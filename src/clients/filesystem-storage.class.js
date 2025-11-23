@@ -1046,21 +1046,32 @@ export class FileSystemStorage {
       throw error;
     }
 
+    const files = [];
+
     for (const entry of entries) {
       const fullPath = path.join(dirPath, entry.name);
 
       if (entry.isDirectory()) {
-        // Recurse into subdirectories
+        // Recurse into subdirectories (sequentially to preserve order/logic)
         yield* this._walkDirectory(fullPath, prefix);
       } else if (entry.isFile() && !entry.name.endsWith('.meta.json')) {
-        // Yield file (skip .meta.json sidecar files)
+        files.push({ entry, fullPath });
+      }
+    }
+
+    // Process files in parallel batches to avoid sequential I/O bottleneck
+    // This reduces list time from O(N*latency) to O(N/Concurrency*latency)
+    const fileBatches = chunk(files, 50); // Batch size 50 for file descriptors safety
+
+    for (const batch of fileBatches) {
+      const promises = batch.map(async ({ entry, fullPath }) => {
         const key = this._pathToKey(fullPath);
 
         // Filter by prefix if specified
         if (!prefix || key.startsWith(prefix)) {
           const [ok, , stats] = await tryFn(() => stat(fullPath));
           if (ok) {
-            yield {
+            return {
               key,
               path: fullPath,
               size: stats.size,
@@ -1068,6 +1079,13 @@ export class FileSystemStorage {
             };
           }
         }
+        return null;
+      });
+
+      const results = await Promise.all(promises);
+      
+      for (const res of results) {
+        if (res) yield res;
       }
     }
   }

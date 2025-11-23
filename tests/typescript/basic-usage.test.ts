@@ -334,6 +334,4 @@ function testTypeAssertions(): void {
   // Test operation types for events
   type ValidOperations = import('s3db.js').ExceedsLimitEvent['operation'];
   const validOperations: ValidOperations[] = ['insert', 'update', 'upsert'];
-}
-
-console.log('Basic TypeScript usage patterns validated successfully!'); 
+} 

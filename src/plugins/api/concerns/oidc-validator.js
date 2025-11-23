@@ -189,10 +189,17 @@ export function validateTokenResponse(tokenResponse, config) {
   }
 
   // 2. Check expiration
-  if (!tokenResponse.expires_in) {
+  // Note: expires_in can be 0 when max_age=0 (Azure AD quirks), so we accept 0 as valid
+  if (tokenResponse.expires_in === undefined || tokenResponse.expires_in === null) {
     errors.push('Missing expires_in in response');
-  } else if (typeof tokenResponse.expires_in !== 'number' || tokenResponse.expires_in <= 0) {
-    errors.push(`Invalid expires_in: ${tokenResponse.expires_in}`);
+  } else {
+    const parsedExpiresIn = Number(tokenResponse.expires_in);
+    if (!Number.isFinite(parsedExpiresIn) || parsedExpiresIn < 0) {
+      errors.push(`Invalid expires_in: ${tokenResponse.expires_in}`);
+    } else {
+      // Normalize to number so downstream code doesn't rely on truthiness
+      tokenResponse.expires_in = parsedExpiresIn;
+    }
   }
 
   // 3. Refresh token (optional but recommended)

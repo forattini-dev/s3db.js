@@ -1,5 +1,5 @@
 import { describe, test, expect } from '@jest/globals'
-import { S3Client } from '../../src/clients/s3-client.class.js'
+import { S3Client } from '#src/clients/s3-client.class.js'
 
 describe('TasksPool in S3Client', () => {
   let client

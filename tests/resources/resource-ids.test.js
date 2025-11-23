@@ -163,7 +163,7 @@ describe('Custom ID Generators - Real Integration Tests', () => {
       expect(error).toBeInstanceOf(ResourceError);
       expect(error.validation).toEqual(
         expect.arrayContaining([
-          expect.stringContaining("Resource 'idGenerator' must be a function or a number (size)")
+          expect.stringContaining("Resource 'idGenerator' must be a function, number (size), 'incremental' string, or incremental config object")
         ])
       );
     });

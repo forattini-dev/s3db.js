@@ -148,8 +148,28 @@ export class CoordinatorPlugin extends Plugin {
     if (!this._coordinatorConfig.enableCoordinator) return;
 
     // Already started
-    if (this._heartbeatHandle) return;
+    if (this._coordinationStarted) return;
+    this._coordinationStarted = true;
 
+    // Initialize global coordinator immediately (critical for subscription)
+    // This needs to happen before we return to ensure we receive events
+    await this._initializeGlobalCoordinator();
+
+    // ✨ FIX: Run election process (jitter, cold start) in BACKGROUND
+    // This ensures we don't block db.connect() and resource operations
+    // while waiting for startup jitter or cold start duration.
+    this._runBackgroundElection().catch(err => {
+      this.logger.warn({ error: err.message }, 'Background election process failed');
+    });
+
+    this.logger.debug({ workerId: this.workerId }, `Coordination initialized (election in background)`);
+  }
+
+  /**
+   * Run the election process (jitter, cold start)
+   * @private
+   */
+  async _runBackgroundElection() {
     // Apply startup jitter to prevent thundering herd
     if (this._coordinatorConfig.startupJitterMax > 0) {
       const jitterMs = this._coordinatorConfig.startupJitterMin +
@@ -159,9 +179,6 @@ export class CoordinatorPlugin extends Plugin {
 
       await this._sleep(jitterMs);
     }
-
-    // Initialize global coordinator
-    await this._initializeGlobalCoordinator();
 
     // Cold start observation
     if (!this._coordinatorConfig.skipColdStart && this._coordinatorConfig.coldStartDuration > 0) {
@@ -189,8 +206,6 @@ export class CoordinatorPlugin extends Plugin {
     if (this._coordinatorConfig.coordinatorWorkInterval && this.isCoordinator) {
       await this._startCoordinatorWork();
     }
-
-    this.logger.debug({ workerId: this.workerId }, `Coordination started (workerId: ${this.workerId})`);
   }
 
   /**
@@ -210,6 +225,7 @@ export class CoordinatorPlugin extends Plugin {
     this._coordinatorWorkHandle = null;
 
     // Reset state
+    this._coordinationStarted = false;
     this.isCoordinator = false;
     this.currentLeaderId = null;
     this.coldStartPhase = 'not_started';

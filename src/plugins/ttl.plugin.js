@@ -528,8 +528,10 @@ export class TTLPlugin extends CoordinatorPlugin {
    * Only the coordinator should run cleanup intervals
    */
   async onBecomeCoordinator() {
-    // 🪵 Debug: became coordinator
-    this.logger.debug({ workerId: this.workerId }, 'Became coordinator - starting cleanup intervals');
+    this.logger.debug(
+      { workerId: this.workerId },
+      'Global coordinator elected this worker as leader - starting cleanup intervals'
+    );
 
     // Start cleanup intervals (only coordinator does cleanup)
     await this._startIntervals();
@@ -545,8 +547,10 @@ export class TTLPlugin extends CoordinatorPlugin {
    * Cleanup intervals are auto-stopped by Plugin.stop()
    */
   async onStopBeingCoordinator() {
-    // 🪵 Debug: no longer coordinator
-    this.logger.debug({ workerId: this.workerId }, 'No longer coordinator - cleanup intervals will be stopped automatically');
+    this.logger.debug(
+      { workerId: this.workerId },
+      'Global coordinator demoted this worker from leader - cleanup intervals will be stopped automatically'
+    );
 
     this.emit('plg:ttl:coordinator-demoted', {
       workerId: this.workerId,

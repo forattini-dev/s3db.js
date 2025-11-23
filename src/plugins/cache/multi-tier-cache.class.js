@@ -63,7 +63,16 @@ export class MultiTierCache extends Cache {
       misses: 0,
       writes: 0,
       deletes: 0,
-      errors: 0
+      errors: 0,
+      tiers: this.drivers.map((tier, index) => ({
+        name: tier.name,
+        tier: tier.tier,
+        hits: 0,
+        misses: 0,
+        errors: 0,
+        sets: 0,
+        promotions: 0
+      }))
     };
 
     if (this.logger.isLevelEnabled('info')) {
@@ -76,8 +85,8 @@ export class MultiTierCache extends Cache {
    * @private
    */
   _log(...args) {
-    if (this.config.logLevel) {
-      this.logger.info('[MultiTierCache]', ...args);
+    if (this.config.logLevel && args.length > 0) {
+      this.logger.debug('[MultiTierCache]', ...args);
     }
   }
 

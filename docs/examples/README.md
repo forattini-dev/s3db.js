@@ -1,323 +1,115 @@
-# s3db.js Examples
-
-Organized examples by category to help you get started quickly.
-
-## 📚 Index by Category
-
-### 🔰 Basics (Getting Started)
-- [e01-basic-crud.js](./e01-basic-crud.js) - Basic CRUD
-- [e02-validation.js](./e02-validation.js) - Schema validation
-- [e03-timestamps.js](./e03-timestamps.js) - Auto timestamps
-- [e04-unique-fields.js](./e04-unique-fields.js) - Unique fields
-- [e05-custom-ids.js](./e05-custom-ids.js) - Custom IDs
-- [e06-behaviors.js](./e06-behaviors.js) - Behaviors (metadata overflow)
-- [e07-encryption.js](./e07-encryption.js) - Field encryption
-
-### 📊 Queries & Partitions
-- [e08-queries.js](./e08-queries.js) - Advanced queries
-- [e09-partitions.js](./e09-partitions.js) - Partitions for performance
-- [e10-indexes.js](./e10-indexes.js) - Secondary indexes
-- [e11-pagination.js](./e11-pagination.js) - Pagination
-- [e44-orphaned-partitions.js](./e44-orphaned-partitions.js) - Orphaned partitions recovery
-
-### 🔌 Plugins
-- [e18-cache-plugin.js](./e18-cache-plugin.js) - Cache (memory/S3/filesystem)
-- [e19-audit-plugin.js](./e19-audit-plugin.js) - Audit trail
-- [e20-ttl-plugin.js](./e20-ttl-plugin.js) - Time-to-live (auto-cleanup)
-- [e21-replicator-plugin.js](./e21-replicator-plugin.js) - Replication to PostgreSQL/BigQuery
-- [e22-metrics-plugin.js](./e22-metrics-plugin.js) - Performance metrics
-- [e23-costs-plugin.js](./e23-costs-plugin.js) - AWS cost tracking
-- [e24-backup-plugin.js](./e24-backup-plugin.js) - Automatic backup
-
-### 📧 Email (SMTP Plugin)
-- [e50-smtp-relay.js](./e50-smtp-relay.js) - Email sending via 4 providers (SendGrid, AWS SES, Mailgun, Postmark)
-- [e51-smtp-server.js](./e51-smtp-server.js) - In-process SMTP server (receive emails from external systems)
-- [e52-smtp-templates.js](./e52-smtp-templates.js) - Handlebars templating with custom helpers and partials
-- [e53-smtp-webhooks.js](./e53-smtp-webhooks.js) - Webhook processing (bounce, complaint, delivery, open, click events)
-
-### 🌊 Streams
-- [e12-streams-read.js](./e12-streams-read.js) - Read resources as stream
-- [e13-streams-write.js](./e13-streams-write.js) - Write via stream
-- [e14-streams-transform.js](./e14-streams-transform.js) - Transform streams
-
-### 🧠 Machine Learning & RAG
-- [e41-embeddings.js](./e41-embeddings.js) - Vector embeddings (77% compression)
-- [e42-rag-basic.js](./e42-rag-basic.js) - Basic RAG with OpenAI
-- [e43-rag-advanced.js](./e43-rag-advanced.js) - Advanced RAG with hybrid search
-
-### 🔐 OAuth2 / OIDC (Authentication)
-- [e60-oauth2-sso-server.js](./e60-oauth2-sso-server.js) - **SSO Server** (Authorization Server)
-  - Issues JWT tokens (RS256)
-  - OIDC Discovery
-  - Client Credentials flow
-  - JWKS endpoint
-  - Token introspection
-  - Zero external dependencies!
-
-- [e61-oauth2-resource-server.js](./e61-oauth2-resource-server.js) - **Resource Server** (API)
-  - Validates JWT tokens locally
-  - OIDC Client (JWKS auto-fetch)
-  - Scope enforcement
-  - Multi-resource server support
-
-- [e62-azure-ad-integration.js](./e62-azure-ad-integration.js) - **Azure AD Integration**
-  - Passive API (validates tokens only)
-  - Azure AD manages users
-  - Complete Azure Portal setup
-  - App Roles and Scopes
-  - 3 methods to obtain tokens
-
-- [e63-keycloak-integration.js](./e63-keycloak-integration.js) - **Keycloak Integration**
-  - Passive API (validates tokens only)
-  - Keycloak manages users
-  - Complete Docker setup
-  - Realm, Client, Roles, Scopes
-  - Comparison: Keycloak vs Azure AD
-
-### 🛡️ Authorization (Row-Level Security)
-- [e64-authorization-complete.js](./e64-authorization-complete.js) - **Complete Authorization**
-  - ✅ Multi-tenancy (partition by tenant)
-  - ✅ Row-Level Security (RLS via partitions)
-  - ✅ Granular scopes (own/team/org/all)
-  - ✅ RBAC (Role-Based Access Control)
-  - ✅ ABAC (Attribute-Based Access Control)
-  - ✅ Ownership checks
-  - ✅ Automatic audit trail
-  - See also: [../authorization-patterns.md](../authorization-patterns.md)
-
-### 🏢 Multi-Tenancy
-- [e30-multi-tenant.js](./e30-multi-tenant.js) - Basic multi-tenancy
-- [e31-tenant-isolation.js](./e31-tenant-isolation.js) - Complete tenant isolation
-- [e64-authorization-complete.js](./e64-authorization-complete.js) - Multi-tenancy + complete RLS
-
-### ⚡ Performance
-- [e50-update-methods.js](./e50-update-methods.js) - Comparison: update() vs patch() vs replace()
-- [e51-batch-operations.js](./e51-batch-operations.js) - Batch operations
-- [e52-concurrent-writes.js](./e52-concurrent-writes.js) - Concurrent writes
-
-### 🔧 Advanced
-- [e15-hooks.js](./e15-hooks.js) - Lifecycle hooks
-- [e16-custom-validation.js](./e16-custom-validation.js) - Custom validations
-- [e17-transactions.js](./e17-transactions.js) - Transactions (eventual consistency)
-- [e25-migrations.js](./e25-migrations.js) - Schema migrations
-- [e26-versioning.js](./e26-versioning.js) - Resource versioning
-
----
-
-## 🚀 Quick Start
-
-### 1. OAuth2/OIDC (Authentication)
-
-If you want complete authentication:
-
-```bash
-# Option 1: Own SSO (you manage users)
-node docs/examples/e60-oauth2-sso-server.js
-
-# Option 2: Passive API with Azure AD
-node docs/examples/e62-azure-ad-integration.js
-
-# Option 3: Passive API with Keycloak (open-source)
-node docs/examples/e63-keycloak-integration.js
-```
-
-### 2. Authorization (Row-Level Security)
-
-After authentication, add granular authorization:
-
-```bash
-# Complete authorization: Multi-tenancy + RLS + RBAC + ABAC
-node docs/examples/e64-authorization-complete.js
-```
-
-**See complete documentation:** [authorization-patterns.md](../authorization-patterns.md)
-
-### 3. Basic CRUD
-
-To get started with simple CRUD:
-
-```bash
-node docs/examples/e01-basic-crud.js
-```
-
----
-
-## 📖 Documentation
-
-### OAuth2/OIDC
-- [oauth2-dependencies.md](../oauth2-dependencies.md) - Zero dependencies!
-- [oauth2-testing.md](../oauth2-testing.md) - 101 automated tests
-
-### Authorization
-- [authorization-patterns.md](../authorization-patterns.md) - Complete authorization patterns
-  - Granular scopes
-  - Row-Level Security (RLS)
-  - Multi-tenancy
-  - RBAC & ABAC
-  - Audit trail
-
-### General
-- [README.md](../../README.md) - Main documentation
-- [client.md](../client.md) - S3 Client API
-- [resource.md](../resource.md) - Resource API
-- [plugins/](../plugins/) - Plugin docs
-
----
-
-## 🎯 Use Cases
-
-### "I need complete authentication with my own users"
-→ [e60-oauth2-sso-server.js](./e60-oauth2-sso-server.js) + [e61-oauth2-resource-server.js](./e61-oauth2-resource-server.js)
-
-### "I need to integrate with Azure AD / Microsoft 365"
-→ [e62-azure-ad-integration.js](./e62-azure-ad-integration.js)
-
-### "I need an open-source identity provider"
-→ [e63-keycloak-integration.js](./e63-keycloak-integration.js)
-
-### "I need multi-tenancy with complete isolation"
-→ [e64-authorization-complete.js](./e64-authorization-complete.js)
-
-### "Each user should only see their own data"
-→ [e64-authorization-complete.js](./e64-authorization-complete.js) (Row-Level Security)
-
-### "I need RAG with embeddings"
-→ [e42-rag-basic.js](./e42-rag-basic.js) + [e43-rag-advanced.js](./e43-rag-advanced.js)
-
-### "I need caching for performance"
-→ [e18-cache-plugin.js](./e18-cache-plugin.js)
-
-### "I need replication to BigQuery/PostgreSQL"
-→ [e21-replicator-plugin.js](./e21-replicator-plugin.js)
-
-### "I need auto-cleanup of old data"
-→ [e20-ttl-plugin.js](./e20-ttl-plugin.js)
-
----
-
-## 🔒 Security Layers (Recommended Stack)
-
-```
-┌──────────────────────────────────────────────┐
-│  1. OAuth2/OIDC (Authentication)             │  ← e60-e63
-│     Who are you?                             │
-└──────────────────────────────────────────────┘
-                   ↓
-┌──────────────────────────────────────────────┐
-│  2. Multi-Tenancy (Tenant Isolation)         │  ← e64
-│     Which organization?                      │
-└──────────────────────────────────────────────┘
-                   ↓
-┌──────────────────────────────────────────────┐
-│  3. Scopes (Coarse Permissions)              │  ← e64
-│     What type of access?                     │
-│     orders:read:own/team/org/all             │
-└──────────────────────────────────────────────┘
-                   ↓
-┌──────────────────────────────────────────────┐
-│  4. Roles (RBAC)                             │  ← e64
-│     What's your role?                        │
-│     admin, manager, user                     │
-└──────────────────────────────────────────────┘
-                   ↓
-┌──────────────────────────────────────────────┐
-│  5. Row-Level Security (Ownership)           │  ← e64
-│     Do you own this data?                    │
-│     resource.userId === token.sub            │
-└──────────────────────────────────────────────┘
-                   ↓
-┌──────────────────────────────────────────────┐
-│  6. ABAC (Business Rules)                    │  ← e64
-│     Does context allow this?                 │
-│     Business hours, approval limits, etc     │
-└──────────────────────────────────────────────┘
-                   ↓
-              ✅ ALLOWED
-```
-
-**Complete stack:** [e64-authorization-complete.js](./e64-authorization-complete.js)
-
----
-
-## 💡 Tips
-
-1. **Performance**: Use partitions for O(1) queries instead of O(n)
-2. **Security**: NEVER trust `userId`/`tenantId` from request body - always get from token
-3. **Multi-tenancy**: Use `404` instead of `403` to avoid information leakage
-4. **Audit**: Log ALL authorization decisions
-5. **Scopes**: Use hierarchy (own < team < org < all)
-6. **ABAC**: Combine with RBAC for maximum flexibility
-
----
-
-## 🧪 Testing
-
-```bash
-# Test OAuth2/OIDC
-npm run test:js -- oauth2
-
-# Test specific
-npm run test:js -- oauth2.rsa-keys
-npm run test:js -- oauth2.oidc-discovery
-npm run test:js -- oauth2.test
-
-# Run examples
-node docs/examples/e64-authorization-complete.js
-```
-
----
-
-## 📦 Full List
-
-| # | File | Description |
-|---|------|-------------|
-| 01 | `e01-basic-crud.js` | Basic CRUD |
-| 02 | `e02-validation.js` | Schema validation |
-| 03 | `e03-timestamps.js` | Auto timestamps |
-| 04 | `e04-unique-fields.js` | Unique constraints |
-| 05 | `e05-custom-ids.js` | Custom ID generation |
-| 06 | `e06-behaviors.js` | Metadata behaviors |
-| 07 | `e07-encryption.js` | Field encryption |
-| 08 | `e08-queries.js` | Advanced queries |
-| 09 | `e09-partitions.js` | Partitions for O(1) |
-| 10 | `e10-indexes.js` | Secondary indexes |
-| 11 | `e11-pagination.js` | Pagination patterns |
-| 12 | `e12-streams-read.js` | Stream reads |
-| 13 | `e13-streams-write.js` | Stream writes |
-| 14 | `e14-streams-transform.js` | Transform streams |
-| 15 | `e15-hooks.js` | Lifecycle hooks |
-| 16 | `e16-custom-validation.js` | Custom validators |
-| 17 | `e17-transactions.js` | Eventual consistency |
-| 18 | `e18-cache-plugin.js` | Cache plugin |
-| 19 | `e19-audit-plugin.js` | Audit plugin |
-| 20 | `e20-ttl-plugin.js` | TTL plugin |
-| 21 | `e21-replicator-plugin.js` | Replicator plugin |
-| 22 | `e22-metrics-plugin.js` | Metrics plugin |
-| 23 | `e23-costs-plugin.js` | Costs plugin |
-| 24 | `e24-backup-plugin.js` | Backup plugin |
-| 25 | `e25-migrations.js` | Schema migrations |
-| 26 | `e26-versioning.js` | Resource versioning |
-| 30 | `e30-multi-tenant.js` | Multi-tenancy basic |
-| 31 | `e31-tenant-isolation.js` | Tenant isolation |
-| 41 | `e41-embeddings.js` | Vector embeddings |
-| 42 | `e42-rag-basic.js` | RAG basic |
-| 43 | `e43-rag-advanced.js` | RAG advanced |
-| 44 | `e44-orphaned-partitions.js` | Partition recovery |
-| 50 | `e50-smtp-relay.js` | SMTP relay mode |
-| 51 | `e51-smtp-server.js` | SMTP server mode |
-| 52 | `e52-smtp-templates.js` | SMTP templating |
-| 53 | `e53-smtp-webhooks.js` | SMTP webhooks |
-| **60** | **`e60-oauth2-sso-server.js`** | **SSO Server** |
-| **61** | **`e61-oauth2-resource-server.js`** | **Resource Server** |
-| **62** | **`e62-azure-ad-integration.js`** | **Azure AD Integration** |
-| **63** | **`e63-keycloak-integration.js`** | **Keycloak Integration** |
-| **64** | **`e64-authorization-complete.js`** | **Authorization Complete** |
-
----
-
-## 🆘 Help
-
-- **Main docs**: [../../README.md](../../README.md)
-- **OAuth2 docs**: [../oauth2-testing.md](../oauth2-testing.md)
-- **Authorization docs**: [../authorization-patterns.md](../authorization-patterns.md)
-- **Issues**: https://github.com/forattini-dev/s3db.js/issues
+# s3db.js Example Hub
+
+Curated, searchable entry point for everything inside `docs/examples/`. Use it as the landing page in Docsify to
+find a runnable script, understand what it demonstrates, and why it matters.
+
+## Run any example in seconds
+1. `cd s3db.js && pnpm install` (installs runtime + dev deps).
+2. Start the fake S3 backend using `USE_FAKE_S3=true` or point `connectionString` to your MinIO/S3 endpoint.
+3. Execute any script: `node docs/examples/e47-api-plugin-basic.js` (Node 18+ recommended). Most samples rely on
+   helper utilities such as `docs/examples/database.js` so they auto-create resources.
+4. Need TypeScript? Copy `docs/examples/tsconfig.example.json` and run `tsx docs/examples/typescript-usage-example.ts`.
+
+> Tip: Many demos (API Plugin, OAuth2, Recon, ML) spin up servers. Keep multiple terminals open or use `pnpm concurrently`.
+
+## Navigation helpers
+- [Use-case proposals](./use-cases.md) - scenario-driven "propostas" that suggest example playlists.
+- [Example catalog](./catalog.md) - alphabetical list of every script with keywords for Docsify search.
+- [Plugins overview](../plugins/README.md) - deep dive into each plugin once you know which one to explore.
+- [Client & resource references](../client.md), (../resources.md), (../schema.md) - API surface that examples rely on.
+
+## Category cheat-sheet
+### Data ingestion & schema
+- `e01-bulk-insert.js`, `e02-read-stream.js`, `e03-export-to-csv.js`, `e04-export-to-zip.js`, `e05-write-stream.js` -
+  bulk import/export via streams with throughput + cost tracking.
+- `e07-create-resource.js`, `e08-resource-behaviors.js`, `e12-schema-validation.js`, `e13-versioning-hooks.js`,
+  `e14-timestamp-hooks.js` - schema DSL usage, behaviors, versioning, and auditing.
+- `e15-pagination.js`, `e16-full-crud.js`, `e17-error-handling.js`, `e29-arrays-of-strings-and-numbers.js` -
+  production-friendly query patterns and validation edge cases.
+
+### Partitioning, IDs & authorization
+- `e09-partitioning.js`, `e10-partition-validation.js`, `e11-utm-partitioning.js` - tenant-aware layouts.
+- `e22-custom-id-generators.js`, `e51-incremental-ids.js` - deterministic IDs for reconciliation-heavy apps.
+- `e30-middleware-auth-audit.js`, `e64-authorization-complete.js`, `e65-guards-comparison.js`,
+  `e90-guards-with-partitions.js` - complete RLS + RBAC + ABAC story with middleware instrumentation.
+- `e47-namespace-concern-usage.js`, `e85-api-path-based-auth.js` - isolate namespaces per customer/region.
+
+### Replication, analytics & caching
+- `e23-replicators.js`, `e24-bigquery-replicator.js`, `e25-sqs-replication.js`, `e26-postgres-replicator.js`,
+  `e46-replicator-schema-sync.js` - move data to BigQuery, Postgres, queues, and keep schemas consistent.
+- `e32-improved-caching.js`, `e37-cache-plugin-drivers.js`, `e56-memory-cache-limits.js`, `e57-memory-cache-percentage.js`,
+  `e99-multi-tier-cache.js` - tuning caches for read-heavy APIs.
+- `e54-analytics-granularity.js`, `e55-multi-field-resources-demo.js`, `e98-resource-schema-introspection.js` -
+  analytics-friendly sampling and live schema exploration.
+
+### Eventual consistency, state machines & messaging
+- `e50-eventual-consistency-simple.js`, `e51-eventual-consistency-url-shortener.js`, `e52-eventual-consistency-analytics.js`,
+  `e53-eventual-consistency-url-tracking.js` - queue-backed workloads and reconciliation loops.
+- `e51-state-machine-event-triggers.js`, `e52-state-machine-resource-api.js`, `e76-state-machine-sync-events.js` -
+  workflow/state-machine orchestration.
+- `e50-smtp-relay.js`, `e51-smtp-server.js`, `e52-smtp-templates.js`, `e53-smtp-webhooks.js` - outbound notifications,
+  multi-provider failover, and webhook ingestion.
+
+### API Plugin & HTTP delivery
+- `e47-api-plugin-basic.js`, `e49-api-plugin-complete.js`, `e58-api-rest-complete.js`, `e59-api-rest-simple.js`,
+  `e103-api-plugin-complete-config.js` - every knob you can tweak in the API Plugin.
+- `e69-api-custom-routes.js`, `e71-api-root-route-customization.js`, `e77-api-version-prefix.js`,
+  `e90-api-context-injection-dx.js` - advanced routing, DX helpers, and version negotiation.
+- `api-plugin-new-features.js`, `e87-api-templates-ejs-pug.js`, `e88-api-templates-pug-only.js`,
+  `e91-api-opengraph-helper.js`, `e84-static-files.js` - templating, OG metadata, and static asset delivery.
+- `e78-api-driver-auth-jwt.js`, `e79-api-driver-auth-basic.js`, `e80-api-custom-routes.js`, `e83-api-oidc-dual-auth.js` -
+  auth drivers and flow mixing.
+
+### Identity, OAuth2 & UX polish
+- `e60-oauth2-microservices.js`, `e61-sso-architecture-explained.js`, `e80-sso-oauth2-server.js`,
+  `e81-oauth2-resource-server.js`, `e82-oidc-web-app.js` - base stack covering server, resource server, and SPA.
+- `e62-azure-ad-integration.js`, `e63-keycloak-integration.js`, `e101-path-based-basic-oidc.js`,
+  `e102-oidc-s3db-session-store.js` - drop-in provider integrations.
+- `e85-identity-whitelabel.js`, `e85-protected-spa.js`, `e86-custom-login-page.js`, `e87-identity-no-registration.js`,
+  `e90-identity-custom-css.js`, `e89-identity-1password-cli.js` - custom UX, restricted enrollments, CLI ties.
+- `e86-oidc-user-hooks.js`, `e87-oidc-api-token-cookie.js`, `e92-oidc-external-api-enrichment.js` - customizing
+  claims, cookies, and profile hydration.
+
+### Observability, recon & infrastructure guardrails
+- `e17-error-handling.js`, `e28-errors-detailed.js`, `e200-pretty-logging.js`, `e72-api-plugin-logging.js` -
+  structured logging, regression repros, and failure observability.
+- `e44-orphaned-partitions-recovery.js`, `e45-recon-behavior-modes.js`, `e46-recon-namespace-detection.js`,
+  `e48-recon-per-tool-artifacts.js`, `e50-recon-uptime-monitoring.js` - Recon operations.
+- `e47-tfstate-tracking.js`, `e48-tfstate-advanced-monitoring.js`, `e70-cloud-inventory-terraform-export.js`,
+  `e71-cloud-inventory-terraform-auto-export.js`, `e72`-`e77` Kubernetes inventory series - Terraform/Kubernetes
+  governance at scale.
+
+### ML, automation & growth
+- `e41-vector-rag-chatbot.js`, `e42-vector-integrations.js`, `e43-vector-benchmarks.js` - RAG and vector pilots.
+- `e66-ml-plugin-regression.js`, `e67-ml-plugin-classification.js`, `e68-ml-plugin-timeseries.js`,
+  `e71-ml-plugin-partitions.js`, `e72-ml-plugin-versioning.js`, `e74-ml-plugin-data-transforms.js`,
+  `e75-ml-plugin-namespace.js` - ML plugin lifecycle.
+- `e67-process-manager.js`, `e69-cron-manager.js`, `e27-queue-consumer.js`, `e68-safe-event-emitter.js` - job orchestration.
+- `e91-puppeteer-basic.js`, `e92-puppeteer-cookie-farming.js`, `e93-puppeteer-proxy-binding.js`,
+  `e94-cookie-farm-personas.js`, `e95`-`e97` monitoring scripts, `e96-spider-seo-analysis.js` - growth & automation labs.
+
+## Value proposition highlights
+| Proposta | When to start here | Anchor examples |
+| --- | --- | --- |
+| API-first launch pad | Need REST + docs + DX quickly | `e47`, `e49`, `e58`, `e103`, `api-plugin-new-features.js` |
+| Identity & SSO rollout | Ship OAuth2/OIDC with branded flows | `e80`, `e81`, `e82`, `e85`, `e102`, `e92` |
+| Authorization & tenant isolation | Guarantee RLS, scopes, and auditing | `e09`, `e10`, `e64`, `e90`, `e65` |
+| Eventual consistency & workflows | Run async jobs and state machines | `e50`, `e51`, `e52`, `e69`, `e76` |
+| Observability, Recon & FinOps | Need findings, uptime, tfstate, compliance dashboards | `e44`, `e45`, `e46`, `e47-tfstate-tracking.js`, `e48-metrics-prometheus.js` |
+| ML & analytics pipelines | Centralize RAG/ML experiments | `e41`, `e43`, `e66`-`e75`, `e98` |
+| Messaging & growth automation | Own emails, webhooks, and puppeteer ops | `e50-smtp-relay.js`, `e52-smtp-templates.js`, `e53-smtp-webhooks.js`, `e91`-`e97` |
+
+Each proposta is documented in more detail inside [use-cases.md](./use-cases.md) with sequencing tips.
+
+## Docsify search tips
+- Search by feature (`"eventual consistency"`, `"kubernetes inventory"`) to jump straight to the right file.
+- Search by provider names (`"Azure AD"`, `"Keycloak"`, `"Mailgun"`, `"Prometheus"`) because they are explicitly
+  mentioned in the catalog table.
+- Search by plugin names (`"API Plugin"`, `"Recon"`, `"ML Plugin"`, `"Costs Plugin"`) to list the relevant scripts.
+
+## Related reading
+- [../multi-file-plugin-docs-standard.md](../multi-file-plugin-docs-standard.md) - how plugin docs are structured.
+- [../logging.md](../logging.md) & [../logger-best-practices.md](../logger-best-practices.md) - tie into the
+  observability samples.
+- [../mcp.md](../mcp.md) - background on the MCP server referenced by `e45-mcp-documentation-assistant.js`.
+- [../resources.md](../resources.md) & [../schema.md](../schema.md) - deep reference for building your own examples.

@@ -2081,7 +2081,32 @@ storage.getPluginKey('users', 'cache', 'user-123')
 
 storage.getPluginKey('wallets', 'transactions', 'txn-456')
 // → "resource=wallets/plugin=my-plugin/transactions/txn-456"
+
+// Resource-scoped sequences (for plugins that need incremental IDs per resource)
+storage.getSequenceKey('users', 'orderId', 'value')
+// → "resource=users/plugin=my-plugin/sequence=orderId/value"
+
+storage.getSequenceKey('users', 'orderId', 'lock')
+// → "resource=users/plugin=my-plugin/sequence=orderId/lock"
+
+// Global sequences (not tied to a resource)
+storage.getSequenceKey(null, 'globalCounter', 'value')
+// → "plugin=my-plugin/sequence=globalCounter/value"
 ```
+
+##### Storage Path Convention Rules
+
+All s3db.js storage follows strict path conventions to ensure data isolation:
+
+| Scope | Pattern | Example |
+|-------|---------|---------|
+| **Native Resource Feature** | `resource={name}/{feature}/...` | `resource=orders/sequence=id/value` |
+| **Plugin Global Data** | `plugin={slug}/...` | `plugin=cache/config` |
+| **Plugin Resource-Scoped** | `resource={name}/plugin={slug}/...` | `resource=users/plugin=cache/entries/...` |
+| **Plugin Sequence (Resource)** | `resource={name}/plugin={slug}/sequence={field}/...` | `resource=orders/plugin=billing/sequence=invoiceId/value` |
+| **Plugin Sequence (Global)** | `plugin={slug}/sequence={field}/...` | `plugin=scheduler/sequence=jobId/value` |
+
+**Key Rule:** Everything restricted to a resource scope MUST be inside the resource path (`resource={name}/...`).
 
 #### Core Methods
 

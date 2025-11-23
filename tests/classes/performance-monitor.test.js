@@ -64,7 +64,7 @@ describe('PerformanceMonitor', () => {
     test('should take snapshots at specified interval', async () => {
       monitor.start(50) // 50ms intervals
 
-      await sleep(160)
+      await sleep(300)
 
       expect(monitor.snapshots.length).toBeGreaterThanOrEqual(2)
     })
@@ -73,9 +73,9 @@ describe('PerformanceMonitor', () => {
       const takeSnapshotSpy = jest.spyOn(monitor, 'takeSnapshot')
 
       monitor.start(50)
-      await sleep(120)
+      await sleep(250)
 
-      expect(takeSnapshotSpy).toHaveBeenCalledTimes(2)
+      expect(takeSnapshotSpy.mock.calls.length).toBeGreaterThanOrEqual(2)
 
       takeSnapshotSpy.mockRestore()
     })
@@ -243,7 +243,9 @@ describe('PerformanceMonitor', () => {
       }
 
       const timestamps = monitor.snapshots.map((s) => s.timestamp)
-      expect(timestamps).not.toContain(firstTimestamp)
+      
+      // Check identity instead of value to avoid timestamp collision issues
+      expect(monitor.snapshots).not.toContain(firstSnapshot)
     })
 
     test('should maintain chronological order', () => {

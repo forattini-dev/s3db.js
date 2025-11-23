@@ -2,7 +2,7 @@ import { describe, expect, test, beforeEach, afterEach, jest } from '@jest/globa
 import { spawn } from 'child_process';
 import path from 'path';
 
-jest.setTimeout(30000);
+jest.setTimeout(120000);
 
 describe('CLI Commands Basic Tests', () => {
   
@@ -222,11 +222,11 @@ describe('CLI Commands Basic Tests', () => {
         resolve({ code, stdout, stderr });
       });
 
-      // Timeout after 10 seconds
+      // Timeout after 120 seconds
       const timeoutId = setTimeout(() => {
         child.kill();
         resolve({ code: -1, stdout, stderr: 'Timeout' });
-      }, 10000);
+      }, 120000);
       
       // Clear timeout when process exits
       child.on('exit', () => clearTimeout(timeoutId));

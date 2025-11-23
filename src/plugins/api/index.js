@@ -514,11 +514,37 @@ export class ApiPlugin extends Plugin {
     });
 
     // Start server
+    await this._checkPortAvailability(this.config.port, this.config.host);
     await this.server.start();
 
     this.emit('plugin.started', {
       port: this.config.port,
       host: this.config.host
+    });
+  }
+
+  /**
+   * Check if the port is available
+   * @private
+   */
+  async _checkPortAvailability(port, host) {
+    const { createServer } = await import('net');
+    return new Promise((resolve, reject) => {
+      const server = createServer();
+
+      server.once('error', (err) => {
+        if (err.code === 'EADDRINUSE') {
+          reject(new Error(`Port ${port} is already in use. Please choose a different port or stop the process using it.`));
+        } else {
+          reject(err);
+        }
+      });
+
+      server.once('listening', () => {
+        server.close(() => resolve());
+      });
+
+      server.listen(port, host);
     });
   }
 

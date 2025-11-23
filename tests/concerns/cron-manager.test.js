@@ -310,7 +310,7 @@ describe('CronManager', () => {
       );
 
       // Wait for at least one execution
-      await new Promise(resolve => setTimeout(resolve, 1500));
+      await new Promise(resolve => setTimeout(resolve, 2500));
 
       expect(results.length).toBeGreaterThanOrEqual(1);
     });

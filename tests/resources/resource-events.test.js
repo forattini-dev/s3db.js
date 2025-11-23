@@ -10,6 +10,12 @@ describe('Resource Events - Always Emit Complete Content', () => {
     await database.connect();
   });
 
+  afterEach(async () => {
+    if (database) {
+      await database.disconnect();
+    }
+  });
+
   describe('user-managed behavior', () => {
     test('should emit complete content on insert', async () => {
       const resource = await database.createResource({

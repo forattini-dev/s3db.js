@@ -58,6 +58,7 @@ export * from './ttl.plugin.js'
 export * from './vector.plugin.js'
 export * from './ml.plugin.js'
 export * from './smtp.plugin.js'
+export * from './tournament.plugin.js'
 
 // NOTE: QueueConsumerPlugin removed from direct exports because it requires
 // peer dependencies (amqplib, @aws-sdk/client-sqs) via consumers/index.js.

@@ -98,17 +98,14 @@ export class GlobalCoordinatorService extends EventEmitter {
     this._pluginStorage = null;
 
     // Logger
-    this.logger = database.getChildLogger(`GlobalCoordinator:${namespace}`, {
-      namespace,
-      serviceId: this.serviceId
-    });
+    this.logger = database.getChildLogger(`GlobalCoordinator:${namespace}`);
   }
 
   // ==================== LIFECYCLE ====================
 
   /**
    * Start the global coordinator service
-   * Initializes storage and begins heartbeat cycle
+   * Initializes storage and begins heartbeat cycle in BACKGROUND
    */
   async start() {
     if (this.isRunning) {
@@ -129,20 +126,39 @@ export class GlobalCoordinatorService extends EventEmitter {
 
       this._log('Service started');
 
-      // Begin heartbeat with startup jitter
-      const jitterMs = Math.random() * this.config.heartbeatJitter;
-      await this._sleep(jitterMs);
-
-      // Run first heartbeat immediately
-      await this._heartbeatCycle();
-
-      // Schedule periodic heartbeats
-      this._scheduleHeartbeat();
+      // Start background loop (fire and forget)
+      this._startLoop();
 
     } catch (err) {
       this.isRunning = false;
       this._logError('Failed to start service', err);
       throw err;
+    }
+  }
+
+  /**
+   * Start the background heartbeat loop
+   * @private
+   */
+  async _startLoop() {
+    try {
+      // Begin heartbeat with startup jitter
+      const jitterMs = Math.random() * this.config.heartbeatJitter;
+      await this._sleep(jitterMs);
+
+      // Run first heartbeat immediately if still running
+      if (this.isRunning) {
+        await this._heartbeatCycle();
+
+        // Schedule periodic heartbeats
+        this._scheduleHeartbeat();
+      }
+    } catch (err) {
+      this._logError('Error in background loop start', err);
+      // Retry loop start after delay if it failed completely
+      if (this.isRunning) {
+        setTimeout(() => this._startLoop(), 5000);
+      }
     }
   }
 
@@ -191,6 +207,9 @@ export class GlobalCoordinatorService extends EventEmitter {
    * @param {Object} plugin - Plugin instance
    */
   async subscribePlugin(pluginName, plugin) {
+    const subStart = Date.now();
+    this.logger.debug({ namespace: this.namespace, pluginName }, `[SUBSCRIBE] START`);
+
     if (!pluginName || !plugin) {
       throw new Error('GlobalCoordinatorService: pluginName and plugin required');
     }
@@ -201,11 +220,22 @@ export class GlobalCoordinatorService extends EventEmitter {
     // If service is running, immediately register this plugin's worker
     // This prevents race conditions where first heartbeat completes before plugin subscribes
     if (this.isRunning && plugin.workerId && this.storage) {
+      this.logger.debug({ namespace: this.namespace, pluginName, workerId: plugin.workerId?.substring(0, 30) }, `[SUBSCRIBE] registering worker entry`);
+      const regStart = Date.now();
       await this._registerWorkerEntry(plugin.workerId, pluginName);
+      this.logger.debug({ namespace: this.namespace, pluginName, ms: Date.now() - regStart }, `[SUBSCRIBE] worker entry registered`);
 
-      // Trigger a heartbeat cycle to conduct election with the new plugin worker
-      await this._heartbeatCycle();
+      // ✨ FIX: Trigger heartbeat in BACKGROUND (fire-and-forget) to avoid blocking
+      // resource operations. The periodic heartbeat will handle election properly.
+      // Previous: await this._heartbeatCycle() - blocked ALL S3 operations during boot!
+      this.logger.debug({ namespace: this.namespace, pluginName }, `[SUBSCRIBE] triggering background heartbeat (fire-and-forget)`);
+      this._heartbeatCycle().catch(err => {
+        this._logError('Background heartbeat after plugin subscription failed', err);
+      });
     }
+
+    const totalMs = Date.now() - subStart;
+    this.logger.debug({ namespace: this.namespace, pluginName, totalMs }, `[SUBSCRIBE] complete`);
   }
 
   /**
@@ -253,30 +283,12 @@ export class GlobalCoordinatorService extends EventEmitter {
   async getActiveWorkers() {
     if (!this.storage) return [];
 
-    const [ok, err, workers] = await tryFn(() =>
-      this.storage.listWithPrefix(this._getWorkersPrefix())
+    // ✨ PERFORMANCE FIX: Use optimized listing that filters by S3 LastModified
+    // This prevents reading thousands of stale worker files
+    return await this.storage.listActiveWorkers(
+      this._getWorkersPrefix(),
+      this.config.workerTimeout
     );
-
-    if (!ok) {
-      this._logError('Failed to list active workers', err);
-      return [];
-    }
-
-    if (!workers || workers.length === 0) {
-      return [];
-    }
-
-    // Filter out stale workers
-    const now = Date.now();
-    const timeout = this.config.workerTimeout;
-
-    return workers
-      .filter(w => {
-        if (!w || !w.workerId || !w.lastHeartbeat) return false;
-        const age = now - w.lastHeartbeat;
-        return age < timeout;
-      })
-      .sort((a, b) => a.workerId.localeCompare(b.workerId));
   }
 
   /**
@@ -299,12 +311,17 @@ export class GlobalCoordinatorService extends EventEmitter {
 
     try {
       const startMs = Date.now();
+      this.logger.debug({ namespace: this.namespace }, `[HEARTBEAT] START`);
 
       // Step 1: Register/refresh this worker's heartbeat
+      const regStart = Date.now();
       await this._registerWorker();
+      this.logger.debug({ namespace: this.namespace, ms: Date.now() - regStart }, `[HEARTBEAT] _registerWorker complete`);
 
       // Step 2: Get current state
+      const stateStart = Date.now();
       const state = await this._getState();
+      this.logger.debug({ namespace: this.namespace, ms: Date.now() - stateStart, hasState: !!state }, `[HEARTBEAT] _getState complete`);
       const previousLeaderId = this.currentLeaderId;
       const previousEpoch = this.currentEpoch;
 
@@ -316,20 +333,32 @@ export class GlobalCoordinatorService extends EventEmitter {
 
       // If current leader is coordinator worker but plugin workers are now available, force new election
       if (!needsNewElection && state?.leaderId) {
-        const workers = await this.getActiveWorkers();
-        const pluginWorkers = workers.filter(w => w.pluginName && w.pluginName !== 'coordinator');
-        const currentLeaderWorker = workers.find(w => w.workerId === state.leaderId);
+        // Check if current leader is a coordinator (starts with 'gcs-')
+        const isLeaderCoordinator = state.leaderId.startsWith('gcs-');
+        
+        if (isLeaderCoordinator) {
+          // Only fetch active IDs if we might need to replace the coordinator
+          const workerIds = await this.storage.listActiveWorkerIds(
+            this._getWorkersPrefix(),
+            this.config.workerTimeout
+          );
+          
+          // Check if any plugin workers are available (not starting with 'gcs-')
+          const hasPluginWorkers = workerIds.some(id => !id.startsWith('gcs-'));
 
-        // Force election if current leader is coordinator but we have plugin workers now
-        if (currentLeaderWorker?.pluginName === 'coordinator' && pluginWorkers.length > 0) {
-          this._log('Plugin workers available, forcing re-election');
-          needsNewElection = true;
+          if (hasPluginWorkers) {
+            this._log('Plugin workers available, forcing re-election');
+            needsNewElection = true;
+          }
         }
       }
 
       if (needsNewElection) {
         // Step 4: Conduct election
+        this.logger.debug({ namespace: this.namespace }, `[HEARTBEAT] needs election, calling _conductElection`);
+        const electionStart = Date.now();
         const electionResult = await this._conductElection(newEpoch);
+        this.logger.debug({ namespace: this.namespace, ms: Date.now() - electionStart, leader: electionResult?.leaderId }, `[HEARTBEAT] _conductElection complete`);
         newLeaderId = electionResult?.leaderId || null;
         newEpoch = electionResult?.epoch ?? newEpoch + 1;
         this.metrics.electionCount++;
@@ -345,11 +374,18 @@ export class GlobalCoordinatorService extends EventEmitter {
       // Step 6: Notify plugins if leader changed
       if (previousLeaderId !== newLeaderId) {
         this.metrics.leaderChanges++;
+        this.logger.debug({ namespace: this.namespace, from: previousLeaderId, to: newLeaderId }, `[HEARTBEAT] leader changed, notifying plugins`);
         this._notifyLeaderChange(previousLeaderId, newLeaderId);
       }
 
       const durationMs = Date.now() - startMs;
       this.metrics.electionDurationMs = durationMs;
+
+      if (durationMs > 100) {
+        this.logger.warn({ namespace: this.namespace, durationMs }, `[PERF] SLOW HEARTBEAT detected`);
+      } else {
+        this.logger.debug({ namespace: this.namespace, durationMs }, `[HEARTBEAT] complete`);
+      }
 
     } catch (err) {
       this._logError('Heartbeat cycle failed', err);
@@ -363,22 +399,33 @@ export class GlobalCoordinatorService extends EventEmitter {
    */
   async _conductElection(previousEpoch = 0) {
     try {
-      // Get active workers
-      const workers = await this.getActiveWorkers();
+      this.logger.debug({ namespace: this.namespace }, `[ELECTION] START`);
 
-      // Filter out the coordinator service's own worker - only elect plugin workers
-      const pluginWorkers = workers.filter(w => w.pluginName && w.pluginName !== 'coordinator');
+      // Get active worker IDs (optimized: no body fetch)
+      const listStart = Date.now();
+      const workerIds = await this.storage.listActiveWorkerIds(
+        this._getWorkersPrefix(),
+        this.config.workerTimeout
+      );
+      this.logger.debug({ namespace: this.namespace, ms: Date.now() - listStart, count: workerIds?.length }, `[ELECTION] listActiveWorkerIds complete`);
 
-      // Use plugin workers if available, otherwise fall back to all workers (including coordinator)
-      const candidateWorkers = pluginWorkers.length > 0 ? pluginWorkers : workers;
+      // Filter out the coordinator service's own worker (starts with 'gcs-')
+      // Only elect plugin workers
+      const pluginWorkerIds = workerIds.filter(id => !id.startsWith('gcs-'));
+      this.logger.debug({ namespace: this.namespace, pluginWorkers: pluginWorkerIds?.length, allWorkers: workerIds?.length }, `[ELECTION] filtered workers`);
 
-      if (candidateWorkers.length === 0) {
+      // Use plugin workers if available, otherwise fall back to all workers
+      const candidateIds = pluginWorkerIds.length > 0 ? pluginWorkerIds : workerIds;
+
+      if (candidateIds.length === 0) {
+        this.logger.debug({ namespace: this.namespace }, `[ELECTION] no workers available`);
         this._log('No workers available for election');
         return { leaderId: null, epoch: previousEpoch };
       }
 
       // Elect lexicographically first worker
-      const elected = candidateWorkers[0].workerId;
+      // candidateIds are already sorted by listActiveWorkerIds
+      const elected = candidateIds[0];
 
       // Try to acquire leader lease
       const now = Date.now();
@@ -430,14 +477,30 @@ export class GlobalCoordinatorService extends EventEmitter {
   async _registerWorker() {
     if (!this.storage) return;
 
-    // Register service's own worker
-    await this._registerWorkerEntry(this.workerId);
+    const regStart = Date.now();
+    this.logger.debug({ namespace: this.namespace, subscribedCount: this.subscribedPlugins.size }, `[REGISTER_WORKER] START`);
 
-    // Register all subscribed plugin workers
+    // Build list of all workers to register
+    const registrations = [
+      // Service's own worker
+      this._registerWorkerEntry(this.workerId)
+    ];
+
+    // Add all subscribed plugin workers
     for (const [pluginName, plugin] of this.subscribedPlugins.entries()) {
       if (plugin && plugin.workerId) {
-        await this._registerWorkerEntry(plugin.workerId, pluginName);
+        registrations.push(this._registerWorkerEntry(plugin.workerId, pluginName));
       }
+    }
+
+    // Register all workers IN PARALLEL for performance
+    await Promise.all(registrations);
+
+    const totalMs = Date.now() - regStart;
+    if (totalMs > 50) {
+      this.logger.warn({ namespace: this.namespace, totalMs, count: registrations.length }, `[PERF] SLOW _registerWorker`);
+    } else {
+      this.logger.debug({ namespace: this.namespace, totalMs, count: registrations.length }, `[REGISTER_WORKER] complete`);
     }
   }
 
@@ -480,15 +543,21 @@ export class GlobalCoordinatorService extends EventEmitter {
   async _unregisterWorker() {
     if (!this.storage) return;
 
-    // Unregister service's own worker
-    await this._unregisterWorkerEntry(this.workerId);
+    // Build list of all workers to unregister
+    const unregistrations = [
+      // Service's own worker
+      this._unregisterWorkerEntry(this.workerId)
+    ];
 
-    // Unregister all subscribed plugin workers
+    // Add all subscribed plugin workers
     for (const [pluginName, plugin] of this.subscribedPlugins.entries()) {
       if (plugin && plugin.workerId) {
-        await this._unregisterWorkerEntry(plugin.workerId);
+        unregistrations.push(this._unregisterWorkerEntry(plugin.workerId));
       }
     }
+
+    // Unregister all workers IN PARALLEL for performance
+    await Promise.all(unregistrations);
   }
 
   /**
@@ -717,7 +786,7 @@ export class GlobalCoordinatorService extends EventEmitter {
    */
   _log(...args) {
     if (this.config.diagnosticsEnabled) {
-      this.logger.info(`[coordinator:global] [${this.namespace}]`, ...args);
+      this.logger.debug(...args);
     }
   }
 
@@ -727,7 +796,7 @@ export class GlobalCoordinatorService extends EventEmitter {
    */
   _logError(msg, err) {
     if (this.config.diagnosticsEnabled) {
-      this.logger.error(`[coordinator:global] [${this.namespace}] ${msg}:`, err?.message || err);
+      this.logger.error(`${msg}:`, err?.message || err);
     }
   }
 }
@@ -763,6 +832,101 @@ class CoordinatorPluginStorage extends PluginStorage {
     return results
       .filter(item => item.ok && item.data != null)
       .map(item => item.data);
+  }
+
+  /**
+   * Internal helper to get active keys and clean up stale ones
+   * @private
+   * @returns {Promise<string[]>} List of active full keys
+   */
+  async _getActiveKeys(prefix, timeoutMs) {
+    const fullPrefix = prefix || '';
+    
+    const [ok, err, result] = await tryFn(() =>
+      this.client.listObjects({ prefix: fullPrefix })
+    );
+
+    if (!ok || !result.Contents) {
+      return [];
+    }
+
+    const now = Date.now();
+    const activeKeys = [];
+    const staleKeys = [];
+
+    for (const obj of result.Contents) {
+      const lastModified = obj.LastModified ? new Date(obj.LastModified).getTime() : 0;
+      const age = now - lastModified;
+
+      // Check if worker is active based on S3 timestamp
+      // Adding 5s buffer to account for clock skew
+      if (age < (timeoutMs + 5000)) {
+        activeKeys.push(obj.Key);
+      } else {
+        staleKeys.push(obj.Key);
+      }
+    }
+
+    // Clean up stale workers asynchronously (fire and forget)
+    if (staleKeys.length > 0) {
+      this._deleteStaleWorkers(staleKeys).catch(() => {});
+    }
+
+    return activeKeys;
+  }
+
+  /**
+   * List active workers using S3 LastModified optimization
+   * Prevents reading bodies of stale files
+   */
+  async listActiveWorkers(prefix, timeoutMs) {
+    const activeKeys = await this._getActiveKeys(prefix, timeoutMs);
+    
+    // Fetch only active workers
+    const keysToFetch = this._removeKeyPrefix(activeKeys);
+    if (keysToFetch.length === 0) return [];
+
+    const results = await this.batchGet(keysToFetch);
+    
+    return results
+      .filter(item => item.ok && item.data != null)
+      .map(item => item.data)
+      .sort((a, b) => (a.workerId || '').localeCompare(b.workerId || ''));
+  }
+
+  /**
+   * List active worker IDs without fetching bodies
+   * Uses key analysis (filename) to extract IDs
+   */
+  async listActiveWorkerIds(prefix, timeoutMs) {
+    const activeKeys = await this._getActiveKeys(prefix, timeoutMs);
+    
+    const keysToProcess = this._removeKeyPrefix(activeKeys);
+    if (keysToProcess.length === 0) return [];
+
+    // Extract workerId from key: .../workers/<workerId>.json
+    return keysToProcess
+      .map(key => {
+        const parts = key.split('/');
+        const filename = parts[parts.length - 1];
+        return filename.replace('.json', '');
+      })
+      .filter(id => id)
+      .sort((a, b) => a.localeCompare(b));
+  }
+
+  async _deleteStaleWorkers(keys) {
+    // Strip prefix to match what deleteObjects expects (relative to bucket root or client prefix?)
+    // S3Client.deleteObjects expects keys relative to client prefix (or absolute if prefix empty)
+    // keys from listObjects are FULL keys (including prefix)
+    // S3Client.deleteObjects adds prefix again! 
+    // Wait, S3Client.listObjects returns keys WITH prefix.
+    // S3Client.deleteObjects takes keys and ADDS prefix.
+    // So we must strip prefix.
+    const cleanKeys = this._removeKeyPrefix(keys);
+    if (cleanKeys.length > 0) {
+      await this.client.deleteObjects(cleanKeys);
+    }
   }
 }
 

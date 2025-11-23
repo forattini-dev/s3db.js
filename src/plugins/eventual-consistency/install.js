@@ -319,14 +319,19 @@ export async function onStart(fieldHandlers, config, runConsolidationFn, runGCFn
   for (const [resourceName, resourceHandlers] of fieldHandlers) {
     for (const [fieldName, handler] of resourceHandlers) {
       if (!handler.deferredSetup) {
-        // Start auto-consolidation timer if enabled
-        if (config.autoConsolidate && config.mode === 'async') {
-          startConsolidationTimer(handler, resourceName, fieldName, runConsolidationFn, config);
-        }
+        // If coordinator mode is enabled, skip local timers
+        // The coordinator will handle ticket creation (workload distribution)
+        // and workers will process tickets.
+        if (!config.enableCoordinator) {
+          // Start auto-consolidation timer if enabled
+          if (config.autoConsolidate && config.mode === 'async') {
+            startConsolidationTimer(handler, resourceName, fieldName, runConsolidationFn, config);
+          }
 
-        // Start garbage collection timer
-        if (config.transactionRetention && config.transactionRetention > 0) {
-          startGarbageCollectionTimer(handler, resourceName, fieldName, runGCFn, config);
+          // Start garbage collection timer
+          if (config.transactionRetention && config.transactionRetention > 0) {
+            startGarbageCollectionTimer(handler, resourceName, fieldName, runGCFn, config);
+          }
         }
 
         if (emitFn) {

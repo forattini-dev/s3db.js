@@ -77,6 +77,8 @@ import {
   generateErrorPage,
   generateErrorJSON
 } from '../concerns/oidc-errors.js';
+import { createHookExecutor, createCookieHelpers } from '../concerns/oidc-hooks.js';
+import { idGenerator } from '../../../concerns/id.js';
 
 // Module-level logger for OIDC auth (respects S3DB_LOG_LEVEL env var)
 const logger = createLogger({
@@ -227,13 +229,29 @@ function applyUserMapping(claims, mapping, defaults) {
  * @param {Object} config - OIDC config
  * @returns {Promise<{user: Object, created: boolean}>} User object and creation status
  */
-async function getOrCreateUser(usersResource, claims, config) {
+async function getOrCreateUser(usersResource, claims, config, context, hookExecutor) {
+  // ⚠️ FORCED CONSOLE OUTPUT - MUST APPEAR
+  console.error('\n\n========== GET OR CREATE USER CALLED ==========');
+  console.error('Claims received:', JSON.stringify(claims, null, 2));
+  console.error('Config:', JSON.stringify(config, null, 2));
+  console.error('==============================================\n\n');
+
   const {
     autoCreateUser = true,
     userIdClaim = 'sub',
     fallbackIdClaims = ['email', 'preferred_username'],
     lookupFields = ['email', 'preferred_username']
   } = config;
+
+  // 🔍 DEBUG: Log ALL claims received from Azure AD
+  logger.info({
+    allClaims: claims,
+    claimKeys: Object.keys(claims),
+    userIdClaim,
+    userIdValue: claims[userIdClaim],
+    fallbackIdClaims,
+    lookupFields
+  }, '[OIDC] 🔍 DEBUG: Received ID Token claims');
 
   const candidateIds = [];
   if (userIdClaim && claims[userIdClaim]) {
@@ -256,29 +274,48 @@ async function getOrCreateUser(usersResource, claims, config) {
   }, '[OIDC] User lookup starting');
 
   let user = null;
-  // Try direct lookups by id
+  // Try direct lookups by id (skip cache to avoid auth flow issues)
   for (const candidate of candidateIds) {
     try {
-      user = await usersResource.get(candidate);
+      user = await usersResource.get(candidate, { skipCache: true });
       break;
     } catch (_) {
       // Not found, continue with next candidate
     }
   }
 
-  // Fallback: query by lookup fields
+  // Fallback: query by lookup fields (skip cache to avoid auth flow issues)
   if (!user) {
     const fields = Array.isArray(lookupFields) ? lookupFields : [lookupFields];
+    logger.info({
+      lookupFields: fields,
+      attemptedQueries: fields.map(f => ({ field: f, value: claims[f], hasValue: !!claims[f] }))
+    }, '[OIDC] 🔍 DEBUG: Attempting query lookups');
+
     for (const field of fields) {
       if (!field) continue;
       const value = claims[field];
-      if (!value) continue;
-      const results = await usersResource.query({ [field]: value }, { limit: 1 });
+      if (!value) {
+        logger.info({ field, reason: 'no value in claims' }, '[OIDC] ⚠️ Skipping lookup field');
+        continue;
+      }
+      const results = await usersResource.query({ [field]: value }, { limit: 1, skipCache: true });
+      logger.info({ field, value, resultsCount: results.length }, '[OIDC] 🔍 Query result');
       if (results.length > 0) {
         user = results[0];
         break;
       }
     }
+  }
+
+  // 🔍 DEBUG: Log if user not found
+  if (!user) {
+    logger.warn({
+      candidateIds,
+      lookupFields,
+      availableClaims: Object.keys(claims),
+      autoCreateUser
+    }, '[OIDC] ⚠️ User NOT found - will attempt auto-create');
   }
 
   const now = new Date().toISOString();
@@ -321,30 +358,35 @@ async function getOrCreateUser(usersResource, claims, config) {
       }
     };
 
-    // Call beforeUpdateUser hook if configured
-    let finalUser = cleanUser;
-    if (config.beforeUpdateUser && typeof config.beforeUpdateUser === 'function') {
-      try {
-        const enrichedData = await config.beforeUpdateUser({
-          user: cleanUser,
-          updates: cleanUser,
-          claims,
-          usersResource
-        });
+    // Execute beforeUserUpdate hooks with context
+    let hookParams = {};
+    try {
+      hookParams = await hookExecutor.executeHooks('beforeUserUpdate', {
+        user: cleanUser,
+        updates: cleanUser,
+        claims,
+        usersResource,
+        context
+      });
+    } catch (hookError) {
+      logger.error({
+        error: hookError.message,
+        stack: hookError.stack,
+        userId: user.id,
+        hook: 'beforeUserUpdate'
+      }, '[OIDC] CRITICAL: `beforeUserUpdate` hook failed but login flow will continue. Error will not be re-thrown.');
+      // Do not re-throw; allow login to complete even if hook fails
+    }
 
-        if (enrichedData && typeof enrichedData === 'object') {
-          finalUser = { ...cleanUser, ...enrichedData };
-          if (enrichedData.metadata) {
-            finalUser.metadata = {
-              ...cleanUser.metadata,
-              ...enrichedData.metadata
-            };
-          }
-        }
-      } catch (hookErr) {
-        if (config?.logLevel === 'debug' || config?.logLevel === 'trace') {
-          logger.error('[OIDC] beforeUpdateUser hook failed:', hookErr);
-        }
+    // Hook can modify updates
+    let finalUser = cleanUser;
+    if (hookParams.updates) {
+      finalUser = { ...cleanUser, ...hookParams.updates };
+      if (hookParams.updates.metadata) {
+        finalUser.metadata = {
+          ...cleanUser.metadata,
+          ...hookParams.updates.metadata
+        };
       }
     }
 
@@ -357,7 +399,7 @@ async function getOrCreateUser(usersResource, claims, config) {
     }, '[OIDC] Updating existing user with merged data');
 
     try {
-      user = await usersResource.update(user.id, finalUser);
+      user = await usersResource.update(user.id, finalUser, { skipCache: true });
       logger.debug({
         userId: user.id?.substring(0, 15) + '...',
         email: user.email,
@@ -424,33 +466,22 @@ async function getOrCreateUser(usersResource, claims, config) {
     };
   }
 
-  // Call beforeCreateUser hook if configured (allows enriching with external API data)
-  if (config.beforeCreateUser && typeof config.beforeCreateUser === 'function') {
-    try {
-      const enrichedData = await config.beforeCreateUser({
-        user: newUser,
-        claims,
-        usersResource
-      });
+  // Execute beforeUserCreate hooks with context
+  const createHookParams = await hookExecutor.executeHooks('beforeUserCreate', {
+    userData: newUser,
+    claims,
+    usersResource,
+    context
+  });
 
-      // Merge enriched data into newUser
-      if (enrichedData && typeof enrichedData === 'object') {
-        Object.assign(newUser, enrichedData);
-        // Deep merge metadata
-        if (enrichedData.metadata) {
-          newUser.metadata = {
-            ...newUser.metadata,
-            ...enrichedData.metadata
-          };
-        }
-      }
-    } catch (hookErr) {
-      logger.error({
-        error: hookErr.message,
-        errorType: hookErr.constructor.name,
-        stack: hookErr.stack
-      }, '[OIDC] beforeCreateUser hook failed');
-      // Continue with default user data (don't block auth)
+  // Hook can modify userData
+  if (createHookParams.userData) {
+    Object.assign(newUser, createHookParams.userData);
+    if (createHookParams.userData.metadata) {
+      newUser.metadata = {
+        ...newUser.metadata,
+        ...createHookParams.userData.metadata
+      };
     }
   }
 
@@ -462,7 +493,7 @@ async function getOrCreateUser(usersResource, claims, config) {
   }, '[OIDC] Inserting new user');
 
   try {
-    user = await usersResource.insert(newUser);
+    user = await usersResource.insert(newUser, { skipCache: true });
     logger.debug({
       userId: user.id?.substring(0, 15) + '...',
       email: user.email,
@@ -535,7 +566,7 @@ const config = {
     refreshThreshold: 300000, // 5 minutes before expiry
     cookieSecure: process.env.NODE_ENV === 'production',
     cookieSameSite: 'Lax',
-    allowInsecureCookies: process.env.NODE_ENV === 'development', // Allow SameSite=None on HTTP (dev only)
+    allowInsecureCookies: ['development', 'local'].includes(process.env.NODE_ENV), // Allow SameSite=None on HTTP (dev only)
     defaultRole: 'user',
     defaultScopes: ['openid', 'profile', 'email'],
     discovery: { enabled: true, ...(preset.discovery || {}) },
@@ -546,6 +577,7 @@ const config = {
       maxAttempts: 200,
       skipSuccessfulRequests: true
     },
+    tokenFallbackSeconds: 3600, // Fallback when provider omits/zeros expires_in
     apiTokenField: undefined,
     detectApiTokenField: true,
     generateApiToken: true,
@@ -590,6 +622,11 @@ const config = {
    * Auto garbage-collected when request completes
    */
   const sessionCache = new WeakMap();
+
+  /**
+   * Hook Executor - Composable lifecycle hooks for OIDC authentication
+   */
+  const hookExecutor = createHookExecutor(config, logger);
 
   /**
    * Generate secure random session ID
@@ -1034,6 +1071,35 @@ const config = {
     }
   }
 
+  /**
+   * Resolve effective expires_in seconds for access tokens.
+   * Falls back to ID token exp or config default when provider responses are invalid.
+   */
+  function resolveExpiresInSeconds(tokens = {}, fallbackClaims = null) {
+    const raw = Number(tokens?.expires_in);
+
+    if (Number.isFinite(raw) && raw > 0) {
+      return { seconds: raw, source: 'provider' };
+    }
+
+    if (fallbackClaims?.exp) {
+      const claimExp = Number(fallbackClaims.exp);
+      const nowSeconds = Math.floor(Date.now() / 1000);
+      const delta = claimExp - nowSeconds;
+
+      if (Number.isFinite(delta) && delta > 0) {
+        return { seconds: delta, source: 'id_token' };
+      }
+    }
+
+    const fallbackFromConfig = Number(config.tokenFallbackSeconds);
+    const fallbackSeconds = Number.isFinite(fallbackFromConfig) && fallbackFromConfig > 0
+      ? Math.floor(fallbackFromConfig)
+      : 3600;
+
+    return { seconds: fallbackSeconds, source: 'config' };
+  }
+
   // ==================== ROUTES ====================
 
   // Create rate limiter if enabled
@@ -1046,6 +1112,7 @@ const config = {
    * LOGIN Route
    */
   app.get(loginPath, async (c) => {
+    try {
     const state = generateState();
 
     // 🎯 NEW: Continue URL pattern - preserve original destination after login
@@ -1075,16 +1142,6 @@ const config = {
       }
     }
 
-    // 🪵 Log login initiation
-    logger.info({
-      state: state.substring(0, 8) + '...',
-      hasPKCE: !!codeVerifier,
-      hasReturnTo: !!returnToParam,
-      returnTo: returnToParam,
-      continueUrl,
-      scopes: scopes.join(' ')
-    }, '[OIDC] Login flow initiated');
-
     // Store state and continueUrl in short-lived cookie
     const stateJWT = await encodeSession({
       state,
@@ -1101,19 +1158,46 @@ const config = {
     const isSecure = config.baseURL && config.baseURL.startsWith('https://');
     const useServerSideState = !isSecure && config.allowInsecureCookies;
 
+    // 🪵 Log login initiation WITH state storage mode
+    logger.info({
+      state: state.substring(0, 8) + '...',
+      hasPKCE: !!codeVerifier,
+      hasReturnTo: !!returnToParam,
+      returnTo: returnToParam,
+      continueUrl,
+      scopes: scopes.join(' '),
+      // 🔍 State storage debug info
+      stateStorage: useServerSideState ? 'server-side (dev)' : 'cookie',
+      isSecure,
+      baseURL: config.baseURL,
+      allowInsecureCookies: config.allowInsecureCookies,
+      nodeEnv: process.env.NODE_ENV,
+      cookieSettings: useServerSideState ? 'n/a' : {
+        sameSite: isSecure ? 'None' : 'Lax',
+        secure: isSecure
+      }
+    }, '[OIDC] 🚀 Login flow initiated');
+
     let stateId = null;
     if (useServerSideState) {
       // ⚠️ Development only: Store state server-side to bypass cookie blocking
       stateId = idGenerator();
       if (!global.__oidc_state_store) global.__oidc_state_store = new Map();
+      if (!global.__oidc_state_mapping) global.__oidc_state_mapping = new Map();
+
+      // Store the state data by stateId
       global.__oidc_state_store.set(stateId, {
         data: stateJWT,
         expires: Date.now() + 600000  // 10 minutes
       });
 
+      // Create mapping from state -> stateId (Azure AD preserves state parameter)
+      global.__oidc_state_mapping.set(state, stateId);
+
       logger.warn({
         baseURL: config.baseURL,
         stateStorage: 'server-side',
+        state: state.substring(0, 8) + '...',
         stateId: stateId.substring(0, 8) + '...'
       }, '[OIDC] ⚠️ DEV MODE: Using server-side state storage (cookies blocked on HTTP cross-site redirect). Use HTTPS in production!');
     } else {
@@ -1138,12 +1222,15 @@ const config = {
     }, '[OIDC] Login - State cookie set');
 
     // Build authorization URL
+    // Note: state parameter is sent as-is (mapping stored server-side)
+    const stateParam = state;
+
     const params = new URLSearchParams({
       response_type: 'code',
       client_id: clientId,
       redirect_uri: redirectUri,
       scope: scopes.join(' '),
-      state,
+      state: stateParam,
       nonce
     });
 
@@ -1163,20 +1250,29 @@ const config = {
     // Automatically adds required parameters based on issuer URL
     applyProviderQuirks(authUrl, issuer, config);
 
-    // Add stateId to redirect_uri if using server-side state storage (dev mode)
-    // Azure AD will preserve the redirect_uri exactly, so we can add query param
     if (stateId) {
-      const enhancedRedirectUri = `${redirectUri}${redirectUri.includes('?') ? '&' : '?'}sid=${stateId}`;
-      authUrl.searchParams.set('redirect_uri', enhancedRedirectUri);
-
       logger.debug({
-        originalRedirectUri: redirectUri,
-        enhancedRedirectUri,
-        stateId: stateId.substring(0, 8) + '...'
-      }, '[OIDC] Added stateId to redirect_uri for server-side state retrieval');
+        stateId: stateId.substring(0, 8) + '...',
+        stateParam: stateParam.substring(0, 20) + '...'
+      }, '[OIDC] StateId encoded in state parameter for server-side retrieval');
     }
 
     return c.redirect(authUrl.toString(), 302);
+    } catch (error) {
+      logger.error({
+        error: error.message,
+        stack: error.stack,
+        returnTo: c.req.query('returnTo'),
+        baseURL: config.baseURL,
+        issuer: config.issuer
+      }, '[OIDC] ❌ Login handler exception');
+
+      return c.json({
+        error: 'login_failed',
+        message: error.message,
+        details: process.env.NODE_ENV === 'development' ? error.stack : undefined
+      }, 500);
+    }
   });
 
   /**
@@ -1227,22 +1323,64 @@ const config = {
     // Validate CSRF state - try cookie first, fallback to server-side store (dev mode)
     let stateCookie = getCookie(c, `${cookieName}_state`);
     let stateSource = 'cookie';
+    let extractedStateId = null;
 
     // Fallback: Check server-side state store (dev mode)
-    if (!stateCookie) {
-      const stateId = c.req.query('sid');  // State ID passed in redirect_uri
-      if (stateId && global.__oidc_state_store) {
-        const stored = global.__oidc_state_store.get(stateId);
+    if (!stateCookie && state) {
+      const stateParts = state.split(':');
+      const stateValue = stateParts[0];
+      const stateIdFromParam = stateParts.length > 1 ? stateParts[1] : null;
+
+      // Try direct stateId from URL (format: state:stateId)
+      if (stateIdFromParam && global.__oidc_state_store) {
+        const stored = global.__oidc_state_store.get(stateIdFromParam);
         if (stored && stored.expires > Date.now()) {
           stateCookie = stored.data;
           stateSource = 'server-side';
+          extractedStateId = stateIdFromParam;
+
           // Clean up used state
-          global.__oidc_state_store.delete(stateId);
+          global.__oidc_state_store.delete(stateIdFromParam);
+
+          // Also try to clean up the original mapping if possible
+          const stateDataForMapping = await decodeSession(stateCookie);
+          if (stateDataForMapping && stateDataForMapping.state && global.__oidc_state_mapping) {
+            global.__oidc_state_mapping.delete(stateDataForMapping.state);
+          }
 
           logger.debug({
-            stateId: stateId.substring(0, 8) + '...',
-            stateSource: 'server-side'
+            state: stateValue.substring(0, 8) + '...',
+            stateId: extractedStateId.substring(0, 8) + '...',
+            stateSource: 'server-side (direct)',
+            storeSize: global.__oidc_state_store.size,
+            mappingSize: global.__oidc_state_mapping?.size || 0
           }, '[OIDC] Retrieved state from server-side store (dev mode fallback)');
+        }
+      }
+
+      // If no stateId in URL, try using the state->stateId mapping
+      // (This is the normal case for OAuth providers that preserve the state parameter)
+      if (!stateCookie && global.__oidc_state_mapping && global.__oidc_state_store) {
+        const mappedStateId = global.__oidc_state_mapping.get(stateValue);
+        if (mappedStateId) {
+          const stored = global.__oidc_state_store.get(mappedStateId);
+          if (stored && stored.expires > Date.now()) {
+            stateCookie = stored.data;
+            stateSource = 'server-side';
+            extractedStateId = mappedStateId;
+
+            // Clean up used state
+            global.__oidc_state_store.delete(mappedStateId);
+            global.__oidc_state_mapping.delete(stateValue);
+
+            logger.debug({
+              state: stateValue.substring(0, 8) + '...',
+              stateId: extractedStateId.substring(0, 8) + '...',
+              stateSource: 'server-side (mapping)',
+              storeSize: global.__oidc_state_store.size,
+              mappingSize: global.__oidc_state_mapping.size
+            }, '[OIDC] Retrieved state from server-side store via mapping (dev mode)');
+          }
         }
       }
     }
@@ -1259,8 +1397,9 @@ const config = {
       logger.error({
         expectedCookieName: `${cookieName}_state`,
         hasCookieHeader: !!c.req.header('cookie'),
-        hasStateIdParam: !!c.req.query('sid'),
-        stateIdFound: !!global.__oidc_state_store?.has(c.req.query('sid')),
+        hasStateIdInParam: !!extractedStateId,
+        stateIdFound: extractedStateId ? !!global.__oidc_state_store?.has(extractedStateId) : false,
+        storeSize: global.__oidc_state_store?.size || 0,
         redirectUri,
         host: c.req.header('host')
       }, '[OIDC] State cookie/store missing (CSRF protection failed)');
@@ -1272,10 +1411,22 @@ const config = {
     }
 
     const stateData = await decodeSession(stateCookie);
-    if (!stateData || stateData.state !== state) {
+
+    // Extract actual state value (remove stateId suffix if present)
+    // State format in dev mode: "actualState:stateId"
+    // State format in cookie mode: "actualState"
+    const statePartsForComparison = state?.split(':');
+    const actualStateValue = statePartsForComparison && statePartsForComparison.length >= 1
+      ? statePartsForComparison[0]
+      : state;
+
+    if (!stateData || stateData.state !== actualStateValue) {
       logger.error({
         stateDecoded: !!stateData,
-        stateMatch: stateData?.state === state
+        stateMatch: stateData?.state === actualStateValue,
+        stateFromParam: actualStateValue?.substring(0, 8) + '...',
+        stateFromCookie: stateData?.state?.substring(0, 8) + '...',
+        stateSource
       }, '[OIDC] State mismatch (CSRF protection failed)');
 
       return c.json({ error: 'Invalid state (CSRF protection)' }, 400);
@@ -1348,8 +1499,24 @@ const config = {
         expiresIn: tokens.expires_in
       }, '[OIDC] Token exchange successful');
 
+      // ⚠️ FORCED DEBUG - Token response before validation
+      process.stdout.write('\n\n========== TOKEN RESPONSE ==========\n');
+      process.stdout.write('Has access_token: ' + !!tokens.access_token + '\n');
+      process.stdout.write('Has id_token: ' + !!tokens.id_token + '\n');
+      process.stdout.write('Has refresh_token: ' + !!tokens.refresh_token + '\n');
+      process.stdout.write('Token type: ' + tokens.token_type + '\n');
+      process.stdout.write('Expires in: ' + tokens.expires_in + '\n');
+      process.stdout.write('====================================\n\n');
+
       // Validate token response (Phase 3)
       const tokenValidation = validateTokenResponse(tokens, config);
+
+      // ⚠️ FORCED DEBUG - Validation result
+      process.stdout.write('\n\n========== TOKEN VALIDATION ==========\n');
+      process.stdout.write('Valid: ' + tokenValidation.valid + '\n');
+      process.stdout.write('Errors: ' + JSON.stringify(tokenValidation.errors, null, 2) + '\n');
+      process.stdout.write('======================================\n\n');
+
       if (!tokenValidation.valid) {
         if (c.get('logLevel') === 'debug' || c.get('logLevel') === 'trace') {
           logger.error('[OIDC] Token response validation failed:', tokenValidation.errors);
@@ -1372,6 +1539,23 @@ const config = {
       // Decode id_token claims
       const idTokenClaims = decodeIdToken(tokens.id_token);
 
+      // ⚠️ FORCED DEBUG - Must appear!
+      process.stdout.write('\n\n========== ID TOKEN DECODED ==========\n');
+      process.stdout.write('Success: ' + !!idTokenClaims + '\n');
+      process.stdout.write('Claims: ' + (idTokenClaims ? JSON.stringify(idTokenClaims, null, 2) : 'NULL') + '\n');
+      process.stdout.write('=====================================\n\n');
+
+      // Resolve effective token expiry (handles providers that return expires_in: 0)
+      const expiresInfo = resolveExpiresInSeconds(tokens, idTokenClaims);
+
+      if (expiresInfo.source !== 'provider') {
+        logger.warn({
+          reportedExpiresIn: tokens?.expires_in,
+          fallbackSeconds: expiresInfo.seconds,
+          fallbackSource: expiresInfo.source
+        }, '[OIDC] Token expiry fallback applied');
+      }
+
       // 🪵 Log ID token decode result
       logger.debug({
         success: !!idTokenClaims,
@@ -1380,6 +1564,10 @@ const config = {
         email: idTokenClaims?.email,
         name: idTokenClaims?.name
       }, '[OIDC] ID token decoded');
+
+      process.stdout.write('\n========== EFFECTIVE TOKEN EXPIRY ==========\n');
+      process.stdout.write(`expires_in: ${tokens.expires_in} => resolved: ${expiresInfo.seconds}s (source: ${expiresInfo.source})\n`);
+      process.stdout.write('===========================================\n\n');
 
       if (!idTokenClaims) {
         logger.error('[OIDC] Failed to decode ID token - token is malformed');
@@ -1401,6 +1589,12 @@ const config = {
         clockTolerance: 60,  // 60 seconds
         maxAge: 86400        // 24 hours
       });
+
+      // ⚠️ FORCED DEBUG - Validation result
+      console.error('\n\n========== ID TOKEN VALIDATION ==========');
+      console.error('Valid:', idTokenValidation.valid);
+      console.error('Errors:', JSON.stringify(idTokenValidation.errors, null, 2));
+      console.error('========================================\n\n');
 
       if (!idTokenValidation.valid) {
         logger.error({
@@ -1431,7 +1625,7 @@ const config = {
       let userCreated = false;
       if (usersResource) {
         try {
-          const result = await getOrCreateUser(usersResource, idTokenClaims, config);
+          const result = await getOrCreateUser(usersResource, idTokenClaims, config, c, hookExecutor);
           user = result.user;
           userCreated = result.created;
 
@@ -1498,42 +1692,18 @@ const config = {
         }
       }
 
-      // 🚧 TEMPORARY DEBUG: Log token sizes
-      logger.info('\n========== TOKEN SIZE DEBUG ==========');
-      logger.info('access_token bytes:', Buffer.byteLength(tokens.access_token || '', 'utf8'));
-      logger.info('id_token bytes:', Buffer.byteLength(tokens.id_token || '', 'utf8'));
-      logger.info('refresh_token bytes:', Buffer.byteLength(tokens.refresh_token || '', 'utf8'));
-      logger.info('TOTAL tokens bytes:',
-        Buffer.byteLength(tokens.access_token || '', 'utf8') +
-        Buffer.byteLength(tokens.id_token || '', 'utf8') +
-        Buffer.byteLength(tokens.refresh_token || '', 'utf8')
-      );
-      logger.info('======================================\n');
-
-      // Optional: set API token cookie (generic, opt-in)
-      try {
-        const apiTokenCfg = {
-          enabled: !!(apiTokenCookie && apiTokenCookie.enabled),
-          name: (apiTokenCookie && apiTokenCookie.name) || 'api_token',
-          httpOnly: apiTokenCookie?.httpOnly !== false,
-          sameSite: apiTokenCookie?.sameSite || cookieSameSite,
-          secure: apiTokenCookie?.secure ?? cookieSecure,
-          maxAge: apiTokenCookie?.maxAge || (7 * 24 * 60 * 60) // seconds
-        };
-
-        if (apiTokenCfg.enabled && user && user.apiToken) {
-          setCookie(c, apiTokenCfg.name, user.apiToken, {
-            path: '/',
-            httpOnly: apiTokenCfg.httpOnly,
-            sameSite: apiTokenCfg.sameSite,
-            secure: apiTokenCfg.secure,
-            maxAge: apiTokenCfg.maxAge
-          });
-        }
-      } catch (_) {
-        // non-fatal
+      // 🚧 DEBUG: Log token sizes to help diagnose cookie overflow issues
+      if (config.verbose) {
+        const accessTokenBytes = Buffer.byteLength(tokens.access_token || '', 'utf8');
+        const idTokenBytes = Buffer.byteLength(tokens.id_token || '', 'utf8');
+        const refreshTokenBytes = Buffer.byteLength(tokens.refresh_token || '', 'utf8');
+        logger.info('\n========== TOKEN SIZE DEBUG ==========');
+        logger.info('access_token bytes: %d', accessTokenBytes);
+        logger.info('id_token bytes: %d', idTokenBytes);
+        logger.info('refresh_token bytes: %d', refreshTokenBytes);
+        logger.info('TOTAL tokens bytes: %d', accessTokenBytes + idTokenBytes + refreshTokenBytes);
+        logger.info('======================================\n');
       }
-
 
       // Optional: issue JWT for API (Bearer) and set cookie fallback
       try {
@@ -1542,7 +1712,8 @@ const config = {
           const { createToken } = await import('./jwt-auth.js');
           const jwtPayload = { userId: user.id, scopes: user.scopes || [] };
           const jwtToken = createToken(jwtPayload, jwtSecret, '7d');
-          setCookie(c, 'mrt_jwt', jwtToken, {
+          const jwtCookieName = cookiePrefix ? `${cookiePrefix}_jwt` : 'jwt';
+          setCookie(c, jwtCookieName, jwtToken, {
             path: '/',
             httpOnly: true,
             sameSite: cookieSameSite,
@@ -1562,8 +1733,10 @@ const config = {
       const sessionData = {
         // Session lifecycle
         issued_at: now,                                // Absolute session start (ms)
-        expires_at: now + (tokens.expires_in * 1000),  // Token expiry hint (ms)
+        expires_at: now + (expiresInfo.seconds * 1000),  // Token expiry hint (ms)
         last_activity: now,                            // For rolling session duration (ms)
+        token_expires_in: expiresInfo.seconds,         // Effective expires_in (seconds)
+        token_expiry_source: expiresInfo.source,
 
         // 🎯 NEW: Refresh token for implicit refresh (if enabled and available)
         // Only stored if autoRefreshTokens = true to keep cookie size minimal
@@ -1573,10 +1746,14 @@ const config = {
 
         // Minimal user data (authorization only, ~200-400 bytes)
         user: user ? {
-          id: user.id,           // For user lookup in database
-          email: user.email,     // For display/audit
-          role: user.role,       // For basic authorization
-          scopes: user.scopes    // For scope-based authorization
+          id: user.id,                      // For user lookup in database
+          email: user.email,                // For display/audit
+          name: user.name,                  // For display in UI
+          role: user.role,                  // For basic authorization
+          scopes: user.scopes,              // For scope-based authorization
+          apiToken: user.apiToken,          // For API Key authentication (frontend needs this)
+          costCenterId: user.costCenterId,  // For cost center filtering/grouping
+          costCenterName: user.costCenterName  // For cost center display
         } : {
           id: idTokenClaims.sub,
           email: idTokenClaims.email,
@@ -1588,29 +1765,96 @@ const config = {
 
       const sessionJWT = await encodeSession(sessionData);
 
-      // 🚧 TEMPORARY DEBUG: Log session cookie size
-      logger.info('\n========== SESSION COOKIE SIZE ==========');
-      logger.info('Session data (stringified) bytes:', Buffer.byteLength(JSON.stringify(sessionData), 'utf8'));
-      logger.info('Session JWT bytes:', Buffer.byteLength(sessionJWT, 'utf8'));
-      logger.info('Cookie name bytes:', Buffer.byteLength(cookieName, 'utf8'));
-      logger.info('Cookie attributes ~bytes:', 60);  // Approximate (Max-Age, Path, HttpOnly, Secure, SameSite)
-      logger.info('TOTAL cookie bytes (name + JWT + attributes):',
-        Buffer.byteLength(cookieName, 'utf8') + Buffer.byteLength(sessionJWT, 'utf8') + 60
-      );
-      logger.info('Browser limit: 4096 bytes');
-      logger.info('==========================================\n');
+      // 🚧 DEBUG: Log session cookie size to help diagnose overflow issues
+      if (config.verbose) {
+        const sessionDataBytes = Buffer.byteLength(JSON.stringify(sessionData), 'utf8');
+        const sessionJwtBytes = Buffer.byteLength(sessionJWT, 'utf8');
+        const cookieNameBytes = Buffer.byteLength(cookieName, 'utf8');
+        const approximateAttributesBytes = 80; // A generous estimate for Path, HttpOnly, Secure, SameSite, Max-Age
+        const totalCookieBytes = cookieNameBytes + sessionJwtBytes + approximateAttributesBytes;
+
+        logger.info('\n========== SESSION COOKIE SIZE ==========');
+        logger.info('Session data (stringified) bytes: %d', sessionDataBytes);
+        logger.info('Session JWT bytes: %d', sessionJwtBytes);
+        logger.info('Cookie name bytes: %d', cookieNameBytes);
+        logger.info('Cookie attributes ~bytes: %d', approximateAttributesBytes);
+        logger.info('TOTAL cookie bytes (name + JWT + attributes): %d', totalCookieBytes);
+        logger.info('Browser limit: 4096 bytes');
+        if (totalCookieBytes > 4000) {
+          logger.warn('[OIDC] ⚠️ WARNING: Session cookie size is approaching the 4KB browser limit. Consider reducing data stored in the session.');
+        }
+        logger.info('==========================================\n');
+      }
 
       // Set session cookie (with automatic chunking if > 4KB)
-      setChunkedCookie(c, cookieName, sessionJWT, {
-        path: '/',
-        httpOnly: true,
-        maxAge: Math.floor(cookieMaxAge / 1000),
-        sameSite: cookieSameSite,
-        secure: cookieSecure
-      });
+      logger.info('🍪 [OIDC] Setting session cookie...');
+      try {
+        setChunkedCookie(c, cookieName, sessionJWT, {
+          path: '/',
+          httpOnly: true,
+          maxAge: Math.floor(cookieMaxAge / 1000),
+          sameSite: cookieSameSite,
+          secure: cookieSecure
+        });
+        logger.info('✅ [OIDC] Session cookie set successfully');
+
+        // Verify cookie was set by checking response headers
+        const setCookieHeaders = c.res.headers.getSetCookie?.() || [];
+        logger.info('🔍 [OIDC] Set-Cookie headers count:', setCookieHeaders.length);
+        if (setCookieHeaders.length > 0) {
+          setCookieHeaders.forEach((header, idx) => {
+            const cookieName = header.split('=')[0];
+            const cookieLength = header.length;
+            logger.info(`   [${idx + 1}] ${cookieName} (${cookieLength} bytes)`);
+          });
+        } else {
+          logger.warn('⚠️  [OIDC] WARNING: No Set-Cookie headers found in response!');
+        }
+      } catch (cookieErr) {
+        logger.error('❌ [OIDC] CRITICAL: Failed to set session cookie!', cookieErr);
+        throw new Error(`Failed to set session cookie: ${cookieErr.message}`);
+      }
+
+      // Create cookie helpers for hooks
+      const auth = createCookieHelpers(c, config);
+
+      // Store sessionId for helper access
+      c.set('sessionId', sessionJWT.split('.')[1]); // JWT payload part
+      c.set('sessionData', sessionData);
+
+      // Execute afterSessionCreate hooks
+      logger.info('🪝 [OIDC] Executing afterSessionCreate hooks...');
+      try {
+        await hookExecutor.executeHooks('afterSessionCreate', {
+          user,
+          sessionId: sessionJWT,
+          sessionData,
+          created: userCreated,
+          context: c,
+          auth
+        });
+        logger.info('✅ [OIDC] Hooks executed successfully');
+      } catch (hooksErr) {
+        logger.error('❌ [OIDC] ERROR in afterSessionCreate hooks:', hooksErr);
+        // Continue execution - hooks shouldn't block login
+      }
+
+      // Final verification before redirect
+      logger.info('\n========== PRE-REDIRECT VERIFICATION ==========');
+      logger.info('🔍 Verifying session cookie before redirect...');
+      const finalSetCookieHeaders = c.res.headers.getSetCookie?.() || [];
+      logger.info('📋 Total Set-Cookie headers:', finalSetCookieHeaders.length);
+      const hasSessionCookie = finalSetCookieHeaders.some(h => h.startsWith(cookieName));
+      logger.info('✓ Session cookie present:', hasSessionCookie);
+      if (!hasSessionCookie) {
+        logger.error('❌ CRITICAL: Session cookie NOT in response headers!');
+        logger.error('   This will cause login loop - user will not be authenticated');
+      }
+      logger.info('===============================================\n');
 
       // Redirect to original destination or default post-login page
       const redirectUrl = stateData.returnTo || postLoginRedirect;
+      logger.info('🔀 [OIDC] Redirecting to:', redirectUrl);
       return c.redirect(redirectUrl, 302);
 
     } catch (err) {
@@ -1828,9 +2072,19 @@ const config = {
         const newTokens = await refreshTokens(c, session.refresh_token);
 
         if (newTokens) {
+          const refreshedExpiry = resolveExpiresInSeconds(newTokens);
+          if (refreshedExpiry.source !== 'provider') {
+            logger.warn({
+              reportedExpiresIn: newTokens?.expires_in,
+              fallbackSeconds: refreshedExpiry.seconds,
+              fallbackSource: refreshedExpiry.source
+            }, '[OIDC] Token refresh applied expiry fallback');
+          }
           // Update session with new tokens
-          session.expires_at = now + (newTokens.expires_in * 1000);
+          session.expires_at = now + (refreshedExpiry.seconds * 1000);
           session.refresh_token = newTokens.refresh_token || session.refresh_token;
+          session.token_expires_in = refreshedExpiry.seconds;
+          session.token_expiry_source = refreshedExpiry.source;
 
           // Mark session as refreshed for JWT workaround
           const updatedSessionJWT = await encodeSession(session);
@@ -1838,7 +2092,8 @@ const config = {
 
           logger.debug({
             timeUntilExpiry: Math.round(timeUntilExpiry / 1000),
-            newExpiresIn: newTokens.expires_in
+            newExpiresIn: refreshedExpiry.seconds,
+            newExpirySource: refreshedExpiry.source
           }, '[OIDC] Token refreshed implicitly');
         } else {
           // Refresh failed - let session continue until it expires
@@ -1867,15 +2122,26 @@ const config = {
       }
     }
 
-    // Set user in context (minimal, from session)
-    c.set('user', {
+    // Base user from session
+    const sessionUser = {
       ...session.user,
       authMethod: 'oidc',
       session: {
         expires_at: session.expires_at,  // When session expires (user must re-login)
         last_activity: session.last_activity  // Last request timestamp
       }
+    };
+
+    // Execute afterUserEnrich hooks
+    const enrichParams = await hookExecutor.executeHooks('afterUserEnrich', {
+      sessionUser,        // User from session cookie
+      dbUser: null,       // Hook will fetch from database
+      mergedUser: sessionUser,  // MUTABLE - hook modifies this
+      context: c
     });
+
+    // Set enriched user in context
+    c.set('user', enrichParams.mergedUser || sessionUser);
 
     // 🪵 Log successful authentication
     logger.debug({

@@ -1,6 +1,7 @@
 import { describe, expect, test, beforeEach, afterEach } from '@jest/globals';
 import { createDatabaseForTest, createTemporaryPathForTest } from '../config.js';
 import { BackupPlugin } from '../../src/plugins/backup.plugin.js';
+import { MemoryClient } from '../../src/clients/memory-client.class.js';
 
 describe('CLI Backup & Restore API Tests', () => {
   let database;
@@ -64,6 +65,7 @@ describe('CLI Backup & Restore API Tests', () => {
     if (database) {
       await database.disconnect();
     }
+    MemoryClient.clearBucketStorage('suite-cli-backup-api');
   });
 
   describe('Backup API Functions', () => {

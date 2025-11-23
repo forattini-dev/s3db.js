@@ -249,7 +249,7 @@ export class CronManager {
     } catch (error) {
       if (isTestEnv) {
         // 🪵 Warn: falling back to cron stub
-        this.logger.warn({ error: error.message }, 'Falling back to in-memory cron stub for tests');
+      this.logger.warn({ name, error: error.message }, `[CronManager] Falling back to in-memory cron stub for tests: ${error.message}`);
 
         this._cron = this._createTestCronStub();
         return this._cron;
@@ -391,7 +391,6 @@ export class CronManager {
 
     if (!this.jobs.has(name)) {
       this.logger.warn({ name: jobName }, `Job '${jobName}' not found`);
-      console.trace('CronManager.stop() called with object as name');
       return false;
     }
 

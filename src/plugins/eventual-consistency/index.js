@@ -111,10 +111,11 @@ export class EventualConsistencyPlugin extends CoordinatorPlugin {
 
     // Start coordinator mode if enabled
     if (this.config.enableCoordinator) {
-      await this.startCoordination(
-        () => this.coordinatorWork(),
-        () => this.workerLoop()
-      );
+      // Start leader election
+      await this.startCoordination();
+
+      // Start worker loop to process tickets (runs on ALL nodes)
+      this._startWorkerLoop();
 
       if (this.config.logLevel) {
         this.logger.info(`[EventualConsistency] Coordinator mode started (workerId: ${this.workerId})`);
@@ -130,6 +131,31 @@ export class EventualConsistencyPlugin extends CoordinatorPlugin {
       this.fieldHandlers,
       (event, data) => this.emit(event, data)
     );
+
+    // Stop worker loop
+    if (this._workerLoopHandle) {
+      if (this._workerLoopHandle.stop) this._workerLoopHandle.stop();
+      else clearInterval(this._workerLoopHandle);
+      this._workerLoopHandle = null;
+    }
+  }
+
+  /**
+   * Start the worker loop interval
+   * @private
+   */
+  async _startWorkerLoop() {
+    const interval = Math.max(1000, this.config.workerInterval || 5000);
+    const { getCronManager } = await import('../../concerns/cron-manager.js');
+    const cronManager = getCronManager();
+
+    if (cronManager && !cronManager.disabled) {
+      const jobName = `ec-worker-${this.workerId}`;
+      await cronManager.scheduleInterval(interval, () => this.workerLoop(), jobName);
+      this._workerLoopHandle = { stop: () => cronManager.stop(jobName) };
+    } else {
+      this._workerLoopHandle = setInterval(() => this.workerLoop(), interval);
+    }
   }
 
   /**
@@ -785,9 +811,10 @@ export class EventualConsistencyPlugin extends CoordinatorPlugin {
    * @override
    */
   async onBecomeCoordinator() {
-    if (this.config.logLevel) {
-      this.logger.info(`[EventualConsistency] 🎖️  Became coordinator (workerId: ${this.workerId})`);
-    }
+    this.logger.debug(
+      { workerId: this.workerId },
+      'Global coordinator elected this worker as leader'
+    );
 
     // Emit event for monitoring
     this.database.emit('plg:eventual-consistency:coordinator-promoted', {
@@ -802,9 +829,10 @@ export class EventualConsistencyPlugin extends CoordinatorPlugin {
    * @override
    */
   async onStopBeingCoordinator() {
-    if (this.config.logLevel) {
-      this.logger.info(`[EventualConsistency] No longer coordinator (workerId: ${this.workerId})`);
-    }
+    this.logger.debug(
+      { workerId: this.workerId },
+      'Global coordinator demoted this worker from leader'
+    );
 
     // Emit event for monitoring
     this.database.emit('plg:eventual-consistency:coordinator-demoted', {
@@ -859,6 +887,9 @@ export class EventualConsistencyPlugin extends CoordinatorPlugin {
             (windowHours) => this._getCohortHours(windowHours)
           );
 
+          // Run garbage collection (coordinator responsibility now)
+          await this._runGarbageCollectionForHandler(handler, resourceName, fieldName);
+
           totalTickets += tickets.length;
           results.push({
             resource: resourceName,
@@ -900,96 +931,168 @@ export class EventualConsistencyPlugin extends CoordinatorPlugin {
       return; // Coordinator mode disabled
     }
 
-    if (this.config.logLevel) {
-      this.logger.info(`[EventualConsistency] Worker loop executing (workerId: ${this.workerId})`);
+    if (this.config.logLevel === 'debug') {
+      this.logger.debug(`[EventualConsistency] Worker loop executing (workerId: ${this.workerId})`);
     }
 
-    // Iterate over all field handlers and process tickets
+    // Flatten handlers for concurrent processing
+    const tasks = [];
+    for (const [resourceName, fieldHandlers] of this.fieldHandlers.entries()) {
+      for (const [fieldName, handler] of fieldHandlers.entries()) {
+        tasks.push({ resourceName, fieldName, handler });
+      }
+    }
+
+    // Process all handlers concurrently
+    // S3Client's TasksPool will manage the concurrency limit (default 10)
+    const taskResults = await Promise.all(tasks.map(task => this._processHandlerWork(task)));
+
+    // Aggregate results
     let totalClaimed = 0;
     let totalProcessed = 0;
     let totalErrors = 0;
     const results = [];
 
-    for (const [resourceName, fieldHandlers] of this.fieldHandlers.entries()) {
-      for (const [fieldName, handler] of fieldHandlers.entries()) {
-        try {
-          // Attempt to claim tickets
-          const claimed = await claimTickets(
-            handler.ticketResource,
-            this.workerId,
-            this.config
-          );
-
-          if (claimed.length === 0) {
-            continue; // No tickets available for this handler
-          }
-
-          totalClaimed += claimed.length;
-
-          if (this.config.logLevel) {
-            this.logger.info(`[EventualConsistency] Claimed ${claimed.length} tickets for ${resourceName}.${fieldName}`);
-          }
-
-          // Process each claimed ticket
-          for (const ticket of claimed) {
-            try {
-              const result = await processTicket(ticket, handler, this.database);
-
-              totalProcessed += result.recordsProcessed;
-              totalErrors += result.errors.length;
-
-              results.push({
-                resource: resourceName,
-                field: fieldName,
-                ticketId: ticket.id,
-                recordsProcessed: result.recordsProcessed,
-                transactionsApplied: result.transactionsApplied,
-                errors: result.errors
-              });
-
-              if (this.config.logLevel && result.recordsProcessed > 0) {
-                this.logger.info(`[EventualConsistency] Processed ticket ${ticket.id}: ${result.recordsProcessed} records, ${result.transactionsApplied} transactions`);
-              }
-
-              if (this.config.logLevel && result.errors.length > 0) {
-                this.logger.error(`[EventualConsistency] Errors processing ticket ${ticket.id}:`, result.errors);
-              }
-            } catch (err) {
-              totalErrors++;
-              if (this.config.logLevel) {
-                this.logger.error(`[EventualConsistency] Failed to process ticket ${ticket.id}:`, err);
-              }
-              results.push({
-                resource: resourceName,
-                field: fieldName,
-                ticketId: ticket.id,
-                recordsProcessed: 0,
-                transactionsApplied: 0,
-                errors: [{ error: err.message }]
-              });
-            }
-          }
-        } catch (err) {
-          if (this.config.logLevel) {
-            this.logger.error(`[EventualConsistency] Error in worker loop for ${resourceName}.${fieldName}:`, err);
-          }
-        }
-      }
+    for (const res of taskResults) {
+      if (!res) continue;
+      totalClaimed += res.claimed;
+      totalProcessed += res.processed;
+      totalErrors += res.errors;
+      if (res.details) results.push(...res.details);
     }
 
-    if (this.config.logLevel) {
+    if (this.config.logLevel && (totalClaimed > 0 || totalErrors > 0)) {
       this.logger.info(`[EventualConsistency] Worker loop complete: claimed ${totalClaimed} tickets, processed ${totalProcessed} records, ${totalErrors} errors`);
     }
 
-    // Emit event for monitoring
-    this.database.emit('plg:eventual-consistency:tickets-processed', {
-      pluginName: this.name,
-      workerId: this.workerId,
-      ticketsClaimed: totalClaimed,
-      recordsProcessed: totalProcessed,
-      errors: totalErrors,
-      results,
-      timestamp: Date.now()
-    });
+    // Emit event for monitoring (only if meaningful activity)
+    if (totalClaimed > 0 || totalErrors > 0) {
+      this.database.emit('plg:eventual-consistency:tickets-processed', {
+        pluginName: this.name,
+        workerId: this.workerId,
+        ticketsClaimed: totalClaimed,
+        recordsProcessed: totalProcessed,
+        errors: totalErrors,
+        results,
+        timestamp: Date.now()
+      });
+    }
+  }
+
+  /**
+   * Process work for a single handler (claim & process tickets)
+   * @private
+   */
+  async _processHandlerWork({ resourceName, fieldName, handler }) {
+    const now = Date.now();
+    
+    // Adaptive Backoff Settings
+    const MIN_INTERVAL = 10000; // 10s (fast polling when active)
+    const MAX_INTERVAL = 60000; // 1m (slow polling when idle)
+    const BASE_INTERVAL = this.config.workerInterval || 30000;
+
+    // Initialize backoff state if missing
+    if (!handler._backoffState) {
+      // Jitter the first check to spread load over the base interval
+      // This prevents all 14+ queues from being checked simultaneously on startup
+      const initialDelay = Math.floor(Math.random() * BASE_INTERVAL);
+      handler._backoffState = {
+        nextCheck: now + initialDelay,
+        multiplier: 1
+      };
+      // Skip first run to respect jitter
+      return null;
+    }
+
+    // Skip if backoff active
+    if (now < handler._backoffState.nextCheck) {
+      return null;
+    }
+
+    const result = { claimed: 0, processed: 0, errors: 0, details: [] };
+
+    try {
+      // Attempt to claim tickets
+      const claimed = await claimTickets(
+        handler.ticketResource,
+        this.workerId,
+        this.config
+      );
+
+      if (claimed.length === 0) {
+        // No tickets: Increase backoff
+        let newInterval;
+        
+        if (handler._backoffState.multiplier < 1) {
+           // Was fast polling, but queue empty now. Reset to base.
+           handler._backoffState.multiplier = 1;
+           newInterval = BASE_INTERVAL;
+        } else {
+           // Was normal/slow polling, still empty. Backoff further.
+           handler._backoffState.multiplier = Math.min(10, handler._backoffState.multiplier * 1.5);
+           newInterval = Math.min(MAX_INTERVAL, BASE_INTERVAL * handler._backoffState.multiplier);
+        }
+
+        handler._backoffState.nextCheck = now + newInterval;
+        return null;
+      }
+
+      // Tickets found: Reset to fast polling to drain queue
+      handler._backoffState.multiplier = 0.2; 
+      handler._backoffState.nextCheck = now + MIN_INTERVAL;
+
+      result.claimed = claimed.length;
+
+      if (this.config.logLevel) {
+        this.logger.info(`[EventualConsistency] Claimed ${claimed.length} tickets for ${resourceName}.${fieldName}`);
+      }
+
+      // Process each claimed ticket
+      // We process tickets sequentially per handler to avoid race conditions on the same data
+      for (const ticket of claimed) {
+        try {
+          const ticketResult = await processTicket(ticket, handler, this.database);
+
+          result.processed += ticketResult.recordsProcessed;
+          result.errors += ticketResult.errors.length;
+
+          result.details.push({
+            resource: resourceName,
+            field: fieldName,
+            ticketId: ticket.id,
+            recordsProcessed: ticketResult.recordsProcessed,
+            transactionsApplied: ticketResult.transactionsApplied,
+            errors: ticketResult.errors
+          });
+
+          if (this.config.logLevel && ticketResult.recordsProcessed > 0) {
+            this.logger.info(`[EventualConsistency] Processed ticket ${ticket.id}: ${ticketResult.recordsProcessed} records, ${ticketResult.transactionsApplied} transactions`);
+          }
+
+          if (this.config.logLevel && ticketResult.errors.length > 0) {
+            this.logger.error(`[EventualConsistency] Errors processing ticket ${ticket.id}:`, ticketResult.errors);
+          }
+        } catch (err) {
+          result.errors++;
+          if (this.config.logLevel) {
+            this.logger.error(`[EventualConsistency] Failed to process ticket ${ticket.id}:`, err);
+          }
+          result.details.push({
+            resource: resourceName,
+            field: fieldName,
+            ticketId: ticket.id,
+            recordsProcessed: 0,
+            transactionsApplied: 0,
+            errors: [{ error: err.message }]
+          });
+        }
+      }
+    } catch (err) {
+      if (this.config.logLevel) {
+        this.logger.error(`[EventualConsistency] Error in worker loop for ${resourceName}.${fieldName}:`, err);
+      }
+    }
+
+    return result;
   }
 }

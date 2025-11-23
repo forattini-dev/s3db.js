@@ -401,7 +401,8 @@ export class Router {
         resource: name,
         path: fullMountPath,
         methods,
-        authEnabled: !!this.authMiddleware && !authDisabled
+        authEnabled: !!this.authMiddleware && !authDisabled,
+        authConfig: resourceConfig?.auth
       });
 
       // Mount custom routes for this resource

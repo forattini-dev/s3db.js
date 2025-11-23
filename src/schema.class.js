@@ -19,6 +19,7 @@ import { tryFn, tryFnSync } from "./concerns/try-fn.js";
 import { SchemaError } from "./errors.js";
 import { encode as toBase62, decode as fromBase62, encodeDecimal, decodeDecimal, encodeFixedPoint, decodeFixedPoint, encodeFixedPointBatch, decodeFixedPointBatch } from "./concerns/base62.js";
 import { encodeIPv4, decodeIPv4, encodeIPv6, decodeIPv6, isValidIPv4, isValidIPv6 } from "./concerns/ip.js";
+import { encodeBuffer, decodeBuffer, encodeBits, decodeBits } from "./concerns/binary.js";
 import { encodeMoney, decodeMoney, getCurrencyDecimals } from "./concerns/money.js";
 import { encodeGeoLat, decodeGeoLat, encodeGeoLon, decodeGeoLon, encodeGeoPoint, decodeGeoPoint } from "./concerns/geo-encoding.js";
 import {
@@ -447,6 +448,34 @@ export const SchemaActions = {
     if (value === null || value === undefined) return value;
     if (typeof value !== 'string') return value;
     const [ok, err, decoded] = tryFnSync(() => decodeIPv6(value));
+    return ok ? decoded : value;
+  },
+
+  // Buffer type - Generic binary data (Base64 encoded)
+  encodeBuffer: (value) => {
+    if (value === null || value === undefined) return value;
+    if (!Buffer.isBuffer(value) && !(value instanceof Uint8Array)) return value;
+    const [ok, err, encoded] = tryFnSync(() => encodeBuffer(value));
+    return ok ? encoded : value;
+  },
+  decodeBuffer: (value) => {
+    if (value === null || value === undefined) return value;
+    if (typeof value !== 'string') return value;
+    const [ok, err, decoded] = tryFnSync(() => decodeBuffer(value));
+    return ok ? decoded : value;
+  },
+
+  // Bits type - Fixed-size bitmap (Base64 encoded)
+  encodeBits: (value, { bitCount = null } = {}) => {
+    if (value === null || value === undefined) return value;
+    if (!Buffer.isBuffer(value) && !(value instanceof Uint8Array)) return value;
+    const [ok, err, encoded] = tryFnSync(() => encodeBits(value, bitCount));
+    return ok ? encoded : value;
+  },
+  decodeBits: (value, { bitCount = null } = {}) => {
+    if (value === null || value === undefined) return value;
+    if (typeof value !== 'string') return value;
+    const [ok, err, decoded] = tryFnSync(() => decodeBits(value, bitCount));
     return ok ? decoded : value;
   },
 
@@ -891,6 +920,27 @@ export class Schema {
         continue;
       }
 
+      // Handle buffer type (generic binary data)
+      if (defStr.includes("buffer") || defType === 'buffer') {
+        this.addHook("beforeMap", name, "encodeBuffer");
+        this.addHook("afterUnmap", name, "decodeBuffer");
+        continue;
+      }
+
+      // Handle bits:N type (fixed-size bitmap)
+      if (defStr.includes("bits") || defType === 'bits') {
+        // Extract bit count from bits:1024 notation
+        let bitCount = null;
+        const bitsMatch = defStr.match(/bits:(\d+)/);
+        if (bitsMatch) {
+          bitCount = parseInt(bitsMatch[1], 10);
+        }
+
+        this.addHook("beforeMap", name, "encodeBits", { bitCount });
+        this.addHook("afterUnmap", name, "decodeBits", { bitCount });
+        continue;
+      }
+
       // Handle money type (integer-based, decimal-aware)
       if (defStr.includes("money") || defType === 'money' || defStr.includes("crypto") || defType === 'crypto') {
         // Extract decimals from money:8 or crypto:8 notation
@@ -1329,6 +1379,16 @@ export class Schema {
           processed[key] = value.replace(/^ip6/, 'string');
           continue;
         }
+        // Expand buffer shorthand to any type (validated by hooks)
+        if (value === 'buffer' || value.startsWith('buffer|')) {
+          processed[key] = 'any';
+          continue;
+        }
+        // Expand bits:N shorthand to any type (validated by hooks)
+        if (value === 'bits' || value.startsWith('bits:') || value.startsWith('bits|')) {
+          processed[key] = 'any';
+          continue;
+        }
         // Expand money/crypto shorthand to number type with min validation
         if (value === 'money' || value.startsWith('money:') || value.startsWith('money|') ||
             value === 'crypto' || value.startsWith('crypto:') || value.startsWith('crypto|')) {
@@ -1395,11 +1455,50 @@ export class Schema {
           processed[key] = value.replace(/^embedding/, 'array|items:number|empty:false');
           continue;
         }
+        // Convert s3db.js pipe notation to fastest-validator object format
+        // e.g., 'string|optional' -> { type: 'string', optional: true }
+        // e.g., 'number|min:0|max:100' -> { type: 'number', min: 0, max: 100 }
+        if (value.includes('|')) {
+          const parts = value.split('|');
+          const baseType = parts[0];
+          const config = { type: baseType };
+
+          for (let i = 1; i < parts.length; i++) {
+            const part = parts[i];
+            if (part === 'optional') {
+              config.optional = true;
+            } else if (part === 'required') {
+              // required is default, no action needed
+            } else if (part.includes(':')) {
+              const [modifier, val] = part.split(':');
+              // Parse numeric values or booleans
+              if (val === 'true') {
+                config[modifier] = true;
+              } else if (val === 'false') {
+                config[modifier] = false;
+              } else {
+                const numVal = Number(val);
+                config[modifier] = Number.isNaN(numVal) ? val : numVal;
+              }
+            } else {
+              // Boolean modifier like 'empty'
+              config[part] = true;
+            }
+          }
+          processed[key] = config;
+          continue;
+        }
         processed[key] = value;
       } else if (typeof value === 'object' && value !== null && !Array.isArray(value)) {
-        // Check if this is a validator type definition (has 'type' property that is NOT '$$type')
-        // vs a nested object structure
-        const hasValidatorType = value.type !== undefined && key !== '$$type';
+        // Check if this is a validator type definition (has 'type' property that is a valid type)
+        // vs a nested object structure that happens to have a field named "type"
+        // Valid validator types don't contain '|' - that's s3db shorthand notation for data fields
+        const validatorTypes = ['string', 'number', 'boolean', 'any', 'object', 'array', 'date', 'email', 'url', 'uuid', 'enum', 'custom', 'ip4', 'ip6', 'buffer', 'bits', 'money', 'crypto', 'decimal', 'geo:lat', 'geo:lon', 'geo:point', 'geo-lat', 'geo-lon', 'geo-point', 'secret', 'password', 'embedding'];
+        const typeValue = value.type;
+        const isValidValidatorType = typeof typeValue === 'string' &&
+          !typeValue.includes('|') &&
+          (validatorTypes.includes(typeValue) || typeValue.startsWith('bits:') || typeValue.startsWith('embedding:'));
+        const hasValidatorType = isValidValidatorType && key !== '$$type';
 
         if (hasValidatorType) {
           // Remove plugin metadata from all object definitions
@@ -1410,6 +1509,12 @@ export class Schema {
             processed[key] = { ...cleanValue, type: 'string' };
           } else if (cleanValue.type === 'ip6') {
             processed[key] = { ...cleanValue, type: 'string' };
+          } else if (cleanValue.type === 'buffer') {
+            // Buffer type → any (validated by hooks)
+            processed[key] = { ...cleanValue, type: 'any' };
+          } else if (cleanValue.type === 'bits' || cleanValue.type?.startsWith('bits:')) {
+            // Bits type → any (validated by hooks)
+            processed[key] = { ...cleanValue, type: 'any' };
           } else if (cleanValue.type === 'money' || cleanValue.type === 'crypto') {
             // Money/crypto type → number with min:0
             processed[key] = { ...cleanValue, type: 'number', min: cleanValue.min !== undefined ? cleanValue.min : 0 };
@@ -1441,6 +1546,12 @@ export class Schema {
               ...cleanValue,
               properties: this.preprocessAttributesForValidation(cleanValue.properties)
             };
+          } else if (cleanValue.type === 'object' && cleanValue.props) {
+            // Recursively process nested object props (fastest-validator format)
+            processed[key] = {
+              ...cleanValue,
+              props: this.preprocessAttributesForValidation(cleanValue.props)
+            };
           } else {
             // This is a validator type definition (e.g., { type: 'array', items: 'number' })
             processed[key] = cleanValue;
@@ -1451,7 +1562,7 @@ export class Schema {
           const isExplicitOptional = value.$$type && value.$$type.includes('optional');
           const objectConfig = {
             type: 'object',
-            properties: this.preprocessAttributesForValidation(value),
+            props: this.preprocessAttributesForValidation(value),
             strict: false
           };
           // If explicitly required, don't mark as optional

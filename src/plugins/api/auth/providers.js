@@ -107,9 +107,17 @@ export function applyProviderQuirks(authUrl, issuer, config = {}) {
 
   // 🔍 Azure AD / Microsoft Entra quirks
   // Default prompt to 'select_account' for better UX (allows account switching)
+  // Add max_age=0 to force fresh authentication and prevent PKCE verifier mismatches
   if (issuerLower.includes('login.microsoftonline.com')) {
     if (!authUrl.searchParams.has('prompt')) {
       authUrl.searchParams.set('prompt', 'select_account');
+    }
+    // CRITICAL: max_age=0 prevents Azure AD from reusing cached authentication
+    // This prevents PKCE code_verifier mismatches when multiple login attempts occur
+    // Without this, Azure AD may return a code based on an old code_challenge
+    // while the application has a new code_verifier in the state cookie
+    if (!authUrl.searchParams.has('max_age')) {
+      authUrl.searchParams.set('max_age', '0');
     }
     return;
   }

@@ -8,7 +8,7 @@ function normalizeNamespace(namespace) {
   if (!text) return null;
   const normalized = text
     .replace(/[^a-z0-9]+/g, '-')  // Use hyphens instead of underscores
-    .replace(/-+/, '')
+    .replace(/^-+/, '')
     .replace(/-+$/, '');
   return normalized || null;
 }

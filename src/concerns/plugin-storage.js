@@ -82,6 +82,25 @@ export class PluginStorage {
   }
 
   /**
+   * Generate sequence key following the resource-scoped pattern
+   *
+   * Storage path conventions:
+   * - Resource-scoped: resource={resourceName}/plugin={slug}/sequence={name}/{suffix}
+   * - Global (no resource): plugin={slug}/sequence={name}/{suffix}
+   *
+   * @param {string} resourceName - Resource name (optional)
+   * @param {string} sequenceName - Sequence name
+   * @param {string} suffix - 'value' or 'lock'
+   * @returns {string} S3 key
+   */
+  getSequenceKey(resourceName, sequenceName, suffix) {
+    if (resourceName) {
+      return `resource=${resourceName}/plugin=${this.pluginSlug}/sequence=${sequenceName}/${suffix}`;
+    }
+    return `plugin=${this.pluginSlug}/sequence=${sequenceName}/${suffix}`;
+  }
+
+  /**
    * Save data with metadata encoding, behavior support, and optional TTL
    *
    * @param {string} key - S3 key
@@ -150,24 +169,18 @@ export class PluginStorage {
   }
 
   /**
-   * Batch set multiple items
+   * Batch set multiple items (parallel execution for performance)
    *
    * @param {Array<{key: string, data: Object, options?: Object}>} items - Items to save
    * @returns {Promise<Array<{ok: boolean, key: string, error?: Error}>>} Results
    */
   async batchSet(items) {
-    const results = [];
+    const promises = items.map(async (item) => {
+      const [ok, error] = await tryFn(() => this.set(item.key, item.data, item.options || {}));
+      return { ok, key: item.key, error: ok ? undefined : error };
+    });
 
-    for (const item of items) {
-      try {
-        await this.set(item.key, item.data, item.options || {});
-        results.push({ ok: true, key: item.key });
-      } catch (error) {
-        results.push({ ok: false, key: item.key, error });
-      }
-    }
-
-    return results;
+    return Promise.all(promises);
   }
 
   /**
@@ -621,50 +634,33 @@ export class PluginStorage {
   }
 
   /**
-   * Batch put operations
+   * Batch put operations (parallel execution for performance)
    *
    * @param {Array<{key: string, data: Object, options?: Object}>} items - Items to save
    * @returns {Promise<Array<{key: string, ok: boolean, error?: Error}>>} Results
    */
   async batchPut(items) {
-    const results = [];
+    const promises = items.map(async (item) => {
+      const [ok, error] = await tryFn(() => this.set(item.key, item.data, item.options));
+      return { key: item.key, ok, error: ok ? undefined : error };
+    });
 
-    for (const item of items) {
-      const [ok, err] = await tryFn(() =>
-        this.put(item.key, item.data, item.options)
-      );
-
-      results.push({
-        key: item.key,
-        ok,
-        error: err
-      });
-    }
-
-    return results;
+    return Promise.all(promises);
   }
 
   /**
-   * Batch get operations
+   * Batch get operations (parallel execution for performance)
    *
    * @param {Array<string>} keys - Keys to fetch
    * @returns {Promise<Array<{key: string, ok: boolean, data?: Object, error?: Error}>>} Results
    */
   async batchGet(keys) {
-    const results = [];
+    const promises = keys.map(async (key) => {
+      const [ok, error, data] = await tryFn(() => this.get(key));
+      return { key, ok, data, error: ok ? undefined : error };
+    });
 
-    for (const key of keys) {
-      const [ok, err, data] = await tryFn(() => this.get(key));
-
-      results.push({
-        key,
-        ok,
-        data,
-        error: err
-      });
-    }
-
-    return results;
+    return Promise.all(promises);
   }
 
   /**
@@ -935,6 +931,278 @@ export class PluginStorage {
    */
   async decrement(key, amount = 1, options = {}) {
     return this.increment(key, -amount, options);
+  }
+
+  /**
+   * Get the next value from a named sequence (atomic, distributed-safe)
+   *
+   * Uses distributed locking to ensure uniqueness across multiple workers/processes.
+   * Returns the current value BEFORE incrementing (suitable for use as an ID).
+   *
+   * Storage paths:
+   * - Resource-scoped: resource={resourceName}/plugin={slug}/sequence={name}/value
+   * - Global: plugin={slug}/sequence={name}/value
+   *
+   * @param {string} name - Sequence name
+   * @param {Object} options - Sequence options
+   * @param {string} options.resourceName - Resource name for resource-scoped sequences (optional)
+   * @param {number} options.initialValue - Starting value if sequence doesn't exist (default: 1)
+   * @param {number} options.increment - Amount to increment (default: 1)
+   * @param {number} options.lockTimeout - Max time to wait for lock in ms (default: 5000)
+   * @param {number} options.lockTTL - Lock TTL in seconds (default: 10)
+   * @returns {Promise<number>} The sequence value (before increment)
+   *
+   * @example
+   * // Global sequence
+   * const globalId = await storage.nextSequence('global-counter');
+   *
+   * @example
+   * // Resource-scoped sequence
+   * const orderId = await storage.nextSequence('id', {
+   *   resourceName: 'orders',
+   *   initialValue: 1000
+   * });
+   */
+  async nextSequence(name, options = {}) {
+    const {
+      resourceName = null,
+      initialValue = 1,
+      increment = 1,
+      lockTimeout = 5000,
+      lockTTL = 10
+    } = options;
+
+    const valueKey = this.getSequenceKey(resourceName, name, 'value');
+    const lockKey = this.getSequenceKey(resourceName, name, 'lock');
+
+    const result = await this._withSequenceLock(lockKey, { timeout: lockTimeout, ttl: lockTTL }, async () => {
+      // Get current sequence value
+      const data = await this.get(valueKey);
+
+      if (!data) {
+        // Initialize sequence
+        await this.set(valueKey, {
+          value: initialValue + increment,
+          name,
+          resourceName,
+          createdAt: Date.now()
+        }, { behavior: 'body-only' });
+        return initialValue;
+      }
+
+      // Get current value and increment
+      const currentValue = data.value;
+      await this.set(valueKey, {
+        ...data,
+        value: currentValue + increment,
+        updatedAt: Date.now()
+      }, { behavior: 'body-only' });
+
+      return currentValue;
+    });
+
+    if (result === null) {
+      throw new PluginStorageError(`Failed to acquire lock for sequence "${name}"`, {
+        pluginSlug: this.pluginSlug,
+        operation: 'nextSequence',
+        sequenceName: name,
+        resourceName,
+        lockTimeout,
+        suggestion: 'Increase lockTimeout or check for deadlocks'
+      });
+    }
+
+    return result;
+  }
+
+  /**
+   * Internal lock mechanism for sequences using direct key
+   * @private
+   */
+  async _withSequenceLock(lockKey, options, callback) {
+    const { ttl = 30, timeout = 5000 } = options;
+    const token = idGenerator();
+    const startTime = Date.now();
+    let attempt = 0;
+
+    // Try to acquire lock
+    while (true) {
+      const payload = {
+        token,
+        acquiredAt: Date.now(),
+        _expiresAt: Date.now() + (ttl * 1000)
+      };
+
+      const [ok, err] = await tryFn(() => this.set(lockKey, payload, {
+        behavior: 'body-only',
+        ifNoneMatch: '*'
+      }));
+
+      if (ok) {
+        // Lock acquired, execute callback
+        try {
+          return await callback();
+        } finally {
+          // Release lock
+          const current = await this.get(lockKey);
+          if (current && current.token === token) {
+            await tryFn(() => this.delete(lockKey));
+          }
+        }
+      }
+
+      const originalError = err?.original || err;
+      const errorCode = originalError?.code || originalError?.Code || originalError?.name;
+      const statusCode = originalError?.statusCode || originalError?.$metadata?.httpStatusCode;
+      const isPreconditionFailure = errorCode === 'PreconditionFailed' || statusCode === 412;
+
+      if (!isPreconditionFailure) {
+        throw err;
+      }
+
+      if (timeout !== undefined && Date.now() - startTime >= timeout) {
+        return null;
+      }
+
+      // Check if lock expired
+      const current = await this.get(lockKey);
+      if (!current) continue;
+
+      if (current._expiresAt && Date.now() > current._expiresAt) {
+        await tryFn(() => this.delete(lockKey));
+        continue;
+      }
+
+      attempt += 1;
+      const delay = this._computeBackoff(attempt, 100, 1000);
+      await this._sleep(delay);
+    }
+  }
+
+  /**
+   * Get the current value of a sequence without incrementing
+   *
+   * @param {string} name - Sequence name
+   * @param {Object} options - Options
+   * @param {string} options.resourceName - Resource name for resource-scoped sequences (optional)
+   * @returns {Promise<number|null>} Current value or null if sequence doesn't exist
+   *
+   * @example
+   * // Global sequence
+   * const current = await storage.getSequence('global-counter');
+   *
+   * @example
+   * // Resource-scoped sequence
+   * const current = await storage.getSequence('id', { resourceName: 'orders' });
+   */
+  async getSequence(name, options = {}) {
+    const { resourceName = null } = options;
+    const valueKey = this.getSequenceKey(resourceName, name, 'value');
+    const data = await this.get(valueKey);
+    return data?.value ?? null;
+  }
+
+  /**
+   * Reset a sequence to a specific value
+   *
+   * @param {string} name - Sequence name
+   * @param {number} value - New value for the sequence
+   * @param {Object} options - Options
+   * @param {string} options.resourceName - Resource name for resource-scoped sequences (optional)
+   * @param {number} options.lockTimeout - Max time to wait for lock in ms (default: 5000)
+   * @param {number} options.lockTTL - Lock TTL in seconds (default: 10)
+   * @returns {Promise<boolean>} True if reset successful
+   *
+   * @example
+   * // Reset resource-scoped sequence
+   * await storage.resetSequence('id', 1000, { resourceName: 'orders' });
+   */
+  async resetSequence(name, value, options = {}) {
+    const { resourceName = null, lockTimeout = 5000, lockTTL = 10 } = options;
+
+    const valueKey = this.getSequenceKey(resourceName, name, 'value');
+    const lockKey = this.getSequenceKey(resourceName, name, 'lock');
+
+    const result = await this._withSequenceLock(lockKey, { timeout: lockTimeout, ttl: lockTTL }, async () => {
+      const data = await this.get(valueKey);
+
+      await this.set(valueKey, {
+        value,
+        name,
+        resourceName,
+        createdAt: data?.createdAt || Date.now(),
+        updatedAt: Date.now(),
+        resetAt: Date.now()
+      }, { behavior: 'body-only' });
+
+      return true;
+    });
+
+    if (result === null) {
+      throw new PluginStorageError(`Failed to acquire lock for sequence "${name}"`, {
+        pluginSlug: this.pluginSlug,
+        operation: 'resetSequence',
+        sequenceName: name,
+        resourceName,
+        lockTimeout,
+        suggestion: 'Increase lockTimeout or check for deadlocks'
+      });
+    }
+
+    return result;
+  }
+
+  /**
+   * Delete a sequence
+   *
+   * @param {string} name - Sequence name
+   * @param {Object} options - Options
+   * @param {string} options.resourceName - Resource name for resource-scoped sequences (optional)
+   * @returns {Promise<void>}
+   */
+  async deleteSequence(name, options = {}) {
+    const { resourceName = null } = options;
+    const valueKey = this.getSequenceKey(resourceName, name, 'value');
+    const lockKey = this.getSequenceKey(resourceName, name, 'lock');
+    await this.delete(valueKey);
+    await tryFn(() => this.delete(lockKey));
+  }
+
+  /**
+   * List all sequences for this plugin
+   *
+   * @param {Object} options - Options
+   * @param {string} options.resourceName - Resource name to filter (optional)
+   * @returns {Promise<Array<{name: string, value: number, createdAt: number, updatedAt?: number}>>}
+   */
+  async listSequences(options = {}) {
+    const { resourceName = null } = options;
+
+    let prefix;
+    if (resourceName) {
+      prefix = `resource=${resourceName}/plugin=${this.pluginSlug}/sequence=`;
+    } else {
+      prefix = `plugin=${this.pluginSlug}/sequence=`;
+    }
+
+    const [ok, , result] = await tryFn(() =>
+      this.client.listObjects({ prefix })
+    );
+
+    if (!ok) return [];
+
+    const keys = result.Contents?.map(item => item.Key) || [];
+    const valueKeys = keys.filter(k => k.endsWith('/value'));
+
+    const sequences = [];
+    for (const key of valueKeys) {
+      const data = await this.get(key);
+      if (data) {
+        sequences.push(data);
+      }
+    }
+
+    return sequences;
   }
 
   /**

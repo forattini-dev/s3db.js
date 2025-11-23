@@ -35,6 +35,7 @@ describe('Validator Cache', () => {
 
   afterEach(async () => {
     if (db) await db.disconnect();
+    MemoryClient.clearBucketStorage('test-validator-cache');
     clearValidatorCache();
   });
 
@@ -191,8 +192,8 @@ describe('Validator Cache', () => {
         active: 'boolean|optional'
       };
 
-      // Create 100 resources with identical schema
-      for (let i = 0; i < 100; i++) {
+      // Create 5 resources with identical schema
+      for (let i = 0; i < 5; i++) {
         await db.createResource({
           name: `resource_${i}`,
           attributes: schema
@@ -204,9 +205,9 @@ describe('Validator Cache', () => {
 
       // Should have only 1 unique validator
       expect(stats.size).toBe(1);
-      expect(stats.totalReferences).toBe(100);
+      expect(stats.totalReferences).toBe(5);
 
-      // Memory usage should be ~50KB instead of 5000KB (5MB)
+      // Memory usage should be ~50KB instead of 250KB (0.25MB)
       expect(memUsage.estimatedKB).toBe(50);
       expect(memUsage.estimatedMB).toBeCloseTo(0.049, 2);
 

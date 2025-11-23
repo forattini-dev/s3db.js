@@ -36,6 +36,7 @@ describe('Event Listener Cleanup', () => {
 
   afterEach(async () => {
     if (db) await db.disconnect();
+    MemoryClient.clearBucketStorage('test-listener-cleanup');
     clearValidatorCache();
   });
 

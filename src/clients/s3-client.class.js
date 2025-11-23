@@ -4,6 +4,7 @@ import { chunk } from "lodash-es";
 import { Agent as HttpAgent } from 'http';
 import { Agent as HttpsAgent } from 'https';
 import { NodeHttpHandler } from '@smithy/node-http-handler';
+import jsonStableStringify from "json-stable-stringify";
 
 import {
   S3Client as AwsS3Client,
@@ -28,6 +29,7 @@ import { AdaptiveTuning } from "../concerns/adaptive-tuning.js";
 export class S3Client extends EventEmitter {
   constructor({
     logLevel = 'info',
+    logger = null,
     id = null,
     AwsS3Client,
     connectionString,
@@ -37,6 +39,17 @@ export class S3Client extends EventEmitter {
   }) {
     super();
     this.logLevel = logLevel;
+    
+    // Logger shim (if no logger provided)
+    const noop = () => {};
+    this.logger = logger || {
+      debug: noop,
+      info: noop,
+      warn: noop,
+      error: noop,
+      trace: noop
+    };
+    
     this.id = id ?? idGenerator(77);
     this.config = new ConnectionString(connectionString);
     this.connectionString = connectionString;
@@ -49,6 +62,7 @@ export class S3Client extends EventEmitter {
       ...httpClientOptions,
     };
     this.client = AwsS3Client || this.createClient();
+    this._inflightCoalescing = new Map(); // Track in-flight requests for deduplication
 
     // 🔄 Support both old (taskExecutor) and new (executorPool) names
     // executorPool is the new name, takes precedence over taskExecutor
@@ -57,6 +71,27 @@ export class S3Client extends EventEmitter {
     // Initialize TasksPool (ENABLED BY DEFAULT!)
     this.taskExecutorConfig = this._normalizeTaskExecutorConfig(poolConfig);
     this.taskExecutor = this.taskExecutorConfig.enabled ? this._createTasksPool() : null;
+  }
+
+  /**
+   * Coalesce identical in-flight requests (Request Deduplication)
+   * If a request with the same key is already in flight, return the existing promise.
+   * @private
+   */
+  async _coalesce(key, operationFn) {
+    if (this._inflightCoalescing.has(key)) {
+      if (this.logLevel === 'debug' || this.logLevel === 'trace') {
+        // this.logger?.debug(`[S3Client] Coalescing duplicate request: ${key}`);
+      }
+      return this._inflightCoalescing.get(key);
+    }
+
+    const promise = operationFn().finally(() => {
+      this._inflightCoalescing.delete(key);
+    });
+
+    this._inflightCoalescing.set(key, promise);
+    return promise;
   }
 
   /**
@@ -70,11 +105,26 @@ export class S3Client extends EventEmitter {
 
     const normalized = {
       enabled: config.enabled ?? true, // ENABLED BY DEFAULT
-      concurrency: config.concurrency ?? 100, // Default: 100 concurrent operations per pool
+      concurrency: config.concurrency ?? 50, // Default: 50 concurrent operations per pool
       retries: config.retries ?? 3,
       retryDelay: config.retryDelay ?? 1000,
       timeout: config.timeout ?? 30000,
-      retryableErrors: config.retryableErrors ?? [],
+      // ⚠️ CRITICAL: Empty array means ALL errors retry (7+ seconds blocking!)
+      // Only retry transient/recoverable errors, NOT UnknownError or validation errors
+      retryableErrors: config.retryableErrors ?? [
+        'ECONNRESET',
+        'ETIMEDOUT',
+        'ENOTFOUND',
+        'EAI_AGAIN',
+        'EPIPE',
+        'ECONNREFUSED',
+        'SlowDown',
+        'ServiceUnavailable',
+        'InternalError',
+        'RequestTimeout',
+        'ThrottlingException',
+        'ProvisionedThroughputExceededException',
+      ],
       autotune: config.autotune ?? null,
       monitoring: config.monitoring ?? { collectMetrics: true },
     };
@@ -112,7 +162,15 @@ export class S3Client extends EventEmitter {
     const pool = new TasksPool(poolConfig);
 
     // Forward pool events to client
-    pool.on('pool:taskStarted', (task) => this.emit('pool:taskStarted', task));
+    pool.on('pool:taskStarted', (task) => {
+      this.emit('pool:taskStarted', task);
+      // Log slow queue waits
+      if (task.timings.queueWait > 50) {
+         if (this.logLevel === 'debug' || this.logLevel === 'trace') {
+           this.logger.debug(`[S3Client] Task started after ${task.timings.queueWait}ms wait (Active: ${this.taskExecutor.getStats().activeCount}, ID: ${task.id.slice(0,6)}, Sig: ${task.signature.slice(0,10)}, Op: ${task.metadata?.operation || 'N/A'})`);
+         }
+      }
+    });
     pool.on('pool:taskCompleted', (task) => this.emit('pool:taskCompleted', task));
     pool.on('pool:taskFailed', (task, error) => this.emit('pool:taskFailed', task, error));
     pool.on('pool:taskRetried', (task, attempt) => this.emit('pool:taskRetried', task, attempt));
@@ -131,13 +189,34 @@ export class S3Client extends EventEmitter {
       return await fn();
     }
 
-    // Execute through pool - THIS IS THE MAGIC!
-    return await this.taskExecutor.enqueue(fn, {
+    // Debug logging for pool diagnostics
+    if (this.logLevel === 'debug' || this.logLevel === 'trace') {
+      const stats = this.taskExecutor.getStats();
+      // Only log if queue is backing up or nearing saturation
+      if (stats.queueSize > 5 || stats.activeCount > (stats.effectiveConcurrency * 0.8)) {
+        this.logger.debug(`[S3Client] Pool Load: Active=${stats.activeCount}/${stats.effectiveConcurrency}, Queue=${stats.queueSize}, Operation=${options.metadata?.operation || 'unknown'}`);
+      }
+    }
+
+    // 🔍 PERF DEBUG: Measure queue wait time
+    const enqueueStart = Date.now();
+    const result = await this.taskExecutor.enqueue(fn, {
       priority: options.priority ?? 0,
       retries: options.retries,
       timeout: options.timeout,
       metadata: options.metadata || {},
     });
+    const totalMs = Date.now() - enqueueStart;
+
+    // Log if operation took too long (likely waiting in queue)
+    if (totalMs > 100) {
+      const op = options.metadata?.operation || 'unknown';
+      const key = options.metadata?.key?.substring(0, 50) || '?';
+      const stats = this.taskExecutor?.stats || {};
+      this.logger.warn({ op, totalMs, key, queueSize: stats.queueSize || 0, active: stats.activeCount || 0 }, `[PERF] S3Client._executeOperation SLOW`);
+    }
+
+    return result;
   }
 
   /**
@@ -204,6 +283,17 @@ export class S3Client extends EventEmitter {
   stopPool() {
     if (!this.taskExecutor) return;
     this.taskExecutor.stop();
+  }
+
+  /**
+   * Destroy the client and release resources (HTTP agents)
+   */
+  destroy() {
+    if (this.client && typeof this.client.destroy === 'function') {
+      this.client.destroy();
+    }
+    this.stopPool();
+    this.removeAllListeners();
   }
 
   createClient() {
@@ -321,6 +411,9 @@ export class S3Client extends EventEmitter {
   }
 
   async getObject(key) {
+    const getStart = Date.now();
+    this.logger.debug({ key: key?.substring(0, 60) }, `[S3Client.getObject] START`);
+
     return await this._executeOperation(async () => {
       const keyPrefix = typeof this.config.keyPrefix === 'string' ? this.config.keyPrefix : '';
       const options = {
@@ -328,6 +421,7 @@ export class S3Client extends EventEmitter {
         Key: keyPrefix ? path.join(keyPrefix, key) : key,
       };
 
+      const cmdStart = Date.now();
       const [ok, err, response] = await tryFn(async () => {
         const res = await this.sendCommand(new GetObjectCommand(options));
 
@@ -342,16 +436,25 @@ export class S3Client extends EventEmitter {
 
         return res;
       });
+      const cmdMs = Date.now() - cmdStart;
 
       this.emit('cl:GetObject', err || response, { key });
 
       if (!ok) {
+        this.logger.debug({ key: key?.substring(0, 60), cmdMs, err: err?.name }, `[S3Client.getObject] ERROR`);
         throw mapAwsError(err, {
           bucket: this.config.bucket,
           key,
           commandName: 'GetObjectCommand',
           commandInput: options,
         });
+      }
+
+      const totalMs = Date.now() - getStart;
+      if (totalMs > 50) {
+        this.logger.warn({ totalMs, cmdMs, key: key?.substring(0, 60) }, `[PERF] S3Client.getObject SLOW`);
+      } else {
+        this.logger.debug({ totalMs, key: key?.substring(0, 60) }, `[S3Client.getObject] complete`);
       }
 
       return response;
@@ -596,6 +699,9 @@ export class S3Client extends EventEmitter {
     maxKeys = 1000,
     continuationToken,
   } = {}) {
+    const listStart = Date.now();
+    this.logger.debug({ prefix: prefix?.substring(0, 60), maxKeys }, `[S3Client.listObjects] START`);
+
     const options = {
       Bucket: this.config.bucket,
       MaxKeys: maxKeys,
@@ -605,11 +711,21 @@ export class S3Client extends EventEmitter {
         : prefix || "",
     };
     const [ok, err, response] = await tryFn(() => this.sendCommand(new ListObjectsV2Command(options)));
+
+    const totalMs = Date.now() - listStart;
     if (!ok) {
+      this.logger.warn({ totalMs, prefix: prefix?.substring(0, 60), err: err?.name }, `[S3Client.listObjects] ERROR`);
       throw new UnknownError("Unknown error in listObjects", { prefix, bucket: this.config.bucket, original: err });
     }
-      this.emit("cl:ListObjects", response, options);
-      return response;
+
+    if (totalMs > 100) {
+      this.logger.warn({ totalMs, prefix: prefix?.substring(0, 60), keys: response?.KeyCount || 0 }, `[PERF] S3Client.listObjects SLOW`);
+    } else {
+      this.logger.debug({ totalMs, prefix: prefix?.substring(0, 60), keys: response?.KeyCount || 0 }, `[S3Client.listObjects] complete`);
+    }
+
+    this.emit("cl:ListObjects", response, options);
+    return response;
   }
 
   async count({ prefix } = {}) {
@@ -634,18 +750,36 @@ export class S3Client extends EventEmitter {
     let keys = [];
     let truncated = true;
     let continuationToken;
+    let iterations = 0;
+    const startTotal = Date.now();
+
     while (truncated) {
+      iterations++;
       const options = {
         prefix,
         continuationToken,
       };
+      const startList = Date.now();
       const response = await this.listObjects(options);
+      const listMs = Date.now() - startList;
+
+      // 🔍 PERF DEBUG: Log slow listObjects calls
+      if (listMs > 500) {
+        this.logger.warn({ iterations, listMs, prefix: prefix?.substring(0, 60) }, `[PERF] S3Client.getAllKeys: listObjects iteration SLOW`);
+      }
+
       if (response.Contents) {
         keys = keys.concat(response.Contents.map((x) => x.Key));
       }
       truncated = response.IsTruncated || false;
       continuationToken = response.NextContinuationToken;
     }
+
+    const totalMs = Date.now() - startTotal;
+    if (totalMs > 100) {
+      this.logger.warn({ totalMs, iterations, keysCount: keys.length, prefix: prefix?.substring(0, 60) }, `[PERF] S3Client.getAllKeys SLOW TOTAL`);
+    }
+
     if (this.config.keyPrefix) {
       keys = keys
         .map((x) => x.replace(this.config.keyPrefix, ""))
@@ -691,25 +825,35 @@ export class S3Client extends EventEmitter {
   }
 
   async getKeysPage(params = {}) {
+    const pageStart = Date.now();
     const {
       prefix,
       offset = 0,
       amount = 100,
     } = params
+
+    this.logger.debug({ prefix: prefix?.substring(0, 60), offset, amount }, `[S3Client.getKeysPage] START`);
+
     let keys = [];
     let truncated = true;
     let continuationToken;
+    let iterations = 0;
+
     if (offset > 0) {
+      const tokenStart = Date.now();
       continuationToken = await this.getContinuationTokenAfterOffset({
         prefix,
         offset,
       });
+      const tokenMs = Date.now() - tokenStart;
+      this.logger.debug({ tokenMs, hasToken: !!continuationToken }, `[S3Client.getKeysPage] getContinuationTokenAfterOffset`);
       if (!continuationToken) {
         this.emit("cl:GetKeysPage", [], params);
         return [];
       }
     }
     while (truncated) {
+      iterations++;
       const options = {
         prefix,
         continuationToken,
@@ -730,6 +874,14 @@ export class S3Client extends EventEmitter {
         .map((x) => x.replace(this.config.keyPrefix, ""))
         .map((x) => (x.startsWith("/") ? x.replace(`/`, "") : x));
     }
+
+    const totalMs = Date.now() - pageStart;
+    if (totalMs > 100) {
+      this.logger.warn({ totalMs, iterations, keysCount: keys.length, prefix: prefix?.substring(0, 60) }, `[PERF] S3Client.getKeysPage SLOW`);
+    } else {
+      this.logger.debug({ totalMs, iterations, keysCount: keys.length }, `[S3Client.getKeysPage] complete`);
+    }
+
     this.emit("cl:GetKeysPage", keys, params);
     return keys;
   }

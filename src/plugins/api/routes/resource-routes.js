@@ -396,7 +396,11 @@ export function createResourceRoutes(resource, version, config = {}, Hono) {
       const data = await c.req.json();
 
       // Validation middleware will run if enabled
-      const item = await resource.insert(data);
+      // Pass user and request from Hono context to resource hooks
+      const item = await resource.insert(data, {
+        user: c.get('user'),
+        request: c.req
+      });
 
       // Emit resource:created event
       if (events) {
@@ -456,7 +460,11 @@ export function createResourceRoutes(resource, version, config = {}, Hono) {
       }
 
       // Full update
-      const updated = await resource.update(id, data);
+      // Pass user and request from Hono context to resource hooks
+      const updated = await resource.update(id, data, {
+        user: c.get('user'),
+        request: c.req
+      });
 
       // ✅ Add ETag to response
       const newETag = generateRecordETag(updated);
@@ -519,7 +527,11 @@ export function createResourceRoutes(resource, version, config = {}, Hono) {
 
       // Partial update (merge with existing)
       const merged = { ...existing, ...data, id };
-      const updated = await resource.update(id, merged);
+      // Pass user and request from Hono context to resource hooks
+      const updated = await resource.update(id, merged, {
+        user: c.get('user'),
+        request: c.req
+      });
 
       // ✅ Add ETag to response
       const newETag = generateRecordETag(updated);

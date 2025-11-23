@@ -242,8 +242,6 @@ export class ProcessManager {
       return;
     }
 
-    // console.log(`[ProcessManager] Received ${signal}, initiating graceful shutdown...`);
-
     try {
       await this.shutdown();
 
@@ -287,11 +285,8 @@ export class ProcessManager {
   async _performShutdown(timeout) {
     const startTime = Date.now();
 
-    // console.log('[ProcessManager] Starting shutdown sequence...');
-
     // 1. Clear all intervals
     if (this.intervals.size > 0) {
-      // console.log(`[ProcessManager] Clearing ${this.intervals.size} intervals...`);
       for (const [name, entry] of this.intervals.entries()) {
         if (entry.precise) {
           clearTimeout(entry.id);
@@ -306,7 +301,6 @@ export class ProcessManager {
 
     // 2. Clear all timeouts
     if (this.timeouts.size > 0) {
-      // console.log(`[ProcessManager] Clearing ${this.timeouts.size} timeouts...`);
       for (const [name, entry] of this.timeouts.entries()) {
         clearTimeout(entry.id);
         // 🪵 Debug: timeout cleared during shutdown
@@ -317,8 +311,6 @@ export class ProcessManager {
 
     // 3. Run cleanup functions with timeout
     if (this.cleanups.size > 0) {
-      // console.log(`[ProcessManager] Running ${this.cleanups.size} cleanup functions...`);
-
       const cleanupPromises = Array.from(this.cleanups.entries()).map(async ([name, cleanupFn]) => {
         try {
           const cleanupTimeout = new Promise((_, reject) =>
@@ -343,7 +335,6 @@ export class ProcessManager {
     }
 
     const elapsed = Date.now() - startTime;
-    // console.log(`[ProcessManager] Shutdown complete in ${elapsed}ms`);
   }
 
   /**

@@ -1328,6 +1328,21 @@ bucket-name/databases/myapp/
 | Document | `resource={name}/data/id={id}` |
 | Single partition | `resource={name}/partition={partition}/{field}={value}/id={id}` |
 | Composite partition | `resource={name}/partition={partition}/{field1}={value1}/{field2}={value2}/id={id}` |
+| Sequence value | `resource={name}/sequence={field}/value` |
+| Sequence lock | `resource={name}/sequence={field}/lock` |
+
+**Resource-Scoped Data Convention:**
+
+All data that is restricted to a specific resource scope MUST be stored inside the resource path. This includes:
+
+- **Sequences** (incremental IDs): `resource={name}/sequence={field}/...`
+- **Plugin data** (resource-scoped): `resource={name}/plugin={slug}/...`
+
+This convention ensures:
+- ✅ Data isolation per resource
+- ✅ Clean deletion when resource is removed
+- ✅ Clear ownership and accountability
+- ✅ Consistent S3 prefix queries
 
 **Why this structure?**
 - ✅ Flat hierarchy (no deep nesting)
@@ -3001,6 +3016,183 @@ const events = await db.createResource({
   idGenerator: uuidv1
 });
 ```
+
+#### Incremental IDs
+
+Auto-incrementing IDs using distributed sequences with S3-based locking. Supports both standard mode (strict sequence) and fast mode (batch reservation).
+
+##### String Formats
+
+```javascript
+// Sequential IDs: 1, 2, 3...
+const orders = await db.createResource({
+  name: 'orders',
+  attributes: { product: 'string' },
+  idGenerator: 'incremental'
+});
+
+// Start from specific value: 1000, 1001...
+const invoices = await db.createResource({
+  name: 'invoices',
+  attributes: { amount: 'number' },
+  idGenerator: 'incremental:1000'
+});
+
+// Fast mode (batch reservation, ~1ms/ID vs ~20-50ms):
+const logs = await db.createResource({
+  name: 'logs',
+  attributes: { message: 'string' },
+  idGenerator: 'incremental:fast'
+});
+
+// Fast mode starting from 5000:
+const events = await db.createResource({
+  name: 'events',
+  attributes: { type: 'string' },
+  idGenerator: 'incremental:fast:5000'
+});
+
+// Prefixed IDs with zero-padding: ORD-0001, ORD-0002...
+const tickets = await db.createResource({
+  name: 'tickets',
+  attributes: { title: 'string' },
+  idGenerator: 'incremental:ORD-0001'
+});
+
+// Prefix starting from custom value: INV-1000, INV-1001...
+const receipts = await db.createResource({
+  name: 'receipts',
+  attributes: { total: 'number' },
+  idGenerator: 'incremental:INV-1000'
+});
+```
+
+##### Object Format
+
+For full control, use object configuration:
+
+```javascript
+const products = await db.createResource({
+  name: 'products',
+  attributes: { name: 'string', price: 'number' },
+  idGenerator: {
+    type: 'incremental',
+    start: 100,           // Starting value (default: 1)
+    increment: 10,        // Step between IDs (default: 1)
+    mode: 'standard',     // 'standard' or 'fast' (default: 'standard')
+    batchSize: 100,       // Batch size for fast mode (default: 100)
+    prefix: 'PROD-',      // ID prefix (default: '')
+    padding: 6            // Zero-padding width (default: 0)
+  }
+});
+
+// Results: PROD-000100, PROD-000110, PROD-000120...
+```
+
+##### Mode Comparison
+
+| Mode | Latency | Guarantees | Use Case |
+|------|---------|------------|----------|
+| **standard** | ~20-50ms/ID | Strictly contiguous (1, 2, 3...) | Order numbers, invoices, legal documents |
+| **fast** | ~1ms/ID | Unique, may have gaps on crash | Logs, analytics, bulk imports, high-traffic |
+
+**Standard Mode:**
+- Each ID requires distributed lock acquisition
+- Guarantees strictly sequential IDs (no gaps)
+- Use for: order numbers, invoice IDs, anything requiring strict sequence
+
+**Fast Mode:**
+- Reserves batches of IDs locally
+- First ID in batch requires lock, subsequent are instant
+- Gaps possible if process crashes with unused batch
+- Use for: logs, analytics events, bulk imports
+
+##### Utility Methods
+
+```javascript
+const orders = await db.createResource({
+  name: 'orders',
+  attributes: { product: 'string' },
+  idGenerator: 'incremental'
+});
+
+// Get next value without incrementing (peek)
+const nextId = await orders.getSequenceValue();
+console.log(nextId); // 4 (next ID to be assigned)
+
+// Reset sequence to specific value (use with caution!)
+await orders.resetSequence('id', 1000);
+
+// List all sequences for this resource
+const sequences = await orders.listSequences();
+console.log(sequences); // [{ name: 'id', value: 1000, ... }]
+
+// Fast mode only: get batch status
+const status = orders.getBatchStatus();
+console.log(status); // { start: 1, end: 101, current: 5, remaining: 96 }
+
+// Fast mode only: reserve explicit batch
+const batch = await orders.reserveIdBatch(500);
+console.log(batch); // { start: 101, end: 601, current: 101 }
+
+// Fast mode only: release unused batch (for graceful shutdown)
+orders.releaseBatch();
+```
+
+##### Configuration Options
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `start` | `integer` | `1` | Starting value |
+| `increment` | `integer` | `1` | Step between IDs (can be negative) |
+| `mode` | `string` | `'standard'` | `'standard'` or `'fast'` |
+| `batchSize` | `integer` | `100` | Batch size for fast mode (1-100000) |
+| `prefix` | `string` | `''` | ID prefix (max 20 chars, alphanumeric + `-_`) |
+| `padding` | `integer` | `0` | Zero-padding width (0-20) |
+
+##### Validation
+
+Configuration is validated when using the `validate` option:
+
+```javascript
+import { parseIncrementalConfig, validateIncrementalConfig } from 's3db.js';
+
+// Parse and validate
+const config = parseIncrementalConfig('incremental:1000', { validate: true });
+
+// Validate separately
+const result = validateIncrementalConfig(config, { throwOnError: false });
+if (!result.valid) {
+  console.log('Errors:', result.errors);
+}
+
+// Throws IncrementalConfigError on invalid config
+try {
+  parseIncrementalConfig({ start: 'invalid' }, { validate: true });
+} catch (err) {
+  console.log(err.field);   // 'start'
+  console.log(err.value);   // 'invalid'
+  console.log(err.message); // 'Invalid incremental config: start must be a finite number'
+}
+```
+
+##### Storage Structure
+
+Incremental sequences are stored in resource-scoped paths:
+
+```
+resource={resourceName}/
+└── sequence={fieldName}/
+    ├── value   (current sequence value)
+    └── lock    (distributed lock with TTL)
+```
+
+##### Concurrency & Distributed Systems
+
+- Uses S3 conditional writes (`ifNoneMatch: '*'`) for atomic lock acquisition
+- Exponential backoff with jitter for lock contention
+- TTL-based lock expiration prevents deadlocks
+- Safe for multi-process and multi-node deployments
 
 ### Performance Tips
 

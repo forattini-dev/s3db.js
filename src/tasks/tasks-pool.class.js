@@ -776,11 +776,14 @@ export class TasksPool extends EventEmitter {
     }
 
     // Check if error matches any retryable type
+    // ⚠️ IMPORTANT: Only check error.name, error.code, and constructor name.
+    // Do NOT use error.message.includes() as it causes false positives
+    // (e.g., UnknownError with message containing "ServiceUnavailable" would retry)
     return this.retryableErrors.some((errorType) => {
       return (
         error.name === errorType ||
-        error.constructor.name === errorType ||
-        error.message.includes(errorType)
+        error.code === errorType ||
+        error.constructor.name === errorType
       )
     })
   }

@@ -1,7 +1,9 @@
 export default {
-  maxWorkers: 6, // Allow 6 workers with reduced concurrency (5 per TaskManager)
-  workerIdleMemoryLimit: '512MB', // Kill workers that use too much memory
-  testTimeout: 10000, // Reduced from 30s to 10s (specific tests have their own timeouts)
+  // RESOURCE LIMITS - Use 2 workers to avoid OOM/Timeouts
+  maxWorkers: 2,
+  // 75% of 32GB / 9 workers = ~2.6GB per worker
+  workerIdleMemoryLimit: '2GB',
+  testTimeout: 120000, // Increased to 120s for CI/slow environments
   testEnvironment: 'node',
 
   // Settings to avoid test suite hangs
@@ -74,8 +76,6 @@ export default {
   testPathIgnorePatterns: [
     '/node_modules/',
     '/tests/typescript/',
-    '/docs/', // Exclude docs/examples (uses Node native test runner)
-    'docs/examples/hooks/validate-domain.test.js',
   ],
 
   transform: {

@@ -12,7 +12,9 @@ describe('Replicators Coverage Tests', () => {
   });
 
   afterEach(async () => {
-    // No cleanup needed for database in these tests
+    if (database) {
+      await database.disconnect();
+    }
   });
 
   describe('BaseReplicator', () => {

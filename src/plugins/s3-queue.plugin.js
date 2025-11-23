@@ -539,7 +539,7 @@ export class S3QueuePlugin extends CoordinatorPlugin {
   async onBecomeCoordinator() {
     this.logger.debug(
       { workerId: this.workerId, resource: this.config.resource },
-      'Became coordinator - publishing initial tickets'
+      'Global coordinator elected this worker as leader - publishing initial tickets'
     );
 
     // Publish initial batch of tickets
@@ -574,7 +574,7 @@ export class S3QueuePlugin extends CoordinatorPlugin {
   async onStopBeingCoordinator() {
     this.logger.debug(
       { workerId: this.workerId, resource: this.config.resource },
-      'No longer coordinator'
+      'Global coordinator demoted this worker from leader'
     );
 
     this.emit('plg:s3-queue:coordinator-demoted', {

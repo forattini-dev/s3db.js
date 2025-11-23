@@ -26,7 +26,7 @@ describe('resource-names namespace support', () => {
       override: 'custom_sessions'
     }, { namespace: 'tenant-alpha' });
 
-    expect(name).toBe('plg_custom_sessions');
+    expect(name).toBe('custom_sessions');
   });
 
   it('optionally namespaces overrides when requested', () => {

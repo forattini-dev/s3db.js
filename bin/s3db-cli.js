@@ -38,9 +38,10 @@ program
   .option('-c, --connection <string>', 'S3 connection string')
   .action(async (options) => {
     const spinner = ora('Connecting to S3DB...').start();
+    let db;
     
     try {
-      const db = new S3db({ 
+      db = new S3db({ 
         connectionString: getConnection(options) 
       });
       await db.connect();
@@ -50,27 +51,29 @@ program
       
       if (resources.length === 0) {
         console.log(chalk.yellow('No resources found'));
-        return;
+      } else {
+        const table = new Table({
+          head: ['Resource', 'Behavior', 'Timestamps', 'Paranoid'],
+          style: { head: ['cyan'] }
+        });
+        
+        resources.forEach(r => {
+          table.push([
+            r.name,
+            r.config.behavior || 'user-managed',
+            r.config.timestamps ? '✓' : '✗',
+            r.config.paranoid ? '✓' : '✗'
+          ]);
+        });
+        
+        console.log(table.toString());
       }
-      
-      const table = new Table({
-        head: ['Resource', 'Behavior', 'Timestamps', 'Paranoid'],
-        style: { head: ['cyan'] }
-      });
-      
-      resources.forEach(r => {
-        table.push([
-          r.name,
-          r.config.behavior || 'user-managed',
-          r.config.timestamps ? '✓' : '✗',
-          r.config.paranoid ? '✓' : '✗'
-        ]);
-      });
-      
-      console.log(table.toString());
     } catch (error) {
       spinner.fail(chalk.red(error.message));
-      process.exit(1);
+      process.exitCode = 1;
+    } finally {
+      if (db) await db.disconnect();
+      process.exit(process.exitCode || 0);
     }
   });
 
@@ -83,9 +86,10 @@ program
   .option('--json', 'Output as JSON')
   .action(async (resourceName, options) => {
     const spinner = ora('Querying...').start();
+    let db;
     
     try {
-      const db = new S3db({ 
+      db = new S3db({ 
         connectionString: getConnection(options) 
       });
       await db.connect();
@@ -102,30 +106,32 @@ program
       } else {
         if (results.length === 0) {
           console.log(chalk.yellow('No results found'));
-          return;
+        } else {
+          const headers = Object.keys(results[0]);
+          const table = new Table({
+            head: headers,
+            style: { head: ['cyan'] }
+          });
+          
+          results.forEach(row => {
+            table.push(headers.map(h => {
+              const val = row[h];
+              if (val === null || val === undefined) return '';
+              if (typeof val === 'object') return JSON.stringify(val);
+              const str = String(val);
+              return str.length > 50 ? str.substring(0, 47) + '...' : str;
+            }));
+          });
+          
+          console.log(table.toString());
         }
-        
-        const headers = Object.keys(results[0]);
-        const table = new Table({
-          head: headers,
-          style: { head: ['cyan'] }
-        });
-        
-        results.forEach(row => {
-          table.push(headers.map(h => {
-            const val = row[h];
-            if (val === null || val === undefined) return '';
-            if (typeof val === 'object') return JSON.stringify(val);
-            const str = String(val);
-            return str.length > 50 ? str.substring(0, 47) + '...' : str;
-          }));
-        });
-        
-        console.log(table.toString());
       }
     } catch (error) {
       spinner.fail(chalk.red(error.message));
-      process.exit(1);
+      process.exitCode = 1;
+    } finally {
+      if (db) await db.disconnect();
+      process.exit(process.exitCode || 0);
     }
   });
 
@@ -138,6 +144,7 @@ program
   .option('-f, --file <path>', 'Read data from JSON file')
   .action(async (resourceName, options) => {
     const spinner = ora('Inserting...').start();
+    let db;
     
     try {
       let data;
@@ -151,7 +158,7 @@ program
         process.exit(1);
       }
       
-      const db = new S3db({ 
+      db = new S3db({ 
         connectionString: getConnection(options) 
       });
       await db.connect();
@@ -163,7 +170,10 @@ program
       console.log(JSON.stringify(result, null, 2));
     } catch (error) {
       spinner.fail(chalk.red(error.message));
-      process.exit(1);
+      process.exitCode = 1;
+    } finally {
+      if (db) await db.disconnect();
+      process.exit(process.exitCode || 0);
     }
   });
 
@@ -174,9 +184,11 @@ program
   .option('-c, --connection <string>', 'S3 connection string')
   .action(async (resourceName, id, options) => {
     const spinner = ora('Fetching...').start();
+    let db;
     
     try {
-      const db = new S3db({ 
+      const { S3db } = await import('../src/index.js');
+      db = new S3db({ 
         connectionString: getConnection(options) 
       });
       await db.connect();
@@ -193,7 +205,10 @@ program
       }
     } catch (error) {
       spinner.fail(chalk.red(error.message));
-      process.exit(1);
+      process.exitCode = 1;
+    } finally {
+      if (db) await db.disconnect();
+      process.exit(process.exitCode || 0);
     }
   });
 
@@ -204,9 +219,11 @@ program
   .option('-c, --connection <string>', 'S3 connection string')
   .action(async (resourceName, id, options) => {
     const spinner = ora('Deleting...').start();
+    let db;
     
     try {
-      const db = new S3db({ 
+      const { S3db } = await import('../src/index.js');
+      db = new S3db({ 
         connectionString: getConnection(options) 
       });
       await db.connect();
@@ -217,7 +234,10 @@ program
       spinner.succeed(chalk.green(`✓ Deleted ID: ${id}`));
     } catch (error) {
       spinner.fail(chalk.red(error.message));
-      process.exit(1);
+      process.exitCode = 1;
+    } finally {
+      if (db) await db.disconnect();
+      process.exit(process.exitCode || 0);
     }
   });
 
@@ -228,9 +248,11 @@ program
   .option('-c, --connection <string>', 'S3 connection string')
   .action(async (resourceName, options) => {
     const spinner = ora('Counting...').start();
+    let db;
     
     try {
-      const db = new S3db({ 
+      const { S3db } = await import('../src/index.js');
+      db = new S3db({ 
         connectionString: getConnection(options) 
       });
       await db.connect();
@@ -242,7 +264,10 @@ program
       console.log(chalk.cyan(`Total records in ${resourceName}: ${count}`));
     } catch (error) {
       spinner.fail(chalk.red(error.message));
-      process.exit(1);
+      process.exitCode = 1;
+    } finally {
+      if (db) await db.disconnect();
+      process.exit(process.exitCode || 0);
     }
   });
 
@@ -257,9 +282,11 @@ program
   .option('--status <backupId>', 'Get status of a specific backup')
   .action(async (type = 'full', options) => {
     const spinner = ora('Connecting to S3DB...').start();
+    let db;
     
     try {
-      const db = new S3db({ 
+      const { S3db } = await import('../src/index.js');
+      db = new S3db({ 
         connectionString: getConnection(options) 
       });
       await db.connect();
@@ -279,30 +306,29 @@ program
         
         if (backups.length === 0) {
           console.log(chalk.yellow('No backups found'));
-          return;
-        }
-        
-        const table = new Table({
-          head: ['Backup ID', 'Type', 'Status', 'Size', 'Duration', 'Created'],
-          style: { head: ['cyan'] }
-        });
-        
-        backups.forEach(backup => {
-          const createdAt = new Date(backup.timestamp).toLocaleString();
-          const size = backup.size ? `${(backup.size / 1024 / 1024).toFixed(2)} MB` : 'N/A';
-          const duration = backup.duration ? `${(backup.duration / 1000).toFixed(1)}s` : 'N/A';
+        } else {
+          const table = new Table({
+            head: ['Backup ID', 'Type', 'Status', 'Size', 'Duration', 'Created'],
+            style: { head: ['cyan'] }
+          });
           
-          table.push([
-            backup.id,
-            backup.type || 'full',
-            backup.status === 'completed' ? '✓' : backup.status,
-            size,
-            duration,
-            createdAt
-          ]);
-        });
-        
-        console.log(table.toString());
+          backups.forEach(backup => {
+            const createdAt = new Date(backup.timestamp).toLocaleString();
+            const size = backup.size ? `${(backup.size / 1024 / 1024).toFixed(2)} MB` : 'N/A';
+            const duration = backup.duration ? `${(backup.duration / 1000).toFixed(1)}s` : 'N/A';
+            
+            table.push([
+              backup.id,
+              backup.type || 'full',
+              backup.status === 'completed' ? '✓' : backup.status,
+              size,
+              duration,
+              createdAt
+            ]);
+          });
+          
+          console.log(table.toString());
+        }
         return;
       }
       
@@ -372,7 +398,10 @@ program
       
     } catch (error) {
       spinner.fail(chalk.red(error.message));
-      process.exit(1);
+      process.exitCode = 1;
+    } finally {
+      if (db) await db.disconnect();
+      process.exit(process.exitCode || 0);
     }
   });
 
@@ -386,9 +415,11 @@ program
   .option('--list-backups', 'List available backups before restoring')
   .action(async (backupId, options) => {
     const spinner = ora('Connecting to S3DB...').start();
+    let db;
     
     try {
-      const db = new S3db({ 
+      const { S3db } = await import('../src/index.js');
+      db = new S3db({ 
         connectionString: getConnection(options) 
       });
       await db.connect();
@@ -408,31 +439,30 @@ program
         
         if (backups.length === 0) {
           console.log(chalk.yellow('No backups found'));
-          return;
-        }
-        
-        const table = new Table({
-          head: ['Backup ID', 'Type', 'Status', 'Size', 'Created', 'Resources'],
-          style: { head: ['cyan'] }
-        });
-        
-        backups.forEach(backup => {
-          const createdAt = new Date(backup.timestamp).toLocaleString();
-          const size = backup.size ? `${(backup.size / 1024 / 1024).toFixed(2)} MB` : 'N/A';
-          const resources = Array.isArray(backup.resources) ? backup.resources.join(', ') : 'N/A';
+        } else {
+          const table = new Table({
+            head: ['Backup ID', 'Type', 'Status', 'Size', 'Created', 'Resources'],
+            style: { head: ['cyan'] }
+          });
           
-          table.push([
-            backup.id,
-            backup.type || 'full',
-            backup.status === 'completed' ? '✓' : backup.status,
-            size,
-            createdAt,
-            resources.length > 50 ? resources.substring(0, 47) + '...' : resources
-          ]);
-        });
-        
-        console.log(table.toString());
-        console.log(chalk.gray(`\nUse: s3db restore <backupId> to restore from a backup`));
+          backups.forEach(backup => {
+            const createdAt = new Date(backup.timestamp).toLocaleString();
+            const size = backup.size ? `${(backup.size / 1024 / 1024).toFixed(2)} MB` : 'N/A';
+            const resources = Array.isArray(backup.resources) ? backup.resources.join(', ') : 'N/A';
+            
+            table.push([
+              backup.id,
+              backup.type || 'full',
+              backup.status === 'completed' ? '✓' : backup.status,
+              size,
+              createdAt,
+              resources.length > 50 ? resources.substring(0, 47) + '...' : resources
+            ]);
+          });
+          
+          console.log(table.toString());
+          console.log(chalk.gray(`\nUse: s3db restore <backupId> to restore from a backup`));
+        }
         return;
       }
       
@@ -448,12 +478,12 @@ program
       
       if (!backup) {
         spinner.fail(chalk.red(`Backup '${backupId}' not found`));
-        process.exit(1);
+        return;
       }
       
       if (backup.status !== 'completed') {
         spinner.fail(chalk.red(`Backup '${backupId}' is not in completed status (current: ${backup.status})`));
-        process.exit(1);
+        return;
       }
       
       // Show backup info
@@ -494,7 +524,10 @@ program
       
     } catch (error) {
       spinner.fail(chalk.red(error.message));
-      process.exit(1);
+      process.exitCode = 1;
+    } finally {
+      if (db) await db.disconnect();
+      process.exit(process.exitCode || 0);
     }
   });
 

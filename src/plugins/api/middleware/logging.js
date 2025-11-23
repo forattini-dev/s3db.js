@@ -16,7 +16,7 @@ export async function createLoggingMiddleware(loggingConfig, logger) {
   const excludedPatterns = Array.isArray(excludePaths) ? excludePaths : [];
 
   // 🪵 Get child logger for HTTP request logging (inherits pretty format from parent)
-  const httpLogger = logger.child({ component: 'http' });
+  const httpLogger = logger.child({});
 
 
   const formatHeaderTokens = (message, headers) => {
@@ -103,14 +103,7 @@ export async function createLoggingMiddleware(loggingConfig, logger) {
         colorize
       });
 
-      httpLogger[logLevel]({
-        req: { method, url: urlPath },
-        res: { statusCode: status },
-        responseTime: duration,
-        contentLength: contentLength === '-' ? undefined : contentLength,
-        requestId,
-        user
-      }, prettyMessage);
+      httpLogger[logLevel](prettyMessage);
       return;
     }
 

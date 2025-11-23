@@ -194,6 +194,18 @@ export class ApiServer {
       // This ensures /docs and /openapi.json are registered before catch-all routes like /:urlId
       this._setupDocumentationRoutes();
 
+      // ⚠️ IMPORTANT: Setup health routes BEFORE router mounting
+      // This ensures /health endpoints are registered before catch-all routes like /:urlId
+      if (this.options.health?.enabled !== false) {
+        this.healthManager = new HealthManager({
+          database: this.options.database,
+          healthConfig: this.options.health,
+          logLevel: this.options.logLevel,
+          logger: this.logger // Pass Pino logger from APIPlugin
+        });
+        this.healthManager.register(this.app);
+      }
+
       this.router = new Router({
         database: this.options.database,
         resources: this.options.resources,
@@ -215,16 +227,6 @@ export class ApiServer {
         rootRoute: this.options.rootRoute
       });
       this.router.mount(this.app, this.events);
-
-      if (this.options.health?.enabled !== false) {
-        this.healthManager = new HealthManager({
-          database: this.options.database,
-          healthConfig: this.options.health,
-          logLevel: this.options.logLevel,
-          logger: this.logger // Pass Pino logger from APIPlugin
-        });
-        this.healthManager.register(this.app);
-      }
 
       this.app.onError((err, c) => errorHandler(err, c));
       this.app.notFound((c) => {
@@ -776,10 +778,40 @@ export class ApiServer {
     const routeSummaries = this.router?.getRouteSummaries?.() || [];
     if (routeSummaries.length > 0) {
       lines.push('     Routes:');
+      
+      // Get global driver names
+      const globalDrivers = this.options.auth?.drivers?.map(d => d.driver === 'apiKey' ? 'apikey' : d.driver) || [];
+
+      // Calculate padding
+      const maxPathLen = routeSummaries.reduce((max, r) => Math.max(max, r.path.length), 0);
+
       routeSummaries.forEach((route) => {
-        const methods = route.methods.join(', ');
-        const authLabel = route.authEnabled ? 'auth:on' : 'auth:off';
-        lines.push(`       • ${methods} ${route.path} (${authLabel})`);
+        // Map methods to actions
+        const actions = [];
+        const m = route.methods;
+        if (m.includes('GET')) actions.push('list', 'show');
+        if (m.includes('POST')) actions.push('create');
+        if (m.includes('PATCH')) actions.push('update');
+        if (m.includes('PUT')) actions.push('replace');
+        if (m.includes('DELETE')) actions.push('delete');
+        
+        const actionStr = actions.join(', ');
+        
+        let authTag = '[public]';
+        if (route.authEnabled) {
+          let activeDrivers = globalDrivers;
+          // If resource has specific auth drivers configured (array of strings)
+          if (Array.isArray(route.authConfig)) {
+             activeDrivers = globalDrivers.filter(d => route.authConfig.includes(d) || route.authConfig.includes(d === 'apikey' ? 'apiKey' : d));
+          }
+          
+          authTag = activeDrivers.length > 0 
+            ? `[auth:${activeDrivers.join(',')}]` 
+            : '[auth:none]';
+        }
+        
+        // Format: /path [auth] actions
+        lines.push(`       ${route.path.padEnd(maxPathLen + 2)} ${authTag.padEnd(25)} ${actionStr}`);
       });
     }
 

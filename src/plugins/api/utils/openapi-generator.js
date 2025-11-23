@@ -116,6 +116,11 @@ function inferTagFromPath(fullPath, basePrefix = '', versionPrefix = '') {
     path = `/${path}`;
   }
 
+  // 🩹 Special handling for health probes (K8s standard)
+  if (path === '/liveness' || path === '/readiness' || path === '/health') {
+    return 'Health';
+  }
+
   // Split path into segments
   const segments = path.split('/').filter(segment => segment.length > 0);
 

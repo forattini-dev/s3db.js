@@ -87,7 +87,7 @@ describe('Schema validation options', () => {
     expect(processed.webpush).toBeDefined();
     expect(processed.webpush.type).toBe('object');
     expect(processed.webpush.optional).toBe(true);
-    expect(processed.webpush.properties.enabled).toBe('boolean|optional|default:false');
+    expect(processed.webpush.props.enabled).toEqual({ type: 'boolean', optional: true, default: false });
   });
 
   test('honours allNestedObjectsOptional option', () => {
@@ -134,7 +134,7 @@ describe('Schema validation options', () => {
     expect(processed.b.optional).toBe(true);
     expect(processed.c.optional).toBeUndefined();
     expect(processed.d.optional).toBe(true);
-    expect(processed.d.properties.z.optional).toBe(true);
+    expect(processed.d.props.z.optional).toBe(true);
   });
 
   test('validates nested optional objects', async () => {

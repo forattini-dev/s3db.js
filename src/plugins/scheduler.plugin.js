@@ -345,8 +345,10 @@ export class SchedulerPlugin extends CoordinatorPlugin {
    * Only the coordinator should schedule and execute jobs
    */
   async onBecomeCoordinator() {
-    // 🪵 Debug: became coordinator
-    this.logger.debug({ workerId: this.workerId }, 'Became coordinator - starting job scheduling');
+    this.logger.debug(
+      { workerId: this.workerId },
+      'Global coordinator elected this worker as leader - starting job scheduling'
+    );
 
     // Start job scheduling (only coordinator schedules jobs)
     await this._startScheduling();
@@ -362,8 +364,10 @@ export class SchedulerPlugin extends CoordinatorPlugin {
    * Job timers are cleared automatically in stop() method
    */
   async onStopBeingCoordinator() {
-    // 🪵 Debug: no longer coordinator
-    this.logger.debug({ workerId: this.workerId }, 'No longer coordinator - job timers will be stopped automatically');
+    this.logger.debug(
+      { workerId: this.workerId },
+      'Global coordinator demoted this worker from leader - job timers will be stopped automatically'
+    );
 
     this.emit('plg:scheduler:coordinator-demoted', {
       workerId: this.workerId,

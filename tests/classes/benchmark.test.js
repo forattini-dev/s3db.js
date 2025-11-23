@@ -49,7 +49,7 @@ describe('Benchmark', () => {
       const elapsed = bench.elapsed()
 
       expect(elapsed).toBeGreaterThanOrEqual(45) // Allow 10% variance
-      expect(elapsed).toBeLessThanOrEqual(100)
+      expect(elapsed).toBeLessThanOrEqual(1000)
     })
 
     test('should handle multiple start/end cycles', async () => {

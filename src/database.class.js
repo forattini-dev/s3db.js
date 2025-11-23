@@ -264,6 +264,7 @@ export class Database extends SafeEventEmitter {
           // Merge client options first, then set executorPool (takes precedence)
           const s3ClientOptions = this._deepMerge({
             logLevel: this.logger.level,
+            logger: this.getChildLogger('S3Client'),
             connectionString: connectionString,
           }, mergedClientOptions);
           // executorPool from Database (normalized) takes precedence over any in clientOptions
@@ -277,6 +278,7 @@ export class Database extends SafeEventEmitter {
         // If URL parsing fails, fall back to S3Client
         const s3ClientOptions = this._deepMerge({
           logLevel: this.logger.level,
+          logger: this.getChildLogger('S3Client'),
           connectionString: connectionString,
         }, mergedClientOptions);
         s3ClientOptions.executorPool = this._deepMerge(
@@ -289,6 +291,7 @@ export class Database extends SafeEventEmitter {
       // No connection string provided, use S3Client with defaults
       const s3ClientOptions = this._deepMerge({
         logLevel: this.logger.level,
+        logger: this.getChildLogger('S3Client'),
       }, mergedClientOptions);
       s3ClientOptions.executorPool = this._deepMerge(
         s3ClientOptions.executorPool || {},
@@ -934,15 +937,17 @@ export class Database extends SafeEventEmitter {
     try {
       const { GlobalCoordinatorService } = await import('./plugins/concerns/global-coordinator-service.class.js');
 
+      // Use config from options if provided, otherwise use defaults
+      const coordinatorConfig = options.config || {};
       const service = new GlobalCoordinatorService({
         namespace,
         database: this,
         config: {
-          heartbeatInterval: 5000,
-          heartbeatJitter: 1000,
-          leaseTimeout: 15000,
-          workerTimeout: 20000,
-          diagnosticsEnabled: this.logger.level === 'debug' || this.logger.level === 'trace'
+          heartbeatInterval: coordinatorConfig.heartbeatInterval ?? 5000,
+          heartbeatJitter: coordinatorConfig.heartbeatJitter ?? 1000,
+          leaseTimeout: coordinatorConfig.leaseTimeout ?? 15000,
+          workerTimeout: coordinatorConfig.workerTimeout ?? 20000,
+          diagnosticsEnabled: coordinatorConfig.diagnosticsEnabled ?? (this.logger.level === 'debug' || this.logger.level === 'trace')
         }
       });
 
@@ -1961,8 +1966,13 @@ export class Database extends SafeEventEmitter {
       }
 
       // 3. Remove all listeners from the client
-      if (this.client && typeof this.client.removeAllListeners === 'function') {
-        this.client.removeAllListeners();
+      if (this.client) {
+        if (typeof this.client.removeAllListeners === 'function') {
+          this.client.removeAllListeners();
+        }
+        if (typeof this.client.destroy === 'function') {
+          this.client.destroy();
+        }
       }
 
       // 4. Emit disconnected event BEFORE removing database listeners (race condition fix)
@@ -1977,6 +1987,18 @@ export class Database extends SafeEventEmitter {
         process.off('exit', this._exitListener);
         this._exitListener = null;
         this._exitListenerRegistered = false;
+      }
+
+      // 6b. Cleanup managers
+      if (this.processManager && typeof this.processManager.removeSignalHandlers === 'function') {
+        this.processManager.removeSignalHandlers();
+      }
+      if (this.cronManager && typeof this.cronManager.removeSignalHandlers === 'function') {
+        this.cronManager.removeSignalHandlers();
+        // Also ensure cron manager is shutdown
+        if (typeof this.cronManager.shutdown === 'function') {
+          await this.cronManager.shutdown();
+        }
       }
 
       // 7. Clear saved metadata and plugin lists
