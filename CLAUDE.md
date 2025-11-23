@@ -218,11 +218,12 @@ IncrementalSequence.next()
             └─► reserveBatch() → PluginStorage.nextSequence(batchSize)
 ```
 
-**Lock Mechanism** (`plugin-storage.js:657-719`):
+**Lock Mechanism** (`distributed-lock.js`):
 - Uses `ifNoneMatch: '*'` S3 precondition for atomic lock acquisition
 - If object exists → 412 PreconditionFailed → retry with exponential backoff
 - TTL on locks prevents deadlocks if process crashes
 - Token-based release ensures only owner can release
+- Shared by `PluginStorage` and `SequenceStorage` via composition
 
 **Concurrency Guarantees:**
 1. **Uniqueness**: Distributed lock ensures only one process increments at a time
@@ -279,6 +280,7 @@ await db.uploadMetadataFile();
 
 | Plugin | Purpose |
 |--------|---------|
+| `ApiPlugin` | REST API with guards, protected fields, OpenAPI docs |
 | `TTLPlugin` | Auto-cleanup expired records (O(1) partition-based) |
 | `CachePlugin` | Cache reads (memory/S3/filesystem) |
 | `AuditPlugin` | Track all changes |
@@ -286,6 +288,55 @@ await db.uploadMetadataFile();
 | `MetricsPlugin` | Performance monitoring |
 | `CostsPlugin` | AWS cost tracking |
 | `EventualConsistencyPlugin` | Eventually consistent counters |
+
+### API Plugin Configuration
+
+Resources can define API-specific configuration under the `api` attribute in `$schema`:
+
+```javascript
+await database.createResource({
+  name: 'users',
+  attributes: {
+    email: 'string|required|email',
+    password: 'secret|required',
+    apiToken: 'secret|optional',
+    ip: 'ip4|optional'
+  },
+  api: {
+    description: 'User management endpoints',
+    protected: ['ip', 'metadata.internal'],  // Fields filtered from API responses
+    guard: {
+      list: async (c, ctx) => {
+        if (!ctx.user) throw new Error('Auth required');
+        if (ctx.user.role === 'admin') return true;
+        return { userId: ctx.user.id };  // Filter by ownership
+      },
+      get: async (c, ctx) => { /* ... */ },
+      create: async (c, ctx) => true,
+      update: async (c, ctx) => { /* ... */ },
+      delete: async (c, ctx) => { /* ... */ }
+    }
+  }
+});
+```
+
+**API Config Options:**
+
+| Option | Type | Description |
+|--------|------|-------------|
+| `description` | `string` | OpenAPI documentation description |
+| `protected` | `string[]` | Fields to filter from responses (supports dot notation) |
+| `guard` | `object` | Row-level security guards per operation |
+
+**Guard Return Values:**
+- `true` - Allow operation
+- `false` / `throw Error` - Deny operation
+- `{ field: value }` - Apply filter to list operations (partition-based O(1) lookup)
+
+**Protected Fields:**
+- Supports dot notation: `['ip', 'metadata.internal', 'audit.createdBy']`
+- Filters from all API responses (GET, LIST, POST, PUT, PATCH)
+- Does NOT affect direct Resource access (only API layer)
 
 **TTL v2 Architecture**: Uses plugin storage with partition on `expiresAtCohort` for O(1) cleanup. Auto-detects granularity (minute/hour/day/week) and runs multiple intervals. Zero full scans.
 
@@ -454,6 +505,53 @@ console.log('Staging:', await stagingCoordinator.getLeader());
 | `mapAwsError()` | `src/errors.js:190` | AWS error translator |
 | `idGenerator()` | `src/concerns/id.js` | nanoid (22 chars) |
 | `requirePluginDependency()` | `src/plugins/concerns/plugin-dependencies.js` | Validate plugin deps |
+| `DistributedLock` | `src/concerns/distributed-lock.js` | S3-based distributed locking |
+| `DistributedSequence` | `src/concerns/distributed-sequence.js` | S3-based atomic sequences |
+
+### Distributed Lock & Sequence
+
+Shared primitives for distributed coordination using S3 conditional writes.
+
+**DistributedLock** (`src/concerns/distributed-lock.js`):
+```javascript
+import { DistributedLock } from './distributed-lock.js';
+
+const lock = new DistributedLock(storage, {
+  keyGenerator: (name) => `locks/${name}`
+});
+
+// Acquire and release manually
+const handle = await lock.acquire('my-resource', { ttl: 30, timeout: 5000 });
+try {
+  // Critical section
+} finally {
+  await lock.release(handle);
+}
+
+// Or use withLock helper
+const result = await lock.withLock('my-resource', { ttl: 30 }, async () => {
+  return await doWork();
+});
+```
+
+**DistributedSequence** (`src/concerns/distributed-sequence.js`):
+```javascript
+import { DistributedSequence, createSequence } from './distributed-sequence.js';
+
+// Resource-scoped sequence
+const seq = createSequence(storage, { resourceName: 'orders' });
+
+const nextId = await seq.next('id', { initialValue: 1000 });  // Returns 1000, stores 1001
+const current = await seq.get('id');                          // Returns 1001
+await seq.reset('id', 5000);                                  // Resets to 5000
+```
+
+**Exported Helpers:**
+| Function | Purpose |
+|----------|---------|
+| `computeBackoff(attempt, base, max)` | Exponential backoff with jitter |
+| `sleep(ms)` | Promise-based delay |
+| `isPreconditionFailure(err)` | Check if error is 412 PreconditionFailed |
 
 ### Streams
 
@@ -637,6 +735,10 @@ s3db insert <resource> -d '<json>'  # Insert
 - **Base62**: `src/concerns/base62.js` (number/vector compression)
 - **Errors**: `src/errors.js` (custom error classes)
 - **Plugin Storage**: `src/concerns/plugin-storage.js` (HEAD+COPY optimizations)
+- **Distributed Lock**: `src/concerns/distributed-lock.js` (shared locking primitives)
+- **Distributed Sequence**: `src/concerns/distributed-sequence.js` (shared sequence primitives)
+- **API Routes**: `src/plugins/api/routes/resource-routes.js` (guards, protected fields)
+- **Response Formatter**: `src/plugins/api/utils/response-formatter.js` (field filtering)
 
 ## MCP Server
 
