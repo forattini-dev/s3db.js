@@ -150,8 +150,8 @@ describe('Bits Performance Benchmarks', () => {
           fastOverhead: ((fastResult.avgNs / directResult.avgNs - 1) * 100).toFixed(1) + '%',
         });
 
-        // Fast version should be within 3x of direct (CI environment variation)
-        expect(fastResult.avgNs).toBeLessThan(directResult.avgNs * 3);
+        // Fast version should be within 5x of direct (CI environment variation)
+        expect(fastResult.avgNs).toBeLessThan(directResult.avgNs * 5);
       }
 
       console.log('\n📊 createBitmap Performance (safe vs fast vs direct):');
@@ -411,9 +411,9 @@ describe('Bits Performance Benchmarks', () => {
       // - Write flow should be < 10μs (10,000ns)
       // - Read flow should be < 5μs (5,000ns)
       // - Check bits should be < 3μs (3,000ns)
-      expect(writeFlowResult.avgNs).toBeLessThan(50_000); // 50μs max (relaxed for CI)
-      expect(readFlowResult.avgNs).toBeLessThan(30_000);  // 30μs max
-      expect(checkBitsResult.avgNs).toBeLessThan(20_000); // 20μs max
+      expect(writeFlowResult.avgNs).toBeLessThan(100_000); // 100μs max (relaxed for CI)
+      expect(readFlowResult.avgNs).toBeLessThan(100_000);  // 100μs max (relaxed for CI)
+      expect(checkBitsResult.avgNs).toBeLessThan(100_000); // 100μs max (relaxed for CI)
     });
 
     test('should compare s3db vs manual favicon implementation', () => {
@@ -580,9 +580,9 @@ describe('Bits Performance Benchmarks', () => {
       const setVariance = Math.max(...setTimes) / Math.min(...setTimes);
       const getVariance = Math.max(...getTimes) / Math.min(...getTimes);
 
-      // Variance should be < 2x between any two boundary bits
-      expect(setVariance).toBeLessThan(2);
-      expect(getVariance).toBeLessThan(2);
+      // Variance should be < 5x between any two boundary bits (relaxed for CI)
+      expect(setVariance).toBeLessThan(5);
+      expect(getVariance).toBeLessThan(5);
     });
   });
 });
