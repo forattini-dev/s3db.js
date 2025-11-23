@@ -17,24 +17,27 @@
 > const ordersResource = await db.createResource({
 >   name: 'orders',
 >   attributes: { tenantId: 'string|required', userId: 'string|required', total: 'number' },
->   guard: {
->     '*': (ctx) => {
->       ctx.tenantId = ctx.user.tenantId;  // Extract tenant from JWT
->       return !!ctx.tenantId;              // Block if no tenant
->     },
->     list: (ctx) => {
->       // Automatic partition isolation - users ONLY see their tenant's data!
->       ctx.setPartition('byTenantUser', {
->         tenantId: ctx.tenantId,
->         userId: ctx.user.sub
->       });
->       return true;
->     },
->     create: (ctx) => {
->       // Auto-inject tenant/user - impossible to forget or bypass!
->       ctx.data.tenantId = ctx.tenantId;
->       ctx.data.userId = ctx.user.sub;
->       return true;
+>   api: {
+>     protected: ['internalNotes'],  // Hide sensitive fields from API responses
+>     guard: {
+>       '*': (ctx) => {
+>         ctx.tenantId = ctx.user.tenantId;  // Extract tenant from JWT
+>         return !!ctx.tenantId;              // Block if no tenant
+>       },
+>       list: (ctx) => {
+>         // Automatic partition isolation - users ONLY see their tenant's data!
+>         ctx.setPartition('byTenantUser', {
+>           tenantId: ctx.tenantId,
+>           userId: ctx.user.sub
+>         });
+>         return true;
+>       },
+>       create: (ctx) => {
+>         // Auto-inject tenant/user - impossible to forget or bypass!
+>         ctx.data.tenantId = ctx.tenantId;
+>         ctx.data.userId = ctx.user.sub;
+>         return true;
+>       }
 >     }
 >   }
 > });
@@ -86,44 +89,48 @@ app.post('/orders', requireAuth, async (req, res) => {
 
 **With Guards (Declarative Authorization):**
 ```javascript
-// ✅ 20 lines - Impossible to forget!
+// ✅ 25 lines - Impossible to forget!
 const ordersResource = await db.createResource({
   name: 'orders',
   attributes: { tenantId: 'string|required', userId: 'string|required', ... },
-  guard: {
-    // Wildcard: applies to ALL operations
-    '*': (ctx) => {
-      const tenantId = ctx.user.tenantId || ctx.user.tid;
-      if (!tenantId) return false;
-      ctx.tenantId = tenantId;
-      ctx.userId = ctx.user.sub;
-      return true;
-    },
+  api: {
+    description: 'Order management with multi-tenant isolation',
+    protected: ['internalNotes', 'auditTrail'],  // Hide from API responses
+    guard: {
+      // Wildcard: applies to ALL operations
+      '*': (ctx) => {
+        const tenantId = ctx.user.tenantId || ctx.user.tid;
+        if (!tenantId) return false;
+        ctx.tenantId = tenantId;
+        ctx.userId = ctx.user.sub;
+        return true;
+      },
 
-    // List: automatic partition (O(1) RLS!)
-    list: (ctx) => {
-      ctx.setPartition('byTenantUser', {
-        tenantId: ctx.tenantId,
-        userId: ctx.userId
-      });
-      return true;
-    },
+      // List: automatic partition (O(1) RLS!)
+      list: (ctx) => {
+        ctx.setPartition('byTenantUser', {
+          tenantId: ctx.tenantId,
+          userId: ctx.userId
+        });
+        return true;
+      },
 
-    // Insert: force tenant/user from token (never trust body!)
-    insert: (ctx) => {
-      ctx.body.tenantId = ctx.tenantId;
-      ctx.body.userId = ctx.userId;
-      return true;
-    },
+      // Insert: force tenant/user from token (never trust body!)
+      create: (ctx) => {
+        ctx.body.tenantId = ctx.tenantId;
+        ctx.body.userId = ctx.userId;
+        return true;
+      },
 
-    // Update: ownership check
-    update: (ctx, resource) => resource.userId === ctx.userId,
+      // Update: ownership check
+      update: (ctx, resource) => resource.userId === ctx.userId,
 
-    // Delete: ownership OR admin role
-    delete: (ctx, resource) => {
-      const isOwner = resource.userId === ctx.userId;
-      const isAdmin = ctx.user.roles?.includes('admin');
-      return isOwner || isAdmin;
+      // Delete: ownership OR admin role
+      delete: (ctx, resource) => {
+        const isOwner = resource.userId === ctx.userId;
+        const isAdmin = ctx.user.roles?.includes('admin');
+        return isOwner || isAdmin;
+      }
     }
   }
 });
@@ -141,27 +148,35 @@ const ordersResource = await db.createResource({
 
 ## 📖 Guard Syntax
 
+Guards are defined inside the `api` configuration block:
+
 **Simple Role/Scope Array:**
 ```javascript
-guard: ['admin']  // Allow if user has 'admin' role or scope
+api: {
+  guard: ['admin']  // Allow if user has 'admin' role or scope
+}
 ```
 
 **Per-Operation Guards:**
 ```javascript
-guard: {
-  list: (ctx) => { /* ... */ },
-  get: (ctx, resource) => { /* ... */ },
-  insert: (ctx) => { /* ... */ },
-  update: (ctx, resource) => { /* ... */ },
-  delete: (ctx, resource) => { /* ... */ }
+api: {
+  guard: {
+    list: (ctx) => { /* ... */ },
+    get: (ctx, resource) => { /* ... */ },
+    create: (ctx) => { /* ... */ },
+    update: (ctx, resource) => { /* ... */ },
+    delete: (ctx, resource) => { /* ... */ }
+  }
 }
 ```
 
 **Wildcard + Override:**
 ```javascript
-guard: {
-  '*': (ctx) => ctx.user.tenantId ? true : false,  // Apply to all
-  delete: ['admin']  // Override: only admins can delete
+api: {
+  guard: {
+    '*': (ctx) => ctx.user.tenantId ? true : false,  // Apply to all
+    delete: ['admin']  // Override: only admins can delete
+  }
 }
 ```
 
@@ -189,48 +204,55 @@ type GuardFunction = (
 
 ## 📍 Guards Placement & Precedence
 
-**NEW**: Guards can be defined in three places with clear precedence:
+Guards can be defined in two places with clear precedence:
 
-### 1. Resource-Level Guards (Root)
+### 1. Resource-Level Guards (via `api` config)
 
-**Recommended** - Cleaner, more intuitive syntax:
-
-```javascript
-await db.createResource({
-  name: 'orders',
-  attributes: { tenantId: 'string', userId: 'string', total: 'number' },
-  guards: {  // ✅ At root level (NEW!)
-    list: (ctx) => {
-      ctx.setPartition('byTenant', { tenantId: ctx.user.tenantId });
-      return true;
-    },
-    create: (ctx) => {
-      ctx.data.tenantId = ctx.user.tenantId;
-      return true;
-    },
-    delete: ['admin']
-  }
-});
-```
-
-### 2. Resource-Level Guards (Config)
-
-**Legacy** - Still supported for backwards compatibility:
+**Recommended** - Define guards, protected fields, and descriptions together:
 
 ```javascript
 await db.createResource({
   name: 'orders',
-  attributes: { tenantId: 'string', userId: 'string', total: 'number' },
-  config: {
-    guards: {  // ⚠️ Legacy location (still works)
-      list: (ctx) => { /* ... */ },
-      create: (ctx) => { /* ... */ }
+  attributes: {
+    tenantId: 'string',
+    userId: 'string',
+    total: 'number',
+    internalNotes: 'string',    // Sensitive field
+    auditTrail: 'object'        // Internal data
+  },
+  api: {  // ✅ API-specific configuration
+    description: 'Order management endpoints',  // OpenAPI description
+    protected: ['internalNotes', 'auditTrail', 'metadata.internal'],  // Fields hidden from API responses
+    guard: {  // Authorization rules
+      list: (ctx) => {
+        ctx.setPartition('byTenant', { tenantId: ctx.user.tenantId });
+        return true;
+      },
+      create: (ctx) => {
+        ctx.data.tenantId = ctx.user.tenantId;
+        return true;
+      },
+      delete: ['admin']
     }
   }
 });
 ```
 
-### 3. Global Guards (API Plugin Level)
+**API Config Options:**
+
+| Option | Type | Description |
+|--------|------|-------------|
+| `description` | `string` | OpenAPI documentation description for the resource |
+| `protected` | `string[]` | Fields to filter from API responses (supports dot notation) |
+| `guard` | `object` | Per-operation authorization rules |
+
+**Protected Fields:**
+- Supports nested paths: `['ip', 'metadata.internal', 'user.apiToken']`
+- Filters from ALL API responses (GET, LIST, POST, PUT, PATCH)
+- Does NOT affect direct Resource access (only API layer)
+- Useful for hiding internal/sensitive data from clients
+
+### 2. Global Guards (API Plugin Level)
 
 **NEW** - Apply to ALL resources for specific HTTP verbs:
 
