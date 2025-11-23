@@ -11,6 +11,7 @@ import tryFn, { tryFnSync } from "./concerns/try-fn.js";
 import { ResourceReader, ResourceWriter } from "./stream/index.js"
 import { getBehavior, DEFAULT_BEHAVIOR } from "./behaviors/index.js";
 import { idGenerator as defaultIdGenerator, createCustomGenerator, getUrlAlphabet } from "./concerns/id.js";
+import { createIncrementalIdGenerator, parseIncrementalConfig } from "./concerns/incremental-sequence.js";
 import { calculateTotalSize, calculateEffectiveLimit } from "./concerns/calculator.js";
 import { mapAwsError, InvalidResourceItem, ResourceError, PartitionError, ValidationError } from "./errors.js";
 import { createLogger } from "./concerns/logger.js";
@@ -305,17 +306,25 @@ export class Resource extends AsyncEventEmitter {
 
     // --- MIDDLEWARE SYSTEM ---
     this._initMiddleware();
-    // Debug: print method names and typeof update at construction
-    const ownProps = Object.getOwnPropertyNames(this);
-    const proto = Object.getPrototypeOf(this);
-    const protoProps = Object.getOwnPropertyNames(proto);
+
+    // --- INCREMENTAL ID GENERATOR ---
+    // Initialize if incremental config was provided
+    this._initIncrementalIdGenerator();
   }
 
   /**
    * Configure ID generator based on provided options
-   * @param {Function|number} customIdGenerator - Custom ID generator function or size
+   * @param {Function|number|string|Object} customIdGenerator - Custom ID generator function, size, or config
+   *   Supports:
+   *   - Function: Custom generator function
+   *   - Number: ID size (e.g., 32 for 32-char IDs)
+   *   - 'incremental': Auto-incrementing IDs starting from 1
+   *   - 'incremental:1000': Auto-incrementing IDs starting from 1000
+   *   - 'incremental:fast': Fast mode with batch reservation
+   *   - 'incremental:ORD-0001': Prefixed sequential IDs
+   *   - { type: 'incremental', start: 1000, mode: 'fast', batchSize: 500 }
    * @param {number} idSize - Size for auto-generated IDs
-   * @returns {Function} Configured ID generator function
+   * @returns {Function} Configured ID generator function (may be async for incremental)
    * @private
    */
   configureIdGenerator(customIdGenerator, idSize) {
@@ -323,6 +332,21 @@ export class Resource extends AsyncEventEmitter {
     if (typeof customIdGenerator === 'function') {
       return () => String(customIdGenerator());
     }
+
+    // Check for incremental type (string or object)
+    const isIncrementalString = typeof customIdGenerator === 'string' &&
+      (customIdGenerator === 'incremental' || customIdGenerator.startsWith('incremental:'));
+    const isIncrementalObject = typeof customIdGenerator === 'object' &&
+      customIdGenerator !== null &&
+      customIdGenerator.type === 'incremental';
+
+    if (isIncrementalString || isIncrementalObject) {
+      // Store config for later initialization (client may not be available yet)
+      this._incrementalConfig = customIdGenerator;
+      // Return placeholder that will be replaced in _initIncrementalIdGenerator
+      return null;
+    }
+
     // If customIdGenerator is a number (size), create a generator with that size
     if (typeof customIdGenerator === 'number' && customIdGenerator > 0) {
       return createCustomGenerator(getUrlAlphabet(), customIdGenerator);
@@ -333,6 +357,34 @@ export class Resource extends AsyncEventEmitter {
     }
     // Default to the standard idGenerator (22 chars)
     return defaultIdGenerator;
+  }
+
+  /**
+   * Initialize incremental ID generator (called after client is available)
+   * @private
+   */
+  _initIncrementalIdGenerator() {
+    if (!this._incrementalConfig || this.idGenerator !== null) {
+      return;
+    }
+
+    this.idGenerator = createIncrementalIdGenerator({
+      client: this.client,
+      resourceName: this.name,
+      config: this._incrementalConfig,
+      logger: this.logger
+    });
+
+    // Mark as async generator
+    this._asyncIdGenerator = true;
+  }
+
+  /**
+   * Check if ID generator is async (incremental mode)
+   * @returns {boolean}
+   */
+  hasAsyncIdGenerator() {
+    return this._asyncIdGenerator === true;
   }
 
   /**
@@ -1218,11 +1270,13 @@ export class Resource extends AsyncEventEmitter {
     Object.assign(validatedAttributes, extraData);
     
     // Generate ID with fallback for empty generators
+    // Supports both sync and async ID generators (incremental mode is async)
     let finalId = validatedId || preProcessedData.id || id;
     if (!finalId) {
-      finalId = this.idGenerator();
+      // Use Promise.resolve to handle both sync and async generators
+      finalId = await Promise.resolve(this.idGenerator());
       // Fallback to default generator if custom generator returns empty
-      if (!finalId || finalId.trim() === '') {
+      if (!finalId || String(finalId).trim() === '') {
         const { idGenerator } = await import('#src/concerns/id.js');
         finalId = idGenerator();
       }
@@ -1388,6 +1442,10 @@ export class Resource extends AsyncEventEmitter {
    * const user = await resource.get('user-123');
    */
   async get(id) {
+    const getStart = Date.now();
+    const log = this.database?.logger || console;
+    log.debug({ resource: this.name, id: id?.substring(0, 40) }, `[GET] START`);
+
     if (isObject(id)) {
       throw new ValidationError('Resource id must be a string', {
         field: 'id',
@@ -1406,12 +1464,25 @@ export class Resource extends AsyncEventEmitter {
     }
 
     // Execute beforeGet hooks
+    const hooksStart = Date.now();
+    log.debug({ resource: this.name, id: id?.substring(0, 40) }, `[GET] executing beforeGet hooks`);
     await this.executeHooks('beforeGet', { id });
+    const hooksMs = Date.now() - hooksStart;
+    log.debug({ resource: this.name, id: id?.substring(0, 40), hooksMs }, `[GET] beforeGet hooks complete`);
 
     const key = this.getResourceKey(id);
-    // LOG: start of get
-    // eslint-disable-next-line no-console
+    log.debug({ resource: this.name, id: id?.substring(0, 40), key: key?.substring(0, 60) }, `[GET] calling client.getObject`);
+
+    const s3Start = Date.now();
     const [ok, err, request] = await tryFn(() => this.client.getObject(key));
+    const s3Ms = Date.now() - s3Start;
+    log.debug({ resource: this.name, id: id?.substring(0, 40), s3Ms, ok, hasErr: !!err }, `[GET] client.getObject complete`);
+
+    // 🔍 PERF DEBUG: Log slow get operations
+    const totalMs = Date.now() - getStart;
+    if (totalMs > 100) {
+      log.warn({ resource: this.name, id: id?.substring(0, 40), totalMs, hooksMs, s3Ms }, `[PERF] SLOW GET detected`);
+    }
     // LOG: resultado do headObject
     // eslint-disable-next-line no-console
     if (!ok) {
@@ -2854,21 +2925,44 @@ export class Resource extends AsyncEventEmitter {
    * });
    */
   async list({ partition = null, partitionValues = {}, limit, offset = 0 } = {}) {
+    const listStart = Date.now();
+    const log = this.database?.logger || console;
+    log.debug({ resource: this.name, partition, limit, offset }, `[LIST] START`);
+
     // Execute beforeList hooks
+    const hooksStart = Date.now();
     await this.executeHooks('beforeList', { partition, partitionValues, limit, offset });
+    const hooksMs = Date.now() - hooksStart;
+    log.debug({ resource: this.name, hooksMs }, `[LIST] beforeList hooks complete`);
 
     const [ok, err, result] = await tryFn(async () => {
       if (!partition) {
-        return await this.listMain({ limit, offset });
+        log.debug({ resource: this.name }, `[LIST] calling listMain`);
+        const mainStart = Date.now();
+        const res = await this.listMain({ limit, offset });
+        log.debug({ resource: this.name, ms: Date.now() - mainStart, count: res?.length }, `[LIST] listMain complete`);
+        return res;
       }
-      return await this.listPartition({ partition, partitionValues, limit, offset });
+      log.debug({ resource: this.name, partition }, `[LIST] calling listPartition`);
+      const partStart = Date.now();
+      const res = await this.listPartition({ partition, partitionValues, limit, offset });
+      log.debug({ resource: this.name, partition, ms: Date.now() - partStart, count: res?.length }, `[LIST] listPartition complete`);
+      return res;
     });
     if (!ok) {
+      log.warn({ resource: this.name, error: err?.message }, `[LIST] ERROR`);
       return this.handleListError(err, { partition, partitionValues });
     }
 
     // Execute afterList hooks
+    const afterHooksStart = Date.now();
     const finalResult = await this.executeHooks('afterList', result);
+    log.debug({ resource: this.name, afterHooksMs: Date.now() - afterHooksStart }, `[LIST] afterList hooks complete`);
+
+    const totalMs = Date.now() - listStart;
+    if (totalMs > 100) {
+      log.warn({ resource: this.name, totalMs, hooksMs, count: finalResult?.length }, `[PERF] SLOW LIST detected`);
+    }
     return finalResult;
   }
 
@@ -2881,17 +2975,48 @@ export class Resource extends AsyncEventEmitter {
   }
 
   async listPartition({ partition, partitionValues, limit, offset = 0 }) {
+    const listPartStart = Date.now();
+    const log = this.database?.logger || console;
+    log.debug({ resource: this.name, partition, limit, offset }, `[LISTPARTITION] START`);
+
     if (!this.config.partitions?.[partition]) {
+      log.debug({ resource: this.name, partition }, `[LISTPARTITION] partition not found, returning empty`);
       this._emitStandardized("list", { partition, partitionValues, count: 0, errors: 0 });
       return [];
     }
     const partitionDef = this.config.partitions[partition];
     const prefix = this.buildPartitionPrefix(partition, partitionDef, partitionValues);
-    const [ok, err, keys] = await tryFn(() => this.client.getAllKeys({ prefix }));
-    if (!ok) throw err;
-    const ids = this.extractIdsFromKeys(keys).slice(offset);
-    const filteredIds = limit ? ids.slice(0, limit) : ids;
+    log.debug({ resource: this.name, prefix: prefix?.substring(0, 80) }, `[LISTPARTITION] built prefix`);
+
+    // Optimization: Use getKeysPage for server-side pagination instead of getAllKeys
+    const keysStart = Date.now();
+    const [ok, err, keys] = await tryFn(() => this.client.getKeysPage({
+      prefix,
+      offset,
+      amount: limit || 1000
+    }));
+    const keysMs = Date.now() - keysStart;
+    log.debug({ resource: this.name, keysMs, keysCount: keys?.length }, `[LISTPARTITION] getKeysPage complete`);
+
+    if (!ok) {
+      log.warn({ resource: this.name, error: err?.message }, `[LISTPARTITION] ERROR in getKeysPage`);
+      throw err;
+    }
+
+    // Keys are already paginated by the client
+    const filteredIds = this.extractIdsFromKeys(keys);
+    log.debug({ resource: this.name, idsCount: filteredIds?.length }, `[LISTPARTITION] extracted IDs`);
+
+    const processStart = Date.now();
     const results = await this.processPartitionResults(filteredIds, partition, partitionDef, keys);
+    const processMs = Date.now() - processStart;
+    log.debug({ resource: this.name, processMs, resultsCount: results?.length }, `[LISTPARTITION] processPartitionResults complete`);
+
+    const totalMs = Date.now() - listPartStart;
+    if (totalMs > 100) {
+      log.warn({ resource: this.name, totalMs, keysMs, processMs, count: results?.length }, `[PERF] SLOW LISTPARTITION detected`);
+    }
+
     this._emitStandardized("list", { partition, partitionValues, count: results.length, errors: 0 });
     return results;
   }
@@ -2965,11 +3090,16 @@ export class Resource extends AsyncEventEmitter {
     const operations = ids.map((id) => async () => {
       const [ok, err, result] = await tryFn(async () => {
         const actualPartitionValues = this.extractPartitionValuesFromKey(id, keys, sortedFields);
-        return await this.getFromPartition({
-          id,
-          partitionName: partition,
-          partitionValues: actualPartitionValues
-        });
+        
+        // Optimization: skip getFromPartition (which does a redundant HEAD check)
+        // We already know the partition key exists because it came from listPartition/getKeysPage
+        const data = await this.get(id);
+        
+        // Add partition metadata manually
+        data._partition = partition;
+        data._partitionValues = actualPartitionValues;
+        
+        return data;
       });
       if (ok) return result;
       return this.handleResourceError(err, id, 'partition');
@@ -3130,12 +3260,20 @@ export class Resource extends AsyncEventEmitter {
    * });
       */
   async page({ offset = 0, size = 100, partition = null, partitionValues = {}, skipCount = false } = {}) {
+    const pageStart = Date.now();
+    const log = this.database?.logger || console;
+    log.debug({ resource: this.name, offset, size, partition, skipCount }, `[PAGE] START`);
+
     const [ok, err, result] = await tryFn(async () => {
       // Get total count only if not skipped (for performance)
       let totalItems = null;
       let totalPages = null;
       if (!skipCount) {
+        const countStart = Date.now();
+        log.debug({ resource: this.name }, `[PAGE] calling count()`);
         const [okCount, errCount, count] = await tryFn(() => this.count({ partition, partitionValues }));
+        const countMs = Date.now() - countStart;
+        log.debug({ resource: this.name, countMs, count, ok: okCount }, `[PAGE] count() complete`);
         if (okCount) {
           totalItems = count;
           totalPages = Math.ceil(totalItems / size);
@@ -3149,7 +3287,11 @@ export class Resource extends AsyncEventEmitter {
       if (size <= 0) {
         items = [];
       } else {
+        const listStart = Date.now();
+        log.debug({ resource: this.name, partition, size, offset }, `[PAGE] calling list()`);
         const [okList, errList, listResult] = await tryFn(() => this.list({ partition, partitionValues, limit: size, offset: offset }));
+        const listMs = Date.now() - listStart;
+        log.debug({ resource: this.name, listMs, itemsCount: listResult?.length, ok: okList }, `[PAGE] list() complete`);
         items = okList ? listResult : [];
       }
       const result = {
@@ -3170,7 +3312,14 @@ export class Resource extends AsyncEventEmitter {
       this._emitStandardized("paginated", result);
       return result;
     });
+
+    const totalMs = Date.now() - pageStart;
+    if (totalMs > 100) {
+      log.warn({ resource: this.name, totalMs, itemsCount: result?.items?.length }, `[PERF] SLOW PAGE detected`);
+    }
+
     if (ok) return result;
+    log.warn({ resource: this.name, error: err?.message }, `[PAGE] ERROR, returning fallback`);
     // Final fallback - return a safe result even if everything fails
     return {
       items: [],
@@ -4294,9 +4443,17 @@ function validateResourceConfig(config) {
 
   // Validate idGenerator
   if (config.idGenerator !== undefined) {
-    if (typeof config.idGenerator !== 'function' && typeof config.idGenerator !== 'number') {
-      errors.push("Resource 'idGenerator' must be a function or a number (size)");
-    } else if (typeof config.idGenerator === 'number' && config.idGenerator <= 0) {
+    const isValidFunction = typeof config.idGenerator === 'function';
+    const isValidNumber = typeof config.idGenerator === 'number';
+    const isValidIncremental = typeof config.idGenerator === 'string' &&
+      (config.idGenerator === 'incremental' || config.idGenerator.startsWith('incremental:'));
+    const isValidIncrementalObject = typeof config.idGenerator === 'object' &&
+      config.idGenerator !== null &&
+      config.idGenerator.type === 'incremental';
+
+    if (!isValidFunction && !isValidNumber && !isValidIncremental && !isValidIncrementalObject) {
+      errors.push("Resource 'idGenerator' must be a function, number (size), 'incremental' string, or incremental config object");
+    } else if (isValidNumber && config.idGenerator <= 0) {
       errors.push("Resource 'idGenerator' size must be greater than 0");
     }
   }
@@ -4399,6 +4556,123 @@ function validateResourceConfig(config) {
     errors
   };
 }
+
+// ============================================================================
+// INCREMENTAL SEQUENCE UTILITIES
+// ============================================================================
+
+/**
+ * Get the current value of a sequence without incrementing
+ * Only available for resources with incremental ID generator
+ *
+ * @param {string} [fieldName='id'] - Field name (defaults to 'id')
+ * @returns {Promise<number|null>} Current sequence value or null if not incremental
+ *
+ * @example
+ * const resource = await db.createResource({
+ *   name: 'orders',
+ *   idGenerator: 'incremental:1000'
+ * });
+ *
+ * // After inserting 5 records
+ * const nextValue = await resource.getSequenceValue();
+ * console.log(nextValue); // 1006 (next ID that will be assigned)
+ */
+Resource.prototype.getSequenceValue = async function(fieldName = 'id') {
+  if (!this.idGenerator?._sequence) {
+    return null;
+  }
+  return this.idGenerator._sequence.getValue(fieldName);
+};
+
+/**
+ * Reset a sequence to a specific value
+ * Only available for resources with incremental ID generator
+ *
+ * WARNING: This can cause ID conflicts if you reset to a value
+ * that has already been used. Use with caution.
+ *
+ * @param {string} fieldName - Field name
+ * @param {number} value - New value for the sequence
+ * @returns {Promise<boolean>} True if reset successful, false if not incremental
+ *
+ * @example
+ * // Reset order IDs to start from 5000
+ * await orders.resetSequence('id', 5000);
+ */
+Resource.prototype.resetSequence = async function(fieldName, value) {
+  if (!this.idGenerator?._sequence) {
+    this.logger.warn('resetSequence called on non-incremental resource');
+    return false;
+  }
+  return this.idGenerator._sequence.reset(fieldName, value);
+};
+
+/**
+ * List all sequences for this resource
+ * Only available for resources with incremental ID generator
+ *
+ * @returns {Promise<Array|null>} Array of sequence info or null if not incremental
+ *
+ * @example
+ * const sequences = await orders.listSequences();
+ * // [{ name: 'orders-id', value: 1006, createdAt: ..., updatedAt: ... }]
+ */
+Resource.prototype.listSequences = async function() {
+  if (!this.idGenerator?._sequence) {
+    return null;
+  }
+  return this.idGenerator._sequence.list();
+};
+
+/**
+ * Reserve a batch of IDs for bulk operations (fast mode only)
+ *
+ * @param {number} [count=100] - Number of IDs to reserve
+ * @returns {Promise<Object|null>} Batch info { start, end, current } or null
+ *
+ * @example
+ * const batch = await resource.reserveIdBatch(500);
+ * // batch = { start: 1000, end: 1500, current: 1000 }
+ */
+Resource.prototype.reserveIdBatch = async function(count = 100) {
+  if (!this.idGenerator?._sequence) {
+    return null;
+  }
+  return this.idGenerator._sequence.reserveBatch('id', count);
+};
+
+/**
+ * Get the status of the current local batch (fast mode only)
+ *
+ * @param {string} [fieldName='id'] - Field name
+ * @returns {Object|null} Batch status { start, end, current, remaining } or null
+ *
+ * @example
+ * const status = resource.getBatchStatus();
+ * // { start: 1000, end: 1100, current: 1042, remaining: 58 }
+ */
+Resource.prototype.getBatchStatus = function(fieldName = 'id') {
+  if (!this.idGenerator?._sequence) {
+    return null;
+  }
+  return this.idGenerator._sequence.getBatchStatus(fieldName);
+};
+
+/**
+ * Release unused IDs in the current batch (for graceful shutdown)
+ *
+ * @param {string} [fieldName='id'] - Field name
+ */
+Resource.prototype.releaseBatch = function(fieldName = 'id') {
+  if (this.idGenerator?._sequence) {
+    this.idGenerator._sequence.releaseBatch(fieldName);
+  }
+};
+
+// ============================================================================
+// DISPOSAL
+// ============================================================================
 
 /**
  * Dispose of the resource and clean up all references

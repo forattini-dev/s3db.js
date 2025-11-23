@@ -161,6 +161,90 @@ node test.js
 | `enforce-limits` | Production, strict validation |
 | `user-managed` | Custom handling via events |
 
+### Incremental IDs
+
+Auto-incrementing ID generation using distributed sequences with locking.
+
+**Basic Usage:**
+```javascript
+// Sequential IDs: 1, 2, 3...
+idGenerator: 'incremental'
+
+// Start from custom value: 1000, 1001...
+idGenerator: 'incremental:1000'
+
+// Custom increment: 100, 110, 120...
+idGenerator: { type: 'incremental', start: 100, increment: 10 }
+
+// Prefixed IDs: ORD-0001, ORD-0002...
+idGenerator: 'incremental:ORD-0001'
+
+// Fast mode (batch reservation, ~1ms/ID):
+idGenerator: 'incremental:fast'
+idGenerator: { type: 'incremental', mode: 'fast', batchSize: 500 }
+```
+
+**Utility Methods:**
+| Method | Purpose |
+|--------|---------|
+| `getSequenceValue(field)` | Peek next value without incrementing |
+| `resetSequence(field, value)` | Reset sequence (use with caution) |
+| `listSequences()` | List all sequences for resource |
+| `reserveIdBatch(count)` | Reserve batch (fast mode) |
+| `getBatchStatus(field)` | Get local batch status |
+
+**Performance:**
+| Mode | Latency | Use Case |
+|------|---------|----------|
+| Standard | ~20-50ms/ID | Order numbers, invoices |
+| Fast | ~1ms/ID | Bulk imports, high-traffic |
+
+**Files:** `src/concerns/incremental-sequence.js`, `docs/examples/e51-incremental-ids.js`
+
+**Internal Architecture (Concurrency):**
+
+The incremental ID system uses distributed locking via S3 preconditions to ensure uniqueness:
+
+```
+Resource.insert()
+    │
+    ▼
+IncrementalSequence.next()
+    │
+    ├─► Standard: PluginStorage.nextSequence() per ID
+    │       └─► withLock() → acquireLock() → read/increment → releaseLock()
+    │
+    └─► Fast: Check local batch, reserve new if exhausted
+            └─► reserveBatch() → PluginStorage.nextSequence(batchSize)
+```
+
+**Lock Mechanism** (`plugin-storage.js:657-719`):
+- Uses `ifNoneMatch: '*'` S3 precondition for atomic lock acquisition
+- If object exists → 412 PreconditionFailed → retry with exponential backoff
+- TTL on locks prevents deadlocks if process crashes
+- Token-based release ensures only owner can release
+
+**Concurrency Guarantees:**
+1. **Uniqueness**: Distributed lock ensures only one process increments at a time
+2. **Atomicity**: S3 `ifNoneMatch` is atomic (no check-then-write race)
+3. **Fault Tolerance**: Lock TTL auto-expires stale locks
+4. **Contention Handling**: Exponential backoff + jitter reduces thundering herd
+
+**Storage Structure (resource-scoped, NOT plugin-scoped):**
+```
+resource={resourceName}/
+└── sequence={fieldName}/
+    ├── value   (current sequence value: { value: N, name, createdAt, ... })
+    └── lock    (distributed lock with TTL)
+```
+
+**Fast Mode Trade-offs:**
+| Aspect | Standard | Fast |
+|--------|----------|------|
+| Contiguous IDs | Always | Within batch |
+| ID Gaps | Never | Possible (crashed process) |
+| Use Case | Orders, Invoices | Logs, Analytics, Bulk |
+
 ### Field Types
 
 | Type | Example | Notes |
