@@ -57,6 +57,7 @@
 
 import { tryFn } from './try-fn.js';
 import { idGenerator as generateId } from './id.js';
+import { DistributedLock, computeBackoff, sleep, isPreconditionFailure } from './distributed-lock.js';
 
 /** Default configuration values */
 const INCREMENTAL_DEFAULTS = {
@@ -382,11 +383,18 @@ export function formatIncrementalValue(value, { prefix = '', padding = 0 } = {})
  *
  * Uses resource-scoped paths: resource={resourceName}/sequence={fieldName}/...
  * This is NOT a plugin, so it doesn't use the plugin= prefix.
+ *
+ * Leverages shared DistributedLock utilities for locking logic.
  */
 class SequenceStorage {
   constructor(client, resourceName) {
     this.client = client;
     this.resourceName = resourceName;
+
+    // Initialize distributed lock with resource-scoped keys
+    this._lock = new DistributedLock(this, {
+      keyGenerator: (fieldName) => this.getLockKey(fieldName)
+    });
   }
 
   getKey(fieldName, suffix) {
@@ -450,93 +458,17 @@ class SequenceStorage {
     await tryFn(() => this.client.deleteObject(key));
   }
 
-  _sleep(ms) {
-    return new Promise((resolve) => setTimeout(resolve, ms));
-  }
-
-  _computeBackoff(attempt, baseDelay, maxDelay) {
-    const exponential = Math.min(baseDelay * Math.pow(2, Math.max(attempt - 1, 0)), maxDelay);
-    const jitter = Math.floor(Math.random() * Math.max(baseDelay / 2, 1));
-    return exponential + jitter;
-  }
-
   async acquireLock(fieldName, options = {}) {
-    const {
-      ttl = 30,
-      timeout = 5000,
-      retryDelay = 100,
-      maxRetryDelay = 1000
-    } = options;
-
-    const lockKey = this.getLockKey(fieldName);
-    const token = generateId();
-    const startTime = Date.now();
-    let attempt = 0;
-
-    while (true) {
-      const payload = {
-        token,
-        acquiredAt: Date.now(),
-        _expiresAt: Date.now() + (ttl * 1000)
-      };
-
-      const [ok, err] = await tryFn(() => this.set(lockKey, payload, {
-        ifNoneMatch: '*'
-      }));
-
-      if (ok) {
-        return { fieldName, lockKey, token, expiresAt: payload._expiresAt };
-      }
-
-      const originalError = err?.original || err;
-      const errorCode = originalError?.code || originalError?.Code || originalError?.name;
-      const statusCode = originalError?.statusCode || originalError?.$metadata?.httpStatusCode;
-      const isPreconditionFailure = errorCode === 'PreconditionFailed' || statusCode === 412;
-
-      if (!isPreconditionFailure) {
-        throw err;
-      }
-
-      if (timeout !== undefined && Date.now() - startTime >= timeout) {
-        return null;
-      }
-
-      // Check if lock expired
-      const current = await this.get(lockKey);
-      if (!current) continue;
-
-      // Check TTL
-      if (current._expiresAt && Date.now() > current._expiresAt) {
-        await this.delete(lockKey);
-        continue;
-      }
-
-      attempt += 1;
-      const delay = this._computeBackoff(attempt, retryDelay, maxRetryDelay);
-      await this._sleep(delay);
-    }
+    return this._lock.acquire(fieldName, options);
   }
 
   async releaseLock(lock) {
     if (!lock) return;
-
-    const current = await this.get(lock.lockKey);
-    if (!current) return;
-
-    if (current.token === lock.token) {
-      await this.delete(lock.lockKey);
-    }
+    return this._lock.release(lock);
   }
 
   async withLock(fieldName, options, callback) {
-    const lock = await this.acquireLock(fieldName, options);
-    if (!lock) return null;
-
-    try {
-      return await callback(lock);
-    } finally {
-      await tryFn(() => this.releaseLock(lock));
-    }
+    return this._lock.withLock(fieldName, options, callback);
   }
 
   async nextSequence(fieldName, options = {}) {
