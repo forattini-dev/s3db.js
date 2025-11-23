@@ -11,201 +11,51 @@
   <!-- Favicon -->
   <link rel="icon" href="https://img.icons8.com/fluency/48/database.png" type="image/png">
 
-  <!-- Dark Theme -->
+  <!-- Docsify Dark Theme -->
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/docsify-themeable@0/dist/css/theme-simple-dark.css">
 
-  <!-- Custom Dark Theme with Purple -->
+  <!-- Purple customization -->
   <style>
     :root {
-      /* Purple accent colors */
       --theme-color: #9C27B0;
       --theme-color-secondary: #BA68C8;
 
-      /* Dark background */
-      --base-background-color: #0d1117;
-      --base-color: #c9d1d9;
-
-      /* Sidebar */
-      --sidebar-width: 280px;
-      --sidebar-background: #161b22;
-      --sidebar-border-color: #30363d;
-      --sidebar-nav-link-color: #8b949e;
-      --sidebar-nav-link-color--active: #BA68C8;
-      --sidebar-nav-link-font-weight--active: 600;
-      --sidebar-nav-link-border-color--active: #9C27B0;
-      --sidebar-name-color: #BA68C8;
-
-      /* Content */
-      --content-max-width: 900px;
-
-      /* Headings - Purple! */
+      /* Headings - Purple */
       --heading-color: #BA68C8;
       --heading-h1-color: #CE93D8;
       --heading-h2-color: #BA68C8;
       --heading-h2-border-color: #30363d;
 
-      /* Code */
-      --code-font-family: 'JetBrains Mono', 'Fira Code', Consolas, monospace;
-      --code-block-border-radius: 8px;
-      --code-inline-background: #21262d;
-      --code-inline-color: #f0883e;
-      --code-block-background: #161b22;
-      --code-theme-selection: rgba(156, 39, 176, 0.3);
+      /* Sidebar */
+      --sidebar-nav-link-color--active: #BA68C8;
+      --sidebar-nav-link-border-color--active: #9C27B0;
+      --sidebar-name-color: #BA68C8;
 
       /* Links */
       --link-color: #BA68C8;
       --link-color--hover: #CE93D8;
 
-      /* Cover */
-      --cover-background-color: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%);
-      --cover-heading-color: #CE93D8;
-      --cover-color: rgba(255,255,255,0.85);
-      --cover-button-primary-background: #9C27B0;
-      --cover-button-primary-color: #fff;
-
       /* Blockquote */
       --blockquote-border-color: #9C27B0;
-      --blockquote-background: #21262d;
 
-      /* Table */
-      --table-head-background: #21262d;
-      --table-row-odd-background: #161b22;
-      --table-row-even-background: #0d1117;
-      --table-cell-border-color: #30363d;
+      /* Code */
+      --code-font-family: 'JetBrains Mono', 'Fira Code', Consolas, monospace;
 
-      /* Search */
-      --search-background: #21262d;
-      --search-result-keyword-background: rgba(156, 39, 176, 0.3);
+      /* Cover */
+      --cover-button-primary-background: #9C27B0;
 
       /* Notice */
       --notice-tip-border-color: #9C27B0;
-      --notice-important-border-color: #f85149;
     }
 
-    /* Logo styling */
-    .app-name-link img {
-      width: 80px;
-      margin-bottom: 10px;
-    }
-
-    /* Better code blocks */
-    pre[data-lang] {
-      border-radius: 8px;
-      box-shadow: 0 4px 20px rgba(0,0,0,0.4);
-      border: 1px solid #30363d;
-    }
-
-    /* Blockquote styling */
-    blockquote {
-      border-left: 4px solid #9C27B0;
-      background: #21262d;
-      padding: 12px 20px;
-      border-radius: 0 8px 8px 0;
-    }
-
-    /* Table styling */
-    table {
-      border-collapse: collapse;
-      width: 100%;
-      margin: 20px 0;
-    }
+    /* Table header purple */
     table th {
-      background: #21262d;
-      font-weight: 600;
-      color: #BA68C8;
-    }
-    table th, table td {
-      padding: 12px 15px;
-      border: 1px solid #30363d;
-    }
-    table tr:hover {
-      background: #1c2128;
+      color: #BA68C8 !important;
     }
 
-    /* Search box */
-    .search input {
-      border-radius: 20px !important;
-      padding-left: 35px !important;
-      background: #21262d !important;
-      border: 1px solid #30363d !important;
-      color: #c9d1d9 !important;
-    }
-    .search input::placeholder {
-      color: #8b949e !important;
-    }
-
-    /* Scrollbar */
-    ::-webkit-scrollbar {
-      width: 8px;
-      height: 8px;
-    }
-    ::-webkit-scrollbar-track {
-      background: #0d1117;
-    }
-    ::-webkit-scrollbar-thumb {
-      background: #30363d;
-      border-radius: 4px;
-    }
-    ::-webkit-scrollbar-thumb:hover {
-      background: #484f58;
-    }
-
-    /* Mobile */
-    @media (max-width: 768px) {
-      :root {
-        --sidebar-width: 260px;
-      }
-    }
-
-    /* Plugin badges */
-    .plugin-badge {
-      display: inline-block;
-      padding: 2px 8px;
-      border-radius: 12px;
-      font-size: 12px;
-      font-weight: 500;
-      margin-left: 8px;
-    }
-    .plugin-badge.stable {
-      background: #238636;
-      color: white;
-    }
-    .plugin-badge.beta {
-      background: #9e6a03;
-      color: white;
-    }
-    .plugin-badge.experimental {
-      background: #da3633;
-      color: white;
-    }
-
-    /* Mermaid diagrams dark theme */
+    /* Mermaid transparent */
     .mermaid {
       background: transparent !important;
-    }
-
-    /* Inline code */
-    code:not([class*="lang-"]) {
-      background: #21262d;
-      color: #f0883e;
-      padding: 2px 6px;
-      border-radius: 4px;
-    }
-
-    /* Strong/bold text */
-    strong {
-      color: #f0f6fc;
-    }
-
-    /* HR */
-    hr {
-      border-color: #30363d;
-    }
-
-    /* Mark/highlight */
-    mark {
-      background: rgba(156, 39, 176, 0.3);
-      color: #f0f6fc;
     }
   </style>
 </head>

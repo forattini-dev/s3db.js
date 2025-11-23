@@ -16,5 +16,6 @@
 - ⚡ **Streaming API** - Handle large datasets efficiently
 - 🔌 **Plugin System** - Extend with cache, audit, metrics & more
 
-[GitHub](https://github.com/forattini-dev/s3db.js)
 [Get Started](#-quick-start)
+[GitHub](https://github.com/forattini-dev/s3db.js)
+[📖 Full Documentation](https://forattini-dev.github.io/s3db.js/)

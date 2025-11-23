@@ -29,6 +29,10 @@
   <a href="https://nodejs.org/"><img src="https://img.shields.io/badge/Runtime-Node.js-339933.svg?style=flat&logo=node.js" alt="Node.js Runtime"></a>
 </p>
 
+<p align="center">
+  <a href="https://forattini-dev.github.io/s3db.js/"><strong>📖 Full Documentation</strong></a>
+</p>
+
 <br>
 
 ## 🚀 What is s3db.js?
