@@ -7,6 +7,7 @@
 import { asyncHandler } from '../utils/error-handler.js';
 import { createLogger } from '../../../concerns/logger.js';
 import * as formatter from '../utils/response-formatter.js';
+import { filterProtectedFields } from '../utils/response-formatter.js';
 import { guardMiddleware } from '../utils/guards.js';
 import { generateRecordETag, validateIfMatch, validateIfNoneMatch } from '../utils/etag.js';
 
@@ -173,10 +174,13 @@ export function createResourceRoutes(resource, version, config = {}, Hono) {
   const resourceName = resource.name;
   const basePath = versionPrefix ? `/${versionPrefix}/${resourceName}` : `/${resourceName}`;
 
-  // Get guards configuration from resource
-  // Priority: resource.guards (root level) > resource.config.guards (legacy) > config.globalGuards (API Plugin level)
-  const guards = resource.guards || resource.config?.guards || null;
+  // Get API configuration from resource.$schema.api (passed via createResource)
+  const apiConfig = resource.$schema?.api || {};
+  const guards = apiConfig.guard || null;
   const globalGuards = config.globalGuards || null;
+
+  // Get protected fields list (fields to filter from API responses)
+  const protectedFields = apiConfig.protected || [];
 
   // Apply custom middleware
   customMiddleware.forEach(middleware => {
@@ -309,7 +313,10 @@ export function createResourceRoutes(resource, version, config = {}, Hono) {
         await relationsPlugin.populate(resource, items, populateIncludes);
       }
 
-      const response = formatter.list(items, {
+      // Filter protected fields from response
+      const filteredItems = filterProtectedFields(items, protectedFields);
+
+      const response = formatter.list(filteredItems, {
         total,
         page: Math.floor(offset / limit) + 1,
         pageSize: limit,
@@ -385,7 +392,10 @@ export function createResourceRoutes(resource, version, config = {}, Hono) {
         return c.body(null, 304);
       }
 
-      const response = formatter.success(item);
+      // Filter protected fields from response
+      const filteredItem = filterProtectedFields(item, protectedFields);
+
+      const response = formatter.success(filteredItem);
       return c.json(response, response._status);
     }));
   }
@@ -426,8 +436,11 @@ export function createResourceRoutes(resource, version, config = {}, Hono) {
         return c.body(null, 201);
       }
 
+      // Filter protected fields from response
+      const filteredItem = filterProtectedFields(item, protectedFields);
+
       // Return full representation (default)
-      const response = formatter.created(item, location);
+      const response = formatter.created(filteredItem, location);
       return c.json(response, response._status);
     }));
   }
@@ -493,7 +506,10 @@ export function createResourceRoutes(resource, version, config = {}, Hono) {
         return c.body(null, 200);
       }
 
-      const response = formatter.success(updated);
+      // Filter protected fields from response
+      const filteredUpdated = filterProtectedFields(updated, protectedFields);
+
+      const response = formatter.success(filteredUpdated);
       return c.json(response, response._status);
     }));
   }
@@ -561,7 +577,10 @@ export function createResourceRoutes(resource, version, config = {}, Hono) {
         return c.body(null, 200);
       }
 
-      const response = formatter.success(updated);
+      // Filter protected fields from response
+      const filteredUpdated = filterProtectedFields(updated, protectedFields);
+
+      const response = formatter.success(filteredUpdated);
       return c.json(response, response._status);
     }));
   }

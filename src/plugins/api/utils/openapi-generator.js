@@ -451,8 +451,10 @@ function generateResourceSchema(resource) {
     Object.entries(allAttributes).filter(([name]) => !pluginAttrNames.includes(name))
   );
 
-  // Extract resource description (supports both string and object format)
-  const resourceDescription = resource.$schema.description;
+  // Extract resource description from $schema.api.description (new) or $schema.description (legacy)
+  // Supports both string and object format: { resource: '...', attributes: { field: 'desc' } }
+  const apiConfig = resource.$schema?.api || {};
+  const resourceDescription = apiConfig.description || resource.$schema?.description;
   const attributeDescriptions = typeof resourceDescription === 'object'
     ? (resourceDescription.attributes || {})
     : {};
@@ -1381,7 +1383,9 @@ export function generateOpenAPISpec(database, config = {}) {
     }
 
     const version = resource.config?.currentVersion || resource.version || 'v1';
-    const resourceDescription = resource.config?.description;
+    // Read description from $schema.api.description (new) or resource.config.description (legacy)
+    const apiConfig = resource.$schema?.api || {};
+    const resourceDescription = apiConfig.description || resource.config?.description;
     const descText = typeof resourceDescription === 'object'
       ? resourceDescription.resource
       : resourceDescription || 'No description';
@@ -1736,11 +1740,12 @@ For detailed information about each endpoint, see the sections below.`;
     // Merge paths
     Object.assign(spec.paths, paths);
 
-    // Add tag with description support
-    const resourceDescription = resource.config?.description;
-    const tagDescription = typeof resourceDescription === 'object'
-      ? resourceDescription.resource
-      : resourceDescription || `Operations for ${name} resource`;
+    // Add tag with description support (from $schema.api.description or legacy resource.config.description)
+    const tagApiConfig = resource.$schema?.api || {};
+    const tagResourceDescription = tagApiConfig.description || resource.config?.description;
+    const tagDescription = typeof tagResourceDescription === 'object'
+      ? tagResourceDescription.resource
+      : tagResourceDescription || `Operations for ${name} resource`;
 
     spec.tags.push({
       name: name,

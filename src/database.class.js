@@ -1770,7 +1770,9 @@ export class Database extends SafeEventEmitter {
       asyncPartitions: config.asyncPartitions !== undefined ? config.asyncPartitions : true,
       events: config.events || {},
       disableEvents: config.disableEvents !== undefined ? config.disableEvents : this.disableResourceEvents,
-      createdBy: config.createdBy || 'user'
+      createdBy: config.createdBy || 'user',
+      api: config.api,
+      description: config.description
     });
     resource.database = this;
     this._resourcesMap[name] = resource;
