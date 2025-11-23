@@ -57,10 +57,8 @@ describe('Benchmark', () => {
       await sleep(10)
       bench.end()
 
-      const firstElapsed = bench.elapsed()
-
       bench.start()
-      await sleep(20)
+      await sleep(100)
       bench.end()
 
       const secondElapsed = bench.elapsed()

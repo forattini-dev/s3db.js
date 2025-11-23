@@ -3,6 +3,7 @@ import { readFileSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { createDatabaseForTest } from '../config.js';
+import { MemoryClient } from '../../src/clients/memory-client.class.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -12,7 +13,7 @@ describe('S3DB JSON Self-Healing Tests', () => {
   let database;
 
   beforeEach(async () => {
-    database = await createDatabaseForTest('suite=s3db-json/self-healing', {
+    database = await createDatabaseForTest('suite=s3db-json/self-healing-' + Date.now() + '-' + Math.random(), {
       versioningEnabled: true,
       logLevel: 'silent',
       persistHooks: true
@@ -22,7 +23,10 @@ describe('S3DB JSON Self-Healing Tests', () => {
   afterEach(async () => {
     if (database?.client) {
       try {
-        await database.client.deleteObject({ key: 's3db.json' });
+        if (database.bucket) {
+          MemoryClient.clearBucketStorage(database.bucket);
+        }
+        await database.disconnect();
       } catch (error) {
         // ignore
       }

@@ -1,6 +1,6 @@
 export default {
-  // RESOURCE LIMITS - Use 2 workers to avoid OOM/Timeouts
-  maxWorkers: 2,
+  // RESOURCE LIMITS - Use 50% of system resources
+  maxWorkers: '50%',
   // 75% of 32GB / 9 workers = ~2.6GB per worker
   workerIdleMemoryLimit: '2GB',
   testTimeout: 120000, // Increased to 120s for CI/slow environments

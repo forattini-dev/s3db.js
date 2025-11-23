@@ -1,5 +1,6 @@
 import { describe, test, expect, beforeEach, afterEach } from '@jest/globals';
 import { createDatabaseForTest } from '../config.js';
+import { MemoryClient } from '../../src/clients/memory-client.class.js';
 import BaseReplicator from '../../src/plugins/replicators/base-replicator.class.js';
 import S3dbReplicator from '../../src/plugins/replicators/s3db-replicator.class.js';
 import SqsReplicator from '../../src/plugins/replicators/sqs-replicator.class.js';
@@ -8,11 +9,14 @@ describe('Replicators Coverage Tests', () => {
   let database;
 
   beforeEach(async () => {
-    database = createDatabaseForTest('replicators');
+    database = createDatabaseForTest('replicators-' + Date.now() + '-' + Math.random());
   });
 
   afterEach(async () => {
     if (database) {
+      if (database.bucket) {
+        MemoryClient.clearBucketStorage(database.bucket);
+      }
       await database.disconnect();
     }
   });

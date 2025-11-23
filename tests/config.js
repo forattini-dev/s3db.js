@@ -235,8 +235,11 @@ export function createMemoryDatabaseForTest(testName, options = {}) {
     throw new Error('testName must be a string');
   }
 
+  // Ensure bucket is unique per test instance to avoid OOM from shared storage
+  const uniqueBucket = `test-${testName}-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
+
   const memoryClient = new MemoryClient({
-    bucket: `test-${testName}`,
+    bucket: uniqueBucket,
     keyPrefix: s3Prefix(testName),
     enforceLimits: options.enforceLimits || false,
     persistPath: options.persistPath,

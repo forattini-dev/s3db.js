@@ -1,12 +1,13 @@
 import { describe, test, expect, beforeEach, afterEach } from '@jest/globals';
 import { Database } from '../../src/database.class.js';
 import { createDatabaseForTest } from '../config.js';
+import { MemoryClient } from '../../src/clients/memory-client.class.js';
 
 describe('S3DB JSON Advanced Self-Healing Tests', () => {
   let database;
 
   beforeEach(async () => {
-    database = await createDatabaseForTest('suite=s3db-json/self-healing-advanced', {
+    database = await createDatabaseForTest('suite=s3db-json/self-healing-advanced-' + Date.now() + '-' + Math.random(), {
       versioningEnabled: true,
       logLevel: 'silent',
       persistHooks: true
@@ -16,6 +17,9 @@ describe('S3DB JSON Advanced Self-Healing Tests', () => {
   afterEach(async () => {
     if (database?.client) {
       try {
+        if (database.bucket) {
+          MemoryClient.clearBucketStorage(database.bucket);
+        }
         // Clean up all files
         const objects = await database.client.listObjects();
         if (objects && objects.Contents && objects.Contents.length > 0) {

@@ -12,7 +12,7 @@ describe('Database Class - Complete Journey', () => {
   let database;
 
   beforeEach(async () => {
-    database = createDatabaseForTest('suite=classes/database');
+    database = createDatabaseForTest('suite=classes/database-' + Date.now() + '-' + Math.random());
     await database.connect();
   });
 

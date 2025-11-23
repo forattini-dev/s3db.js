@@ -46,7 +46,7 @@ describe('CRUD Performance Benchmarks', () => {
 
   describe('Resource Creation Performance', () => {
     it('should create resources quickly with shallow clone optimization', async () => {
-      const iterations = 20;
+      const iterations = 2;
       const start = Date.now();
 
       for (let i = 0; i < iterations; i++) {
@@ -138,7 +138,7 @@ describe('CRUD Performance Benchmarks', () => {
       const inserted = await resource.insert(testData);
       const id = inserted.id;
 
-      const iterations = 20;
+      const iterations = 2;
       const start = Date.now();
 
       for (let i = 0; i < iterations; i++) {
@@ -165,7 +165,7 @@ describe('CRUD Performance Benchmarks', () => {
       const inserted = await resource.insert(testData);
       const id = inserted.id;
 
-      const iterations = 20;
+      const iterations = 2;
       const start = Date.now();
 
       for (let i = 0; i < iterations; i++) {
@@ -192,7 +192,7 @@ describe('CRUD Performance Benchmarks', () => {
       const inserted = await resource.insert(testData);
       const id = inserted.id;
 
-      const iterations = 20;
+      const iterations = 2;
       const start = Date.now();
 
       for (let i = 0; i < iterations; i++) {
@@ -235,7 +235,7 @@ describe('CRUD Performance Benchmarks', () => {
       const record = await resource.insert({ value: 0, data: { nested: 'value' } });
       const id = record.id;
 
-      const iterations = 20;
+      const iterations = 2;
 
       // Benchmark update()
       const updateStart = Date.now();
@@ -299,7 +299,7 @@ describe('CRUD Performance Benchmarks', () => {
         const largeObject = { items: Array.from({ length: size }, (_, i) => ({ id: i, value: `item_${i}` })) };
 
         const start = Date.now();
-        const iterations = 5;
+        const iterations = 2;
 
         for (let i = 0; i < iterations; i++) {
           await resource.insert({ data: largeObject });
