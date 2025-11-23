@@ -5,6 +5,63 @@
  */
 
 /**
+ * Filter protected fields from data
+ * Supports nested paths like 'metadata.ip', 'user.profile.ssn'
+ *
+ * @param {Object|Array} data - Data to filter
+ * @param {Array<string>} protectedFields - List of field paths to remove
+ * @returns {Object|Array} Filtered data
+ *
+ * @example
+ * filterProtectedFields({ ip: '1.2.3.4', name: 'John', metadata: { ip: '5.6.7.8', browser: 'Chrome' } }, ['ip', 'metadata.ip'])
+ * // Returns: { name: 'John', metadata: { browser: 'Chrome' } }
+ */
+export function filterProtectedFields(data, protectedFields) {
+  if (!protectedFields || protectedFields.length === 0) {
+    return data;
+  }
+
+  if (Array.isArray(data)) {
+    return data.map(item => filterProtectedFields(item, protectedFields));
+  }
+
+  if (data === null || typeof data !== 'object') {
+    return data;
+  }
+
+  const result = { ...data };
+
+  for (const fieldPath of protectedFields) {
+    deleteNestedField(result, fieldPath);
+  }
+
+  return result;
+}
+
+/**
+ * Delete a nested field from an object using dot notation path
+ * @param {Object} obj - Object to modify
+ * @param {string} path - Dot-separated path (e.g., 'metadata.ip')
+ */
+function deleteNestedField(obj, path) {
+  const parts = path.split('.');
+  let current = obj;
+
+  for (let i = 0; i < parts.length - 1; i++) {
+    const part = parts[i];
+    if (current[part] === undefined || current[part] === null || typeof current[part] !== 'object') {
+      return;
+    }
+    current = current[part];
+  }
+
+  const lastPart = parts[parts.length - 1];
+  if (current && typeof current === 'object' && lastPart in current) {
+    delete current[lastPart];
+  }
+}
+
+/**
  * Format successful response
  * @param {Object} data - Response data
  * @param {Object} options - Response options
@@ -214,5 +271,6 @@ export default {
   unauthorized,
   forbidden,
   rateLimitExceeded,
-  payloadTooLarge
+  payloadTooLarge,
+  filterProtectedFields
 };
