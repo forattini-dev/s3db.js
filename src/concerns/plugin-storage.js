@@ -33,6 +33,8 @@ import { calculateEffectiveLimit, calculateUTF8Bytes } from './calculator.js';
 import { tryFn } from './try-fn.js';
 import { idGenerator } from './id.js';
 import { PluginStorageError, MetadataLimitError, BehaviorError } from '../errors.js';
+import { DistributedLock, computeBackoff, sleep, isPreconditionFailure } from './distributed-lock.js';
+import { DistributedSequence } from './distributed-sequence.js';
 
 const S3_METADATA_LIMIT = 2047; // AWS S3 metadata limit in bytes
 
@@ -58,6 +60,19 @@ export class PluginStorage {
 
     this.client = client;
     this.pluginSlug = pluginSlug;
+
+    // Initialize distributed lock with plugin-scoped keys
+    this._lock = new DistributedLock(this, {
+      keyGenerator: (name) => this.getPluginKey(null, 'locks', name)
+    });
+
+    // Initialize distributed sequence with plugin-scoped keys
+    this._sequence = new DistributedSequence(this, {
+      valueKeyGenerator: (resourceName, name) =>
+        this.getSequenceKey(resourceName, name, 'value'),
+      lockKeyGenerator: (resourceName, name) =>
+        this.getSequenceKey(resourceName, name, 'lock')
+    });
   }
 
   /**
@@ -674,67 +689,7 @@ export class PluginStorage {
    * @returns {Promise<Object|null>} Lock object or null if couldn't acquire
    */
   async acquireLock(lockName, options = {}) {
-    const {
-      ttl = 30,
-      timeout = 0,
-      workerId = 'unknown',
-      retryDelay = 100,
-      maxRetryDelay = 1000
-    } = options;
-    const key = this.getPluginKey(null, 'locks', lockName);
-    const token = idGenerator();
-
-    const startTime = Date.now();
-    let attempt = 0;
-
-    while (true) {
-      const payload = {
-        workerId,
-        token,
-        acquiredAt: Date.now()
-      };
-
-      const [ok, err, putResponse] = await tryFn(() => this.set(key, payload, {
-        ttl,
-        behavior: 'body-only',
-        ifNoneMatch: '*'
-      }));
-
-      if (ok) {
-        return {
-          name: lockName,
-          key,
-          token,
-          workerId,
-          expiresAt: Date.now() + ttl * 1000,
-          etag: putResponse?.ETag || null
-        };
-      }
-
-      const originalError = err?.original || err;
-      const errorCode = originalError?.code || originalError?.Code || originalError?.name;
-      const statusCode = originalError?.statusCode || originalError?.$metadata?.httpStatusCode;
-      const isPreconditionFailure = errorCode === 'PreconditionFailed' || statusCode === 412;
-
-      if (!isPreconditionFailure) {
-        throw err;
-      }
-
-      // Check timeout (0 means don't wait, undefined means wait indefinitely)
-      if (timeout !== undefined && Date.now() - startTime >= timeout) {
-        return null;
-      }
-
-      // Remove expired locks (get deletes expired entries automatically)
-      const current = await this.get(key);
-      if (!current) {
-        continue; // Lock expired - retry immediately
-      }
-
-      attempt += 1;
-      const delay = this._computeBackoff(attempt, retryDelay, maxRetryDelay);
-      await this._sleep(delay);
-    }
+    return this._lock.acquire(lockName, options);
   }
 
   /**
@@ -745,69 +700,7 @@ export class PluginStorage {
    * @returns {Promise<void>}
    */
   async releaseLock(lock, token) {
-    if (!lock) return;
-
-    let lockName;
-    let key;
-    let expectedToken = token;
-
-    if (typeof lock === 'object') {
-      lockName = lock.name || lock.lockName;
-      key = lock.key || (lockName ? this.getPluginKey(null, 'locks', lockName) : null);
-      expectedToken = lock.token ?? token;
-      if (!expectedToken && lock.token !== undefined) {
-        throw new PluginStorageError('Lock token missing on lock object', {
-          pluginSlug: this.pluginSlug,
-          operation: 'releaseLock',
-          lockName
-        });
-      }
-    } else if (typeof lock === 'string') {
-      lockName = lock;
-      key = this.getPluginKey(null, 'locks', lockName);
-      expectedToken = token;
-      if (!expectedToken) {
-        throw new PluginStorageError('releaseLock(lockName) now requires the lock token', {
-          pluginSlug: this.pluginSlug,
-          operation: 'releaseLock',
-          lockName,
-          suggestion: 'Pass the original lock object or provide the token explicitly'
-        });
-      }
-    } else {
-      throw new PluginStorageError('releaseLock expects a lock object or lock name', {
-        pluginSlug: this.pluginSlug,
-        operation: 'releaseLock'
-      });
-    }
-
-    if (!key) {
-      throw new PluginStorageError('Invalid lock key', {
-        pluginSlug: this.pluginSlug,
-        operation: 'releaseLock'
-      });
-    }
-
-    const current = await this.get(key);
-    if (!current) {
-      return;
-    }
-
-    if (current.token !== undefined) {
-      if (!expectedToken) {
-        throw new PluginStorageError('releaseLock detected a stored token but none was provided', {
-          pluginSlug: this.pluginSlug,
-          operation: 'releaseLock',
-          lockName,
-          suggestion: 'Always release using the lock object returned by acquireLock'
-        });
-      }
-      if (current.token !== expectedToken) {
-        return;
-      }
-    }
-
-    await this.delete(key);
+    return this._lock.release(lock, token);
   }
 
   /**
@@ -819,25 +712,7 @@ export class PluginStorage {
    * @returns {Promise<*>} Callback result, or null when lock not acquired
    */
   async withLock(lockName, options, callback) {
-    if (typeof callback !== 'function') {
-      throw new PluginStorageError('withLock requires a callback function', {
-        pluginSlug: this.pluginSlug,
-        operation: 'withLock',
-        lockName,
-        suggestion: 'Pass an async function as the third argument'
-      });
-    }
-
-    const lock = await this.acquireLock(lockName, options);
-    if (!lock) {
-      return null;
-    }
-
-    try {
-      return await callback(lock);
-    } finally {
-      await tryFn(() => this.releaseLock(lock));
-    }
+    return this._lock.withLock(lockName, options, callback);
   }
 
   /**
@@ -847,19 +722,7 @@ export class PluginStorage {
    * @returns {Promise<boolean>} True if locked
    */
   async isLocked(lockName) {
-    const key = this.getPluginKey(null, 'locks', lockName);
-    const lock = await this.get(key);
-    return lock !== null;
-  }
-
-  _computeBackoff(attempt, baseDelay, maxDelay) {
-    const exponential = Math.min(baseDelay * Math.pow(2, Math.max(attempt - 1, 0)), maxDelay);
-    const jitter = Math.floor(Math.random() * Math.max(baseDelay / 2, 1));
-    return exponential + jitter;
-  }
-
-  _sleep(ms) {
-    return new Promise((resolve) => setTimeout(resolve, ms));
+    return this._lock.isLocked(lockName);
   }
 
   /**
@@ -1017,6 +880,7 @@ export class PluginStorage {
 
   /**
    * Internal lock mechanism for sequences using direct key
+   * Uses shared DistributedLock with a custom key generator
    * @private
    */
   async _withSequenceLock(lockKey, options, callback) {
@@ -1051,12 +915,7 @@ export class PluginStorage {
         }
       }
 
-      const originalError = err?.original || err;
-      const errorCode = originalError?.code || originalError?.Code || originalError?.name;
-      const statusCode = originalError?.statusCode || originalError?.$metadata?.httpStatusCode;
-      const isPreconditionFailure = errorCode === 'PreconditionFailed' || statusCode === 412;
-
-      if (!isPreconditionFailure) {
+      if (!isPreconditionFailure(err)) {
         throw err;
       }
 
@@ -1074,8 +933,8 @@ export class PluginStorage {
       }
 
       attempt += 1;
-      const delay = this._computeBackoff(attempt, 100, 1000);
-      await this._sleep(delay);
+      const delay = computeBackoff(attempt, 100, 1000);
+      await sleep(delay);
     }
   }
 
