@@ -38,7 +38,7 @@ export class MemoryClient extends EventEmitter {
       const logLevel = this.logLevel;
       this.logger = createLogger({ name: 'MemoryClient', level: logLevel });
     }
-
+    this.logger.debug({ id: this.id, bucket: this.bucket, keyPrefix: this.keyPrefix }, `MemoryClient constructor called`);
     // Normalize execution config (mirrors S3Client taskExecutorConfig)
     this.taskExecutorConfig = {
       enabled: true,
@@ -1113,6 +1113,14 @@ export class MemoryClient extends EventEmitter {
    */
   static clearBucketStorage(bucket) {
     globalStorageRegistry.delete(bucket);
+  }
+
+  /**
+   * Destroy the client and clear its associated bucket storage
+   */
+  destroy() {
+    this.logger.debug({ id: this.id, bucket: this.bucket, keyPrefix: this.keyPrefix }, `MemoryClient destroy called`);
+    MemoryClient.clearBucketStorage(this.bucket);
   }
 
   /**

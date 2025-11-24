@@ -14,9 +14,6 @@ describe('Replicators Coverage Tests', () => {
 
   afterEach(async () => {
     if (database) {
-      if (database.bucket) {
-        MemoryClient.clearBucketStorage(database.bucket);
-      }
       await database.disconnect();
     }
   });

@@ -94,7 +94,19 @@ export async function createApiKeyHandler(config = {}, database) {
 
     // Query users by API key (using configured keyField)
     try {
-      const users = await authResource.query({ [keyField]: apiKey }, { limit: 1 });
+      let users;
+
+      // Try to use partition lookup if available (O(1) instead of O(n))
+      const partitionName = `by${keyField.charAt(0).toUpperCase()}${keyField.slice(1)}`;
+      const hasPartition = authResource.partitions && authResource.partitions[partitionName];
+
+      if (hasPartition) {
+        logger.debug(`Using partition ${partitionName} for O(1) API key lookup`);
+        users = await authResource.listPartition(partitionName, { [keyField]: apiKey }, { limit: 1 });
+      } else {
+        logger.debug(`No partition found for ${keyField}, falling back to query (O(n) scan)`);
+        users = await authResource.query({ [keyField]: apiKey }, { limit: 1 });
+      }
 
       if (!users || users.length === 0) {
         const response = unauthorized('Invalid API key');

@@ -2,14 +2,26 @@
  * Deep Discovery - Advanced website intelligence gathering
  *
  * Implements comprehensive discovery strategies:
- * - Sitemap variants (numbered, subdomain, categorized)
+ * - Sitemap variants (numbered, subdomain, categorized, localized)
+ * - Google News sitemaps (time-sensitive, last 2 days)
+ * - Google Images sitemaps (image:image extension)
+ * - Google Videos sitemaps + mRSS (video:video extension)
+ * - Sitemap indexes (references multiple sitemaps)
  * - API endpoint detection (REST, GraphQL, JSON)
- * - Feed discovery (RSS, Atom, JSON Feed)
+ * - Feed discovery (RSS, Atom, JSON Feed, mRSS)
  * - Static JSON/config files
  * - Framework detection (Next.js, Nuxt, Angular, React)
  * - robots.txt analysis for exposed paths
  * - E-commerce specific patterns (Shopify, Magento, WooCommerce)
  * - News portal patterns (WordPress, CMS APIs)
+ *
+ * Google Sitemap Extensions Supported:
+ * - Standard sitemaps (sitemaps.org protocol)
+ * - Google News: xmlns:news="http://www.google.com/schemas/sitemap-news/0.9"
+ * - Google Images: xmlns:image="http://www.google.com/schemas/sitemap-image/1.1"
+ * - Google Videos: xmlns:video="http://www.google.com/schemas/sitemap-video/1.1"
+ * - hreflang (localization): xmlns:xhtml="http://www.w3.org/1999/xhtml"
+ * - mRSS (Media RSS): xmlns:media="http://search.yahoo.com/mrss/"
  *
  * Based on red team reconnaissance best practices.
  */
@@ -36,13 +48,24 @@ export class DeepDiscovery {
       frameworks: [],
       platforms: [],
       subdomains: [],
-      exposedPaths: []
+      exposedPaths: [],
+      ampPages: [],           // NEW: AMP detection
+      robotsDirectives: {}    // NEW: crawl-delay, Host, etc.
     }
 
     this.stats = {
       urlsProbed: 0,
       urlsFound: 0,
       errors: 0
+    }
+
+    // Crawler compatibility tracking
+    this.crawlerCompatibility = {
+      google: { score: 0, strengths: [], warnings: [] },
+      bing: { score: 0, strengths: [], warnings: [] },
+      yandex: { score: 0, strengths: [], warnings: [] },
+      baidu: { score: 0, strengths: [], warnings: [] },
+      duckduckgo: { score: 0, strengths: [], warnings: [] }
     }
   }
 
@@ -130,6 +153,11 @@ export class DeepDiscovery {
 
       const lines = content.split(/\r?\n/)
       const paths = new Set()
+      const directives = {
+        crawlDelay: null,
+        yandexHost: null,
+        noindex: false
+      }
 
       for (const line of lines) {
         const trimmed = line.trim()
@@ -142,6 +170,26 @@ export class DeepDiscovery {
             source: 'robots.txt',
             priority: 10
           })
+          continue
+        }
+
+        // Crawl-delay (Bing, Yandex) - Google ignores
+        const crawlDelayMatch = trimmed.match(/^\s*crawl-delay:\s*(\d+)/i)
+        if (crawlDelayMatch) {
+          directives.crawlDelay = parseInt(crawlDelayMatch[1], 10)
+          continue
+        }
+
+        // Host directive (Yandex-specific)
+        const hostMatch = trimmed.match(/^\s*host:\s*(.+)/i)
+        if (hostMatch) {
+          directives.yandexHost = hostMatch[1].trim()
+          continue
+        }
+
+        // Noindex (deprecated but Google still reads)
+        if (trimmed.match(/^\s*noindex:/i)) {
+          directives.noindex = true
           continue
         }
 
@@ -162,6 +210,20 @@ export class DeepDiscovery {
             paths.add(path)
           }
         }
+      }
+
+      // Store directives
+      this.discovered.robotsDirectives = directives
+
+      // Score crawler compatibility based on directives
+      if (directives.crawlDelay) {
+        this.crawlerCompatibility.bing.strengths.push('Crawl-delay presente (respeitado)')
+        this.crawlerCompatibility.yandex.strengths.push('Crawl-delay presente (respeitado)')
+        this.crawlerCompatibility.google.warnings.push('Crawl-delay ignorado pelo Google')
+      }
+
+      if (directives.yandexHost) {
+        this.crawlerCompatibility.yandex.strengths.push(`Host directive: ${directives.yandexHost}`)
       }
 
       // Analyze paths for API endpoints
@@ -187,7 +249,7 @@ export class DeepDiscovery {
   }
 
   /**
-   * Discover all sitemap variants
+   * Discover all sitemap variants including Google News, Images, Videos
    * @private
    */
   async _discoverSitemaps(domain) {
@@ -216,10 +278,39 @@ export class DeepDiscovery {
       '/category-sitemap.xml',
       '/post-sitemap.xml',
       '/news-sitemap.xml',
+      '/image-sitemap.xml',
+      '/video-sitemap.xml',
+
+      // Google News specific (últimos 2 dias)
+      '/news-sitemap.xml',
+      '/sitemap-news.xml',
+      '/google-news-sitemap.xml',
+      '/gnews-sitemap.xml',
+
+      // Google Images specific
+      '/image-sitemap.xml',
+      '/images-sitemap.xml',
+      '/sitemap-images.xml',
+      '/sitemap-image.xml',
+
+      // Google Videos specific
+      '/video-sitemap.xml',
+      '/videos-sitemap.xml',
+      '/sitemap-videos.xml',
+      '/sitemap-video.xml',
+      '/videositemap.xml',
+
+      // mRSS (alternativa a video sitemap)
+      '/mrss.xml',
+      '/feed/video',
+      '/media-rss.xml',
 
       // Compressed
       '/sitemap.xml.gz',
       '/sitemap_index.xml.gz',
+      '/news-sitemap.xml.gz',
+      '/image-sitemap.xml.gz',
+      '/video-sitemap.xml.gz',
 
       // Text format
       '/sitemap.txt',
@@ -227,20 +318,39 @@ export class DeepDiscovery {
 
       // CMS specific
       '/wp-sitemap.xml',
+      '/wp-sitemap-posts-post-1.xml',
       '/sitemap_index.xml.xsl',
-      '/sitemap.xsl'
+      '/sitemap.xsl',
+
+      // Localized sitemaps
+      '/sitemap-en.xml',
+      '/sitemap-pt.xml',
+      '/sitemap-es.xml',
+      '/en/sitemap.xml',
+      '/pt/sitemap.xml',
+      '/es/sitemap.xml'
     ]
 
     const results = await this._probeUrls(domain, variants)
 
     for (const { url, exists, contentType } of results) {
       if (exists) {
+        const sitemapType = this._detectSitemapType(url)
+
+        // Fetch sitemap content to analyze priority/changefreq
+        const sitemapAnalysis = await this._analyzeSitemapContent(url)
+
         this.discovered.sitemaps.push({
           url,
+          type: sitemapType,
           contentType,
           source: 'probe',
-          priority: this._getSitemapPriority(url)
+          priority: this._getSitemapPriority(url, sitemapType),
+          ...sitemapAnalysis
         })
+
+        // Update crawler compatibility based on sitemap features
+        this._scoreSitemapCompatibility(sitemapType, sitemapAnalysis)
       }
     }
   }
@@ -368,6 +478,7 @@ export class DeepDiscovery {
     }
 
     // Probe frameworks
+    let spaDetected = false
     for (const [framework, paths] of Object.entries(frameworkPaths)) {
       const results = await this._probeUrls(domain, paths)
       const foundCount = results.filter(r => r.exists).length
@@ -379,10 +490,30 @@ export class DeepDiscovery {
           confidence: foundCount / paths.length,
           paths: results.filter(r => r.exists).map(r => r.url)
         })
+
+        // SPA frameworks trigger warnings for Baidu/Yandex
+        spaDetected = true
       }
     }
 
     this.discovered.platforms = detections
+
+    // Score platform compatibility
+    if (spaDetected) {
+      this.crawlerCompatibility.google.strengths.push('Renderiza JavaScript (SPA/React/Next.js)')
+      this.crawlerCompatibility.bing.warnings.push('JS rendering fraco - use prerendering/SSR')
+      this.crawlerCompatibility.yandex.warnings.push('Zero JS rendering - site HTML estático recomendado')
+      this.crawlerCompatibility.baidu.warnings.push('Renderiza JS muito mal - precisa HTML direto')
+    }
+
+    // WordPress/traditional CMS gets bonus for Yandex/Baidu
+    const traditionalCMS = detections.filter(d =>
+      d.type === 'cms' && ['wordpress', 'drupal', 'joomla'].includes(d.platform)
+    )
+    if (traditionalCMS.length > 0 && !spaDetected) {
+      this.crawlerCompatibility.yandex.strengths.push('HTML tradicional (sem SPA)')
+      this.crawlerCompatibility.baidu.strengths.push('HTML direto detectado')
+    }
   }
 
   /**
@@ -678,16 +809,65 @@ export class DeepDiscovery {
   }
 
   /**
-   * Get sitemap priority based on name
+   * Detect sitemap type from URL
    * @private
    */
-  _getSitemapPriority(url) {
-    if (url.includes('index')) return 10
-    if (url.includes('product')) return 9
-    if (url.includes('news')) return 8
-    if (url.includes('category')) return 7
-    if (url.includes('post')) return 6
-    return 5
+  _detectSitemapType(url) {
+    const urlLower = url.toLowerCase()
+
+    // Sitemap Index (highest priority - references multiple sitemaps)
+    if (urlLower.includes('index')) return 'sitemap-index'
+
+    // Google News (time-sensitive, last 2 days)
+    if (urlLower.includes('news') || urlLower.includes('gnews')) return 'google-news'
+
+    // Google Images
+    if (urlLower.includes('image')) return 'google-images'
+
+    // Google Videos or mRSS
+    if (urlLower.includes('video') || urlLower.includes('mrss') || urlLower.includes('media-rss')) {
+      return 'google-videos'
+    }
+
+    // Categorized
+    if (urlLower.includes('product')) return 'products'
+    if (urlLower.includes('categor')) return 'categories'
+    if (urlLower.includes('post')) return 'posts'
+    if (urlLower.includes('page')) return 'pages'
+
+    // Localized
+    if (/\/(en|pt|es|fr|de|it|ja|zh|ko)\//.test(urlLower) ||
+        /sitemap-(en|pt|es|fr|de|it|ja|zh|ko)\.xml/.test(urlLower)) {
+      return 'localized'
+    }
+
+    // Compressed
+    if (urlLower.endsWith('.gz')) return 'compressed'
+
+    // Text format
+    if (urlLower.endsWith('.txt')) return 'text'
+
+    return 'standard'
+  }
+
+  /**
+   * Get sitemap priority based on type and name
+   * @private
+   */
+  _getSitemapPriority(url, type) {
+    // Type-based priority (Google recommendations)
+    switch (type) {
+      case 'sitemap-index': return 10  // Highest - references all others
+      case 'google-news': return 9     // Time-sensitive (2 days)
+      case 'google-videos': return 8   // Rich media, high engagement
+      case 'google-images': return 8   // Rich media, high engagement
+      case 'products': return 7        // E-commerce critical
+      case 'categories': return 6
+      case 'posts': return 5
+      case 'pages': return 5
+      case 'localized': return 4
+      default: return 5
+    }
   }
 
   /**
@@ -698,6 +878,7 @@ export class DeepDiscovery {
     if (url.includes('.json') || contentType?.includes('json')) return 'json'
     if (url.includes('atom') || contentType?.includes('atom')) return 'atom'
     if (url.includes('rss') || contentType?.includes('rss')) return 'rss'
+    if (url.includes('mrss') || contentType?.includes('media-rss')) return 'mrss'
     return 'unknown'
   }
 
@@ -713,10 +894,160 @@ export class DeepDiscovery {
   }
 
   /**
+   * Analyze sitemap content for Bing-specific features
+   * @private
+   */
+  async _analyzeSitemapContent(url) {
+    try {
+      const content = await this._fetch(url)
+      if (!content) return {}
+
+      const analysis = {
+        hasPriority: content.includes('<priority>'),
+        hasChangefreq: content.includes('<changefreq>'),
+        hasLastmod: content.includes('<lastmod>'),
+        urlCount: (content.match(/<loc>/g) || []).length
+      }
+
+      // Detect AMP pages in sitemap
+      if (content.includes('/amp/') || content.includes('.amp.html')) {
+        const ampUrls = content.match(/<loc>([^<]*(?:\/amp\/|\.amp\.html)[^<]*)<\/loc>/gi) || []
+        for (const match of ampUrls) {
+          const urlMatch = match.match(/<loc>([^<]+)<\/loc>/i)
+          if (urlMatch) {
+            this.discovered.ampPages.push({
+              url: urlMatch[1],
+              source: 'sitemap'
+            })
+          }
+        }
+      }
+
+      return analysis
+    } catch {
+      return {}
+    }
+  }
+
+  /**
+   * Score crawler compatibility based on sitemap features
+   * @private
+   */
+  _scoreSitemapCompatibility(type, analysis) {
+    // Google scoring
+    if (type === 'google-news') {
+      this.crawlerCompatibility.google.strengths.push('News sitemap presente (excelente)')
+      this.crawlerCompatibility.bing.warnings.push('News sitemap fraco no Bing')
+      this.crawlerCompatibility.yandex.strengths.push('News sitemap funciona')
+    }
+
+    if (type === 'google-images') {
+      this.crawlerCompatibility.google.strengths.push('Image sitemap presente')
+    }
+
+    if (type === 'google-videos') {
+      this.crawlerCompatibility.google.strengths.push('Video sitemap presente')
+      this.crawlerCompatibility.baidu.warnings.push('Suporte instável a video sitemaps')
+    }
+
+    if (type === 'sitemap-index') {
+      this.crawlerCompatibility.google.strengths.push('Sitemap index bem estruturado')
+      this.crawlerCompatibility.bing.strengths.push('Sitemap index bem estruturado')
+      this.crawlerCompatibility.baidu.warnings.push('Sitemap index pode quebrar no Baidu')
+    }
+
+    // Bing-specific
+    if (analysis.hasPriority) {
+      this.crawlerCompatibility.bing.strengths.push('<priority> presente (Bing usa)')
+      this.crawlerCompatibility.google.warnings.push('<priority> ignorado pelo Google')
+    }
+
+    if (analysis.hasChangefreq) {
+      this.crawlerCompatibility.bing.strengths.push('<changefreq> presente (Bing usa)')
+      this.crawlerCompatibility.google.warnings.push('<changefreq> ignorado pelo Google')
+    }
+
+    // Lastmod (important for all)
+    if (analysis.hasLastmod) {
+      this.crawlerCompatibility.google.strengths.push('<lastmod> presente e confiável')
+      this.crawlerCompatibility.bing.strengths.push('<lastmod> presente')
+    }
+
+    // Large sitemaps
+    if (analysis.urlCount > 10000) {
+      this.crawlerCompatibility.baidu.warnings.push(`Sitemap grande (${analysis.urlCount} URLs) - Baidu pode quebrar`)
+    }
+  }
+
+  /**
+   * Calculate crawler compatibility scores
+   * @private
+   */
+  _calculateCrawlerScores() {
+    for (const crawler of Object.keys(this.crawlerCompatibility)) {
+      const compat = this.crawlerCompatibility[crawler]
+      let score = 5.0 // baseline
+
+      // Add points for strengths (max +5)
+      score += Math.min(compat.strengths.length * 0.5, 5)
+
+      // Subtract points for warnings (max -5)
+      score -= Math.min(compat.warnings.length * 0.5, 5)
+
+      // Cap between 0-10
+      compat.score = Math.max(0, Math.min(10, score))
+    }
+
+    // DuckDuckGo inherits from Bing
+    this.crawlerCompatibility.duckduckgo = {
+      score: this.crawlerCompatibility.bing.score,
+      strengths: [...this.crawlerCompatibility.bing.strengths],
+      warnings: [...this.crawlerCompatibility.bing.warnings, 'Usa resultados do Bing']
+    }
+  }
+
+  /**
+   * Estimate crawl budget and time
+   * @private
+   */
+  _estimateCrawlBudget() {
+    const totalUrls = this.discovered.sitemaps.reduce((sum, s) => sum + (s.urlCount || 0), 0)
+    const crawlDelay = this.discovered.robotsDirectives.crawlDelay || 0
+
+    return {
+      estimatedPageCount: totalUrls,
+      crawlDelay: crawlDelay,
+      estimatedCrawlTime: {
+        google: this._formatTime(totalUrls * 0.5), // 0.5s per URL (fast, no delay)
+        bing: this._formatTime(totalUrls * (1 + crawlDelay)), // respects delay
+        yandex: this._formatTime(totalUrls * (2 + crawlDelay)), // slower + delay
+        baidu: this._formatTime(totalUrls * 1.5), // medium speed, ignores delay
+        duckduckgo: this._formatTime(totalUrls * (1 + crawlDelay)) // same as Bing
+      }
+    }
+  }
+
+  /**
+   * Format seconds to human-readable time
+   * @private
+   */
+  _formatTime(seconds) {
+    if (seconds < 60) return `${Math.round(seconds)}s`
+    if (seconds < 3600) return `${Math.round(seconds / 60)}min`
+    return `${(seconds / 3600).toFixed(1)}h`
+  }
+
+  /**
    * Generate discovery report
    * @private
    */
   _generateReport(domain) {
+    // Calculate final scores
+    this._calculateCrawlerScores()
+
+    // Estimate crawl budget
+    const crawlBudget = this._estimateCrawlBudget()
+
     return {
       domain,
       timestamp: new Date().toISOString(),
@@ -728,8 +1059,12 @@ export class DeepDiscovery {
         staticFiles: this.discovered.staticFiles,
         platforms: this.discovered.platforms.sort((a, b) => b.confidence - a.confidence),
         subdomains: this.discovered.subdomains,
-        exposedPaths: this.discovered.exposedPaths
+        exposedPaths: this.discovered.exposedPaths,
+        ampPages: this.discovered.ampPages,
+        robotsDirectives: this.discovered.robotsDirectives
       },
+      crawlerCompatibility: this.crawlerCompatibility,
+      crawlBudget,
       summary: {
         sitemapCount: this.discovered.sitemaps.length,
         feedCount: this.discovered.feeds.length,
@@ -738,6 +1073,7 @@ export class DeepDiscovery {
         platformCount: this.discovered.platforms.length,
         subdomainCount: this.discovered.subdomains.length,
         exposedPathCount: this.discovered.exposedPaths.length,
+        ampPageCount: this.discovered.ampPages.length,
         totalFound: this.stats.urlsFound,
         totalProbed: this.stats.urlsProbed,
         successRate: ((this.stats.urlsFound / this.stats.urlsProbed) * 100).toFixed(2) + '%'

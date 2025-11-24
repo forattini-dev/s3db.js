@@ -324,6 +324,7 @@ describe('GlobalCoordinatorService - Integration Tests', () => {
   describe('8. Storage Structure', () => {
     it('should use correct storage key formats', async () => {
       const coordinator = await database.getGlobalCoordinator('storage-format-test');
+      await coordinator.start(); // Ensure storage is initialized
 
       // Verify key formats (should follow self-documenting key-value convention)
       const stateKey = coordinator._getStateKey();
