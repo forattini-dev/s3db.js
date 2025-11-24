@@ -435,6 +435,161 @@ describe('LinkDiscoverer', () => {
     })
   })
 
+  describe('Robots.txt integration', () => {
+    test('should filter links by robots.txt with extractLinksAsync', async () => {
+      discoverer = new LinkDiscoverer({
+        respectRobotsTxt: true,
+        robotsFetcher: async () => `
+User-agent: *
+Disallow: /admin/
+Disallow: /private/
+`
+      })
+
+      const html = `
+        <a href="/public">Public</a>
+        <a href="/admin/dashboard">Admin</a>
+        <a href="/private/data">Private</a>
+      `
+
+      const links = await discoverer.extractLinksAsync(html, 'https://example.com', 0)
+
+      expect(links).toHaveLength(1)
+      expect(links[0].url).toBe('https://example.com/public')
+    })
+
+    test('should track blocked URLs', async () => {
+      discoverer = new LinkDiscoverer({
+        respectRobotsTxt: true,
+        robotsFetcher: async () => `
+User-agent: *
+Disallow: /admin/
+`
+      })
+
+      const html = `
+        <a href="/public">Public</a>
+        <a href="/admin/page">Admin</a>
+      `
+
+      await discoverer.extractLinksAsync(html, 'https://example.com', 0)
+
+      const stats = discoverer.getStats()
+      expect(stats.blockedByRobots).toBe(1)
+    })
+
+    test('should include crawl delay in metadata', async () => {
+      discoverer = new LinkDiscoverer({
+        respectRobotsTxt: true,
+        robotsFetcher: async () => `
+User-agent: *
+Crawl-delay: 2
+Disallow:
+`
+      })
+
+      const html = `<a href="/page">Page</a>`
+      const links = await discoverer.extractLinksAsync(html, 'https://example.com', 0)
+
+      expect(links[0].metadata.crawlDelay).toBe(2000)
+    })
+
+    test('should check single URL with isAllowedByRobots', async () => {
+      discoverer = new LinkDiscoverer({
+        respectRobotsTxt: true,
+        robotsFetcher: async () => `
+User-agent: *
+Disallow: /admin/
+`
+      })
+
+      const allowed = await discoverer.isAllowedByRobots('https://example.com/public')
+      expect(allowed.allowed).toBe(true)
+
+      const disallowed = await discoverer.isAllowedByRobots('https://example.com/admin/page')
+      expect(disallowed.allowed).toBe(false)
+    })
+
+    test('should preload robots.txt', async () => {
+      let fetched = false
+      discoverer = new LinkDiscoverer({
+        respectRobotsTxt: true,
+        robotsFetcher: async () => {
+          fetched = true
+          return 'User-agent: *\nDisallow:'
+        }
+      })
+
+      await discoverer.preloadRobots('https://example.com/page')
+      expect(fetched).toBe(true)
+    })
+
+    test('should get sitemaps from robots.txt', async () => {
+      discoverer = new LinkDiscoverer({
+        respectRobotsTxt: true,
+        robotsFetcher: async () => `
+User-agent: *
+Disallow:
+Sitemap: https://example.com/sitemap.xml
+`
+      })
+
+      const sitemaps = await discoverer.getSitemaps('https://example.com')
+      expect(sitemaps).toContain('https://example.com/sitemap.xml')
+    })
+
+    test('should skip robots.txt check when disabled', async () => {
+      discoverer = new LinkDiscoverer({
+        respectRobotsTxt: false
+      })
+
+      const html = `<a href="/admin">Admin</a>`
+      const links = await discoverer.extractLinksAsync(html, 'https://example.com', 0)
+
+      expect(links).toHaveLength(1)
+    })
+
+    test('should use custom user agent', async () => {
+      let receivedUA = null
+      discoverer = new LinkDiscoverer({
+        respectRobotsTxt: true,
+        robotsUserAgent: 'my-custom-bot',
+        robotsFetcher: async () => `
+User-agent: my-custom-bot
+Disallow: /secret/
+
+User-agent: *
+Disallow:
+`
+      })
+
+      const html = `<a href="/secret/page">Secret</a>`
+      const links = await discoverer.extractLinksAsync(html, 'https://example.com', 0)
+
+      expect(links).toHaveLength(0) // Blocked for my-custom-bot
+    })
+
+    test('should clear robots cache on reset with option', async () => {
+      discoverer = new LinkDiscoverer({
+        respectRobotsTxt: true,
+        robotsFetcher: async () => 'User-agent: *\nDisallow:'
+      })
+
+      await discoverer.preloadRobots('https://example.com')
+      expect(discoverer.getStats().robotsCacheSize).toBe(1)
+
+      discoverer.reset({ clearRobotsCache: true })
+      expect(discoverer.getStats().robotsCacheSize).toBe(0)
+    })
+
+    test('should return allowed when robots parser is null', async () => {
+      discoverer = new LinkDiscoverer({ respectRobotsTxt: false })
+
+      const result = await discoverer.isAllowedByRobots('https://example.com/page')
+      expect(result.allowed).toBe(true)
+    })
+  })
+
   describe('Edge cases', () => {
     test('should handle empty href', () => {
       const html = `

@@ -10,6 +10,8 @@
  * - Deduplicate URLs
  */
 
+import { RobotsParser } from './robots-parser.js'
+
 export class LinkDiscoverer {
   constructor(config = {}) {
     this.config = {
@@ -26,6 +28,9 @@ export class LinkDiscoverer {
       respectRobotsTxt: config.respectRobotsTxt !== false,
       ignoreQueryString: config.ignoreQueryString || false,
       ignoreHash: config.ignoreHash !== false,
+      // Robots.txt configuration
+      robotsUserAgent: config.robotsUserAgent || 's3db-spider',
+      robotsCacheTimeout: config.robotsCacheTimeout || 3600000, // 1 hour
       // Default ignore patterns (common non-content pages)
       defaultIgnore: config.defaultIgnore || [
         /\.(css|js|json|xml|ico|png|jpg|jpeg|gif|svg|webp|woff|woff2|ttf|eot|pdf|zip|tar|gz)$/i,
@@ -49,12 +54,21 @@ export class LinkDiscoverer {
     // URL pattern matcher reference (set by SpiderPlugin)
     this.patternMatcher = null
 
+    // Robots.txt parser
+    this.robotsParser = config.respectRobotsTxt !== false
+      ? new RobotsParser({
+          userAgent: this.config.robotsUserAgent,
+          cacheTimeout: this.config.robotsCacheTimeout,
+          fetcher: config.robotsFetcher || null
+        })
+      : null
+
     // Discovered URLs tracking
     this.discovered = new Set()
     this.queued = new Set()
 
-    // Robots.txt cache
-    this.robotsCache = new Map()
+    // URLs blocked by robots.txt
+    this.blockedByRobots = new Set()
   }
 
   /**
@@ -66,7 +80,17 @@ export class LinkDiscoverer {
   }
 
   /**
-   * Extract links from HTML content
+   * Set custom robots.txt fetcher (for testing)
+   * @param {Function} fetcher - async (url) => string
+   */
+  setRobotsFetcher(fetcher) {
+    if (this.robotsParser) {
+      this.robotsParser.setFetcher(fetcher)
+    }
+  }
+
+  /**
+   * Extract links from HTML content (sync version - no robots.txt check)
    *
    * @param {string} html - HTML content
    * @param {string} baseUrl - Base URL for resolving relative links
@@ -145,6 +169,95 @@ export class LinkDiscoverer {
     }
 
     return links
+  }
+
+  /**
+   * Extract links from HTML content with robots.txt checking
+   *
+   * @param {string} html - HTML content
+   * @param {string} baseUrl - Base URL for resolving relative links
+   * @param {number} currentDepth - Current crawl depth
+   * @returns {Promise<Array<Object>>} Discovered links with metadata
+   */
+  async extractLinksAsync(html, baseUrl, currentDepth = 0) {
+    // First extract all links (sync)
+    const links = this.extractLinks(html, baseUrl, currentDepth)
+
+    // If no robots.txt checking, return as-is
+    if (!this.robotsParser || !this.config.respectRobotsTxt) {
+      return links
+    }
+
+    // Filter by robots.txt (in parallel for performance)
+    const results = await Promise.all(
+      links.map(async (link) => {
+        const result = await this.robotsParser.isAllowed(link.url)
+        return { link, allowed: result.allowed, crawlDelay: result.crawlDelay }
+      })
+    )
+
+    // Return only allowed links, track blocked ones
+    const allowedLinks = []
+    for (const { link, allowed, crawlDelay } of results) {
+      if (allowed) {
+        if (crawlDelay) {
+          link.metadata.crawlDelay = crawlDelay
+        }
+        allowedLinks.push(link)
+      } else {
+        this.blockedByRobots.add(link.url)
+      }
+    }
+
+    return allowedLinks
+  }
+
+  /**
+   * Check if a single URL is allowed by robots.txt
+   *
+   * @param {string} url - URL to check
+   * @returns {Promise<{allowed: boolean, crawlDelay?: number}>}
+   */
+  async isAllowedByRobots(url) {
+    if (!this.robotsParser || !this.config.respectRobotsTxt) {
+      return { allowed: true }
+    }
+    return await this.robotsParser.isAllowed(url)
+  }
+
+  /**
+   * Preload robots.txt for a domain
+   *
+   * @param {string} url - Any URL from the domain
+   */
+  async preloadRobots(url) {
+    if (!this.robotsParser) return
+
+    try {
+      const urlObj = new URL(url)
+      const domain = `${urlObj.protocol}//${urlObj.host}`
+      await this.robotsParser.preload(domain)
+    } catch {
+      // Invalid URL, ignore
+    }
+  }
+
+  /**
+   * Get sitemaps from robots.txt for a domain
+   *
+   * @param {string} url - Any URL from the domain
+   * @returns {Promise<string[]>} Array of sitemap URLs
+   */
+  async getSitemaps(url) {
+    if (!this.robotsParser) return []
+
+    try {
+      const urlObj = new URL(url)
+      const domain = `${urlObj.protocol}//${urlObj.host}`
+      return await this.robotsParser.getSitemaps(domain)
+    } catch {
+      return []
+    }
   }
 
   /**
@@ -280,18 +393,27 @@ export class LinkDiscoverer {
     return {
       discovered: this.discovered.size,
       queued: this.queued.size,
+      blockedByRobots: this.blockedByRobots.size,
       maxUrls: this.config.maxUrls,
       maxDepth: this.config.maxDepth,
-      remaining: this.config.maxUrls - this.discovered.size
+      remaining: this.config.maxUrls - this.discovered.size,
+      robotsCacheSize: this.robotsParser?.getCacheStats()?.size || 0
     }
   }
 
   /**
    * Reset discovery state
+   * @param {Object} options - Reset options
+   * @param {boolean} options.clearRobotsCache - Also clear robots.txt cache
    */
-  reset() {
+  reset(options = {}) {
     this.discovered.clear()
     this.queued.clear()
+    this.blockedByRobots.clear()
+
+    if (options.clearRobotsCache && this.robotsParser) {
+      this.robotsParser.clearCache()
+    }
   }
 
   /**
