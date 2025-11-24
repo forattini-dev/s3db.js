@@ -62,8 +62,8 @@ export class GlobalCoordinatorService extends EventEmitter {
     this.database = database;
     this.serviceId = `global-coordinator-${Date.now()}-${++serviceCounter}`;
 
-    // Worker identity
-    this.workerId = `gcs-${namespace}-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
+    // Worker identity - use stable identifiers when available (k8s pod name, database ID)
+    this.workerId = this._generateWorkerId();
 
     // State
     this.isRunning = false;
@@ -801,6 +801,34 @@ export class GlobalCoordinatorService extends EventEmitter {
     if (this.config.diagnosticsEnabled) {
       this.logger.error(`${msg}:`, err?.message || err);
     }
+  }
+
+  /**
+   * Generate stable worker ID from environment variables or database ID
+   * Priority: POD_NAME > HOSTNAME > database.id > fallback
+   * @private
+   * @returns {string} Worker ID
+   */
+  _generateWorkerId() {
+    const env = typeof process !== 'undefined' ? process.env : {};
+
+    // Priority 1: Kubernetes POD_NAME (most stable in k8s)
+    if (env.POD_NAME) {
+      return `gcs-${env.POD_NAME}`;
+    }
+
+    // Priority 2: HOSTNAME (stable in containers/VMs)
+    if (env.HOSTNAME) {
+      return `gcs-${env.HOSTNAME}`;
+    }
+
+    // Priority 3: database.id (stable per database instance)
+    if (this.database && this.database.id) {
+      return `gcs-${this.database.id}`;
+    }
+
+    // Fallback: timestamp + random (for development/testing)
+    return `gcs-${this.namespace}-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
   }
 }
 

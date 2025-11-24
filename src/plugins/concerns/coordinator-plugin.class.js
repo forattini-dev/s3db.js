@@ -52,8 +52,8 @@ export class CoordinatorPlugin extends Plugin {
       this.logger = createLogger({ name: 'CoordinatorPlugin', level: logLevel });
     }
 
-    // Worker identity (unique even if created in same millisecond)
-    this.workerId = `worker-${Date.now()}-${++workerCounter}-${Math.random().toString(36).slice(2, 9)}`;
+    // Worker identity - use stable identifiers when available (k8s pod name, database ID)
+    this.workerId = this._generateWorkerId();
     this.workerStartTime = Date.now();
 
     // Coordinator state
@@ -550,5 +550,33 @@ export class CoordinatorPlugin extends Plugin {
    */
   _sleep(ms) {
     return new Promise(resolve => setTimeout(resolve, ms));
+  }
+
+  /**
+   * Generate stable worker ID from environment variables or database ID
+   * Priority: POD_NAME > HOSTNAME > database.id > fallback
+   * @private
+   * @returns {string} Worker ID
+   */
+  _generateWorkerId() {
+    const env = typeof process !== 'undefined' ? process.env : {};
+
+    // Priority 1: Kubernetes POD_NAME (most stable in k8s)
+    if (env.POD_NAME) {
+      return `worker-${env.POD_NAME}`;
+    }
+
+    // Priority 2: HOSTNAME (stable in containers/VMs)
+    if (env.HOSTNAME) {
+      return `worker-${env.HOSTNAME}`;
+    }
+
+    // Priority 3: database.id (stable per database instance)
+    if (this.database && this.database.id) {
+      return `worker-${this.database.id}`;
+    }
+
+    // Fallback: timestamp + counter + random (for development/testing)
+    return `worker-${Date.now()}-${++workerCounter}-${Math.random().toString(36).slice(2, 9)}`;
   }
 }
