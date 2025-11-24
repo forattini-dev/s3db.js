@@ -1,79 +1,63 @@
 # 🕷️ SpiderPlugin
 
-> **All-in-one web crawler suite bundling Puppeteer, S3Queue, and TTL for distributed crawling workloads.**
+> **Complete web crawler for SEO audits, security analysis, and technology fingerprinting.**
 >
-> **Navigation:** [← Plugin Index](./README.md) | [Configuration ↓](#-configuration-reference) | [FAQ ↓](#-faq)
+> **Navigation:** [← Plugin Index](./README.md) | [Use Cases ↓](#-use-cases) | [Activity System ↓](#-activity-system) | [FAQ ↓](#-faq)
 
 ---
 
 ## ⚡ TLDR
 
-**Integrated crawler bundle** that combines browser automation, distributed queueing, and TTL management under one namespace.
+**Enterprise-grade web crawler** combining browser automation, distributed queuing, and comprehensive analysis.
 
 **1 line to get started:**
 ```javascript
 await db.usePlugin(new SpiderPlugin({ namespace: 'crawler' }));
 ```
 
-**Production-ready setup:**
+**Complete SEO audit:**
 ```javascript
-await db.usePlugin(new SpiderPlugin({
-  namespace: 'crawler',              // Shared namespace
-  queue: {
-    autoStart: true,                 // Start workers automatically
-    concurrency: 5                   // Parallel workers
-  },
-  puppeteer: {
-    pool: { enabled: true, size: 3 } // Browser pool
-  },
-  ttl: {
-    queue: { ttl: 3600 }             // 1-hour TTL for stale tasks
-  },
-  processor: async (task, ctx, { puppeteer }) => {
-    const page = await puppeteer.open(task.url);
-    const title = await page.title();
-    await page.close();
-    return { url: task.url, title };
-  }
-}));
-
-// Enqueue crawl targets
-const spider = db.plugins['crawler-suite'];
-await spider.enqueueTarget({ url: 'https://example.com' });
-```
-
-**Key features:**
-- ✅ **Integrated Browser Automation** - PuppeteerPlugin with sensible defaults
-- ✅ **Distributed Queue** - S3QueuePlugin for scalable task processing
-- ✅ **Automatic TTL Cleanup** - Optional TTL management for stale tasks
-- ✅ **SEO Analysis** - Meta tags, OpenGraph, Twitter Cards, assets, links
-- ✅ **Technology Fingerprinting** - Detect 100+ frameworks, analytics, CDN
-- ✅ **Security Analysis** - Headers, CSP, CORS, WebSockets, vulnerabilities
-- ✅ **Visual Capture** - Screenshot capture with configurable format/quality
-- ✅ **Performance Metrics** - Core Web Vitals, navigation timing, memory
-- ✅ **Data Persistence** - Configurable opt-in storage to S3
-- ✅ **Namespaced Resources** - Isolated crawler data (`<namespace>_targets`)
-- ✅ **Simple API** - Unified interface hiding complexity
-- ✅ **Production Ready** - Error handling, retries, and monitoring built-in
-- ✅ **Horizontal Scaling** - Multiple workers across processes/machines
-
-**Performance comparison:**
-```javascript
-// ❌ Without SpiderPlugin: Manual setup
-await db.usePlugin(new PuppeteerPlugin({ namespace: 'pup' }));
-await db.usePlugin(new S3QueuePlugin({ namespace: 'queue', resource: 'pup_targets' }));
-await db.usePlugin(new TTLPlugin({ resources: [{ name: 'pup_targets', ttl: 3600 }] }));
-// 30+ lines to wire everything together
-
-// ✅ With SpiderPlugin: One-liner setup
-await db.usePlugin(new SpiderPlugin({
-  namespace: 'crawler',
+const spider = new SpiderPlugin({
+  namespace: 'seo-audit',
   queue: { autoStart: true, concurrency: 5 },
-  puppeteer: { pool: { enabled: true } },
-  ttl: { queue: { ttl: 3600 } }
-}));
-// Everything wired and ready to crawl!
+  puppeteer: {
+    stealth: { enabled: true },           // Avoid bot detection
+    pool: { enabled: true, maxBrowsers: 3 }
+  }
+});
+
+await db.usePlugin(spider);
+await db.connect();
+
+// Audit with SEO preset
+await spider.enqueueTarget({
+  url: 'https://example.com',
+  activityPreset: 'seo_complete'    // All SEO activities
+});
+
+// Or custom activities
+await spider.enqueueTarget({
+  url: 'https://competitor.com',
+  activities: [
+    'seo_meta_tags',
+    'seo_opengraph',
+    'seo_links_analysis',
+    'seo_accessibility',
+    'tech_frameworks',
+    'security_headers'
+  ]
+});
 ```
+
+**Key Features:**
+- ✅ **SEO Analysis** - Meta tags, OpenGraph, content ratio, accessibility (WCAG 2.1)
+- ✅ **Security Audit** - Headers, CSP, CORS, CAPTCHA detection, vulnerability scoring
+- ✅ **Tech Detection** - 100+ frameworks, analytics, CMS, CDN fingerprinting
+- ✅ **Performance Metrics** - Core Web Vitals, navigation timing, memory
+- ✅ **Anti-Detection** - Stealth mode, proxy rotation, human behavior simulation
+- ✅ **Distributed Crawling** - Horizontal scaling with S3-based queue
+- ✅ **Storage Analysis** - localStorage, IndexedDB, sessionStorage extraction
+- ✅ **Content Analysis** - iFrames, tracking pixels, embeds detection
 
 ---
 
@@ -84,32 +68,16 @@ await db.usePlugin(new SpiderPlugin({
 pnpm install s3db.js puppeteer
 ```
 
-**Peer Dependencies:**
-- `puppeteer` (required) - Browser automation engine
-- `@aws-sdk/client-s3` (required) - S3 storage backend
+**Full installation (recommended):**
+```bash
+pnpm install s3db.js puppeteer puppeteer-extra puppeteer-extra-plugin-stealth ghost-cursor user-agents
+```
 
-**What You Get:**
-
-SpiderPlugin is a **meta-plugin** that bundles three plugins under one namespace:
-
-1. **PuppeteerPlugin** - Browser automation (Chromium pool)
-2. **S3QueuePlugin** - Distributed task queue
-3. **TTLPlugin** (optional) - Automatic cleanup of stale tasks
-
-**Automatic Setup:**
-- Creates namespaced resources: `<namespace>_targets`, `<namespace>_ttl_cohorts`
-- Wires queue processor to Puppeteer instance
-- Configures TTL cleanup if enabled
-- Provides unified API for common operations
-
-**Why Bundle These?**
-
-Web crawling requires:
-- **Browser automation** - Puppeteer for rendering JavaScript
-- **Distributed queuing** - S3Queue for horizontal scaling
-- **Task expiration** - TTL to prevent infinite retries
-
-SpiderPlugin eliminates 100+ lines of boilerplate setup.
+**What's included:**
+- `puppeteer` - Browser automation
+- `puppeteer-extra-plugin-stealth` - Bot detection bypass
+- `ghost-cursor` - Human-like mouse movements
+- `user-agents` - Realistic user agent rotation
 
 ---
 
@@ -117,656 +85,1658 @@ SpiderPlugin eliminates 100+ lines of boilerplate setup.
 
 1. [⚡ TLDR](#-tldr)
 2. [📦 Dependencies](#-dependencies)
-3. [⚡ Quickstart](#-quickstart)
-4. [Usage Journey](#usage-journey)
-   - [Level 1: Basic Crawling](#level-1-basic-crawling)
-   - [Level 2: Queue Management](#level-2-queue-management)
-   - [Level 3: Advanced Crawling](#level-3-advanced-crawling)
-   - [Level 4: Production Setup](#level-4-production-setup)
-   - [Level 5: Multi-Worker Distributed](#level-5-multi-worker-distributed)
-5. [📊 Configuration Reference](#-configuration-reference)
-6. [📚 Configuration Examples](#-configuration-examples)
-7. [🔧 API Reference](#-api-reference)
-8. [✅ Best Practices](#-best-practices)
-9. [🚨 Error Handling](#-error-handling)
-10. [🔗 See Also](#-see-also)
-11. [❓ FAQ](#-faq)
+3. [🎯 Use Cases](#-use-cases)
+4. [🎬 Activity System](#-activity-system)
+5. [🔍 SEO Analysis Deep Dive](#-seo-analysis-deep-dive)
+6. [🔒 Security Analysis Deep Dive](#-security-analysis-deep-dive)
+7. [🎭 Puppeteer Integration](#-puppeteer-integration)
+8. [📈 Usage Journey](#-usage-journey)
+9. [📊 Configuration Reference](#-configuration-reference)
+10. [🔧 API Reference](#-api-reference)
+11. [✅ Best Practices](#-best-practices)
+12. [🚨 Error Handling](#-error-handling)
+13. [❓ FAQ](#-faq)
 
 ---
 
-## ⚡ Quickstart
+## 🎯 Use Cases
+
+### Use Case 1: Complete SEO Audit
+
+Audit your website for SEO issues, accessibility problems, and content optimization opportunities.
 
 ```javascript
 import { Database } from 's3db.js';
 import { SpiderPlugin } from 's3db.js/plugins';
 
-const db = new Database({
-  connectionString: 's3://key:secret@bucket/path'
-});
+const db = new Database({ connectionString: 's3://...' });
 
-// Create spider with processor
 const spider = new SpiderPlugin({
-  namespace: 'crawler',
+  namespace: 'seo-audit',
   queue: { autoStart: true, concurrency: 3 },
-  processor: async (task, context, helpers) => {
-    // Access browser via helpers.puppeteer
-    const page = await helpers.puppeteer.open(task.url);
-
-    // Extract data
-    const title = await page.title();
-    const links = await page.$$eval('a', els => els.map(a => a.href));
-
-    await page.close();
-
-    // Return crawl results
-    return { url: task.url, title, linksFound: links.length };
+  persistence: { enabled: true },    // Save all results to S3
+  puppeteer: {
+    stealth: { enabled: true }
   }
 });
 
 await db.usePlugin(spider);
 await db.connect();
 
-// Enqueue crawl targets
-await spider.enqueueTarget({ url: 'https://example.com', priority: 10 });
-await spider.enqueueTarget({ url: 'https://example.com/about', priority: 5 });
+// Audit multiple pages
+const pages = [
+  'https://mysite.com',
+  'https://mysite.com/about',
+  'https://mysite.com/products',
+  'https://mysite.com/blog'
+];
 
-// Monitor queue progress
-const stats = await spider.queuePlugin.getStats();
-console.log(`Pending: ${stats.pending}, Completed: ${stats.completed}`);
+for (const url of pages) {
+  await spider.enqueueTarget({
+    url,
+    activityPreset: 'seo_complete'
+  });
+}
 
-await db.disconnect();
+// Wait for completion and get results
+await spider.startProcessing();
+
+// Query SEO analysis results
+const seoResults = await spider.getSEOAnalysis();
+
+for (const result of seoResults) {
+  console.log(`\n📄 ${result.url}`);
+  console.log(`   SEO Score: ${result.seoScore?.percentage}%`);
+  console.log(`   Title: ${result.metaTags?.title || '❌ MISSING'}`);
+  console.log(`   Description: ${result.metaTags?.description ? '✅' : '❌ MISSING'}`);
+  console.log(`   H1 Count: ${result.onPageSEO?.h1?.count} (should be 1)`);
+  console.log(`   Content Words: ${result.onPageSEO?.contentMetrics?.mainContentWordCount}`);
+  console.log(`   Images without alt: ${result.onPageSEO?.images?.withoutAlt}`);
+
+  // Show recommendations
+  if (result.onPageSEO?.recommendations?.length > 0) {
+    console.log(`   ⚠️ Recommendations:`);
+    for (const rec of result.onPageSEO.recommendations.slice(0, 3)) {
+      console.log(`      - ${rec}`);
+    }
+  }
+}
+```
+
+**What you get:**
+- Title tag analysis (length, quality)
+- Meta description presence
+- H1 tag count and quality
+- Heading hierarchy (H1 > H2 > H3)
+- Content word count and ratio
+- Image alt text audit
+- Internal/external link analysis
+- Accessibility score
+
+---
+
+### Use Case 2: Competitor Analysis
+
+Analyze competitors' technology stack, SEO strategy, and marketing tools.
+
+```javascript
+const spider = new SpiderPlugin({
+  namespace: 'competitor-analysis',
+  queue: { autoStart: true, concurrency: 5 },
+  puppeteer: {
+    stealth: { enabled: true },      // Avoid detection
+    proxy: {                         // Rotate IPs
+      enabled: true,
+      list: ['http://proxy1.com', 'http://proxy2.com']
+    }
+  },
+  persistence: { enabled: true }
+});
+
+await db.usePlugin(spider);
+await db.connect();
+
+const competitors = [
+  'https://competitor1.com',
+  'https://competitor2.com',
+  'https://competitor3.com'
+];
+
+// Deep reconnaissance
+for (const url of competitors) {
+  await spider.enqueueTarget({
+    url,
+    activityPreset: 'reconnaissance',  // Full analysis including storage
+    metadata: { type: 'competitor' }
+  });
+}
+
+// Get technology fingerprints
+const techResults = await spider.getTechFingerprints();
+
+for (const result of techResults) {
+  console.log(`\n🔍 ${result.url}`);
+  console.log(`   Frameworks: ${result.frameworks?.join(', ') || 'None detected'}`);
+  console.log(`   Analytics: ${result.analytics?.join(', ') || 'None detected'}`);
+  console.log(`   Marketing: ${result.marketing?.join(', ') || 'None detected'}`);
+  console.log(`   CMS: ${result.cms?.join(', ') || 'None detected'}`);
+  console.log(`   CDN: ${result.cdn?.join(', ') || 'None detected'}`);
+}
+```
+
+**What you discover:**
+- Frontend frameworks (React, Vue, Angular, Next.js, Nuxt)
+- Analytics platforms (Google Analytics, Mixpanel, Amplitude, Segment)
+- Marketing tools (Facebook Pixel, LinkedIn, Google Ads, HubSpot)
+- CMS platforms (WordPress, Shopify, Drupal, Webflow)
+- CDN providers (Cloudflare, CloudFront, Fastly)
+- JavaScript libraries (jQuery, Bootstrap, Tailwind)
+
+---
+
+### Use Case 3: Security Assessment
+
+Audit security headers, CSP policies, and detect vulnerabilities.
+
+```javascript
+const spider = new SpiderPlugin({
+  namespace: 'security-scan',
+  queue: { autoStart: true, concurrency: 2 },
+  security: {
+    analyzeSecurityHeaders: true,
+    analyzeCSP: true,
+    analyzeCORS: true,
+    checkVulnerabilities: true,
+    captureConsoleLogs: true,
+    captureWebSockets: true
+  }
+});
+
+await db.usePlugin(spider);
+await db.connect();
+
+await spider.enqueueTarget({
+  url: 'https://myapp.com',
+  activityPreset: 'security'
+});
+
+// Get security analysis
+const securityResults = await db.getResource(spider.resourceNames.securityAnalysis);
+const results = await securityResults.query({});
+
+for (const result of results) {
+  console.log(`\n🔒 Security Report: ${result.url}`);
+  console.log(`   Security Score: ${result.securityScore}/100`);
+
+  // Missing headers
+  if (result.securityHeaders?.missing?.length > 0) {
+    console.log(`   ❌ Missing Headers:`);
+    for (const header of result.securityHeaders.missing) {
+      console.log(`      - ${header.header} (${header.importance})`);
+      console.log(`        Recommended: ${header.recommended}`);
+    }
+  }
+
+  // CSP analysis
+  if (result.csp) {
+    console.log(`   CSP Strength: ${result.csp.strength}`);
+    if (result.csp.issues?.length > 0) {
+      console.log(`   CSP Issues:`);
+      for (const issue of result.csp.issues) {
+        console.log(`      - ${issue}`);
+      }
+    }
+  }
+
+  // CAPTCHA detection
+  if (result.captcha?.present) {
+    console.log(`   CAPTCHA Detected: ${result.captcha.providers.join(', ')}`);
+  }
+
+  // Vulnerabilities
+  if (result.vulnerabilities?.length > 0) {
+    console.log(`   ⚠️ Vulnerabilities Found:`);
+    for (const vuln of result.vulnerabilities) {
+      console.log(`      [${vuln.severity.toUpperCase()}] ${vuln.type}`);
+      console.log(`         ${vuln.message}`);
+    }
+  }
+}
+```
+
+**What's analyzed:**
+- **Security Headers**: X-Frame-Options, HSTS, X-Content-Type-Options, X-XSS-Protection
+- **CSP**: Content Security Policy directives, unsafe-inline/eval detection
+- **CORS**: Cross-Origin configuration, wildcard detection
+- **TLS/HTTPS**: Certificate presence, HSTS configuration
+- **CAPTCHA**: reCAPTCHA v2/v3, hCaptcha, Cloudflare Turnstile, AWS WAF
+- **Vulnerabilities**: Clickjacking, MIME sniffing, SSL downgrade risks
+
+---
+
+### Use Case 4: Performance Monitoring
+
+Collect Core Web Vitals and performance metrics across your site.
+
+```javascript
+const spider = new SpiderPlugin({
+  namespace: 'performance-monitor',
+  queue: { autoStart: true, concurrency: 3 },
+  performance: {
+    collectCoreWebVitals: true,
+    collectNavigationTiming: true,
+    collectResourceTiming: true,
+    collectMemory: true
+  }
+});
+
+await db.usePlugin(spider);
+await db.connect();
+
+// Monitor key pages
+const criticalPages = [
+  'https://mysite.com',              // Homepage
+  'https://mysite.com/products',     // High-traffic page
+  'https://mysite.com/checkout'      // Conversion page
+];
+
+for (const url of criticalPages) {
+  await spider.enqueueTarget({
+    url,
+    activityPreset: 'performance'
+  });
+}
+
+// Analyze results
+const results = await spider.getResults();
+
+for (const result of results) {
+  const perf = result.performanceMetrics;
+  if (!perf) continue;
+
+  console.log(`\n⚡ ${result.url}`);
+  console.log(`   LCP (Largest Contentful Paint): ${perf.lcp}ms`);
+  console.log(`   FID (First Input Delay): ${perf.fid}ms`);
+  console.log(`   CLS (Cumulative Layout Shift): ${perf.cls}`);
+  console.log(`   TTFB (Time to First Byte): ${perf.ttfb}ms`);
+  console.log(`   Memory Usage: ${(perf.memory?.usedJSHeapSize / 1024 / 1024).toFixed(2)}MB`);
+
+  // Performance grade
+  const grade = perf.lcp < 2500 && perf.cls < 0.1 ? '✅ Good' : '⚠️ Needs Work';
+  console.log(`   Grade: ${grade}`);
+}
 ```
 
 ---
 
-## Usage Journey
+### Use Case 5: Content & Storage Analysis
+
+Discover what data sites store locally and detect third-party embeds.
+
+```javascript
+const spider = new SpiderPlugin({
+  namespace: 'content-analysis',
+  queue: { autoStart: true }
+});
+
+await db.usePlugin(spider);
+await db.connect();
+
+await spider.enqueueTarget({
+  url: 'https://example.com',
+  activities: [
+    'storage_localstorage',
+    'storage_sessionstorage',
+    'storage_indexeddb',
+    'content_iframes',
+    'content_tracking_pixels'
+  ]
+});
+
+// Get storage analysis
+const storageResource = await db.getResource(spider.resourceNames.storageAnalysis);
+const storageResults = await storageResource.query({});
+
+for (const result of storageResults) {
+  console.log(`\n💾 Storage Analysis: ${result.url}`);
+
+  // localStorage
+  if (result.localStorage?.itemCount > 0) {
+    console.log(`   localStorage: ${result.localStorage.itemCount} items`);
+    console.log(`   Keys: ${Object.keys(result.localStorage.data || {}).slice(0, 5).join(', ')}`);
+  }
+
+  // IndexedDB
+  if (result.indexedDB?.databases?.length > 0) {
+    console.log(`   IndexedDB Databases: ${result.indexedDB.databases.length}`);
+    for (const db of result.indexedDB.databases) {
+      console.log(`      - ${db.name} (${db.stores?.length || 0} stores)`);
+    }
+  }
+}
+
+// Get content analysis (iframes, tracking)
+const contentResource = await db.getResource(spider.resourceNames.contentAnalysis);
+const contentResults = await contentResource.query({});
+
+for (const result of contentResults) {
+  console.log(`\n📦 Content Analysis: ${result.url}`);
+
+  // iFrames
+  if (result.iframes?.totalCount > 0) {
+    console.log(`   iFrames Found: ${result.iframes.totalCount}`);
+    console.log(`   Categories:`);
+    for (const [category, count] of Object.entries(result.iframes.categorized || {})) {
+      if (count > 0) console.log(`      - ${category}: ${count}`);
+    }
+  }
+
+  // Tracking Pixels
+  if (result.trackingPixels?.totalCount > 0) {
+    console.log(`   Tracking Pixels: ${result.trackingPixels.totalCount}`);
+    console.log(`   Services: ${result.trackingPixels.detectedServices?.join(', ')}`);
+  }
+}
+```
+
+---
+
+### Use Case 6: Full Power - Complete Site Intelligence
+
+The ultimate configuration combining all Spider capabilities: stealth browsing, proxy rotation, human behavior simulation, and comprehensive analysis.
+
+```javascript
+import { Database } from 's3db.js';
+import { SpiderPlugin } from 's3db.js/plugins';
+
+const db = new Database({ connectionString: 's3://...' });
+
+// ═══════════════════════════════════════════════════════════
+// FULL POWER CONFIGURATION
+// ═══════════════════════════════════════════════════════════
+const spider = new SpiderPlugin({
+  namespace: 'full-power-crawler',
+  logLevel: 'info',
+
+  // Queue: High concurrency with retries
+  queue: {
+    autoStart: true,
+    concurrency: 10,
+    maxRetries: 3,
+    retryDelay: 2000,
+    batchSize: 5
+  },
+
+  // Puppeteer: Maximum stealth and reliability
+  puppeteer: {
+    pool: {
+      enabled: true,
+      maxBrowsers: 5,
+      maxTabsPerBrowser: 2,
+      closeOnIdle: true,
+      idleTimeout: 60000
+    },
+    stealth: {
+      enabled: true,
+      enableEvasions: true
+    },
+    humanBehavior: {
+      enabled: true,
+      mouse: { enabled: true, jitter: true },
+      typing: { enabled: true, mistakes: true },
+      scrolling: { enabled: true, smooth: true, randomStops: true }
+    },
+    proxy: {
+      enabled: true,
+      list: process.env.PROXY_LIST?.split(',') || [],
+      strategy: 'round-robin',
+      healthCheck: true
+    },
+    performance: {
+      blockImages: false,    // Keep for SEO analysis
+      blockFonts: true,
+      blockMedia: true
+    }
+  },
+
+  // TTL: Auto-cleanup after 7 days
+  ttl: {
+    enabled: true,
+    queue: { ttl: 604800000, onExpire: 'hard-delete' }
+  },
+
+  // Persistence: Save everything
+  persistence: {
+    enabled: true,
+    saveResults: true,
+    saveSEOAnalysis: true,
+    saveTechFingerprint: true,
+    saveSecurityAnalysis: true,
+    saveScreenshots: true,
+    savePerformanceMetrics: true
+  }
+});
+
+await db.usePlugin(spider);
+await db.connect();
+
+// ═══════════════════════════════════════════════════════════
+// GRANULAR ACTIVITY SELECTION PER URL
+// ═══════════════════════════════════════════════════════════
+
+// Homepage: Full analysis
+await spider.enqueueTarget({
+  url: 'https://target.com',
+  activities: [
+    // SEO
+    'seo_meta_tags',
+    'seo_opengraph',
+    'seo_twitter_card',
+    'seo_links_analysis',
+    'seo_content_analysis',
+    'seo_accessibility',
+    'seo_heading_structure',
+    // Security
+    'security_headers',
+    'security_csp',
+    'security_captcha',
+    // Tech
+    'tech_frameworks',
+    'tech_analytics',
+    'tech_marketing',
+    // Visual
+    'screenshot_full',
+    // Performance
+    'performance_core_web_vitals'
+  ],
+  priority: 100,
+  metadata: { type: 'homepage', importance: 'critical' }
+});
+
+// Product pages: Focus on SEO and performance
+await spider.enqueueBatch(
+  [
+    { url: 'https://target.com/product/1' },
+    { url: 'https://target.com/product/2' },
+    { url: 'https://target.com/product/3' }
+  ],
+  {
+    activities: [
+      'seo_meta_tags',
+      'seo_opengraph',
+      'seo_content_analysis',
+      'performance_core_web_vitals',
+      'screenshot_viewport'
+    ],
+    priority: 50,
+    metadata: { type: 'product' }
+  }
+);
+
+// Checkout: Security focus
+await spider.enqueueTarget({
+  url: 'https://target.com/checkout',
+  activities: [
+    'security_headers',
+    'security_csp',
+    'security_cors',
+    'security_tls',
+    'security_captcha',
+    'storage_localstorage',
+    'storage_sessionstorage'
+  ],
+  priority: 80,
+  metadata: { type: 'checkout', importance: 'security-critical' }
+});
+
+// ═══════════════════════════════════════════════════════════
+// ADVANCED: Manual Page Operations with Detection API
+// ═══════════════════════════════════════════════════════════
+
+// Navigate manually for deep inspection
+const page = await spider.navigate('https://target.com/login');
+
+// Detect anti-bot protection
+const antiBot = await spider.detectAntiBotServices(page);
+console.log('Anti-bot services:', antiBot);
+
+// Detect fingerprinting attempts
+const fingerprint = await spider.detectFingerprinting(page);
+console.log('Fingerprinting:', fingerprint);
+
+// Detect WebRTC leaks and media streams
+const webrtc = await spider.detectWebRTCAndStreams(page);
+console.log('WebRTC/Streams:', webrtc);
+
+// Capture all storage
+const storage = await spider.captureAllStorage(page);
+console.log('Storage:', storage);
+
+await page.close();
+
+// ═══════════════════════════════════════════════════════════
+// RESULTS: Query and Export
+// ═══════════════════════════════════════════════════════════
+
+// Wait for queue to complete
+await new Promise(resolve => {
+  const interval = setInterval(async () => {
+    const status = await spider.getQueueStatus();
+    console.log(`Progress: ${status.completed}/${status.completed + status.pending + status.processing}`);
+    if (status.pending === 0 && status.processing === 0) {
+      clearInterval(interval);
+      resolve();
+    }
+  }, 5000);
+});
+
+// Get all results
+const seoResults = await spider.getSEOAnalysis();
+const securityResults = await spider.getSecurityAnalysis();
+const techResults = await spider.getTechFingerprints();
+const screenshots = await spider.getScreenshots();
+const storageResults = await spider.getStorageAnalysis();
+const contentResults = await spider.getContentAnalysis();
+const assetsResults = await spider.getAssetsAnalysis();
+
+// Generate report
+console.log('\n═══════════════════════════════════════════════════════════');
+console.log('                    FULL POWER REPORT');
+console.log('═══════════════════════════════════════════════════════════\n');
+
+console.log(`📊 Pages Analyzed: ${seoResults.length}`);
+console.log(`🔒 Security Issues: ${securityResults.filter(r => r.securityScore < 50).length}`);
+console.log(`🛠️ Technologies Detected: ${new Set(techResults.flatMap(r => r.frameworks)).size} frameworks`);
+console.log(`📸 Screenshots Captured: ${screenshots.length}`);
+
+// SEO Summary
+const avgSeoScore = seoResults.reduce((sum, r) => sum + (r.seoScore?.score || 0), 0) / seoResults.length;
+console.log(`\n📈 Average SEO Score: ${avgSeoScore.toFixed(1)}/100`);
+
+// Pages needing attention
+const lowSeoPages = seoResults.filter(r => (r.seoScore?.score || 0) < 50);
+if (lowSeoPages.length > 0) {
+  console.log(`\n⚠️ Pages with Low SEO Score (<50):`);
+  for (const page of lowSeoPages) {
+    console.log(`   - ${page.url}: ${page.seoScore?.score || 0}/100`);
+  }
+}
+
+// Security alerts
+const securityAlerts = securityResults.filter(r => r.securityScore < 50);
+if (securityAlerts.length > 0) {
+  console.log(`\n🚨 Security Alerts:`);
+  for (const alert of securityAlerts) {
+    console.log(`   - ${alert.url}: Score ${alert.securityScore}/100`);
+    if (alert.securityHeaders?.missing?.length > 0) {
+      console.log(`     Missing headers: ${alert.securityHeaders.missing.map(h => h.header).join(', ')}`);
+    }
+  }
+}
+
+// Tech stack overview
+const allFrameworks = new Set(techResults.flatMap(r => r.frameworks || []));
+const allAnalytics = new Set(techResults.flatMap(r => r.analytics || []));
+const allMarketing = new Set(techResults.flatMap(r => r.marketing || []));
+
+console.log(`\n🛠️ Tech Stack Summary:`);
+console.log(`   Frameworks: ${[...allFrameworks].join(', ') || 'None detected'}`);
+console.log(`   Analytics: ${[...allAnalytics].join(', ') || 'None detected'}`);
+console.log(`   Marketing: ${[...allMarketing].join(', ') || 'None detected'}`);
+
+// Cleanup
+await spider.destroy();
+await db.disconnect();
+```
+
+**What Full Power gives you:**
+
+| Capability | What it does |
+|------------|--------------|
+| **Stealth Mode** | Bypasses bot detection (Cloudflare, Akamai, etc.) |
+| **Human Behavior** | Mouse movements, typing patterns, natural scrolling |
+| **Proxy Rotation** | Distributes requests across multiple IPs |
+| **Browser Pool** | Manages multiple browsers for high concurrency |
+| **Granular Activities** | Run only what you need per URL |
+| **Detection API** | Detect anti-bot, fingerprinting, WebRTC, CAPTCHA |
+| **Full Persistence** | All data saved to S3 for later analysis |
+| **Auto TTL** | Automatic cleanup of old data |
+
+---
+
+## 🎬 Activity System
+
+The Activity System lets you **choose exactly what to analyze** on each URL. Instead of running everything, select only what you need for faster crawls and lower costs.
+
+### Activity Categories
+
+| Category | Activities | Description |
+|----------|------------|-------------|
+| **Visual** | `screenshot_full`, `screenshot_viewport` | Page screenshots |
+| **SEO** | 7 activities | Meta tags, OpenGraph, links, accessibility |
+| **Security** | 8 activities | Headers, CSP, CORS, CAPTCHA, vulnerabilities |
+| **Technology** | 7 activities | Frameworks, analytics, CMS, CDN |
+| **Performance** | 4 activities | Core Web Vitals, timing, memory |
+| **Assets** | 5 activities | CSS, JS, images, videos, audio |
+| **Storage** | 3 activities | localStorage, IndexedDB, sessionStorage |
+| **Content** | 2 activities | iFrames, tracking pixels |
+
+### Complete Activity Reference
+
+#### Visual Activities
+| Activity | Description |
+|----------|-------------|
+| `screenshot_full` | Full page screenshot (scrollable) |
+| `screenshot_viewport` | Viewport only (1920x1080) |
+
+#### SEO Activities
+| Activity | Description |
+|----------|-------------|
+| `seo_meta_tags` | Title, description, keywords, viewport, robots |
+| `seo_opengraph` | OpenGraph tags (og:title, og:image, etc.) |
+| `seo_twitter_card` | Twitter Card tags |
+| `seo_links_analysis` | Internal/external links, anchor text quality |
+| `seo_content_analysis` | Word count, content ratio, paragraph analysis |
+| `seo_accessibility` | WCAG 2.1 checks, alt text, semantic HTML |
+| `seo_heading_structure` | H1-H6 hierarchy analysis |
+
+#### Security Activities
+| Activity | Description |
+|----------|-------------|
+| `security_headers` | X-Frame-Options, HSTS, X-Content-Type-Options |
+| `security_csp` | Content Security Policy analysis |
+| `security_cors` | CORS configuration check |
+| `security_tls` | HTTPS/TLS verification |
+| `security_console_logs` | Browser console errors/warnings |
+| `security_websockets` | WebSocket connection detection |
+| `security_captcha` | CAPTCHA provider detection |
+| `security_vulnerabilities` | Security misconfiguration scan |
+
+#### Technology Activities
+| Activity | Description |
+|----------|-------------|
+| `tech_frameworks` | React, Vue, Angular, Next.js, Nuxt, Gatsby, Svelte |
+| `tech_analytics` | Google Analytics, Mixpanel, Amplitude, Hotjar, Segment |
+| `tech_marketing` | Facebook Pixel, LinkedIn, Google Ads, HubSpot, Intercom |
+| `tech_cdn` | Cloudflare, CloudFront, Fastly, Akamai |
+| `tech_web_server` | Nginx, Apache, IIS, LiteSpeed |
+| `tech_cms` | WordPress, Shopify, Drupal, Webflow, Squarespace |
+| `tech_libraries` | jQuery, Lodash, D3.js, Three.js, Chart.js, Bootstrap
+
+#### Performance Activities
+| Activity | Description |
+|----------|-------------|
+| `performance_core_web_vitals` | LCP, FID, CLS |
+| `performance_navigation_timing` | Page load timing |
+| `performance_resource_timing` | Individual resource timing |
+| `performance_memory` | JavaScript heap size |
+
+#### Storage Activities
+| Activity | Description |
+|----------|-------------|
+| `storage_localstorage` | Extract localStorage key-value pairs |
+| `storage_sessionstorage` | Extract sessionStorage data |
+| `storage_indexeddb` | IndexedDB databases and stores |
+
+#### Content Activities
+| Activity | Description |
+|----------|-------------|
+| `content_iframes` | Detect and categorize iFrames |
+| `content_tracking_pixels` | Tracking pixels and analytics beacons |
+
+### Activity Presets
+
+Use presets for common scenarios:
+
+| Preset | Activities | Use Case | ~Time/URL |
+|--------|------------|----------|-----------|
+| `minimal` | 3 | Quick check | ~5s |
+| `basic` | 7 | General crawling | ~15s |
+| `security` | 8 | Security audit | ~20s |
+| `seo_complete` | 7 | SEO analysis | ~20s |
+| `performance` | 4 | Performance testing | ~25s |
+| `reconnaissance` | 19 | Deep analysis | ~40s |
+| `full` | 36+ | Everything | ~60s+ |
+
+```javascript
+// Using presets
+await spider.enqueueTarget({
+  url: 'https://example.com',
+  activityPreset: 'seo_complete'  // All SEO activities
+});
+
+// Custom combination
+await spider.enqueueTarget({
+  url: 'https://example.com',
+  activities: [
+    'screenshot_full',
+    'seo_meta_tags',
+    'seo_links_analysis',
+    'tech_frameworks',
+    'security_headers'
+  ]
+});
+
+// Batch with default preset
+await spider.enqueueBatch(
+  [
+    { url: 'https://example.com' },
+    { url: 'https://example.com/about' },
+    { url: 'https://example.com/blog', activityPreset: 'security' }  // Override
+  ],
+  { activityPreset: 'basic' }  // Default for all
+);
+```
+
+### Activity API
+
+```javascript
+// List all activities
+const activities = spider.getAvailableActivities();
+// Returns: [{ name: 'screenshot_full', label: 'Full Page Screenshot', ... }, ...]
+
+// Get by category
+const seoActivities = spider.getActivitiesByCategory('seo');
+// Returns: Array of SEO activities
+
+// Get all categories
+const categories = spider.getActivityCategories();
+// Returns: { seo: { activities: [...] }, security: { ... }, ... }
+
+// Get preset details
+const preset = spider.getPresetByName('security');
+// Returns: { name: 'security', activities: [...], description: '...' }
+
+// Validate custom list
+const validation = spider.validateActivityList(['seo_meta_tags', 'invalid_name']);
+// Returns: { valid: false, invalid: ['invalid_name'] }
+```
+
+---
+
+## 🔍 SEO Analysis Deep Dive
+
+SpiderPlugin includes a comprehensive SEO analyzer that goes beyond basic meta tag extraction.
+
+### What's Analyzed
+
+#### 1. Meta Tags
+```javascript
+{
+  metaTags: {
+    title: 'Page Title',           // Should be 30-60 chars
+    description: 'Meta desc...',   // Should be 120-160 chars
+    keywords: 'keyword1, ...',
+    viewport: 'width=device-width',
+    robots: 'index, follow',
+    author: 'Author Name',
+    charset: 'UTF-8'
+  }
+}
+```
+
+#### 2. OpenGraph Tags
+```javascript
+{
+  openGraph: {
+    title: 'OG Title',
+    description: 'OG Description',
+    image: 'https://example.com/og.jpg',
+    url: 'https://example.com',
+    type: 'website',
+    siteName: 'Example Site'
+  }
+}
+```
+
+#### 3. On-Page SEO Structure
+```javascript
+{
+  onPageSEO: {
+    title: {
+      text: 'Page Title',
+      length: 42,
+      quality: 'optimal'          // short | optimal | long
+    },
+    h1: {
+      count: 1,                    // Should be exactly 1
+      texts: [{ text: 'Main Heading', quality: 'good' }]
+    },
+    headingStructure: {
+      total: 12,
+      byLevel: { H1: 1, H2: 4, H3: 7 },
+      hierarchy: 'proper'         // proper | improper
+    },
+    paragraphs: {
+      count: 15,
+      avgLength: 120,
+      quality: { readability: 'good' }
+    },
+    images: {
+      count: 8,
+      withAlt: 6,
+      withoutAlt: 2               // ⚠️ Accessibility issue
+    },
+    contentMetrics: {
+      totalWordCount: 2500,
+      mainContentWordCount: 1800, // Excludes nav/footer
+      contentRatio: 0.72,         // 72% is main content
+      quality: 'comprehensive',   // short | medium | comprehensive
+      detectedContentContainers: [
+        { selector: 'article', wordCount: 1800, matchType: 'semantic' }
+      ]
+    }
+  }
+}
+```
+
+#### 4. Internal Link Analysis
+```javascript
+{
+  internalLinks: {
+    total: 45,
+    sameDomain: {
+      count: 30,
+      links: [{
+        href: 'https://example.com/about',
+        text: 'About Us',
+        quality: 'descriptive',    // descriptive | generic
+        referral: {
+          nofollow: false,
+          noopener: false,
+          rel: null
+        }
+      }]
+    },
+    external: {
+      count: 15,
+      domains: { 'twitter.com': 3, 'linkedin.com': 2 }
+    },
+    anchorTextQuality: {
+      descriptive: 38,
+      poor: 7,                     // "click here", "read more"
+      examples: ['click here', 'more']
+    },
+    referralAttributes: {
+      nofollow: 5,
+      sponsored: 2,
+      ugc: 0,
+      targetBlank: 12
+    },
+    topicalClusters: {
+      clusters: ['blog', 'products', 'about'],
+      strength: [15, 10, 5]
+    }
+  }
+}
+```
+
+#### 5. Accessibility (WCAG 2.1)
+```javascript
+{
+  accessibility: {
+    langAttribute: {
+      present: true,
+      value: 'en'
+    },
+    headingStructure: {
+      startsWithH1: true,
+      properlySorted: true
+    },
+    altText: {
+      total: 8,
+      withAlt: 6,
+      percentage: 75              // Should be 100%
+    },
+    formLabels: {
+      inputs: 5,
+      inputsWithLabels: 4         // 1 missing label
+    },
+    semanticHTML: {
+      elements: {
+        nav: 1,
+        main: 1,
+        article: 3,
+        section: 5,
+        aside: 1,
+        header: 1,
+        footer: 1
+      },
+      score: 13                   // Higher is better
+    },
+    keyboardNavigation: {
+      focusableElements: 45,
+      hasSkipLink: false          // ⚠️ Should have skip link
+    },
+    recommendations: [
+      'Add lang attribute to <html> tag',
+      'Add skip navigation link for keyboard users',
+      'Add alt text to 2 images'
+    ]
+  }
+}
+```
+
+#### 6. Keyword Optimization
+```javascript
+{
+  keywordOptimization: {
+    primaryKeyword: 'web development',
+    secondaryKeywords: ['javascript', 'react'],
+    keywordDensity: '1.5%',       // Ideal: 1-2%
+    inTitle: true,
+    inH1: true,
+    inFirstParagraph: true,
+    recommendations: [
+      'Primary keyword should appear in first paragraph'
+    ]
+  }
+}
+```
+
+#### 7. SEO Score
+```javascript
+{
+  seoScore: {
+    score: 78,
+    maxScore: 100,
+    percentage: '78.0'
+  }
+}
+```
+
+**Score breakdown:**
+- Meta tags (20 points): title, description, viewport, robots
+- OpenGraph (10 points): social sharing optimization
+- On-page SEO (30 points): H1, headings, content length
+- Accessibility (20 points): lang, alt text, semantic HTML
+- Internal links (10 points): topical clusters
+- Keyword optimization (10 points): density, placement
+
+---
+
+## 🔒 Security Analysis Deep Dive
+
+### Security Headers Analysis
+
+```javascript
+{
+  securityHeaders: {
+    present: ['X-Frame-Options', 'X-Content-Type-Options'],
+    missing: [
+      {
+        header: 'Strict-Transport-Security',
+        importance: 'critical',
+        recommended: 'max-age=31536000; includeSubDomains',
+        description: 'Forces HTTPS connections'
+      }
+    ],
+    details: {
+      'x-frame-options': {
+        value: 'SAMEORIGIN',
+        importance: 'critical',
+        description: 'Prevents clickjacking attacks'
+      }
+    }
+  }
+}
+```
+
+**Headers analyzed:**
+| Header | Importance | Recommended Value |
+|--------|------------|-------------------|
+| X-Frame-Options | Critical | DENY or SAMEORIGIN |
+| X-Content-Type-Options | Critical | nosniff |
+| Strict-Transport-Security | Critical | max-age=31536000; includeSubDomains |
+| X-XSS-Protection | High | 1; mode=block |
+| Referrer-Policy | Medium | strict-origin-when-cross-origin |
+| Permissions-Policy | Medium | geolocation=(), camera=() |
+
+### CSP Analysis
+
+```javascript
+{
+  csp: {
+    present: true,
+    value: "default-src 'self'; script-src 'self' 'unsafe-inline'",
+    directives: {
+      'default-src': "'self'",
+      'script-src': "'self' 'unsafe-inline'"
+    },
+    issues: [
+      "script-src contains unsafe-inline - reduces security"
+    ],
+    strength: 'moderate'    // none | weak | moderate | strong
+  }
+}
+```
+
+### CORS Analysis
+
+```javascript
+{
+  cors: {
+    corsEnabled: true,
+    allowOrigin: 'https://trusted.com',
+    allowMethods: 'GET, POST',
+    allowHeaders: 'Content-Type',
+    credentials: true,
+    issues: []              // Empty = secure configuration
+  }
+}
+```
+
+### CAPTCHA Detection
+
+SpiderPlugin detects multiple CAPTCHA providers:
+
+```javascript
+{
+  captcha: {
+    present: true,
+    providers: ['reCAPTCHA v3', 'Cloudflare Turnstile'],
+    details: [
+      {
+        provider: 'Google',
+        type: 'reCAPTCHA v3',
+        version: 3,
+        method: 'invisible',
+        description: 'Google reCAPTCHA v3 - invisible verification'
+      },
+      {
+        provider: 'Cloudflare',
+        type: 'Turnstile',
+        method: 'interactive/invisible',
+        description: 'Cloudflare Turnstile - CAPTCHA alternative'
+      }
+    ]
+  }
+}
+```
+
+**Detected providers:**
+- Google reCAPTCHA v2 (checkbox)
+- Google reCAPTCHA v3 (invisible)
+- hCaptcha
+- Cloudflare Turnstile
+- AWS WAF CAPTCHA
+- Akamai Bot Manager
+
+### Vulnerability Detection
+
+```javascript
+{
+  vulnerabilities: [
+    {
+      type: 'clickjacking',
+      severity: 'high',
+      message: 'Missing X-Frame-Options header',
+      recommendation: 'Add X-Frame-Options: DENY or SAMEORIGIN'
+    },
+    {
+      type: 'ssl-downgrade',
+      severity: 'high',
+      message: 'Missing HSTS header',
+      recommendation: 'Add Strict-Transport-Security header'
+    },
+    {
+      type: 'csp-weak',
+      severity: 'medium',
+      message: 'Weak CSP: script-src contains unsafe-inline',
+      recommendation: 'Remove unsafe-inline from CSP'
+    }
+  ]
+}
+```
+
+### Security Score
+
+Score calculation (0-100):
+- Base: 50 points
+- Security headers: +30 (proportional to present/missing)
+- CSP strength: +20 (strong) / +10 (moderate)
+- CORS security: +20 (no issues) / +10 (minor issues)
+- TLS/HTTPS: +15 (HTTPS + HSTS) / +10 (HTTPS only)
+- Penalties: -10 per high vulnerability, -3 per medium
+
+---
+
+## 🎭 Puppeteer Integration
+
+SpiderPlugin uses PuppeteerPlugin for browser automation. Configure it to avoid bot detection and improve reliability.
+
+### Stealth Mode
+
+Bypass bot detection with stealth mode:
+
+```javascript
+const spider = new SpiderPlugin({
+  namespace: 'stealth-crawler',
+  puppeteer: {
+    stealth: {
+      enabled: true,
+      enableEvasions: true    // All evasion techniques
+    }
+  }
+});
+```
+
+**What stealth mode does:**
+- Removes `navigator.webdriver` flag
+- Patches WebGL vendor/renderer
+- Fixes Chrome plugin detection
+- Spoofs permissions API
+- Randomizes canvas fingerprint
+- Patches CDP detection
+
+### Human Behavior Simulation
+
+Add realistic mouse movements and typing:
+
+```javascript
+const spider = new SpiderPlugin({
+  namespace: 'human-like',
+  puppeteer: {
+    humanBehavior: {
+      enabled: true,
+      mouse: {
+        enabled: true,
+        movementDelay: { min: 50, max: 200 },
+        jitter: true
+      },
+      typing: {
+        enabled: true,
+        delay: { min: 50, max: 150 },
+        mistakes: true,           // Occasional typos + corrections
+        mistakeProbability: 0.02
+      },
+      scrolling: {
+        enabled: true,
+        smooth: true,
+        randomStops: true
+      }
+    }
+  }
+});
+```
+
+### Proxy Rotation
+
+Distribute requests across multiple IPs:
+
+```javascript
+const spider = new SpiderPlugin({
+  namespace: 'distributed',
+  puppeteer: {
+    proxy: {
+      enabled: true,
+      list: [
+        'http://user:pass@proxy1.com:8080',
+        'http://user:pass@proxy2.com:8080',
+        'http://user:pass@proxy3.com:8080'
+      ],
+      strategy: 'round-robin',    // round-robin | random | least-used
+      healthCheck: true,
+      failoverThreshold: 3        // Switch after 3 failures
+    }
+  }
+});
+```
+
+### Browser Pool
+
+Manage multiple browser instances:
+
+```javascript
+const spider = new SpiderPlugin({
+  namespace: 'high-volume',
+  puppeteer: {
+    pool: {
+      enabled: true,
+      maxBrowsers: 5,
+      maxTabsPerBrowser: 10,
+      closeOnIdle: true,
+      idleTimeout: 300000         // 5 minutes
+    }
+  },
+  queue: {
+    concurrency: 50               // Match pool capacity
+  }
+});
+```
+
+### Resource Blocking
+
+Speed up crawling by blocking unnecessary resources:
+
+```javascript
+const spider = new SpiderPlugin({
+  namespace: 'fast-crawler',
+  puppeteer: {
+    performance: {
+      blockImages: true,          // Don't load images
+      blockFonts: true,           // Don't load fonts
+      blockCSS: false,            // Keep CSS for analysis
+      blockMedia: true            // Block video/audio
+    }
+  }
+});
+```
+
+**Performance impact:**
+- Blocking images: 40-60% faster
+- Blocking fonts: 10-20% faster
+- Blocking all: 50-70% faster
+
+### Cookie Farming
+
+Maintain session cookies across requests:
+
+```javascript
+const spider = new SpiderPlugin({
+  namespace: 'session-crawler',
+  puppeteer: {
+    cookies: {
+      enabled: true,
+      storage: {
+        enabled: true,
+        resource: 'crawler_cookies'  // Store in S3
+      },
+      farming: {
+        enabled: true,
+        warmupUrls: [
+          'https://target.com',
+          'https://target.com/login'
+        ],
+        rotationStrategy: 'least-used'
+      }
+    }
+  }
+});
+```
+
+---
+
+## 📈 Usage Journey
 
 ### Level 1: Basic Crawling
 
-Start with a simple single-page crawler:
+Start with a simple single-page crawl:
 
 ```javascript
-import { Database, SpiderPlugin } from 's3db.js';
+import { Database } from 's3db.js';
+import { SpiderPlugin } from 's3db.js/plugins';
 
 const db = new Database({ connectionString: 's3://...' });
 
 const spider = new SpiderPlugin({
-  namespace: 'basic-crawler',
-  processor: async (task, ctx, { puppeteer }) => {
-    const page = await puppeteer.open(task.url);
-    const html = await page.content();
-    await page.close();
-
-    return { url: task.url, size: html.length };
-  }
+  namespace: 'basic',
+  queue: { autoStart: true }
 });
 
 await db.usePlugin(spider);
 await db.connect();
 
 // Crawl one page
-await spider.enqueueTarget({ url: 'https://example.com' });
-await spider.startProcessing();
-```
+await spider.enqueueTarget({
+  url: 'https://example.com',
+  activityPreset: 'minimal'
+});
 
-**What's happening:**
-- SpiderPlugin creates `basic-crawler_targets` resource
-- Processor receives tasks from the queue
-- Puppeteer opens the URL and extracts content
-- Results are stored in task metadata
+// Get results
+const results = await spider.getResults();
+console.log(results[0]);
+```
 
 ---
 
-### Level 2: Queue Management
+### Level 2: Batch Crawling
 
-Control when and how tasks are processed:
+Crawl multiple pages efficiently:
 
 ```javascript
 const spider = new SpiderPlugin({
-  namespace: 'managed',
+  namespace: 'batch',
   queue: {
-    autoStart: false,  // Manual start
-    concurrency: 1,    // Sequential processing
-    batchSize: 10      // Process 10 at a time
+    autoStart: true,
+    concurrency: 5
   }
 });
 
 await db.usePlugin(spider);
-await db.connect();
 
-// Set processor later
-spider.setProcessor(async (task, ctx, { puppeteer, enqueue }) => {
-  const page = await puppeteer.open(task.url);
+// Batch enqueue
+await spider.enqueueBatch(
+  [
+    { url: 'https://example.com' },
+    { url: 'https://example.com/about' },
+    { url: 'https://example.com/products' },
+    { url: 'https://example.com/contact' }
+  ],
+  { activityPreset: 'basic' }
+);
 
-  // Find more URLs to crawl
-  const links = await page.$$eval('a', els => els.map(a => a.href));
-
-  await page.close();
-
-  // Enqueue discovered links
-  for (const link of links.slice(0, 5)) {
-    await enqueue({ url: link, parent: task.url });
-  }
-
-  return { crawled: task.url, discovered: links.length };
-});
-
-// Enqueue seed URLs
-await spider.enqueueTarget({ url: 'https://example.com' });
-await spider.enqueueTarget({ url: 'https://example.com/blog' });
-
-// Start when ready
-await spider.startProcessing();
-
-// Check progress
+// Monitor progress
 setInterval(async () => {
-  const stats = await spider.queuePlugin.getStats();
-  console.log(`Queue: ${stats.pending} pending, ${stats.processing} active`);
+  const status = await spider.getQueueStatus();
+  console.log(`Pending: ${status.pending}, Completed: ${status.completed}`);
 }, 5000);
 ```
 
-**New concepts:**
-- Manual processor registration with `setProcessor()`
-- Recursive crawling by enqueueing discovered links
-- Queue statistics monitoring
-- Manual start control
-
 ---
 
-### Level 3: Advanced Crawling
+### Level 3: Persistent Storage
 
-Add browser pool, retries, and error handling:
+Save all analysis results to S3:
 
 ```javascript
 const spider = new SpiderPlugin({
-  namespace: 'advanced',
-  queue: {
-    autoStart: true,
-    concurrency: 5,
-    maxRetries: 3,
-    retryDelay: 1000
-  },
-  puppeteer: {
-    pool: {
-      enabled: true,
-      size: 3,              // 3 browser instances
-      maxPagesPerBrowser: 5 // 5 pages per browser
-    },
-    launchOptions: {
-      headless: true,
-      args: ['--no-sandbox']
-    }
-  },
-  processor: async (task, ctx, { puppeteer }) => {
-    const page = await puppeteer.open(task.url, {
-      waitUntil: 'networkidle2',
-      timeout: 30000
-    });
-
-    try {
-      // Wait for specific content
-      await page.waitForSelector('article', { timeout: 5000 });
-
-      // Extract structured data
-      const data = await page.evaluate(() => ({
-        title: document.querySelector('h1')?.innerText,
-        content: document.querySelector('article')?.innerText,
-        images: Array.from(document.querySelectorAll('img'))
-          .map(img => img.src)
-      }));
-
-      return { url: task.url, ...data };
-    } finally {
-      await page.close();
-    }
+  namespace: 'persistent',
+  queue: { autoStart: true, concurrency: 3 },
+  persistence: {
+    enabled: true,
+    saveResults: true,
+    saveSEOAnalysis: true,
+    saveTechFingerprint: true,
+    saveSecurityAnalysis: true,
+    saveScreenshots: true,
+    savePerformanceMetrics: true
   }
 });
 
 await db.usePlugin(spider);
-await db.connect();
 
-// Crawl with priorities
-await spider.enqueueTarget({ url: 'https://example.com', priority: 10 });
-await spider.enqueueTarget({ url: 'https://example.com/blog', priority: 5 });
+// Crawl pages
+await spider.enqueueBatch([
+  { url: 'https://example.com', activityPreset: 'full' }
+]);
+
+// Later: query stored results
+const seoResults = await spider.getSEOAnalysis();
+const techResults = await spider.getTechFingerprints();
+const screenshots = await spider.getScreenshots();
 ```
-
-**New concepts:**
-- Browser pooling for performance
-- Retry logic for transient failures
-- Page wait strategies
-- Structured data extraction
-- Priority-based processing
 
 ---
 
 ### Level 4: Production Setup
 
-Add TTL cleanup, monitoring, and graceful shutdown:
+Full production configuration with stealth, proxies, and monitoring:
 
 ```javascript
 const spider = new SpiderPlugin({
   namespace: 'production',
+
+  // Queue configuration
   queue: {
     autoStart: true,
     concurrency: 10,
-    maxRetries: 5,
+    maxRetries: 3,
     retryDelay: 2000
   },
+
+  // Browser configuration
   puppeteer: {
-    pool: { enabled: true, size: 5 }
+    pool: { enabled: true, maxBrowsers: 5 },
+    stealth: { enabled: true },
+    proxy: {
+      enabled: true,
+      list: process.env.PROXY_LIST?.split(',') || []
+    },
+    performance: {
+      blockImages: true,
+      blockFonts: true
+    }
   },
+
+  // TTL cleanup
   ttl: {
+    enabled: true,
     queue: {
-      ttl: 3600,              // 1-hour TTL for stale tasks
-      onExpire: 'hard-delete', // Delete expired tasks
-      checkInterval: 300       // Check every 5 minutes
+      ttl: 86400000,              // 24 hours
+      onExpire: 'hard-delete'
     }
   },
-  processor: async (task, ctx, { puppeteer, resource }) => {
-    const startTime = Date.now();
 
-    try {
-      const page = await puppeteer.open(task.url, { timeout: 30000 });
-
-      const data = await page.evaluate(() => ({
-        title: document.title,
-        links: Array.from(document.querySelectorAll('a'))
-          .map(a => a.href)
-          .filter(href => href.startsWith('http'))
-      }));
-
-      await page.close();
-
-      // Log metrics
-      ctx.logger.info({
-        url: task.url,
-        duration: Date.now() - startTime,
-        linksFound: data.links.length
-      });
-
-      return { success: true, ...data };
-    } catch (error) {
-      ctx.logger.error({
-        url: task.url,
-        error: error.message,
-        duration: Date.now() - startTime
-      });
-      throw error; // Let queue handle retry
-    }
+  // Full persistence
+  persistence: {
+    enabled: true,
+    saveResults: true,
+    saveSEOAnalysis: true,
+    saveTechFingerprint: true,
+    saveSecurityAnalysis: true,
+    saveScreenshots: true
   }
 });
 
 await db.usePlugin(spider);
 await db.connect();
 
-// Handle graceful shutdown
+// Graceful shutdown
 process.on('SIGTERM', async () => {
-  console.log('Shutting down spider...');
+  console.log('Shutting down...');
   await spider.stopProcessing();
+  await spider.destroy();
   await db.disconnect();
   process.exit(0);
 });
 
-// Enqueue batch of URLs
-const urls = [
-  'https://example.com',
-  'https://example.com/blog',
-  'https://example.com/about'
-];
-
-for (const url of urls) {
-  await spider.enqueueTarget({ url, timestamp: Date.now() });
-}
-
-// Monitor continuously
-setInterval(async () => {
-  const stats = await spider.queuePlugin.getStats();
-  const resource = await db.getResource(`${spider.namespace}_targets`);
-  const totalJobs = await resource.query({});
-
-  console.log({
-    pending: stats.pending,
-    processing: stats.processing,
-    completed: stats.completed,
-    total: totalJobs.length
-  });
-}, 10000);
+// Start crawling
+await spider.startProcessing();
 ```
-
-**New concepts:**
-- TTL-based cleanup of stale tasks
-- Structured logging with context
-- Graceful shutdown handling
-- Batch enqueueing
-- Continuous monitoring
 
 ---
 
-### Level 5: Multi-Worker Distributed
+### Level 5: Distributed Crawling
 
-Scale horizontally across multiple processes or machines:
+Scale horizontally across multiple workers:
 
+**Worker 1 (machine-1):**
 ```javascript
-// worker-1.js (Machine 1)
 const spider = new SpiderPlugin({
-  namespace: 'distributed',
+  namespace: 'distributed',        // Same namespace
   queue: {
     autoStart: true,
     concurrency: 5,
-    workerId: 'worker-1' // Unique worker ID
-  },
-  puppeteer: {
-    pool: { enabled: true, size: 3 }
-  },
-  processor: async (task, ctx, { puppeteer }) => {
-    ctx.logger.info(`[Worker 1] Processing: ${task.url}`);
-    // ... crawl logic
+    workerId: 'worker-1'           // Unique ID
   }
 });
+```
 
-await db.usePlugin(spider);
-await db.connect();
-
-// worker-2.js (Machine 2)
+**Worker 2 (machine-2):**
+```javascript
 const spider = new SpiderPlugin({
-  namespace: 'distributed',
+  namespace: 'distributed',        // Same namespace
   queue: {
     autoStart: true,
     concurrency: 5,
-    workerId: 'worker-2' // Different worker ID
-  },
-  puppeteer: {
-    pool: { enabled: true, size: 3 }
-  },
-  processor: async (task, ctx, { puppeteer }) => {
-    ctx.logger.info(`[Worker 2] Processing: ${task.url}`);
-    // ... same crawl logic
+    workerId: 'worker-2'           // Different ID
   }
 });
+```
 
-await db.usePlugin(spider);
-await db.connect();
-
-// coordinator.js (Enqueues jobs)
+**Coordinator (enqueues jobs):**
+```javascript
 const db = new Database({ connectionString: 's3://...' });
 await db.connect();
 
-const resource = await db.getResource('distributed_targets');
+const targetsResource = await db.getResource('plg_distributed_targets');
 
-// Enqueue 1000 URLs
-const urls = await fetchUrlsFromSitemap();
+// Enqueue URLs from sitemap
+const urls = await fetchSitemap('https://example.com/sitemap.xml');
 for (const url of urls) {
-  await resource.enqueue({ url, priority: Math.floor(Math.random() * 10) });
+  await targetsResource.insert({
+    url,
+    status: 'pending',
+    activityPreset: 'basic'
+  });
 }
 
 console.log(`Enqueued ${urls.length} URLs for distributed processing`);
 ```
 
-**New concepts:**
-- Unique worker IDs for distributed processing
-- Shared queue across multiple workers
-- Coordinator pattern for job distribution
-- Horizontal scaling across machines
-- Load balancing via S3Queue
-
 ---
 
 ## 📊 Configuration Reference
 
-Complete configuration object with all options:
-
 ```javascript
 new SpiderPlugin({
   // ============================================
-  // SECTION 1: Core Settings
+  // CORE SETTINGS
   // ============================================
-  namespace: 'spider',                    // Namespace for all resources (required)
-  targetsResource: 'spider_targets',      // Resource name for queue (auto-generated from namespace)
+  namespace: 'crawler',              // Required: Namespace for resources
+  logLevel: 'info',                  // debug | info | warn | error
 
   // ============================================
-  // SECTION 2: Queue Configuration
+  // QUEUE CONFIGURATION
   // ============================================
   queue: {
-    autoStart: false,                     // Start processing automatically (default: false)
-    concurrency: 3,                       // Number of parallel workers (default: 3)
-    maxRetries: 3,                        // Max retry attempts per task (default: 3)
-    retryDelay: 1000,                     // Delay between retries in ms (default: 1000)
-    batchSize: 10,                        // Tasks to process per batch (default: 10)
-    workerId: 'worker-1',                 // Unique worker ID for distributed setups (optional)
-    visibilityTimeout: 30                 // Task lock duration in seconds (default: 30)
+    autoStart: true,                 // Start processing automatically
+    concurrency: 5,                  // Parallel workers
+    maxRetries: 3,                   // Retry failed tasks
+    retryDelay: 1000,                // Delay between retries (ms)
+    batchSize: 10,                   // Tasks per batch
+    workerId: 'worker-1',            // Unique ID for distributed
+    visibilityTimeout: 30            // Task lock duration (seconds)
   },
 
   // ============================================
-  // SECTION 3: Puppeteer Configuration
+  // PUPPETEER CONFIGURATION
   // ============================================
-  puppeteer: {
-    pool: {
-      enabled: false,                     // Enable browser pooling (default: false)
-      size: 3,                            // Number of browser instances (default: 3)
-      maxPagesPerBrowser: 5,              // Max pages per browser (default: 5)
-      launchTimeout: 30000,               // Browser launch timeout (default: 30000)
-      closeTimeout: 5000                  // Browser close timeout (default: 5000)
-    },
-    launchOptions: {
-      headless: true,                     // Run in headless mode (default: true)
-      args: ['--no-sandbox'],             // Chrome launch args (default: [])
-      defaultViewport: {
-        width: 1920,
-        height: 1080
-      }
-    }
-  },
-
-  // ============================================
-  // SECTION 4: TTL Configuration (Optional)
-  // ============================================
-  ttl: {
-    queue: {
-      ttl: 3600,                          // TTL in seconds for queue tasks (default: null, disabled)
-      onExpire: 'hard-delete',            // Action on expiration: 'soft-delete', 'hard-delete', 'callback' (default: 'soft-delete')
-      checkInterval: 300,                 // Cleanup interval in seconds (default: 300)
-      field: 'createdAt'                  // Field to check for expiration (default: 'createdAt')
-    }
-  },
-
-  // ============================================
-  // SECTION 5: Processor Function
-  // ============================================
-  processor: async (task, context, helpers) => {
-    // task: { url, priority, metadata, ... }
-    // context: { logger, db, resource }
-    // helpers: { puppeteer, queue, enqueue, resource }
-
-    const page = await helpers.puppeteer.open(task.url);
-    const data = await page.evaluate(() => ({ title: document.title }));
-    await page.close();
-
-    return data;
-  },
-
-  // ============================================
-  // SECTION 6: Advanced Analysis Features
-  // ============================================
-
-  // SEO Analysis
-  seo: {
-    enabled: true,                      // Enable SEO analysis
-    extractMetaTags: true,              // Extract meta tags
-    extractOpenGraph: true,             // Extract OpenGraph tags
-    extractTwitterCard: true,           // Extract Twitter Card tags
-    extractAssets: true,                // Extract CSS, JS, images
-    assetMetadata: true                 // Collect asset metadata
-  },
-
-  // Technology Detection
-  techDetection: {
-    enabled: true,                      // Enable tech fingerprinting
-    detectFrameworks: true,             // React, Vue, Angular, etc.
-    detectAnalytics: true,              // Google Analytics, Amplitude, etc.
-    detectMarketing: true,              // Facebook Pixel, LinkedIn, etc.
-    detectCDN: true,                    // Cloudflare, CloudFront, etc.
-    detectWebServer: true,              // Nginx, Apache, IIS, etc.
-    detectCMS: true                     // WordPress, Shopify, etc.
-  },
-
-  // Screenshot Capture
-  screenshot: {
-    enabled: true,                      // Enable screenshot capture
-    captureFullPage: true,              // Full page or viewport
-    quality: 80,                        // Quality 0-100 (JPEG only)
-    format: 'jpeg',                     // 'jpeg' or 'png'
-    maxWidth: 1920,                     // Screenshot width
-    maxHeight: 1080                     // Screenshot height
-  },
-
-  // Security Analysis
-  security: {
-    enabled: true,                      // Enable security analysis
-    analyzeSecurityHeaders: true,       // HTTP security headers
-    analyzeCSP: true,                   // Content Security Policy
-    analyzeCORS: true,                  // CORS configuration
-    captureConsoleLogs: true,           // Browser console logs
-    consoleLogLevels: ['error', 'warn'],// Log levels to capture
-    maxConsoleLogLines: 100,            // Max console logs
-    analyzeTLS: true,                   // TLS/HTTPS verification
-    checkVulnerabilities: true,         // Security vulnerability detection
-    captureWebSockets: true,            // WebSocket detection
-    maxWebSocketMessages: 50            // Max WebSocket messages
-  },
-
-  // Performance Metrics
-  performance: {
-    enabled: true,                      // Enable performance collection
-    collectCoreWebVitals: true,         // LCP, FID, CLS
-    collectNavigationTiming: true,      // Page load timing
-    collectResourceTiming: true,        // Resource timing
-    collectMemory: true                 // Memory usage
-  },
-
-  // Data Persistence
-  persistence: {
-    enabled: false,                     // Enable data persistence (opt-in)
-    saveResults: true,                  // Save main crawl results
-    saveSEOAnalysis: true,              // Save SEO analysis
-    saveTechFingerprint: true,          // Save technology fingerprints
-    saveSecurityAnalysis: true,         // Save security analysis
-    saveScreenshots: true,              // Save captured screenshots
-    savePerformanceMetrics: true        // Save performance metrics
-  }
-})
-```
-
-**Configuration Validation:**
-
-| Field | Type | Required | Default | Validation |
-|-------|------|----------|---------|------------|
-| `namespace` | string | ✅ Yes | `'spider'` | Must be alphanumeric + hyphens |
-| `targetsResource` | string | ❌ No | `{namespace}_targets` | Must be valid resource name |
-| `queue.autoStart` | boolean | ❌ No | `false` | - |
-| `queue.concurrency` | number | ❌ No | `3` | Must be > 0 |
-| `puppeteer.pool.enabled` | boolean | ❌ No | `false` | - |
-| `ttl.queue.ttl` | number | ❌ No | `null` | Must be > 0 if provided |
-| `processor` | function | ❌ No | `null` | Must be async function if provided |
-
----
-
-## 📚 Configuration Examples
-
-### Example 1: Simple Website Crawler
-
-```javascript
-new SpiderPlugin({
-  namespace: 'simple',
-  queue: { autoStart: true, concurrency: 2 },
-  processor: async (task, ctx, { puppeteer }) => {
-    const page = await puppeteer.open(task.url);
-    const title = await page.title();
-    await page.close();
-    return { url: task.url, title };
-  }
-})
-```
-
----
-
-### Example 2: High-Performance Crawler
-
-```javascript
-new SpiderPlugin({
-  namespace: 'fast',
-  queue: {
-    autoStart: true,
-    concurrency: 10,
-    maxRetries: 5
-  },
   puppeteer: {
     pool: {
       enabled: true,
-      size: 5,
-      maxPagesPerBrowser: 10
+      maxBrowsers: 3,
+      maxTabsPerBrowser: 10,
+      closeOnIdle: true,
+      idleTimeout: 300000
+    },
+    stealth: {
+      enabled: true,
+      enableEvasions: true
+    },
+    humanBehavior: {
+      enabled: false,
+      mouse: { enabled: true, jitter: true },
+      typing: { enabled: true, mistakes: true },
+      scrolling: { enabled: true, smooth: true }
+    },
+    proxy: {
+      enabled: false,
+      list: [],
+      strategy: 'round-robin'
+    },
+    performance: {
+      blockImages: false,
+      blockFonts: false,
+      blockCSS: false,
+      blockMedia: false
+    },
+    cookies: {
+      enabled: false,
+      storage: { enabled: false }
+    },
+    launch: {
+      headless: true,
+      args: ['--no-sandbox']
+    },
+    viewport: {
+      width: 1920,
+      height: 1080
     }
-  }
-})
-```
-
----
-
-### Example 3: Crawler with TTL Cleanup
-
-```javascript
-new SpiderPlugin({
-  namespace: 'ttl-enabled',
-  queue: { autoStart: true },
-  ttl: {
-    queue: {
-      ttl: 7200,              // 2 hours
-      onExpire: 'hard-delete',
-      checkInterval: 600      // Check every 10 minutes
-    }
-  }
-})
-```
-
----
-
-### Example 4: Distributed Crawler
-
-```javascript
-new SpiderPlugin({
-  namespace: 'distributed',
-  queue: {
-    autoStart: true,
-    concurrency: 5,
-    workerId: process.env.WORKER_ID,  // Unique per instance
-    visibilityTimeout: 60             // 1-minute lock
   },
-  puppeteer: {
-    pool: { enabled: true, size: 3 }
-  }
-})
-```
 
----
+  // ============================================
+  // TTL CONFIGURATION
+  // ============================================
+  ttl: {
+    enabled: true,
+    queue: {
+      ttl: 86400000,                 // 24 hours
+      onExpire: 'hard-delete',       // soft-delete | hard-delete
+      checkInterval: 300000          // 5 minutes
+    }
+  },
 
-### Example 5: Screenshot Crawler
+  // ============================================
+  // SEO CONFIGURATION
+  // ============================================
+  seo: {
+    enabled: true,
+    extractMetaTags: true,
+    extractOpenGraph: true,
+    extractTwitterCard: true,
+    extractAssets: true,
+    analyzeOnPageSEO: true,
+    analyzeAccessibility: true,
+    analyzeInternalLinks: true,
+    analyzeKeywordOptimization: true
+  },
 
-```javascript
-new SpiderPlugin({
-  namespace: 'screenshots',
-  processor: async (task, ctx, { puppeteer }) => {
-    const page = await puppeteer.open(task.url);
-    const screenshot = await page.screenshot({ fullPage: true });
-    await page.close();
+  // ============================================
+  // TECHNOLOGY DETECTION
+  // ============================================
+  techDetection: {
+    enabled: true,
+    detectFrameworks: true,
+    detectAnalytics: true,
+    detectMarketing: true,
+    detectCDN: true,
+    detectWebServer: true,
+    detectCMS: true
+  },
 
-    // Upload screenshot to S3
-    const key = `screenshots/${task.url.replace(/[^a-z0-9]/gi, '_')}.png`;
-    await ctx.db.client.putObject({
-      bucket: ctx.db.bucket,
-      key,
-      body: screenshot
-    });
+  // ============================================
+  // SECURITY CONFIGURATION
+  // ============================================
+  security: {
+    enabled: true,
+    analyzeSecurityHeaders: true,
+    analyzeCSP: true,
+    analyzeCORS: true,
+    analyzeTLS: true,
+    captureConsoleLogs: true,
+    consoleLogLevels: ['error', 'warn'],
+    maxConsoleLogLines: 100,
+    captureWebSockets: true,
+    maxWebSocketMessages: 50,
+    checkVulnerabilities: true
+  },
 
-    return { url: task.url, screenshot: key };
+  // ============================================
+  // SCREENSHOT CONFIGURATION
+  // ============================================
+  screenshot: {
+    enabled: true,
+    captureFullPage: true,
+    quality: 80,                     // JPEG quality (0-100)
+    format: 'jpeg',                  // jpeg | png
+    maxWidth: 1920,
+    maxHeight: 1080
+  },
+
+  // ============================================
+  // PERFORMANCE METRICS
+  // ============================================
+  performance: {
+    enabled: true,
+    collectCoreWebVitals: true,
+    collectNavigationTiming: true,
+    collectResourceTiming: true,
+    collectMemory: true
+  },
+
+  // ============================================
+  // PERSISTENCE
+  // ============================================
+  persistence: {
+    enabled: false,                  // Opt-in storage
+    saveResults: true,
+    saveSEOAnalysis: true,
+    saveTechFingerprint: true,
+    saveSecurityAnalysis: true,
+    saveScreenshots: true,
+    savePerformanceMetrics: true
   }
 })
 ```
@@ -777,360 +1747,301 @@ new SpiderPlugin({
 
 ### SpiderPlugin Methods
 
-#### `new SpiderPlugin(options): SpiderPlugin`
+#### `enqueueTarget(target)`
 
-Creates a new SpiderPlugin instance.
+Add a URL to the crawl queue.
 
-**Parameters:**
-- `options` (object, required): Configuration object (see Configuration Reference)
-
-**Returns:** `SpiderPlugin` instance
-
-**Example:**
 ```javascript
-const spider = new SpiderPlugin({
-  namespace: 'crawler',
-  queue: { autoStart: true }
+await spider.enqueueTarget({
+  url: 'https://example.com',        // Required
+  priority: 10,                      // Higher = sooner
+  activities: ['seo_meta_tags'],     // Custom activities
+  activityPreset: 'basic',           // Or use preset
+  metadata: { source: 'sitemap' }    // Custom data
 });
 ```
 
----
+#### `enqueueBatch(targets, defaults)`
 
-#### `setProcessor(fn, options?): void`
+Add multiple URLs with shared defaults.
 
-Sets or replaces the queue processor function.
-
-**Parameters:**
-- `fn` (function, required): Async processor function `(task, context, helpers) => result`
-- `options` (object, optional):
-  - `autoStart` (boolean): Start processing immediately (default: false)
-  - `concurrency` (number): Override queue concurrency
-
-**Returns:** `void`
-
-**Example:**
 ```javascript
-spider.setProcessor(async (task, ctx, { puppeteer }) => {
-  const page = await puppeteer.open(task.url);
-  const data = await page.evaluate(() => ({ title: document.title }));
-  await page.close();
-  return data;
-}, { autoStart: true });
+await spider.enqueueBatch(
+  [
+    { url: 'https://example.com' },
+    { url: 'https://example.com/about', activityPreset: 'security' }
+  ],
+  { activityPreset: 'basic', priority: 5 }
+);
 ```
 
-**Throws:**
-- `PluginError` - If processor is not a function
+#### `getResults(query?)`
 
----
+Query crawl results.
 
-#### `enqueueTarget(data, options?): Promise<string>`
-
-Enqueues a new crawl target.
-
-**Parameters:**
-- `data` (object, required): Task data (must include `url` field)
-- `options` (object, optional):
-  - `priority` (number): Task priority (higher = sooner, default: 5)
-  - `metadata` (object): Additional metadata
-
-**Returns:** `Promise<string>` - Task ID
-
-**Example:**
 ```javascript
-const taskId = await spider.enqueueTarget({
-  url: 'https://example.com',
-  priority: 10,
-  metadata: { source: 'sitemap' }
-});
+const results = await spider.getResults({ url: 'https://example.com' });
 ```
 
-**Throws:**
-- `PluginError` - If `url` field is missing
-- `ResourceError` - If targets resource doesn't exist
+#### `getSEOAnalysis(query?)`
 
----
+Query SEO analysis records.
 
-#### `startProcessing(options?): Promise<void>`
-
-Starts queue processing with registered processor.
-
-**Parameters:**
-- `options` (object, optional):
-  - `concurrency` (number): Override default concurrency
-
-**Returns:** `Promise<void>`
-
-**Example:**
 ```javascript
-await spider.startProcessing({ concurrency: 10 });
+const seo = await spider.getSEOAnalysis({ 'seoScore.percentage': { $gt: 80 } });
 ```
 
-**Throws:**
-- `PluginError` - If no processor is set
+#### `getTechFingerprints(query?)`
 
----
+Query technology fingerprints.
 
-#### `stopProcessing(): Promise<void>`
-
-Stops queue processing gracefully.
-
-**Returns:** `Promise<void>`
-
-**Example:**
 ```javascript
+const tech = await spider.getTechFingerprints({ frameworks: 'React' });
+```
+
+#### `getScreenshots(query?)`
+
+Query captured screenshots.
+
+```javascript
+const screenshots = await spider.getScreenshots({ format: 'png' });
+```
+
+#### `getSecurityAnalysis(query?)`
+
+Query security analysis records.
+
+```javascript
+const security = await spider.getSecurityAnalysis({ 'securityScore': { $lt: 50 } });
+```
+
+#### `getContentAnalysis(query?)`
+
+Query content analysis records (iframes, tracking pixels).
+
+```javascript
+const content = await spider.getContentAnalysis({ 'trackingPixels.totalCount': { $gt: 0 } });
+```
+
+#### `getStorageAnalysis(query?)`
+
+Query storage analysis records (localStorage, IndexedDB, sessionStorage).
+
+```javascript
+const storage = await spider.getStorageAnalysis({ 'localStorage.itemCount': { $gt: 0 } });
+```
+
+#### `getAssetsAnalysis(query?)`
+
+Query assets analysis records (CSS, JS, images, videos, audios).
+
+```javascript
+const assets = await spider.getAssetsAnalysis({ 'summary.totalImages': { $gt: 10 } });
+```
+
+#### `getPerformanceMetrics(query?)`
+
+Query performance metrics records.
+
+```javascript
+const perf = await spider.getPerformanceMetrics({ url: 'https://example.com' });
+```
+
+#### `getQueueStatus()`
+
+Get queue statistics.
+
+```javascript
+const status = await spider.getQueueStatus();
+// { pending: 10, processing: 2, completed: 88, failed: 0 }
+```
+
+#### `startProcessing()` / `stopProcessing()`
+
+Control queue processing.
+
+```javascript
+await spider.startProcessing();
+// ... crawling ...
 await spider.stopProcessing();
 ```
 
----
+#### `enablePersistence(config?)` / `disablePersistence()`
 
-### Processor Helpers
+Toggle persistence at runtime.
 
-The processor function receives a `helpers` object with:
-
-| Helper | Type | Description |
-|--------|------|-------------|
-| `puppeteer` | PuppeteerPlugin | Namespaced Puppeteer instance |
-| `queue` | S3QueuePlugin | Queue plugin instance |
-| `enqueue` | function | Helper to enqueue new tasks |
-| `resource` | Resource | Direct access to targets resource |
-
-**Example:**
 ```javascript
-processor: async (task, ctx, helpers) => {
-  // helpers.puppeteer - Browser automation
-  const page = await helpers.puppeteer.open(task.url);
-
-  // helpers.enqueue - Add more tasks
-  await helpers.enqueue({ url: 'https://example.com/next' });
-
-  // helpers.resource - Direct resource access
-  const allTasks = await helpers.resource.query({});
-
-  // helpers.queue - Queue management
-  const stats = await helpers.queue.getStats();
-}
+spider.enablePersistence({ saveScreenshots: false });
+spider.disablePersistence();
 ```
 
----
+#### `clear()`
 
-### Events
+Delete all crawl data.
 
-SpiderPlugin emits events from child plugins:
-
-#### `queue.task.start`
-
-Emitted when a task starts processing.
-
-**Payload:**
 ```javascript
-{
-  taskId: 'task-123',
-  url: 'https://example.com',
-  timestamp: 1234567890
-}
+await spider.clear();  // Removes all targets, results, etc.
 ```
 
-**Example:**
+#### `destroy()`
+
+Clean up resources.
+
 ```javascript
-spider.queuePlugin.on('queue.task.start', ({ taskId, url }) => {
-  console.log(`Started: ${taskId} - ${url}`);
-});
+await spider.destroy();  // Closes browsers, stops processing
 ```
 
----
+### Activity API
 
-#### `queue.task.complete`
-
-Emitted when a task completes successfully.
-
-**Payload:**
 ```javascript
-{
-  taskId: 'task-123',
-  url: 'https://example.com',
-  result: { title: 'Example' },
-  duration: 1234
-}
+spider.getAvailableActivities()      // All activities
+spider.getActivitiesByCategory(cat)  // By category
+spider.getActivityCategories()       // Categories with activities
+spider.getActivityPresets()          // All presets
+spider.getPresetByName(name)         // Specific preset
+spider.validateActivityList(names)   // Validate custom list
 ```
 
----
+### Detection API (via PuppeteerPlugin)
 
-#### `queue.task.error`
+SpiderPlugin exposes PuppeteerPlugin's detection capabilities for advanced analysis:
 
-Emitted when a task fails.
-
-**Payload:**
 ```javascript
-{
-  taskId: 'task-123',
-  url: 'https://example.com',
-  error: Error,
-  retryCount: 2
-}
+// Get a page for manual operations
+const page = await spider.navigate('https://example.com');
+
+// Anti-bot and CAPTCHA detection
+const antiBot = await spider.detectAntiBotServices(page);
+// Returns: { detected: true, services: ['reCAPTCHA v3', 'Cloudflare'] }
+
+// Browser fingerprinting detection
+const fingerprint = await spider.detectFingerprinting(page);
+// Returns: { canvas: true, webgl: true, audio: true, fonts: true }
+
+// Comprehensive anti-bot + fingerprinting
+const combined = await spider.detectAntiBotsAndFingerprinting(page);
+
+// WebRTC and media detection
+const webrtc = await spider.detectWebRTC(page);
+const streams = await spider.detectMediaStreams(page);
+const protocols = await spider.detectStreamingProtocols(page);
+const allStreams = await spider.detectWebRTCAndStreams(page);
+
+// Manual storage capture
+const storage = await spider.captureAllStorage(page);
+// Returns: { localStorage: {...}, sessionStorage: {...}, indexedDB: {...} }
+
+// Don't forget to close the page
+await page.close();
+```
+
+### Advanced Access
+
+```javascript
+// Get underlying PuppeteerPlugin for advanced usage
+const puppeteer = spider.getPuppeteerPlugin();
+
+// Access cookie manager
+await puppeteer.farmCookies('my-session');
+const cookieStats = await puppeteer.getCookieStats();
+
+// Access proxy manager
+const proxyStats = puppeteer.getProxyStats();
+const bindings = puppeteer.getSessionProxyBindings();
+await puppeteer.checkProxyHealth();
+
+// Human behavior methods (on page)
+const page = await spider.navigate('https://example.com');
+await page.humanClick('#button');
+await page.humanType('#input', 'Hello world');
+await page.humanScroll({ direction: 'down' });
 ```
 
 ---
 
 ## ✅ Best Practices
 
-### Do's ✅
+### Performance
 
-1. **Always close pages**
-   ```javascript
-   // ✅ Good - Always close pages
-   processor: async (task, ctx, { puppeteer }) => {
-     const page = await puppeteer.open(task.url);
-     try {
-       return await extractData(page);
-     } finally {
-       await page.close(); // Always close!
-     }
-   }
-   ```
+```javascript
+// ✅ Match concurrency to pool capacity
+queue: { concurrency: 50 },
+puppeteer: {
+  pool: { maxBrowsers: 10, maxTabsPerBrowser: 5 }  // 10 * 5 = 50
+}
 
-2. **Use browser pooling for high concurrency**
-   ```javascript
-   // ✅ Good - Pool for parallel processing
-   puppeteer: {
-     pool: {
-       enabled: true,
-       size: 5,              // 5 browsers
-       maxPagesPerBrowser: 10 // 50 total pages
-     }
-   },
-   queue: { concurrency: 50 } // Match capacity
-   ```
+// ✅ Block unnecessary resources
+puppeteer: {
+  performance: { blockImages: true, blockFonts: true }
+}
 
-3. **Set appropriate TTL for tasks**
-   ```javascript
-   // ✅ Good - Clean up stale tasks
-   ttl: {
-     queue: {
-       ttl: 3600,              // 1 hour
-       onExpire: 'hard-delete'
-     }
-   }
-   ```
+// ✅ Use minimal activities when possible
+await spider.enqueueTarget({
+  url: 'https://example.com',
+  activityPreset: 'minimal'  // Only 3 activities
+});
 
-4. **Use priority for important URLs**
-   ```javascript
-   // ✅ Good - Prioritize seed URLs
-   await spider.enqueueTarget({ url: seedUrl, priority: 10 });
-   await spider.enqueueTarget({ url: discoveredUrl, priority: 5 });
-   ```
+// ✅ Batch enqueue for better performance
+await spider.enqueueBatch(urls.map(url => ({ url })));
+```
 
-5. **Implement graceful shutdown**
-   ```javascript
-   // ✅ Good - Clean shutdown
-   process.on('SIGTERM', async () => {
-     await spider.stopProcessing();
-     await db.disconnect();
-   });
-   ```
+### Anti-Detection
 
----
+```javascript
+// ✅ Enable stealth for protected sites
+puppeteer: {
+  stealth: { enabled: true }
+}
 
-### Don'ts ❌
+// ✅ Rotate proxies for high-volume crawling
+puppeteer: {
+  proxy: {
+    enabled: true,
+    list: [...proxies],
+    strategy: 'round-robin'
+  }
+}
 
-1. **Don't forget to handle errors**
-   ```javascript
-   // ❌ Bad - Unhandled errors crash worker
-   processor: async (task, ctx, { puppeteer }) => {
-     const page = await puppeteer.open(task.url);
-     return await page.evaluate(() => document.title);
-   }
+// ✅ Add delays between requests
+queue: {
+  concurrency: 2,  // Lower concurrency
+  retryDelay: 5000 // Longer delays
+}
+```
 
-   // ✅ Correct - Handle errors gracefully
-   processor: async (task, ctx, { puppeteer }) => {
-     try {
-       const page = await puppeteer.open(task.url);
-       const title = await page.evaluate(() => document.title);
-       await page.close();
-       return { title };
-     } catch (error) {
-       ctx.logger.error({ url: task.url, error: error.message });
-       throw error; // Let queue retry
-     }
-   }
-   ```
+### Reliability
 
-2. **Don't use autoStart without processor**
-   ```javascript
-   // ❌ Bad - autoStart with no processor
-   new SpiderPlugin({
-     queue: { autoStart: true }  // Will throw error!
-   })
+```javascript
+// ✅ Always handle shutdown gracefully
+process.on('SIGTERM', async () => {
+  await spider.stopProcessing();
+  await spider.destroy();
+});
 
-   // ✅ Correct - Provide processor or use manual start
-   new SpiderPlugin({
-     queue: { autoStart: false },
-     processor: async (task, ctx, helpers) => { /* ... */ }
-   })
-   ```
+// ✅ Enable TTL to clean up stale tasks
+ttl: {
+  enabled: true,
+  queue: { ttl: 86400000, onExpire: 'hard-delete' }
+}
 
-3. **Don't exceed concurrency without pooling**
-   ```javascript
-   // ❌ Bad - High concurrency without pool
-   queue: { concurrency: 50 },
-   puppeteer: { pool: { enabled: false } } // Only 1 browser!
+// ✅ Use unique worker IDs for distributed crawling
+queue: { workerId: process.env.HOSTNAME || 'worker-1' }
+```
 
-   // ✅ Correct - Match concurrency to pool size
-   queue: { concurrency: 50 },
-   puppeteer: {
-     pool: { enabled: true, size: 10, maxPagesPerBrowser: 5 }
-   }
-   ```
+### Data Management
 
-4. **Don't ignore queue stats**
-   ```javascript
-   // ❌ Bad - Enqueue without monitoring
-   for (let i = 0; i < 10000; i++) {
-     await spider.enqueueTarget({ url: urls[i] });
-   }
+```javascript
+// ✅ Enable persistence for important crawls
+persistence: { enabled: true }
 
-   // ✅ Correct - Monitor queue depth
-   const stats = await spider.queuePlugin.getStats();
-   if (stats.pending < 100) {
-     await spider.enqueueTarget({ url: nextUrl });
-   }
-   ```
+// ✅ Query results efficiently
+const results = await spider.getSEOAnalysis({
+  'seoScore.percentage': { $lt: 50 }  // Only poor scores
+});
 
-5. **Don't mix namespace across workers**
-   ```javascript
-   // ❌ Bad - Different namespaces won't share queue
-   // Worker 1
-   new SpiderPlugin({ namespace: 'crawler-1' })
-
-   // Worker 2
-   new SpiderPlugin({ namespace: 'crawler-2' })
-
-   // ✅ Correct - Same namespace, different worker IDs
-   // Worker 1
-   new SpiderPlugin({ namespace: 'crawler', queue: { workerId: 'w1' } })
-
-   // Worker 2
-   new SpiderPlugin({ namespace: 'crawler', queue: { workerId: 'w2' } })
-   ```
-
----
-
-### Performance Tips
-
-- **Batch enqueue**: Enqueue multiple URLs in parallel
-- **Tune concurrency**: Match queue concurrency to browser pool capacity
-- **Use headless mode**: 2-3x faster than headed browsers
-- **Enable pooling**: Reuse browsers across pages for 10x speedup
-- **Set reasonable timeouts**: Avoid hanging on slow pages
-
----
-
-### Security Considerations
-
-- **Sanitize URLs**: Validate URLs before enqueueing
-- **Limit recursion depth**: Prevent infinite crawling loops
-- **Set max retries**: Avoid retry storms on broken sites
-- **Use TTL**: Clean up stale/zombie tasks automatically
-- **Validate extracted data**: Don't trust page content blindly
+// ✅ Clean up after analysis
+await spider.clear();
+```
 
 ---
 
@@ -1138,473 +2049,102 @@ Emitted when a task fails.
 
 ### Common Errors
 
-#### Error 1: `Processor function is missing`
+#### "Target must have a url property"
 
-**Problem**: Attempted to start processing without setting a processor.
-
-**Solution:**
 ```javascript
-// ❌ Bad
-const spider = new SpiderPlugin({ namespace: 'test' });
-await spider.startProcessing(); // Error!
+// ❌ Wrong
+await spider.enqueueTarget({ link: 'https://...' });
 
-// ✅ Good - Set processor first
-spider.setProcessor(async (task, ctx, helpers) => { /* ... */ });
-await spider.startProcessing();
-
-// ✅ Better - Provide processor in constructor
-const spider = new SpiderPlugin({
-  namespace: 'test',
-  processor: async (task, ctx, helpers) => { /* ... */ }
-});
-await spider.startProcessing();
+// ✅ Correct
+await spider.enqueueTarget({ url: 'https://...' });
 ```
 
----
+#### "Unknown activity preset"
 
-#### Error 2: `Resource not found`
-
-**Problem**: Targets resource doesn't exist.
-
-**Diagnosis:**
-1. Check if `initialize()` was called
-2. Verify namespace is correct
-3. Check if resource was created manually
-
-**Fix:**
 ```javascript
-// SpiderPlugin auto-creates resources during initialize()
-await db.usePlugin(spider); // Calls initialize()
-await db.connect();
+// ❌ Wrong
+await spider.enqueueTarget({ url: '...', activityPreset: 'complete' });
 
-// Verify resource exists
-const resources = await db.listResources();
-console.log('Available:', resources.map(r => r.name));
+// ✅ Correct - use valid preset names
+await spider.enqueueTarget({ url: '...', activityPreset: 'full' });
+// Available: minimal, basic, security, seo_complete, performance, reconnaissance, full
 ```
 
----
+#### "Invalid activities"
 
-#### Error 3: `Browser pool exhausted`
-
-**Problem**: All browser instances are busy.
-
-**Diagnosis:**
-1. Check `puppeteer.pool.size` vs `queue.concurrency`
-2. Look for unclosed pages
-3. Check if browsers are crashing
-
-**Fix:**
 ```javascript
-// ✅ Increase pool size
-puppeteer: {
-  pool: {
-    size: 10,              // More browsers
-    maxPagesPerBrowser: 5  // 50 total capacity
-  }
-},
-queue: { concurrency: 50 } // Match capacity
+// ❌ Wrong
+await spider.enqueueTarget({ url: '...', activities: ['seo_all'] });
 
-// ✅ Always close pages
-processor: async (task, ctx, { puppeteer }) => {
-  const page = await puppeteer.open(task.url);
-  try {
-    return await process(page);
-  } finally {
-    await page.close(); // Critical!
-  }
+// ✅ Correct - validate first
+const validation = spider.validateActivityList(['seo_meta_tags', 'seo_all']);
+if (!validation.valid) {
+  console.log('Invalid:', validation.invalid);
 }
 ```
 
----
+#### "Browser pool exhausted"
 
-#### Error 4: `TTL cleanup failed`
-
-**Problem**: TTL plugin can't delete expired tasks.
-
-**Diagnosis:**
-1. Check S3 permissions
-2. Verify TTL resource exists
-3. Check TTL cohort partitions
-
-**Fix:**
 ```javascript
-// Ensure S3 permissions include DeleteObject
-// Verify TTL is properly configured
-ttl: {
-  queue: {
-    ttl: 3600,
-    onExpire: 'hard-delete', // Requires delete permissions
-    checkInterval: 300
-  }
-}
-```
+// ❌ Wrong - concurrency exceeds pool capacity
+queue: { concurrency: 100 },
+puppeteer: { pool: { maxBrowsers: 2 } }
 
----
+// ✅ Correct - match concurrency to capacity
+queue: { concurrency: 20 },
+puppeteer: { pool: { maxBrowsers: 4, maxTabsPerBrowser: 5 } }  // 4 * 5 = 20
+```
 
 ### Troubleshooting
 
-#### Issue 1: Slow Crawling Performance
+#### Site blocking your crawler
 
-**Diagnosis:**
-1. Check `queue.concurrency` setting
-2. Verify browser pool is enabled
-3. Monitor CPU/memory usage
+1. Enable stealth mode
+2. Use proxy rotation
+3. Add delays between requests
+4. Reduce concurrency
+5. Enable human behavior simulation
 
-**Fix:**
 ```javascript
-// Increase parallelism
+const spider = new SpiderPlugin({
+  namespace: 'careful',
+  queue: { concurrency: 2, retryDelay: 5000 },
+  puppeteer: {
+    stealth: { enabled: true },
+    humanBehavior: { enabled: true },
+    proxy: { enabled: true, list: [...] }
+  }
+});
+```
+
+#### Memory issues
+
+1. Enable browser pooling
+2. Block images and fonts
+3. Reduce concurrency
+4. Enable TTL cleanup
+
+```javascript
+puppeteer: {
+  pool: { enabled: true, maxBrowsers: 3 },
+  performance: { blockImages: true, blockFonts: true }
+}
+```
+
+#### Slow crawling
+
+1. Increase concurrency
+2. Use browser pooling
+3. Block unnecessary resources
+4. Use minimal activity preset
+
+```javascript
 queue: { concurrency: 20 },
 puppeteer: {
-  pool: { enabled: true, size: 5, maxPagesPerBrowser: 4 }
-}
-
-// Use headless mode
-puppeteer: {
-  launchOptions: { headless: true }
+  pool: { enabled: true, maxBrowsers: 5, maxTabsPerBrowser: 4 },
+  performance: { blockImages: true }
 }
 ```
-
----
-
-#### Issue 2: Memory Leaks
-
-**Diagnosis:**
-1. Monitor memory over time
-2. Check for unclosed pages
-3. Look for large data structures
-
-**Fix:**
-```javascript
-// Always close pages
-finally { await page.close(); }
-
-// Disable browser cache
-puppeteer: {
-  launchOptions: {
-    args: ['--disable-dev-shm-usage', '--disable-setuid-sandbox']
-  }
-}
-```
-
----
-
-#### Issue 3: Tasks Stuck in Processing
-
-**Diagnosis:**
-1. Check `queue.visibilityTimeout`
-2. Look for infinite loops in processor
-3. Check for unhandled promise rejections
-
-**Fix:**
-```javascript
-// Set appropriate visibility timeout
-queue: {
-  visibilityTimeout: 60, // 1 minute
-  maxRetries: 3          // Retry failed tasks
-}
-
-// Add timeout to processor
-processor: async (task, ctx, helpers) => {
-  const timeout = new Promise((_, reject) =>
-    setTimeout(() => reject(new Error('Timeout')), 30000)
-  );
-
-  const work = async () => {
-    const page = await helpers.puppeteer.open(task.url);
-    // ... process
-  };
-
-  return Promise.race([work(), timeout]);
-}
-```
-
----
-
-## 🎯 Activity System
-
-The Activity System allows you to **selectively execute specific analyses** on each crawled URL instead of running everything. Choose what to do on each target—screenshots, security headers, SEO analysis, tech fingerprinting, performance metrics, or custom combinations.
-
-### Why Use Activities?
-
-✅ **Performance** - Skip unnecessary analyses, crawl faster
-✅ **Cost Control** - Only capture what you need
-✅ **Flexibility** - Different URLs can have different analysis sets
-✅ **Composability** - Mix and match individual activities
-✅ **Presets** - Use pre-defined combinations for common use cases
-
-### Available Activities
-
-Activities are organized into **6 categories**:
-
-#### Visual (Screenshots)
-- `screenshot_full` - Full page screenshot (scrollable)
-- `screenshot_viewport` - Viewport-only screenshot (1920x1080)
-
-#### Security (4 Header Analysis + Real-time)
-- `security_headers` - HTTP security headers
-- `security_csp` - Content Security Policy analysis
-- `security_cors` - CORS configuration
-- `security_tls` - TLS/SSL verification
-- `security_console_logs` - Browser console logs
-- `security_websockets` - WebSocket connections
-- `security_captcha` - CAPTCHA detection
-- `security_vulnerabilities` - Vulnerability scanning
-
-#### SEO (7 Analyses)
-- `seo_meta_tags` - Meta tags extraction
-- `seo_opengraph` - OpenGraph tags
-- `seo_twitter_card` - Twitter Card tags
-- `seo_links_analysis` - Internal/external links
-- `seo_content_analysis` - Content analysis
-- `seo_accessibility` - WCAG accessibility
-- `seo_heading_structure` - Heading hierarchy
-
-#### Technology (7 Detection Types)
-- `tech_frameworks` - Frameworks (React, Vue, Angular, etc.)
-- `tech_analytics` - Analytics platforms
-- `tech_marketing` - Marketing pixels
-- `tech_cdn` - CDN providers
-- `tech_web_server` - Web servers
-- `tech_cms` - CMS platforms
-- `tech_libraries` - JavaScript libraries
-
-#### Performance (4 Metrics)
-- `performance_core_web_vitals` - LCP, FID, CLS
-- `performance_navigation_timing` - Page load timing
-- `performance_resource_timing` - Individual resource timing
-- `performance_memory` - Memory usage
-
-#### Assets (5 Types)
-- `assets_css` - CSS analysis
-- `assets_javascript` - JavaScript analysis
-- `assets_images` - Image analysis
-- `assets_videos` - Video analysis
-- `assets_audios` - Audio analysis
-
-#### Storage (3 Activities)
-- `storage_localstorage` - Extract all localStorage key-value pairs
-- `storage_indexeddb` - Extract IndexedDB databases and structure
-- `storage_sessionstorage` - Extract all sessionStorage key-value pairs
-
-#### Content & Embeds (2 Activities)
-- `content_iframes` - Analyze embedded iframes (categorize by type)
-- `content_tracking_pixels` - Detect tracking pixels and analytics pixels
-
-### Activity Presets
-
-Use presets for quick, pre-configured activity combinations:
-
-```javascript
-// Minimal - only basic data (fast & lightweight)
-await spider.enqueueTarget({
-  url: 'https://example.com',
-  activityPreset: 'minimal'
-  // Equivalent to: ['screenshot_viewport', 'tech_frameworks', 'seo_meta_tags']
-});
-
-// Basic - standard crawl with SEO and tech
-await spider.enqueueTarget({
-  url: 'https://example.com',
-  activityPreset: 'basic'
-  // Equivalent to: screenshot_full, SEO (3 types), tech (3 types)
-});
-
-// Security - focused on security analysis
-await spider.enqueueTarget({
-  url: 'https://example.com',
-  activityPreset: 'security'
-  // All security_* activities
-});
-
-// SEO Complete - all SEO-related activities
-await spider.enqueueTarget({
-  url: 'https://example.com',
-  activityPreset: 'seo_complete'
-  // All seo_* activities
-});
-
-// Performance - all performance metrics
-await spider.enqueueTarget({
-  url: 'https://example.com',
-  activityPreset: 'performance'
-  // All performance_* activities
-});
-
-// Full - all available activities (default)
-await spider.enqueueTarget({
-  url: 'https://example.com',
-  activityPreset: 'full'
-  // Equivalent to default behavior
-});
-
-// Reconnaissance - deep analysis including storage and tracking
-await spider.enqueueTarget({
-  url: 'https://example.com',
-  activityPreset: 'reconnaissance'
-  // 19 activities: screenshots, security, SEO, tech, iframes, tracking pixels, storage
-});
-```
-
-### Custom Activity Lists
-
-Choose specific activities by name:
-
-```javascript
-// Security + SEO + Screenshots
-await spider.enqueueTarget({
-  url: 'https://example.com',
-  activities: [
-    'screenshot_full',
-    'screenshot_viewport',
-    'security_headers',
-    'security_csp',
-    'security_cors',
-    'seo_meta_tags',
-    'seo_opengraph',
-    'seo_twitter_card'
-  ]
-});
-
-// Tech detection only
-await spider.enqueueTarget({
-  url: 'https://example.com',
-  activities: [
-    'tech_frameworks',
-    'tech_analytics',
-    'tech_cdn',
-    'tech_web_server'
-  ]
-});
-
-// Screenshot + Core Web Vitals
-await spider.enqueueTarget({
-  url: 'https://example.com',
-  activities: [
-    'screenshot_full',
-    'performance_core_web_vitals',
-    'performance_memory'
-  ]
-});
-```
-
-### Batch Enqueue with Default Activities
-
-Set default activities for all targets in a batch:
-
-```javascript
-// All targets use 'basic' preset
-const results = await spider.enqueueBatch(
-  [
-    { url: 'https://example.com' },
-    { url: 'https://example.com/about' },
-    { url: 'https://example.com/blog' }
-  ],
-  { activityPreset: 'basic' }
-);
-
-// Mixed: default preset + target-specific overrides
-const results = await spider.enqueueBatch(
-  [
-    { url: 'https://example.com', activityPreset: 'security' }, // Override
-    { url: 'https://example.com/about' }, // Use default
-    { url: 'https://example.com/blog', activities: ['screenshot_viewport'] } // Override
-  ],
-  { activityPreset: 'basic' } // Default for all
-);
-```
-
-### Activity API Methods
-
-Query available activities at runtime:
-
-```javascript
-// Get all activities
-const all = spider.getAvailableActivities();
-// Returns: [ { name: 'screenshot_full', label: 'Full Page Screenshot', ... }, ... ]
-
-// Get activities by category
-const security = spider.getActivitiesByCategory('security');
-// Returns: Array of all security_* activities
-
-// Get categories with nested activities
-const categories = spider.getActivityCategories();
-// Returns: { visual: { name: 'visual', label: '...', activities: [...] }, ... }
-
-// Get all presets
-const presets = spider.getActivityPresets();
-// Returns: { minimal: { ... }, basic: { ... }, ... }
-
-// Get specific preset
-const basicPreset = spider.getPresetByName('basic');
-// Returns: { name: 'basic', label: '...', activities: [...] }
-
-// Validate activity list
-const validation = spider.validateActivityList(['screenshot_full', 'seo_meta_tags']);
-// Returns: { valid: true, invalid: [] }
-
-const invalid = spider.validateActivityList(['screenshot_full', 'invalid_activity']);
-// Returns: { valid: false, invalid: ['invalid_activity'] }
-```
-
-### Activity Execution Logic
-
-During queue processing, **only requested activities are executed**:
-
-```javascript
-// This target will only run:
-// - Screenshot capture
-// - Tech detection
-// - SEO analysis
-// ❌ Security analysis will be SKIPPED (not in activities)
-await spider.enqueueTarget({
-  url: 'https://example.com',
-  activities: ['screenshot_full', 'tech_frameworks', 'seo_meta_tags']
-});
-
-// This target runs EVERYTHING (no activities specified = default to 'full' preset)
-await spider.enqueueTarget({
-  url: 'https://example.com'
-  // Same as: activities: [...all 40+ activities...]
-});
-```
-
-The processor checks `task.activities` and conditionally executes:
-
-```
-if task.activities is empty or includes visual_* activities
-  → Run screenshot capture
-
-if task.activities is empty or includes seo_* activities
-  → Run SEO analysis
-
-if task.activities is empty or includes security_* activities
-  → Run security analysis
-
-if task.activities is empty or includes technology_* activities
-  → Run tech fingerprinting
-
-if task.activities is empty or includes performance_* activities
-  → Run performance metrics collection
-
-if task.activities is empty or includes assets_* activities
-  → Run asset analysis
-```
-
----
-
-## 🔗 See Also
-
-### Related Plugins
-- **[Puppeteer Plugin](./puppeteer/README.md)** - Browser automation, pooling, proxy configuration, anti-bot detection
-- **[Cookie Farm Plugin](./cookie-farm/README.md)** - Automated cookie farming and persona management for anti-bot evasion
-
-### Supporting Plugins
-- [S3 Queue Plugin](./s3-queue/) - Distributed queue implementation
-- [TTL Plugin](./ttl/) - TTL management and automatic cleanup
-
-### Examples
-- [Example: e30-spider-basic.js](../examples/e30-spider-basic.js) - Basic spider example
-- [Example: e31-spider-distributed.js](../examples/e31-spider-distributed.js) - Multi-worker setup
 
 ---
 
@@ -1612,1410 +2152,226 @@ if task.activities is empty or includes assets_* activities
 
 ### General
 
-**Q: What is SpiderPlugin and when should I use it?**
+**Q: What's the difference between SpiderPlugin and PuppeteerPlugin?**
 
-A: SpiderPlugin is a **meta-plugin** that bundles PuppeteerPlugin, S3QueuePlugin, and TTLPlugin under one namespace for web crawling. Use it when you need:
+SpiderPlugin is a **meta-plugin** that includes PuppeteerPlugin plus:
+- Distributed queue (S3QueuePlugin)
+- TTL cleanup (TTLPlugin)
+- SEO/Security/Tech analyzers
+- Activity system
 
-- Distributed web scraping across multiple workers
-- Browser automation with queueing
-- Automatic cleanup of stale crawl tasks
-- Simplified setup (100+ lines of boilerplate → 10 lines)
+Use PuppeteerPlugin alone for simple browser automation. Use SpiderPlugin for web crawling with analysis.
 
-**Don't use it if:**
-- You only need browser automation (use PuppeteerPlugin alone)
-- You don't need distributed processing (use Puppeteer directly)
-- You're not crawling the web (use appropriate plugin)
+**Q: How many URLs can I crawl per hour?**
 
-```javascript
-// ✅ Perfect for SpiderPlugin
-// - Multi-page crawling
-// - Distributed workers
-// - Queue management needed
-const spider = new SpiderPlugin({
-  namespace: 'crawler',
-  queue: { autoStart: true, concurrency: 10 }
-});
+Depends on configuration:
+- Minimal preset, blocking images: ~500-1000 URLs/hour/worker
+- Full preset, no blocking: ~50-100 URLs/hour/worker
+- Distributed (5 workers): 5x single worker capacity
 
-// ❌ Overkill for SpiderPlugin
-// - Single page scraping
-// - One-off automation
-// Use PuppeteerPlugin alone instead
-```
+**Q: Can I crawl JavaScript-rendered pages?**
 
----
+Yes! SpiderPlugin uses Puppeteer which fully renders JavaScript. Enable `waitUntil: 'networkidle2'` for SPA sites.
 
-**Q: How is SpiderPlugin different from PuppeteerPlugin?**
+**Q: Does it work with authentication?**
 
-A: SpiderPlugin **includes** PuppeteerPlugin plus adds queuing and TTL:
+Yes. Use cookie farming or inject auth headers:
 
-| Feature | PuppeteerPlugin | SpiderPlugin |
-|---------|----------------|--------------|
-| Browser automation | ✅ Yes | ✅ Yes |
-| Distributed queue | ❌ No | ✅ Yes (S3Queue) |
-| TTL cleanup | ❌ No | ✅ Yes (optional) |
-| Setup complexity | Low | Very Low |
-| Use case | Single worker | Multi-worker |
-
-**Example comparison:**
-```javascript
-// PuppeteerPlugin alone (manual queue setup)
-await db.usePlugin(new PuppeteerPlugin({ namespace: 'pup' }));
-await db.usePlugin(new S3QueuePlugin({ resource: 'tasks' }));
-// ... wire them together manually (30+ lines)
-
-// SpiderPlugin (automatic)
-await db.usePlugin(new SpiderPlugin({ namespace: 'spider' }));
-// Everything wired and ready!
-```
-
----
-
-**Q: Can I use SpiderPlugin without TTL?**
-
-A: **Yes!** TTL is completely optional:
-
-```javascript
-// Without TTL
-const spider = new SpiderPlugin({
-  namespace: 'crawler',
-  queue: { autoStart: true }
-  // No ttl config = TTLPlugin not installed
-});
-
-// With TTL
-const spider = new SpiderPlugin({
-  namespace: 'crawler',
-  queue: { autoStart: true },
-  ttl: { queue: { ttl: 3600 } } // Enables TTL cleanup
-});
-```
-
-**When to use TTL:**
-- ✅ Long-running crawls (prevent zombie tasks)
-- ✅ Tasks with expiration dates
-- ✅ Retry limits reached (clean up failures)
-
-**When to skip TTL:**
-- ❌ Short-lived crawls (< 1 hour)
-- ❌ All tasks must complete (no expiration)
-- ❌ Manual cleanup preferred
-
----
-
-**Q: How do I scale SpiderPlugin horizontally?**
-
-A: Run multiple workers with the **same namespace** but **different worker IDs**:
-
-**Worker 1:**
-```javascript
-const spider = new SpiderPlugin({
-  namespace: 'distributed',
-  queue: { workerId: 'worker-1', concurrency: 5 }
-});
-```
-
-**Worker 2:**
-```javascript
-const spider = new SpiderPlugin({
-  namespace: 'distributed',
-  queue: { workerId: 'worker-2', concurrency: 5 }
-});
-```
-
-**Worker 3:**
-```javascript
-const spider = new SpiderPlugin({
-  namespace: 'distributed',
-  queue: { workerId: 'worker-3', concurrency: 5 }
-});
-```
-
-All three workers share the same queue (`distributed_targets`) and process tasks in parallel. S3Queue handles distributed locking automatically.
-
-**Coordinator (optional):**
-```javascript
-// Enqueue jobs without processing
-const db = new Database({ connectionString: 's3://...' });
-await db.connect();
-
-const resource = await db.getResource('distributed_targets');
-for (const url of urls) {
-  await resource.enqueue({ url });
-}
-```
-
----
-
-### Configuration
-
-**Q: What's the difference between `queue.concurrency` and `puppeteer.pool.size`?**
-
-A: They control different aspects:
-
-- **`queue.concurrency`**: How many tasks process **simultaneously**
-- **`puppeteer.pool.size`**: How many **browser instances** exist
-
-**Rule of thumb:**
-```javascript
-// queue.concurrency <= (pool.size × maxPagesPerBrowser)
-
-// ✅ Good - Concurrency matches capacity
-queue: { concurrency: 20 },
-puppeteer: {
-  pool: { size: 5, maxPagesPerBrowser: 4 } // 5 × 4 = 20 capacity
-}
-
-// ❌ Bad - Concurrency exceeds capacity
-queue: { concurrency: 50 },
-puppeteer: {
-  pool: { size: 2, maxPagesPerBrowser: 5 } // 2 × 5 = 10 capacity
-}
-// 40 workers will be blocked waiting for browsers!
-```
-
----
-
-**Q: Should I use `autoStart: true` or start manually?**
-
-A: Depends on your setup:
-
-**Use `autoStart: true`** when:
-- Processor is provided in constructor
-- Simple single-worker setup
-- Want immediate processing
-
-```javascript
-// ✅ AutoStart - Simple setup
-const spider = new SpiderPlugin({
-  namespace: 'simple',
-  queue: { autoStart: true },
-  processor: async (task, ctx, helpers) => { /* ... */ }
-});
-// Starts processing immediately after usePlugin()
-```
-
-**Use `autoStart: false`** (manual) when:
-- Setting processor dynamically
-- Coordinating multiple workers
-- Need to enqueue seed URLs first
-
-```javascript
-// ✅ Manual start - More control
-const spider = new SpiderPlugin({
-  namespace: 'controlled',
-  queue: { autoStart: false }
-});
-
-await db.usePlugin(spider);
-await db.connect();
-
-// Enqueue seed URLs first
-await spider.enqueueTarget({ url: 'https://example.com' });
-
-// Set processor
-spider.setProcessor(async (task, ctx, helpers) => { /* ... */ });
-
-// Start when ready
-await spider.startProcessing();
-```
-
----
-
-**Q: How do I change concurrency at runtime?**
-
-A: Use `startProcessing()` with override:
-
-```javascript
-// Initial concurrency: 5
-const spider = new SpiderPlugin({
-  namespace: 'dynamic',
-  queue: { concurrency: 5 }
-});
-
-// Later - increase concurrency
-await spider.stopProcessing();
-await spider.startProcessing({ concurrency: 10 });
-
-// Or change via setProcessor
-spider.setProcessor(
-  async (task, ctx, helpers) => { /* ... */ },
-  { concurrency: 15, autoStart: true }
-);
-```
-
----
-
-### Queue Management
-
-**Q: How do I check queue status?**
-
-A: Use `queuePlugin.getStats()`:
-
-```javascript
-const stats = await spider.queuePlugin.getStats();
-
-console.log({
-  pending: stats.pending,        // Tasks waiting
-  processing: stats.processing,  // Tasks in progress
-  completed: stats.completed,    // Tasks finished
-  failed: stats.failed          // Tasks that failed
-});
-
-// Or access resource directly
-const resource = await db.getResource(`${spider.namespace}_targets`);
-const allTasks = await resource.query({});
-console.log(`Total tasks: ${allTasks.length}`);
-```
-
----
-
-**Q: How do I implement priority queuing?**
-
-A: Use the `priority` field when enqueueing:
-
-```javascript
-// Higher priority = processed sooner
-await spider.enqueueTarget({ url: 'https://important.com', priority: 10 });
-await spider.enqueueTarget({ url: 'https://normal.com', priority: 5 });
-await spider.enqueueTarget({ url: 'https://low.com', priority: 1 });
-
-// S3Queue processes in priority order
-// Order: important.com → normal.com → low.com
-```
-
----
-
-**Q: How do I prevent duplicate URLs from being crawled?**
-
-A: Check before enqueueing:
-
-```javascript
-// Method 1: Query resource before enqueue
-processor: async (task, ctx, { enqueue, resource }) => {
-  const links = await extractLinks(task.url);
-
-  for (const link of links) {
-    // Check if already exists
-    const existing = await resource.query({ url: link });
-    if (existing.length === 0) {
-      await enqueue({ url: link });
-    }
-  }
-}
-
-// Method 2: Use metadata to track visited
-const visited = new Set();
-
-processor: async (task, ctx, { enqueue }) => {
-  const links = await extractLinks(task.url);
-
-  for (const link of links) {
-    if (!visited.has(link)) {
-      visited.add(link);
-      await enqueue({ url: link });
-    }
-  }
-}
-```
-
----
-
-**Q: How do I handle rate limiting?**
-
-A: Implement delays and retry logic:
-
-```javascript
-processor: async (task, ctx, { puppeteer }) => {
-  try {
-    const page = await puppeteer.open(task.url);
-    const data = await extractData(page);
-    await page.close();
-
-    // Add delay to respect rate limits
-    await new Promise(resolve => setTimeout(resolve, 1000));
-
-    return data;
-  } catch (error) {
-    if (error.message.includes('429')) {
-      // Rate limited - throw to trigger retry
-      ctx.logger.warn('Rate limited, retrying...');
-      throw error; // Queue will retry with backoff
-    }
-    throw error;
-  }
-}
-```
-
----
-
-### Browser & Performance
-
-**Q: How many browsers should I run?**
-
-A: Depends on your resources:
-
-**General formula:**
-```
-pool.size = ceil(queue.concurrency / maxPagesPerBrowser)
-```
-
-**Examples:**
-
-| Concurrency | Pages/Browser | Pool Size | Total Capacity |
-|-------------|---------------|-----------|----------------|
-| 10 | 5 | 2 | 10 |
-| 50 | 10 | 5 | 50 |
-| 100 | 5 | 20 | 100 |
-
-**Resource constraints:**
-- **CPU**: Each browser ≈ 1-2 cores (headless)
-- **Memory**: Each browser ≈ 100-500MB
-- **Disk**: Each browser ≈ 200MB (cache)
-
-**Example for 4-core machine:**
 ```javascript
 puppeteer: {
-  pool: {
-    size: 2,              // 2 browsers × 2 cores = 4 cores
-    maxPagesPerBrowser: 5 // 10 total pages
-  }
-},
-queue: { concurrency: 10 }
-```
-
----
-
-**Q: Should I use headless or headed browsers?**
-
-A: Almost always **headless**:
-
-| Mode | Speed | Resources | Use Case |
-|------|-------|-----------|----------|
-| Headless | 2-3x faster | Low memory | Production |
-| Headed | Slower | High memory | Debugging |
-
-```javascript
-// ✅ Production - Headless
-puppeteer: {
-  launchOptions: { headless: true }
-}
-
-// 🐛 Development - Headed for debugging
-puppeteer: {
-  launchOptions: {
-    headless: false,
-    devtools: true
-  }
-}
-```
-
----
-
-**Q: How do I optimize crawling speed?**
-
-A: Multiple strategies:
-
-**1. Increase parallelism:**
-```javascript
-queue: { concurrency: 50 },
-puppeteer: {
-  pool: { size: 10, maxPagesPerBrowser: 5 }
-}
-```
-
-**2. Disable unnecessary features:**
-```javascript
-puppeteer: {
-  launchOptions: {
-    args: [
-      '--disable-images',       // Don't load images
-      '--disable-javascript',   // If JS not needed
-      '--disable-setuid-sandbox'
+  cookies: {
+    enabled: true,
+    initial: [
+      { name: 'session', value: 'abc123', domain: 'example.com' }
     ]
   }
 }
 ```
 
-**3. Use waitUntil wisely:**
-```javascript
-processor: async (task, ctx, { puppeteer }) => {
-  // ❌ Slow - Wait for everything
-  const page = await puppeteer.open(task.url, {
-    waitUntil: 'networkidle0' // Wait for ALL network idle
-  });
+---
 
-  // ✅ Fast - Wait for DOM only
-  const page = await puppeteer.open(task.url, {
-    waitUntil: 'domcontentloaded' // DOM ready, skip images
-  });
-}
-```
+### SEO Analysis
 
-**4. Reuse pages when possible:**
-```javascript
-processor: async (task, ctx, { puppeteer }) => {
-  const page = await puppeteer.open(task.url);
+**Q: What SEO checks are performed?**
 
-  // Extract multiple things without reopening
-  const title = await page.title();
-  const links = await page.$$eval('a', els => els.map(a => a.href));
-  const meta = await page.$eval('meta', el => el.content);
+- Meta tags (title, description, keywords, viewport)
+- OpenGraph and Twitter Card tags
+- H1 tag presence and uniqueness
+- Heading hierarchy (H1 > H2 > H3)
+- Content length and ratio
+- Image alt text audit
+- Internal/external link analysis
+- Keyword density and placement
+- Accessibility (WCAG 2.1)
+- Semantic HTML usage
 
-  await page.close();
-  return { title, links, meta };
-}
-```
+**Q: How is the SEO score calculated?**
+
+- Meta tags: 20 points
+- OpenGraph: 10 points
+- On-page SEO: 30 points
+- Accessibility: 20 points
+- Internal links: 10 points
+- Keyword optimization: 10 points
+
+**Q: What's "content ratio"?**
+
+The percentage of main content vs total page text. A page with 1000 words total but only 300 in the main article has 30% content ratio. Higher is better (aim for 50%+).
 
 ---
 
-### Error Handling & Debugging
+### Security
 
-**Q: How do I debug processor errors?**
+**Q: What vulnerabilities does it detect?**
 
-A: Add comprehensive logging:
+- Missing security headers (X-Frame-Options, HSTS, etc.)
+- Weak CSP (unsafe-inline, unsafe-eval, wildcards)
+- CORS misconfigurations
+- Missing HTTPS/TLS
+- Console errors indicating security issues
 
-```javascript
-processor: async (task, ctx, { puppeteer }) => {
-  ctx.logger.info(`[START] ${task.url}`);
-  const startTime = Date.now();
+**Q: Which CAPTCHA providers are detected?**
 
-  try {
-    const page = await puppeteer.open(task.url);
-    ctx.logger.debug(`[OPENED] ${task.url}`);
+- Google reCAPTCHA v2/v3
+- hCaptcha
+- Cloudflare Turnstile
+- AWS WAF CAPTCHA
+- Akamai Bot Manager
 
-    const data = await page.evaluate(() => ({
-      title: document.title
-    }));
-    ctx.logger.debug(`[EXTRACTED] ${task.url}`, { data });
+**Q: Can it bypass CAPTCHAs?**
 
-    await page.close();
-    ctx.logger.info(`[SUCCESS] ${task.url} (${Date.now() - startTime}ms)`);
-
-    return data;
-  } catch (error) {
-    ctx.logger.error(`[ERROR] ${task.url}`, {
-      error: error.message,
-      stack: error.stack,
-      duration: Date.now() - startTime
-    });
-    throw error;
-  }
-}
-```
+No. SpiderPlugin detects CAPTCHAs but doesn't solve them. For CAPTCHA-protected pages, consider:
+- Cookie farming (maintain logged-in sessions)
+- Human behavior simulation (reduce CAPTCHA triggers)
+- Manual CAPTCHA solving services (not included)
 
 ---
 
-**Q: What happens when a task fails?**
+### Performance
 
-A: S3Queue retries based on `maxRetries`:
+**Q: How do I speed up crawling?**
 
-1. Task fails → retry count increments
-2. If `retryCount < maxRetries` → task re-queued with delay
-3. If `retryCount >= maxRetries` → task marked as failed
+1. Use `minimal` or `basic` presets
+2. Block images/fonts: `performance: { blockImages: true }`
+3. Increase concurrency with matching pool size
+4. Use headless mode (default)
 
-```javascript
-queue: {
-  maxRetries: 3,      // Retry up to 3 times
-  retryDelay: 1000    // Wait 1s between retries
-}
+**Q: What are Core Web Vitals?**
 
-// Monitor failures
-spider.queuePlugin.on('queue.task.error', ({ taskId, error, retryCount }) => {
-  console.log(`Task ${taskId} failed (attempt ${retryCount}): ${error.message}`);
-});
-
-spider.queuePlugin.on('queue.task.failed', ({ taskId, error }) => {
-  console.log(`Task ${taskId} permanently failed after max retries`);
-  // Handle permanent failures (e.g., log to error resource)
-});
-```
+Google's page experience metrics:
+- **LCP** (Largest Contentful Paint): < 2.5s good
+- **FID** (First Input Delay): < 100ms good
+- **CLS** (Cumulative Layout Shift): < 0.1 good
 
 ---
 
-**Q: How do I handle timeouts?**
+### Distributed Crawling
 
-A: Set timeouts at multiple levels:
+**Q: How does distributed crawling work?**
 
-```javascript
-// 1. Browser launch timeout
-puppeteer: {
-  pool: { launchTimeout: 30000 } // 30s to launch browser
-}
+Multiple workers share the same S3-based queue:
+1. All workers use same `namespace`
+2. Each worker has unique `workerId`
+3. S3Queue handles distributed locking
+4. Jobs are automatically balanced
 
-// 2. Page load timeout
-processor: async (task, ctx, { puppeteer }) => {
-  const page = await puppeteer.open(task.url, {
-    timeout: 15000 // 15s to load page
-  });
-}
+**Q: Can workers run on different machines?**
 
-// 3. Overall task timeout
-processor: async (task, ctx, { puppeteer }) => {
-  const timeout = new Promise((_, reject) =>
-    setTimeout(() => reject(new Error('Task timeout')), 30000)
-  );
+Yes. As long as all workers have access to the same S3 bucket and use the same namespace, they can run anywhere.
 
-  const work = async () => {
-    const page = await puppeteer.open(task.url);
-    const data = await page.evaluate(() => ({ title: document.title }));
-    await page.close();
-    return data;
-  };
+**Q: What if a worker crashes mid-task?**
 
-  return Promise.race([work(), timeout]);
-}
-```
+The task's `visibilityTimeout` expires and it's re-queued for another worker. Configure `maxRetries` to limit retry attempts.
 
 ---
 
-### Advanced Usage
+### Storage & Data
 
-**Q: Can I crawl sites requiring authentication?**
+**Q: Where are results stored?**
 
-A: Yes, use cookies or credentials:
+When persistence is enabled, results go to S3 resources:
+- `{namespace}_results` - Main crawl results
+- `{namespace}_seo_analysis` - SEO data
+- `{namespace}_tech_fingerprint` - Technology detection
+- `{namespace}_security_analysis` - Security findings
+- `{namespace}_screenshots` - Captured screenshots
+- `{namespace}_content_analysis` - iFrames, tracking
+- `{namespace}_storage_analysis` - Browser storage
+
+**Q: How do I export results?**
 
 ```javascript
-processor: async (task, ctx, { puppeteer }) => {
-  const page = await puppeteer.open('https://example.com/login');
+const results = await spider.getResults();
+const json = JSON.stringify(results, null, 2);
+fs.writeFileSync('results.json', json);
 
-  // Method 1: Fill login form
-  await page.type('#username', 'user');
-  await page.type('#password', 'pass');
-  await page.click('button[type="submit"]');
-  await page.waitForNavigation();
-
-  // Method 2: Set cookies directly
-  await page.setCookie({
-    name: 'sessionId',
-    value: 'abc123',
-    domain: 'example.com'
-  });
-
-  // Now navigate to protected page
-  await page.goto(task.url);
-  const data = await extractData(page);
-  await page.close();
-
-  return data;
+// Or stream to CSV
+for (const result of results) {
+  console.log(`${result.url},${result.seoScore?.percentage}`);
 }
 ```
 
----
+**Q: How long are results kept?**
 
-**Q: How do I extract data from infinite scroll pages?**
-
-A: Scroll programmatically:
+Until you delete them or TTL expires. Configure TTL for automatic cleanup:
 
 ```javascript
-processor: async (task, ctx, { puppeteer }) => {
-  const page = await puppeteer.open(task.url);
-
-  let items = [];
-  let previousHeight = 0;
-
-  while (true) {
-    // Extract current items
-    const newItems = await page.$$eval('.item', els =>
-      els.map(el => ({ title: el.textContent }))
-    );
-    items.push(...newItems);
-
-    // Scroll to bottom
-    await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
-    await new Promise(resolve => setTimeout(resolve, 1000));
-
-    // Check if more content loaded
-    const currentHeight = await page.evaluate(() => document.body.scrollHeight);
-    if (currentHeight === previousHeight) break; // No more content
-    previousHeight = currentHeight;
-  }
-
-  await page.close();
-  return { url: task.url, items };
-}
-```
-
----
-
-**Q: Can I take screenshots during crawling?**
-
-A: Yes, use `page.screenshot()`:
-
-```javascript
-processor: async (task, ctx, { puppeteer }) => {
-  const page = await puppeteer.open(task.url);
-
-  // Take screenshot
-  const screenshot = await page.screenshot({
-    fullPage: true,
-    type: 'png'
-  });
-
-  // Upload to S3
-  const key = `screenshots/${task.url.replace(/[^a-z0-9]/gi, '_')}.png`;
-  await ctx.db.client.putObject({
-    bucket: ctx.db.bucket,
-    key,
-    body: screenshot
-  });
-
-  await page.close();
-  return { url: task.url, screenshot: key };
-}
-```
-
----
-
-**Q: How do I implement breadth-first vs depth-first crawling?**
-
-A: Control via priorities:
-
-**Breadth-first** (same priority for all):
-```javascript
-processor: async (task, ctx, { puppeteer, enqueue }) => {
-  const page = await puppeteer.open(task.url);
-  const links = await extractLinks(page);
-  await page.close();
-
-  // All links same priority = breadth-first
-  for (const link of links) {
-    await enqueue({ url: link, priority: 5 });
-  }
-}
-```
-
-**Depth-first** (higher priority for child links):
-```javascript
-processor: async (task, ctx, { puppeteer, enqueue }) => {
-  const page = await puppeteer.open(task.url);
-  const links = await extractLinks(page);
-  await page.close();
-
-  // Child links get higher priority = depth-first
-  const childPriority = (task.priority || 5) + 1;
-  for (const link of links) {
-    await enqueue({ url: link, priority: childPriority });
-  }
-}
+ttl: { enabled: true, queue: { ttl: 604800000 } }  // 7 days
 ```
 
 ---
 
 ### Troubleshooting
 
-**Q: Why are my workers not processing tasks?**
+**Q: Why is my crawler being blocked?**
 
-A: Check these common issues:
+Common reasons:
+1. No stealth mode → enable `stealth: { enabled: true }`
+2. Too fast → reduce concurrency, add delays
+3. Same IP → use proxy rotation
+4. Bot-like behavior → enable human simulation
 
-1. **No processor set**:
-   ```javascript
-   // ❌ Forgot to set processor
-   const spider = new SpiderPlugin({ namespace: 'test' });
-   await spider.startProcessing(); // Error!
+**Q: Why are some activities not running?**
 
-   // ✅ Set processor first
-   spider.setProcessor(async (task, ctx, helpers) => { /* ... */ });
-   ```
-
-2. **autoStart without processor**:
-   ```javascript
-   // ❌ autoStart with no processor
-   new SpiderPlugin({ queue: { autoStart: true } }); // Error!
-
-   // ✅ Provide processor
-   new SpiderPlugin({
-     queue: { autoStart: true },
-     processor: async (task, ctx, helpers) => { /* ... */ }
-   });
-   ```
-
-3. **Queue empty**:
-   ```javascript
-   // No tasks in queue!
-   await spider.enqueueTarget({ url: 'https://example.com' });
-   ```
-
-4. **Processing not started**:
-   ```javascript
-   await spider.startProcessing(); // Don't forget this!
-   ```
-
----
-
-**Q: Why is memory usage increasing?**
-
-A: Common causes:
-
-1. **Unclosed pages**:
-   ```javascript
-   // ✅ Always close pages
-   try {
-     const page = await puppeteer.open(task.url);
-     return await process(page);
-   } finally {
-     await page.close(); // Critical!
-   }
-   ```
-
-2. **Large data in memory**:
-   ```javascript
-   // Store in S3, not memory
-   const screenshot = await page.screenshot({ fullPage: true });
-
-   // ❌ Don't store in task result
-   return { screenshot }; // Can be huge!
-
-   // ✅ Upload to S3, return key only
-   const key = `screenshots/${taskId}.png`;
-   await uploadToS3(key, screenshot);
-   return { screenshotKey: key };
-   ```
-
-3. **Too many browsers**:
-   ```javascript
-   // Reduce pool size
-   puppeteer: {
-     pool: { size: 3 } // Instead of 10
-   }
-   ```
-
----
-
-**Q: Tasks are timing out - what should I do?**
-
-A: Increase timeouts and optimize selectors:
+Check your activity list or preset. Only specified activities run:
 
 ```javascript
-// 1. Increase page load timeout
-processor: async (task, ctx, { puppeteer }) => {
-  const page = await puppeteer.open(task.url, {
-    timeout: 60000 // 60 seconds
-  });
-}
-
-// 2. Use faster waitUntil
-const page = await puppeteer.open(task.url, {
-  waitUntil: 'domcontentloaded' // Instead of 'networkidle0'
+// This only runs seo_meta_tags
+await spider.enqueueTarget({
+  url: '...',
+  activities: ['seo_meta_tags']
 });
 
-// 3. Add timeout to specific operations
-await page.waitForSelector('.content', { timeout: 10000 });
+// To run everything, omit activities or use 'full'
+await spider.enqueueTarget({ url: '...' });
+await spider.enqueueTarget({ url: '...', activityPreset: 'full' });
 ```
 
----
+**Q: Why is memory usage high?**
 
-### Activities
+1. Browser pool too large → reduce `maxBrowsers`
+2. Too many concurrent tabs → reduce `maxTabsPerBrowser`
+3. Not blocking resources → enable `blockImages: true`
+4. Screenshots too large → reduce quality or use viewport only
 
-**Q: What is the Activity System and why should I use it?**
+**Q: How do I debug issues?**
 
-A: The Activity System lets you **choose which analyses to run** on each crawled URL. Instead of always running everything (screenshots, security, SEO, tech detection, performance), you can:
-
-- Pick specific activities (e.g., only screenshots + tech detection)
-- Use presets for common combinations (minimal, basic, security, seo_complete, performance, full)
-- Optimize for speed: skip unnecessary analyses
-- Optimize for cost: only capture what you need
+Enable debug logging:
 
 ```javascript
-// ❌ Without activities: ALWAYS runs everything
-await spider.enqueueTarget({ url: 'https://example.com' });
-// Executes: screenshot_full, security_*, seo_*, tech_*, performance_*, assets_*
-
-// ✅ With activities: only run what you need
-await spider.enqueueTarget({
-  url: 'https://example.com',
-  activities: ['screenshot_viewport', 'tech_frameworks', 'seo_meta_tags']
-});
-// Executes: screenshot_viewport, tech_frameworks, seo_meta_tags only
-// Skips: All other analyses
-```
-
----
-
-**Q: What's the difference between `activities` and `activityPreset`?**
-
-A: Both control what executes, but used differently:
-
-| Feature | `activities` | `activityPreset` |
-|---------|------------|-----------------|
-| Type | Array of activity names | String (preset name) |
-| Values | `['screenshot_full', 'seo_meta_tags', ...]` | `'minimal'`, `'basic'`, `'security'`, etc. |
-| When to use | Custom combinations | Quick selections |
-| Flexibility | High (any combination) | Lower (predefined) |
-
-```javascript
-// Custom combination with activities
-await spider.enqueueTarget({
-  url: 'https://example.com',
-  activities: ['screenshot_full', 'security_headers', 'seo_opengraph']
-});
-
-// Quick selection with preset
-await spider.enqueueTarget({
-  url: 'https://example.com',
-  activityPreset: 'security' // All security_* activities
-});
-
-// If you provide both, activities takes precedence
-await spider.enqueueTarget({
-  url: 'https://example.com',
-  activityPreset: 'basic', // Ignored
-  activities: ['screenshot_viewport'] // Used instead
+const spider = new SpiderPlugin({
+  namespace: 'debug',
+  logLevel: 'debug'  // Shows detailed logs
 });
 ```
 
 ---
 
-**Q: How many activities are available?**
-
-A: **40+ activities** organized into **6 categories**:
-
-| Category | Count | Examples |
-|----------|-------|----------|
-| Visual | 2 | screenshot_full, screenshot_viewport |
-| Security | 8 | security_headers, security_csp, security_cors, security_tls, security_console_logs, security_websockets, security_captcha, security_vulnerabilities |
-| SEO | 7 | seo_meta_tags, seo_opengraph, seo_twitter_card, seo_links_analysis, seo_content_analysis, seo_accessibility, seo_heading_structure |
-| Technology | 7 | tech_frameworks, tech_analytics, tech_marketing, tech_cdn, tech_web_server, tech_cms, tech_libraries |
-| Performance | 4 | performance_core_web_vitals, performance_navigation_timing, performance_resource_timing, performance_memory |
-| Assets | 5 | assets_css, assets_javascript, assets_images, assets_videos, assets_audios |
-
-Use `spider.getAvailableActivities()` to list all at runtime.
-
----
-
-**Q: What are the activity presets and when should I use each?**
-
-A: Presets are pre-configured combinations for common use cases:
-
-| Preset | Best For | Activities |
-|--------|----------|-----------|
-| `minimal` | Speed (fast baseline) | screenshot_viewport, tech_frameworks, seo_meta_tags |
-| `basic` | General crawling | screenshot_full, SEO (3), tech (3) |
-| `security` | Security audits | All security_* activities |
-| `seo_complete` | SEO analysis | All seo_* activities |
-| `performance` | Performance testing | All performance_* activities |
-| `full` | Complete analysis (default) | All 40+ activities |
-
-```javascript
-// Fast lightweight crawl
-await spider.enqueueTarget({
-  url: 'https://example.com',
-  activityPreset: 'minimal' // 3 activities
-});
-
-// Standard crawl
-await spider.enqueueTarget({
-  url: 'https://example.com',
-  activityPreset: 'basic' // ~9 activities
-});
-
-// Security-focused
-await spider.enqueueTarget({
-  url: 'https://example.com',
-  activityPreset: 'security' // 8 activities
-});
-
-// No preset = default to 'full' (all activities)
-await spider.enqueueTarget({
-  url: 'https://example.com'
-  // Same as activityPreset: 'full'
-});
-```
-
----
-
-**Q: Can I set default activities for all targets in a batch?**
-
-A: **Yes!** Use the second parameter of `enqueueBatch()`:
-
-```javascript
-// All use 'basic' preset
-const results = await spider.enqueueBatch(
-  [
-    { url: 'https://example.com' },
-    { url: 'https://example.com/about' },
-    { url: 'https://example.com/blog' }
-  ],
-  { activityPreset: 'basic' } // Default for all
-);
-
-// Can also override per-target
-const results = await spider.enqueueBatch(
-  [
-    { url: 'https://example.com', activityPreset: 'security' }, // Override
-    { url: 'https://example.com/about' }, // Use default
-    { url: 'https://example.com/blog', activities: ['screenshot_viewport'] } // Override
-  ],
-  { activityPreset: 'basic' } // Default
-);
-```
-
----
-
-**Q: How do I validate activity names before queueing?**
-
-A: Use `validateActivityList()` to check activity names:
-
-```javascript
-// Valid
-const validation = spider.validateActivityList([
-  'screenshot_full',
-  'seo_meta_tags',
-  'security_headers'
-]);
-// Result: { valid: true, invalid: [] }
-
-// Invalid
-const validation = spider.validateActivityList([
-  'screenshot_full',
-  'invalid_activity_name'
-]);
-// Result: { valid: false, invalid: ['invalid_activity_name'] }
-
-// Use in try-catch
-try {
-  const validation = spider.validateActivityList(userActivities);
-  if (!validation.valid) {
-    throw new Error(`Invalid activities: ${validation.invalid.join(', ')}`);
-  }
-  await spider.enqueueTarget({ url, activities: userActivities });
-} catch (error) {
-  console.error(error);
-}
-```
-
----
-
-**Q: How do I list all available activities programmatically?**
-
-A: Use the activity query methods:
-
-```javascript
-// Get all activities
-const allActivities = spider.getAvailableActivities();
-allActivities.forEach(a => {
-  console.log(`${a.name}: ${a.label}`);
-});
-// Output:
-// screenshot_full: Full Page Screenshot
-// screenshot_viewport: Viewport Screenshot
-// ... 38 more
-
-// Get activities by category
-const securityActivities = spider.getActivitiesByCategory('security');
-// Returns: [ security_headers, security_csp, security_cors, ... ]
-
-// Get categories with nested activities
-const categories = spider.getActivityCategories();
-categories.security.activities.forEach(a => {
-  console.log(`${a.name}: ${a.label}`);
-});
-
-// Get presets
-const presets = spider.getActivityPresets();
-Object.keys(presets).forEach(name => {
-  console.log(`${name}: ${presets[name].label}`);
-});
-// Output:
-// minimal: Minimal Crawl
-// basic: Basic Crawl
-// security: Security Audit
-// ...
-```
-
----
-
-**Q: Do activities affect performance or cost?**
-
-A: **Significantly!** Activities directly control what runs:
-
-```javascript
-// ✅ Fast (only 3 activities, ~5-10 seconds per URL)
-await spider.enqueueTarget({
-  url: 'https://example.com',
-  activityPreset: 'minimal'
-});
-
-// ⚠️ Medium (basic analysis, ~15-30 seconds per URL)
-await spider.enqueueTarget({
-  url: 'https://example.com',
-  activityPreset: 'basic'
-});
-
-// 🔴 Slow (comprehensive, ~60+ seconds per URL)
-await spider.enqueueTarget({
-  url: 'https://example.com',
-  activityPreset: 'full'
-});
-```
-
-**Cost optimization:**
-- Screenshot only: ~1-2 sec, ~50KB per URL
-- Security analysis: ~5-10 sec, depends on findings
-- Full analysis: ~60+ sec, depends on content size
-
----
-
-**Q: What happens if I don't specify activities?**
-
-A: Defaults to the `'full'` preset (all 40+ activities):
-
-```javascript
-// These are equivalent:
-await spider.enqueueTarget({ url: 'https://example.com' });
-
-await spider.enqueueTarget({
-  url: 'https://example.com',
-  activityPreset: 'full'
-});
-
-await spider.enqueueTarget({
-  url: 'https://example.com',
-  activities: ['screenshot_full', 'screenshot_viewport', 'security_headers', ...]
-  // All 40+ activities
-});
-```
-
----
-
-## FAQ - Storage & Content Activities
-
-**Q: What's the difference between `storage_localstorage`, `storage_sessionstorage`, and `storage_indexeddb`?**
-
-A: They capture different browser storage mechanisms:
-
-- **`storage_localstorage`**: Persistent key-value pairs stored per domain, survives browser restart
-- **`storage_sessionstorage`**: Session-only key-value pairs, cleared when tab closes
-- **`storage_indexeddb`**: Large structured databases with object stores, indexes, and transactions
-
-Example use cases:
-```javascript
-// Get all three storage types
-await spider.enqueueTarget({
-  url: 'https://example.com',
-  activities: ['storage_localstorage', 'storage_sessionstorage', 'storage_indexeddb']
-});
-```
-
-The results show item counts, data keys, and for IndexedDB: database version, object store names, and record counts.
-
----
-
-**Q: Why would I capture browser storage data?**
-
-A: Storage analysis reveals:
-
-- **Authentication tokens** (stored in localStorage or sessionStorage)
-- **User preferences and settings** (localStorage)
-- **Cached data** (IndexedDB for offline-capable apps)
-- **Application state** (session state in sessionStorage)
-- **Analytics or tracking IDs** (persistent identifiers)
-- **API credentials** (sometimes insecurely stored)
-- **Feature flags and configuration** (cached from server)
-
-This helps identify what data the application persists locally and how.
-
----
-
-**Q: What does the `content_iframes` activity capture?**
-
-A: It detects all embedded iframes on the page and categorizes them:
-
-```javascript
-{
-  iframes: [
-    {
-      src: 'https://ads.example.com/frame',
-      category: 'advertising',    // advertising, analytics, social, embedded_content, unknown
-      title: 'Advertisement',
-      name: 'ad_frame',
-      sandbox: 'allow-scripts allow-same-origin',
-      allow: 'payment *'
-    },
-    // ... more iframes
-  ],
-  totalCount: 5,
-  categorized: {
-    advertising: 2,
-    analytics: 1,
-    social: 1,
-    embedded_content: 1,
-    unknown: 0
-  }
-}
-```
-
-**Categories**:
-- **advertising**: Ad networks (Google AdSense, AppNexus, etc.)
-- **analytics**: Analytics platforms (Google Analytics, Mixpanel, etc.)
-- **social**: Social media embeds (Facebook, Twitter, LinkedIn)
-- **embedded_content**: Maps, videos, documents
-- **unknown**: Unable to classify
-
----
-
-**Q: What does the `content_tracking_pixels` activity detect?**
-
-A: It finds tracking pixels and analytics tracking mechanisms:
-
-```javascript
-{
-  trackingPixels: [
-    {
-      type: 'pixel',                    // pixel, script, html_attribute
-      src: 'https://analytics.example.com/track.gif?id=123',
-      service: 'Google Analytics',
-      visible: false                    // Usually 1x1 and hidden
-    },
-    {
-      type: 'script',
-      src: 'https://cdn.segment.com/analytics.js',
-      service: 'Segment'
-    }
-  ],
-  detectedServices: ['Google Analytics', 'Facebook Pixel', 'LinkedIn Insight Tag'],
-  totalCount: 8
-}
-```
-
-**Tracked services** (30+): Google Analytics, Facebook Pixel, LinkedIn, Twitter, TikTok, HubSpot, Mixpanel, Amplitude, Segment, Hotjar, Crazy Egg, Mouseflow, FullStory, Drift, Intercom, Zendesk, Qualtrics, Google AdSense, AppNexus, Criteo, Rubicon, and more.
-
----
-
-**Q: How is tracking detected? Can it be bypassed?**
-
-A: Detection uses multiple methods:
-
-1. **Pattern matching**: Known tracking pixel URLs and script sources
-2. **IFrame categorization**: Analytics and advertising iframes
-3. **Inline scripts**: gtag(), analytics.push() calls
-4. **HTML attributes**: data-track, data-analytics, data-event attributes
-5. **Common library detection**: Popular analytics library CDN URLs
-
-**Limitations**:
-- Can't detect obfuscated or custom analytics implementations
-- May miss tracking if:
-  - URLs are proxied or rewritten
-  - Analytics loaded dynamically after page load
-  - Custom tracking implementations
-  - Encrypted or hidden in minified JavaScript
-
-**Note**: Detection runs synchronously on initial page content. Server-side or dynamically-loaded tracking may not be detected.
-
----
-
-**Q: What's the "reconnaissance" preset used for?**
-
-A: It's a comprehensive data collection preset with 19 activities designed for deep security and infrastructure analysis:
-
-```javascript
-await spider.enqueueTarget({
-  url: 'https://example.com',
-  activityPreset: 'reconnaissance'  // Captures 19 key activities
-});
-```
-
-**Activities included**:
-- Visual: Full screenshot, viewport screenshot
-- Security: Headers, SSL/TLS, CSP, DNS, security DNS records
-- SEO: Page title, meta description, Open Graph, robots.txt
-- Technology: Technology stack detection, JavaScript libs, frameworks
-- Storage: localStorage, sessionStorage, IndexedDB
-- Content: iframes, tracking pixels
-
-**Use case**: Initial security assessment, compliance checks, third-party risk analysis.
-
-**Performance**: ~30-45 seconds per URL (slower than minimal/basic presets, but comprehensive).
-
----
-
-**Q: Can I combine storage and content activities with screenshots?**
-
-A: Yes! Mix and match any activities:
-
-```javascript
-await spider.enqueueTarget({
-  url: 'https://example.com',
-  activities: [
-    'screenshot_full',
-    'screenshot_viewport',
-    'storage_localstorage',
-    'storage_indexeddb',
-    'content_iframes',
-    'content_tracking_pixels',
-    'security_headers',
-    'technology_stack'
-  ]
-});
-```
-
-This runs all 8 activities and returns aggregated results with both visual (screenshots) and data analysis (storage, content).
-
----
-
-**Q: Where are storage and content activity results stored?**
-
-A: Results are stored in separate resources:
-
-- **`storageAnalysis` resource**: Storage data (localStorage, sessionStorage, IndexedDB)
-- **`contentAnalysis` resource**: Content analysis (iframes, tracking pixels)
-- Linked to the **`crawlResults` resource** via the task ID
-
-Access results:
-```javascript
-const storageData = await spider.resource('storageAnalysis').get(taskId);
-const contentData = await spider.resource('contentAnalysis').get(taskId);
-```
-
----
-
-**Q: Is capturing storage data safe? Privacy concerns?**
-
-A: **Important considerations**:
-
-1. **Only access your own sites** - Only crawl URLs you own or have permission to crawl
-2. **Data sensitivity** - Storage may contain:
-   - Authentication tokens
-   - Personally identifiable information (PII)
-   - Passwords or API keys (if insecurely stored)
-3. **GDPR/Privacy compliance** - Ensure crawling complies with:
-   - Site's Terms of Service
-   - Privacy regulations (GDPR, CCPA, etc.)
-   - User consent requirements
-4. **Data retention** - Implement appropriate retention policies for captured storage data
-
-**Best practice**: Use for security audits of your own applications, not for unauthorized data collection.
-
----
-
-**Q: Why isn't my storage data being captured?**
-
-A: Several reasons:
-
-1. **Storage doesn't exist**: Page uses no localStorage/sessionStorage/IndexedDB
-2. **Access denied**: CORS restrictions or same-origin policy prevents access
-3. **Timing issue**: Storage populated after page fully loads
-4. **Sandboxed iframes**: Content in sandboxed iframes can't be accessed from main page
-
-**Debugging**:
-```javascript
-// Capture with debugging
-const result = await spider.captureAllStorage(page);
-
-if (!result.localStorage.present) {
-  console.log('No localStorage data found');
-}
-
-if (result.indexedDB.databases.length === 0) {
-  console.log('No IndexedDB databases detected');
-}
-```
-
----
-
-**Q: How do I use storage data for debugging?**
-
-A: Common debugging use cases:
-
-```javascript
-// Check for auth tokens
-const token = storageData.localStorage.data['auth_token'];
-if (token) console.log('Auth token found:', token.substring(0, 20) + '...');
-
-// Find cached API responses
-const apiCache = Object.keys(storageData.localStorage.data)
-  .filter(key => key.includes('api_cache_'));
-
-// Check user preferences
-const preferences = storageData.localStorage.data['user_preferences'];
-if (preferences) {
-  const parsed = JSON.parse(preferences);
-  console.log('Theme:', parsed.theme);
-}
-
-// Find IndexedDB stores
-const dbStores = storageData.indexedDB.databases
-  .flatMap(db => db.stores)
-  .map(store => store.name);
-```
-
----
-
-**Q: Which tracking services are detected?**
-
-A: The plugin detects 30+ major tracking services:
-
-**Analytics**:
-- Google Analytics, Google Tag Manager
-- Mixpanel, Amplitude, Segment
-- Hotjar, Crazy Egg, Mouseflow, FullStory
-
-**Marketing & Social**:
-- Facebook Pixel, LinkedIn Insight Tag
-- Twitter/X Pixel, TikTok Pixel
-- Pinterest Tag, Snapchat Pixel
-
-**Customer Intelligence**:
-- HubSpot, Drift, Intercom
-- Zendesk, Qualtrics
-- VWO (Visual Website Optimizer)
-
-**Ad Networks**:
-- Google AdSense, AppNexus
-- Criteo, Rubicon Project
-- OpenX, AdRoll/RollWorks
-
-**Other**:
-- Sentry (error tracking)
-- New Relic (monitoring)
-- Datadog (monitoring)
-- Many more via pattern matching
-
----
-
-**Q: Can I exclude certain activities to improve performance?**
-
-A: Yes, use the `'minimal'` preset or specify only needed activities:
-
-```javascript
-// Minimal - fastest, visual only
-await spider.enqueueTarget({
-  url: 'https://example.com',
-  activityPreset: 'minimal'  // ~5-10 seconds
-});
-
-// Custom - only what you need
-await spider.enqueueTarget({
-  url: 'https://example.com',
-  activities: [
-    'screenshot_viewport',
-    'storage_localstorage',
-    'content_iframes'
-  ]
-  // ~15-20 seconds, custom selection
-});
-
-// Basic - balanced
-await spider.enqueueTarget({
-  url: 'https://example.com',
-  activityPreset: 'basic'  // ~15-25 seconds
-});
-```
-
-**Performance by preset**:
-- `minimal`: ~5-10 seconds (visual only)
-- `basic`: ~15-25 seconds (visual + headers + tech)
-- `security`: ~20-30 seconds (security focused)
-- `seo_complete`: ~20-30 seconds (SEO analysis)
-- `performance`: ~25-35 seconds (performance metrics)
-- `reconnaissance`: ~30-45 seconds (comprehensive)
-- `full`: ~60+ seconds (all activities)
-
----
-
-## Contributing
-
-Found a bug or have a feature request? Open an issue at:
-https://github.com/forattini-dev/s3db.js/issues
+## 🔗 See Also
+
+- [PuppeteerPlugin](./puppeteer/README.md) - Browser automation details
+- [S3QueuePlugin](./s3-queue.md) - Distributed queue internals
+- [TTLPlugin](./ttl.md) - Automatic cleanup
 
 ---
 
