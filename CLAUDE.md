@@ -428,12 +428,12 @@ class MyPlugin extends CoordinatorPlugin {
 }
 ```
 
-**Storage Structure** (follows plugin= convention):
+**Storage Structure** (self-documenting key-value format):
 ```
-plugin=coordinator/<namespace>/
-  state.json                          # Leader lease and epoch
-  workers/<workerId>.json             # Worker heartbeat registration
-  metadata.json                       # Service metadata
+plugin=coordinator/namespace=default/
+  state.json                               # Leader lease and epoch
+  workers/worker={workerId}.json           # Worker heartbeat registration
+  metadata.json                            # Service metadata
 ```
 
 **Accessing the Coordinator**:
@@ -486,7 +486,7 @@ console.log('Staging:', await stagingCoordinator.getLeader());
 **Debugging**:
 - Enable verbose logs: `logLevel: 'debug'` in plugin config
 - Check coordinator metrics via `coordinator.getMetrics()`
-- Monitor S3 storage: `plugin=coordinator/<namespace>/`
+- Monitor S3 storage: `plugin=coordinator/namespace=default/`
 - See [Coordinator Design](docs/architecture/COORDINATOR-DESIGN.md) for detailed guide
 
 **Documentation**:
