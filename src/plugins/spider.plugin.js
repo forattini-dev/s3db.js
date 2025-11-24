@@ -19,6 +19,8 @@ import {
 } from './spider/task-activities.js'
 import { analyzeIFrames, detectTrackingPixels } from './spider/content-analyzer.js'
 import { analyzeAllStorage } from './spider/storage-analyzer.js'
+import { URLPatternMatcher } from './spider/url-pattern-matcher.js'
+import { LinkDiscoverer } from './spider/link-discoverer.js'
 
 /**
  * SpiderPlugin - All-in-one web crawler suite
@@ -165,6 +167,26 @@ export class SpiderPlugin extends Plugin {
         captureWebSockets: options.security?.captureWebSockets !== false,
         maxWebSocketMessages: options.security?.maxWebSocketMessages || 50,
         ...options.security
+      },
+
+      // URL Patterns configuration
+      patterns: options.patterns || {},
+
+      // Auto-discovery configuration
+      discovery: {
+        enabled: options.discovery?.enabled || false,
+        maxDepth: options.discovery?.maxDepth || 3,
+        maxUrls: options.discovery?.maxUrls || 1000,
+        sameDomainOnly: options.discovery?.sameDomainOnly !== false,
+        includeSubdomains: options.discovery?.includeSubdomains !== false,
+        allowedDomains: options.discovery?.allowedDomains || [],
+        blockedDomains: options.discovery?.blockedDomains || [],
+        followPatterns: options.discovery?.followPatterns || [],
+        followRegex: options.discovery?.followRegex || null,
+        ignoreRegex: options.discovery?.ignoreRegex || null,
+        respectRobotsTxt: options.discovery?.respectRobotsTxt !== false,
+        ignoreQueryString: options.discovery?.ignoreQueryString || false,
+        ...options.discovery
       }
     }
 
@@ -190,6 +212,24 @@ export class SpiderPlugin extends Plugin {
     // SEO and tech detection modules
     this.seoAnalyzer = null
     this.techDetector = null
+    this.securityAnalyzer = null
+
+    // Pattern matching and discovery
+    this.patternMatcher = null
+    this.linkDiscoverer = null
+
+    // Initialize pattern matcher if patterns configured
+    if (Object.keys(this.config.patterns).length > 0) {
+      this.patternMatcher = new URLPatternMatcher(this.config.patterns)
+    }
+
+    // Initialize link discoverer if discovery enabled
+    if (this.config.discovery.enabled) {
+      this.linkDiscoverer = new LinkDiscoverer(this.config.discovery)
+      if (this.patternMatcher) {
+        this.linkDiscoverer.setPatternMatcher(this.patternMatcher)
+      }
+    }
   }
 
   /**
@@ -733,6 +773,37 @@ export class SpiderPlugin extends Plugin {
           this.logger.debug({ url: task.url }, `Persistence disabled, skipping storage for ${task.url}`)
         }
 
+        // Auto-discovery: extract and enqueue new links
+        if (this.linkDiscoverer && this.config.discovery.enabled) {
+          const currentDepth = task.depth || 0
+          if (currentDepth < this.config.discovery.maxDepth && !this.linkDiscoverer.isLimitReached()) {
+            try {
+              const discoveredLinks = this.linkDiscoverer.extractLinks(html, task.url, currentDepth)
+
+              if (discoveredLinks.length > 0) {
+                this.logger.debug(
+                  { url: task.url, count: discoveredLinks.length },
+                  `Discovered ${discoveredLinks.length} links from ${task.url}`
+                )
+
+                // Enqueue discovered links
+                for (const link of discoveredLinks) {
+                  if (!this.linkDiscoverer.isQueued(link.url)) {
+                    await this.enqueueTarget({
+                      url: link.url,
+                      depth: link.depth,
+                      activities: link.activities.length > 0 ? link.activities : undefined,
+                      metadata: link.metadata
+                    })
+                  }
+                }
+              }
+            } catch (error) {
+              this.logger.warn({ url: task.url, error: error.message }, `Failed to discover links from ${task.url}`)
+            }
+          }
+        }
+
         // Close page
         await page.close()
 
@@ -764,11 +835,24 @@ export class SpiderPlugin extends Plugin {
       throw new PluginError('Target must have a url property')
     }
 
-    // Resolve activities: either from explicit list or from preset
+    // Match URL against patterns (if configured)
+    let patternMatch = null
+    if (this.patternMatcher) {
+      patternMatch = this.patternMatcher.match(target.url)
+    }
+
+    // Resolve activities: explicit > preset > pattern > default
     let activities = []
     let activityPreset = null
 
-    if (target.activityPreset) {
+    if (target.activities && Array.isArray(target.activities) && target.activities.length > 0) {
+      // User provided explicit activity list (highest priority)
+      const validation = validateActivities(target.activities)
+      if (!validation.valid) {
+        throw new PluginError(validation.message)
+      }
+      activities = target.activities
+    } else if (target.activityPreset) {
       // User provided a preset name
       const preset = getPreset(target.activityPreset)
       if (!preset) {
@@ -776,26 +860,43 @@ export class SpiderPlugin extends Plugin {
       }
       activities = preset.activities
       activityPreset = target.activityPreset
-    } else if (target.activities && Array.isArray(target.activities) && target.activities.length > 0) {
-      // User provided explicit activity list
-      const validation = validateActivities(target.activities)
-      if (!validation.valid) {
-        throw new PluginError(validation.message)
-      }
-      activities = target.activities
+    } else if (patternMatch && patternMatch.activities && patternMatch.activities.length > 0) {
+      // Pattern defines activities
+      activities = patternMatch.activities
     } else {
       // Default to 'full' preset if nothing specified
       activities = getAllActivities().map((a) => a.name)
       activityPreset = 'full'
     }
 
+    // Merge metadata: target.metadata > pattern.params > pattern.metadata
+    const metadata = {
+      ...(patternMatch?.metadata || {}),
+      ...(patternMatch?.params || {}),
+      ...(target.metadata || {})
+    }
+
+    // Add pattern info to metadata if matched
+    if (patternMatch && !patternMatch.isDefault) {
+      metadata._pattern = patternMatch.pattern
+      metadata._params = patternMatch.params
+    }
+
     const task = {
       url: target.url,
       priority: target.priority || 0,
-      metadata: target.metadata || {},
+      metadata,
       activities,
       activityPreset,
+      pattern: patternMatch?.pattern || null,
+      params: patternMatch?.params || {},
+      depth: target.depth || 0,
       status: 'pending'
+    }
+
+    // Mark as queued in discoverer (if enabled)
+    if (this.linkDiscoverer) {
+      this.linkDiscoverer.markQueued(target.url)
     }
 
     const targetsResource = await this.database.getResource(this.resourceNames.targets)
@@ -1063,6 +1164,155 @@ export class SpiderPlugin extends Plugin {
    */
   async navigate(url, options = {}) {
     return await this.puppeteerPlugin.navigate(url, options)
+  }
+
+  // ============================================
+  // PATTERN MATCHING API
+  // ============================================
+
+  /**
+   * Match a URL against configured patterns
+   *
+   * @param {string} url - URL to match
+   * @returns {Object|null} Match result with pattern name, params, activities
+   */
+  matchUrl(url) {
+    if (!this.patternMatcher) {
+      return null
+    }
+    return this.patternMatcher.match(url)
+  }
+
+  /**
+   * Check if a URL matches any pattern (quick check)
+   *
+   * @param {string} url - URL to check
+   * @returns {boolean}
+   */
+  urlMatchesPattern(url) {
+    if (!this.patternMatcher) {
+      return false
+    }
+    return this.patternMatcher.matches(url)
+  }
+
+  /**
+   * Add a new URL pattern at runtime
+   *
+   * @param {string} name - Pattern name
+   * @param {Object} config - Pattern configuration
+   * @example
+   * spider.addPattern('product', {
+   *   match: '/dp/:asin',
+   *   activities: ['seo_meta_tags', 'seo_opengraph'],
+   *   metadata: { type: 'product' }
+   * });
+   */
+  addPattern(name, config) {
+    if (!this.patternMatcher) {
+      this.patternMatcher = new URLPatternMatcher({})
+    }
+    this.patternMatcher.addPattern(name, config)
+
+    // Update link discoverer if active
+    if (this.linkDiscoverer) {
+      this.linkDiscoverer.setPatternMatcher(this.patternMatcher)
+    }
+  }
+
+  /**
+   * Remove a URL pattern
+   *
+   * @param {string} name - Pattern name to remove
+   */
+  removePattern(name) {
+    if (this.patternMatcher) {
+      this.patternMatcher.removePattern(name)
+    }
+  }
+
+  /**
+   * Get all configured pattern names
+   *
+   * @returns {string[]} Array of pattern names
+   */
+  getPatternNames() {
+    if (!this.patternMatcher) {
+      return []
+    }
+    return this.patternMatcher.getPatternNames()
+  }
+
+  /**
+   * Filter URLs that match specific patterns
+   *
+   * @param {string[]} urls - URLs to filter
+   * @param {string[]} patternNames - Pattern names to match (optional, all if empty)
+   * @returns {Array<{url: string, match: Object}>}
+   */
+  filterUrlsByPattern(urls, patternNames = []) {
+    if (!this.patternMatcher) {
+      return []
+    }
+    return this.patternMatcher.filterUrls(urls, patternNames)
+  }
+
+  // ============================================
+  // DISCOVERY API
+  // ============================================
+
+  /**
+   * Get discovery statistics
+   *
+   * @returns {Object} Discovery stats (discovered, queued, maxUrls, remaining)
+   */
+  getDiscoveryStats() {
+    if (!this.linkDiscoverer) {
+      return { enabled: false }
+    }
+    return {
+      enabled: true,
+      ...this.linkDiscoverer.getStats()
+    }
+  }
+
+  /**
+   * Reset discovery state (clear discovered/queued URLs)
+   * Useful when starting a fresh crawl
+   */
+  resetDiscovery() {
+    if (this.linkDiscoverer) {
+      this.linkDiscoverer.reset()
+    }
+  }
+
+  /**
+   * Enable or configure auto-discovery at runtime
+   *
+   * @param {Object} config - Discovery configuration
+   */
+  enableDiscovery(config = {}) {
+    const discoveryConfig = {
+      ...this.config.discovery,
+      ...config,
+      enabled: true
+    }
+
+    this.config.discovery = discoveryConfig
+
+    if (!this.linkDiscoverer) {
+      this.linkDiscoverer = new LinkDiscoverer(discoveryConfig)
+      if (this.patternMatcher) {
+        this.linkDiscoverer.setPatternMatcher(this.patternMatcher)
+      }
+    }
+  }
+
+  /**
+   * Disable auto-discovery
+   */
+  disableDiscovery() {
+    this.config.discovery.enabled = false
   }
 
   /**

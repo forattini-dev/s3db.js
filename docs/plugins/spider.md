@@ -86,16 +86,19 @@ pnpm install s3db.js puppeteer puppeteer-extra puppeteer-extra-plugin-stealth gh
 1. [⚡ TLDR](#-tldr)
 2. [📦 Dependencies](#-dependencies)
 3. [🎯 Use Cases](#-use-cases)
-4. [🎬 Activity System](#-activity-system)
-5. [🔍 SEO Analysis Deep Dive](#-seo-analysis-deep-dive)
-6. [🔒 Security Analysis Deep Dive](#-security-analysis-deep-dive)
-7. [🎭 Puppeteer Integration](#-puppeteer-integration)
-8. [📈 Usage Journey](#-usage-journey)
-9. [📊 Configuration Reference](#-configuration-reference)
-10. [🔧 API Reference](#-api-reference)
-11. [✅ Best Practices](#-best-practices)
-12. [🚨 Error Handling](#-error-handling)
-13. [❓ FAQ](#-faq)
+4. [🔗 URL Pattern Matching](#-url-pattern-matching)
+5. [🔍 Auto-Discovery](#-auto-discovery)
+6. [🛒 Use Case 7: Amazon Product Crawler](#-use-case-7-amazon-product-crawler)
+7. [🎬 Activity System](#-activity-system)
+8. [🔍 SEO Analysis Deep Dive](#-seo-analysis-deep-dive)
+9. [🔒 Security Analysis Deep Dive](#-security-analysis-deep-dive)
+10. [🎭 Puppeteer Integration](#-puppeteer-integration)
+11. [📈 Usage Journey](#-usage-journey)
+12. [📊 Configuration Reference](#-configuration-reference)
+13. [🔧 API Reference](#-api-reference)
+14. [✅ Best Practices](#-best-practices)
+15. [🚨 Error Handling](#-error-handling)
+16. [❓ FAQ](#-faq)
 
 ---
 
@@ -701,6 +704,680 @@ await db.disconnect();
 | **Detection API** | Detect anti-bot, fingerprinting, WebRTC, CAPTCHA |
 | **Full Persistence** | All data saved to S3 for later analysis |
 | **Auto TTL** | Automatic cleanup of old data |
+
+---
+
+## 🔗 URL Pattern Matching
+
+SpiderPlugin includes a powerful URL pattern matching system that lets you define URL patterns (like Express.js routes), automatically extract parameters from URLs, and assign specific activities per pattern.
+
+### Why Use Pattern Matching?
+
+When crawling large sites, different URL types need different handling:
+
+| URL Type | Example | What You Need |
+|----------|---------|---------------|
+| Homepage | `/` | Full SEO + Tech analysis |
+| Product pages | `/dp/B08N5WRWNW` | Meta tags + OpenGraph + Screenshots |
+| Category pages | `/s?k=laptops` | Links analysis + Content |
+| Cart/Checkout | `/cart` | Security headers only |
+
+Pattern matching solves this by:
+1. **Auto-extracting parameters** from URLs (like `asin` from `/dp/:asin`)
+2. **Assigning activities per pattern** - run only what you need
+3. **Adding parameters to metadata** - for easy querying later
+4. **Filtering discovered links** - only follow URLs matching your patterns
+
+### Pattern Syntax
+
+SpiderPlugin supports Express-style path matching:
+
+| Pattern | Matches | Extracted Params |
+|---------|---------|------------------|
+| `/dp/:asin` | `/dp/B08N5WRWNW` | `{ asin: 'B08N5WRWNW' }` |
+| `/products/:id/reviews` | `/products/123/reviews` | `{ id: '123' }` |
+| `/category/*` | `/category/electronics` | - |
+| `/blog/**` | `/blog/2024/01/post-title` | - |
+| `/search?q=:query` | `/search?q=laptops` | `{ query: 'laptops' }` |
+| `/item/:id?` | `/item` or `/item/123` | `{ id: '123' }` (optional) |
+
+**Pattern types:**
+- `:param` - Required parameter (matches anything except `/`)
+- `:param?` - Optional parameter
+- `*` - Wildcard (matches anything except `/`)
+- `**` - Greedy wildcard (matches anything including `/`)
+- Regex - Full JavaScript regex support
+
+### Basic Configuration
+
+```javascript
+const spider = new SpiderPlugin({
+  namespace: 'ecommerce-crawler',
+
+  // Define URL patterns
+  patterns: {
+    // Product pages
+    product: {
+      match: '/dp/:asin',
+      activities: ['seo_meta_tags', 'seo_opengraph', 'screenshot_viewport'],
+      metadata: { type: 'product' },
+      priority: 10
+    },
+
+    // Category pages
+    category: {
+      match: '/s',   // Matches /s?k=anything
+      activities: ['seo_links_analysis', 'seo_content_analysis'],
+      metadata: { type: 'category' },
+      extract: { query: 'k' }   // Extract 'k' query param as 'query'
+    },
+
+    // Blog posts
+    blog: {
+      match: '/blog/:year/:month/:slug',
+      activities: ['seo_meta_tags', 'seo_content_analysis', 'seo_heading_structure'],
+      metadata: { type: 'blog' }
+    },
+
+    // Default for unmatched URLs
+    default: {
+      activities: ['seo_meta_tags'],
+      metadata: { type: 'other' }
+    }
+  },
+
+  queue: { autoStart: true }
+});
+
+await db.usePlugin(spider);
+await db.connect();
+
+// Enqueue a product page - pattern auto-detected!
+await spider.enqueueTarget({ url: 'https://amazon.com/dp/B08N5WRWNW' });
+
+// The result will have:
+// - pattern: 'product'
+// - metadata: { type: 'product', asin: 'B08N5WRWNW' }
+// - Only runs: seo_meta_tags, seo_opengraph, screenshot_viewport
+```
+
+### Pattern Configuration Reference
+
+```javascript
+patterns: {
+  patternName: {
+    // URL matching (required) - string or RegExp
+    match: '/path/:param',          // Express-style
+    match: /\/dp\/([A-Z0-9]{10})/,  // Regex
+
+    // Activities to run (optional, defaults to preset or config default)
+    activities: ['seo_meta_tags', 'tech_frameworks'],
+
+    // Static metadata to add (optional)
+    metadata: {
+      type: 'product',
+      category: 'electronics'
+    },
+
+    // Query string parameter extraction (optional)
+    extract: {
+      searchQuery: 'q',      // ?q=laptops -> { searchQuery: 'laptops' }
+      page: 'page'           // ?page=2 -> { page: '2' }
+    },
+
+    // Priority for pattern matching (optional, default: 0)
+    // Higher priority patterns are tested first
+    priority: 10
+  }
+}
+```
+
+### Pattern Matching API
+
+```javascript
+// Match a URL against patterns
+const match = spider.matchUrl('https://example.com/dp/B08N5WRWNW');
+// Returns:
+// {
+//   pattern: 'product',
+//   params: { asin: 'B08N5WRWNW' },
+//   activities: ['seo_meta_tags', 'seo_opengraph'],
+//   metadata: { type: 'product', asin: 'B08N5WRWNW' },
+//   priority: 10
+// }
+
+// Quick check if URL matches any pattern
+const matches = spider.urlMatchesPattern('https://example.com/dp/123');
+// Returns: true
+
+// Get all pattern names
+const names = spider.getPatternNames();
+// Returns: ['product', 'category', 'blog']
+
+// Add pattern at runtime
+spider.addPattern('newPattern', {
+  match: '/new/:id',
+  activities: ['seo_meta_tags']
+});
+
+// Remove pattern
+spider.removePattern('oldPattern');
+
+// Filter URLs by pattern
+const urls = [
+  'https://example.com/dp/AAA',
+  'https://example.com/dp/BBB',
+  'https://example.com/cart',
+  'https://example.com/blog/post-1'
+];
+
+const productUrls = spider.filterUrlsByPattern(urls, ['product']);
+// Returns only product URLs with their match data
+```
+
+### Regex Patterns
+
+For complex matching, use full JavaScript regex:
+
+```javascript
+patterns: {
+  // Amazon ASIN (exactly 10 alphanumeric chars)
+  product: {
+    match: /\/dp\/([A-Z0-9]{10})(?:\/|$)/i,
+    activities: ['seo_meta_tags', 'seo_opengraph'],
+    metadata: { type: 'product' },
+    extract: { asin: 0 }  // Extract capture group 0 as 'asin'
+  },
+
+  // UUID pattern
+  order: {
+    match: /\/order\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})/i,
+    activities: ['security_headers'],
+    metadata: { type: 'order' }
+  },
+
+  // Multiple segments
+  api: {
+    match: /\/api\/v(\d+)\/(users|products|orders)\/(\d+)?/,
+    activities: ['security_headers', 'security_cors'],
+    metadata: { type: 'api' }
+  }
+}
+```
+
+---
+
+## 🔍 Auto-Discovery
+
+Auto-Discovery automatically finds and crawls new URLs from the pages you visit. Combined with Pattern Matching, it creates a powerful focused crawler.
+
+### How It Works
+
+```
+1. Spider visits URL A
+2. LinkDiscoverer extracts all <a href="..."> links
+3. Links are filtered by:
+   - Domain rules (same domain, subdomains, allowed list)
+   - Pattern matching (only follow URLs matching your patterns)
+   - Depth limits (don't crawl too deep)
+   - URL limits (don't exceed maxUrls)
+4. Matching links are auto-enqueued with their pattern's activities
+5. Repeat for each new page
+```
+
+### Basic Configuration
+
+```javascript
+const spider = new SpiderPlugin({
+  namespace: 'site-crawler',
+
+  // URL patterns
+  patterns: {
+    product: {
+      match: '/products/:id',
+      activities: ['seo_meta_tags', 'seo_opengraph']
+    },
+    category: {
+      match: '/category/:name',
+      activities: ['seo_links_analysis']
+    }
+  },
+
+  // Enable auto-discovery
+  discovery: {
+    enabled: true,
+    maxDepth: 3,              // Follow links up to 3 levels deep
+    maxUrls: 500,             // Discover max 500 URLs
+    sameDomainOnly: true,     // Stay on same domain
+    includeSubdomains: true,  // Include subdomains
+    followPatterns: ['product', 'category']  // Only follow these patterns
+  },
+
+  queue: { autoStart: true }
+});
+
+await db.usePlugin(spider);
+await db.connect();
+
+// Start with homepage - discovery will find the rest!
+await spider.enqueueTarget({
+  url: 'https://example.com',
+  metadata: { depth: 0 }
+});
+```
+
+### Discovery Configuration Reference
+
+```javascript
+discovery: {
+  // Enable/disable discovery
+  enabled: true,
+
+  // Depth limits
+  maxDepth: 3,              // Max link depth to follow (default: 3)
+  maxUrls: 1000,            // Max URLs to discover (default: 1000)
+
+  // Domain filtering
+  sameDomainOnly: true,     // Only follow same domain (default: true)
+  includeSubdomains: true,  // Include subdomains when sameDomainOnly (default: true)
+  allowedDomains: [],       // Whitelist specific domains
+  blockedDomains: [],       // Blacklist specific domains
+
+  // Pattern filtering
+  followPatterns: [],       // Only follow URLs matching these patterns
+                           // Empty = follow all patterns
+                           // ['product', 'category'] = only these
+                           // Include 'default' to follow unmatched URLs
+
+  // Regex filtering
+  followRegex: /\/products\//,    // Only follow URLs matching regex
+  ignoreRegex: /\/(cart|checkout|login)/,  // Ignore URLs matching regex
+
+  // URL normalization
+  ignoreQueryString: false,  // Treat URLs with different query strings as same
+  ignoreHash: true,          // Ignore URL hash (default: true)
+
+  // Robots.txt
+  respectRobotsTxt: true     // Respect robots.txt (default: true)
+}
+```
+
+### Discovery API
+
+```javascript
+// Get discovery statistics
+const stats = spider.getDiscoveryStats();
+// Returns:
+// {
+//   enabled: true,
+//   discovered: 150,      // Total unique URLs found
+//   queued: 120,          // URLs enqueued for crawling
+//   maxUrls: 1000,
+//   maxDepth: 3,
+//   remaining: 850        // Slots remaining before limit
+// }
+
+// Reset discovery (clear found URLs)
+spider.resetDiscovery();
+
+// Enable discovery at runtime
+spider.enableDiscovery({
+  maxDepth: 5,
+  maxUrls: 2000,
+  followPatterns: ['product']
+});
+
+// Disable discovery
+spider.disableDiscovery();
+```
+
+### Discovery Strategies
+
+#### Strategy 1: Pattern-Focused Crawling
+
+Only discover URLs matching specific patterns:
+
+```javascript
+const spider = new SpiderPlugin({
+  namespace: 'product-crawler',
+
+  patterns: {
+    product: {
+      match: '/product/:id',
+      activities: ['seo_meta_tags', 'screenshot_viewport']
+    },
+    listing: {
+      match: '/products',
+      activities: ['seo_links_analysis']
+    }
+  },
+
+  discovery: {
+    enabled: true,
+    maxDepth: 5,
+    followPatterns: ['product', 'listing']  // Only these patterns
+  }
+});
+```
+
+#### Strategy 2: Regex-Based Crawling
+
+Use regex for flexible URL filtering:
+
+```javascript
+discovery: {
+  enabled: true,
+  followRegex: /\/(products|items|catalog)\//,  // Only these paths
+  ignoreRegex: /\/(api|admin|checkout|cart)\//  // Never these
+}
+```
+
+#### Strategy 3: Domain Expansion
+
+Crawl main domain + specific subdomains:
+
+```javascript
+discovery: {
+  enabled: true,
+  sameDomainOnly: false,
+  allowedDomains: [
+    'example.com',
+    'shop.example.com',
+    'blog.example.com'
+  ],
+  blockedDomains: [
+    'ads.example.com',
+    'tracking.example.com'
+  ]
+}
+```
+
+#### Strategy 4: Breadth-First Crawling
+
+Shallow but wide crawling:
+
+```javascript
+discovery: {
+  enabled: true,
+  maxDepth: 2,       // Only 2 levels deep
+  maxUrls: 5000      // But lots of URLs
+}
+```
+
+---
+
+## 🛒 Use Case 7: Amazon Product Crawler
+
+Complete example crawling Amazon.com to extract product information:
+
+```javascript
+import { Database } from 's3db.js';
+import { SpiderPlugin } from 's3db.js/plugins';
+
+const db = new Database({ connectionString: 's3://...' });
+
+// Configure spider for Amazon crawling
+const spider = new SpiderPlugin({
+  namespace: 'amazon-crawler',
+
+  // ========================================
+  // URL PATTERNS - Amazon-specific
+  // ========================================
+  patterns: {
+    // Product detail pages
+    product: {
+      match: /\/dp\/([A-Z0-9]{10})/i,
+      activities: [
+        'seo_meta_tags',
+        'seo_opengraph',
+        'seo_content_analysis',
+        'screenshot_full',
+        'tech_frameworks'
+      ],
+      metadata: { type: 'product' },
+      extract: { asin: 0 },  // Extract ASIN from regex group
+      priority: 10
+    },
+
+    // Search results
+    search: {
+      match: '/s',
+      activities: [
+        'seo_links_analysis',
+        'seo_content_analysis'
+      ],
+      metadata: { type: 'search' },
+      extract: { query: 'k', page: 'page' },
+      priority: 5
+    },
+
+    // Category browse pages
+    category: {
+      match: /\/b\/\?node=(\d+)/,
+      activities: [
+        'seo_links_analysis',
+        'seo_meta_tags'
+      ],
+      metadata: { type: 'category' },
+      priority: 3
+    },
+
+    // Review pages
+    reviews: {
+      match: '/product-reviews/:asin',
+      activities: [
+        'seo_content_analysis',
+        'seo_heading_structure'
+      ],
+      metadata: { type: 'reviews' },
+      priority: 2
+    },
+
+    // Default - minimal processing for unmatched
+    default: {
+      activities: ['seo_meta_tags'],
+      metadata: { type: 'other' }
+    }
+  },
+
+  // ========================================
+  // AUTO-DISCOVERY - Follow product links
+  // ========================================
+  discovery: {
+    enabled: true,
+    maxDepth: 3,
+    maxUrls: 500,
+    sameDomainOnly: true,
+    includeSubdomains: true,
+
+    // Only follow product and search pages
+    followPatterns: ['product', 'search', 'category'],
+
+    // Ignore checkout, cart, login, etc.
+    ignoreRegex: /\/(cart|checkout|signin|gp\/help|ap\/signin)/i,
+
+    // Don't follow query string variations
+    ignoreQueryString: false
+  },
+
+  // ========================================
+  // STEALTH - Avoid bot detection
+  // ========================================
+  puppeteer: {
+    pool: { enabled: true, maxBrowsers: 3 },
+    stealth: { enabled: true, enableEvasions: true },
+    humanBehavior: {
+      enabled: true,
+      mouse: { enabled: true, jitter: true },
+      scrolling: { enabled: true, smooth: true }
+    },
+    performance: {
+      blockFonts: true,
+      blockMedia: true
+    }
+  },
+
+  // ========================================
+  // QUEUE - Careful rate limiting
+  // ========================================
+  queue: {
+    autoStart: true,
+    concurrency: 2,         // Low concurrency to avoid blocking
+    maxRetries: 2,
+    retryDelay: 5000        // 5 second delay between retries
+  },
+
+  // ========================================
+  // PERSISTENCE - Save everything
+  // ========================================
+  persistence: {
+    enabled: true,
+    saveResults: true,
+    saveSEOAnalysis: true,
+    saveScreenshots: true
+  },
+
+  // TTL cleanup after 7 days
+  ttl: {
+    enabled: true,
+    queue: { ttl: 604800000 }
+  }
+});
+
+await db.usePlugin(spider);
+await db.connect();
+
+// ========================================
+// START CRAWLING
+// ========================================
+
+// Start with a search results page
+await spider.enqueueTarget({
+  url: 'https://www.amazon.com/s?k=wireless+headphones',
+  priority: 100,
+  metadata: { seed: true }
+});
+
+// Or start with specific product ASINs
+const productASINs = ['B08N5WRWNW', 'B09JQL3NWT', 'B0BT2Y42JF'];
+for (const asin of productASINs) {
+  await spider.enqueueTarget({
+    url: `https://www.amazon.com/dp/${asin}`,
+    priority: 50
+  });
+}
+
+// Monitor crawl progress
+const monitor = setInterval(async () => {
+  const queueStatus = await spider.getQueueStatus();
+  const discoveryStats = spider.getDiscoveryStats();
+
+  console.log(`\n=== Crawl Progress ===`);
+  console.log(`Queue: ${queueStatus.pending} pending, ${queueStatus.processing} processing, ${queueStatus.completed} completed`);
+  console.log(`Discovery: ${discoveryStats.discovered} URLs found, ${discoveryStats.remaining} slots remaining`);
+
+  // Stop when done
+  if (queueStatus.pending === 0 && queueStatus.processing === 0) {
+    clearInterval(monitor);
+    await generateReport();
+  }
+}, 10000);
+
+// ========================================
+// GENERATE REPORT
+// ========================================
+async function generateReport() {
+  console.log('\n=== AMAZON CRAWL REPORT ===\n');
+
+  // Get all results
+  const results = await spider.getResults();
+  const seoResults = await spider.getSEOAnalysis();
+
+  // Group by pattern
+  const byPattern = {};
+  for (const result of results) {
+    const pattern = result.pattern || 'unknown';
+    byPattern[pattern] = byPattern[pattern] || [];
+    byPattern[pattern].push(result);
+  }
+
+  console.log('Pages by Type:');
+  for (const [pattern, pages] of Object.entries(byPattern)) {
+    console.log(`  ${pattern}: ${pages.length} pages`);
+  }
+
+  // Product analysis
+  const products = results.filter(r => r.pattern === 'product');
+  console.log(`\nProduct Pages Analyzed: ${products.length}`);
+
+  for (const product of products.slice(0, 10)) {
+    console.log(`\n📦 ${product.url}`);
+    console.log(`   ASIN: ${product.metadata?.asin || 'N/A'}`);
+
+    // Find matching SEO data
+    const seo = seoResults.find(s => s.url === product.url);
+    if (seo) {
+      console.log(`   Title: ${seo.metaTags?.title?.slice(0, 60) || 'N/A'}...`);
+      console.log(`   SEO Score: ${seo.seoScore?.percentage || 'N/A'}%`);
+      console.log(`   OG Image: ${seo.openGraph?.image ? '✅' : '❌'}`);
+    }
+  }
+
+  // Export data
+  const exportData = {
+    crawledAt: new Date().toISOString(),
+    summary: {
+      totalPages: results.length,
+      byPattern: Object.fromEntries(
+        Object.entries(byPattern).map(([k, v]) => [k, v.length])
+      )
+    },
+    products: products.map(p => ({
+      url: p.url,
+      asin: p.metadata?.asin,
+      title: seoResults.find(s => s.url === p.url)?.metaTags?.title
+    }))
+  };
+
+  console.log('\n📊 Export data ready (', products.length, 'products)');
+
+  // Cleanup
+  await spider.destroy();
+  await db.disconnect();
+}
+```
+
+### What This Crawler Captures:
+
+| Pattern | What's Extracted | Use Case |
+|---------|------------------|----------|
+| `product` | ASIN, title, OG tags, screenshot | Product database, price monitoring |
+| `search` | Links to products, search metadata | Discover new products |
+| `category` | Category structure, product links | Category mapping |
+| `reviews` | Review content, heading structure | Sentiment analysis |
+
+### Results Structure:
+
+```javascript
+// Each crawled product has:
+{
+  url: 'https://amazon.com/dp/B08N5WRWNW',
+  pattern: 'product',
+  params: { asin: 'B08N5WRWNW' },
+  metadata: {
+    type: 'product',
+    asin: 'B08N5WRWNW',
+    depth: 1,
+    discoveredFrom: 'https://amazon.com/s?k=headphones'
+  },
+  seoAnalysis: {
+    metaTags: { title: 'Sony WH-1000XM4...' },
+    openGraph: { image: '...', title: '...' },
+    seoScore: { percentage: 85 }
+  },
+  screenshot: { /* base64 or S3 reference */ }
+}
+```
 
 ---
 
@@ -1704,6 +2381,43 @@ new SpiderPlugin({
   },
 
   // ============================================
+  // URL PATTERNS
+  // ============================================
+  patterns: {
+    // Pattern name: configuration object
+    product: {
+      match: '/dp/:asin',            // Express-style or regex
+      activities: ['seo_meta_tags'], // Activities for this pattern
+      metadata: { type: 'product' }, // Static metadata
+      extract: { query: 'k' },       // Query param extraction
+      priority: 10                   // Higher = matched first
+    },
+    default: {                       // Matches unmatched URLs
+      activities: ['seo_meta_tags'],
+      metadata: { type: 'other' }
+    }
+  },
+
+  // ============================================
+  // AUTO-DISCOVERY
+  // ============================================
+  discovery: {
+    enabled: false,                  // Enable auto-discovery
+    maxDepth: 3,                     // Max link depth to follow
+    maxUrls: 1000,                   // Max URLs to discover
+    sameDomainOnly: true,            // Stay on same domain
+    includeSubdomains: true,         // Include subdomains
+    allowedDomains: [],              // Whitelist domains
+    blockedDomains: [],              // Blacklist domains
+    followPatterns: [],              // Only follow these patterns
+    followRegex: null,               // Regex to match URLs
+    ignoreRegex: null,               // Regex to ignore URLs
+    ignoreQueryString: false,        // Treat query variations as same
+    ignoreHash: true,                // Ignore URL hash
+    respectRobotsTxt: true           // Respect robots.txt
+  },
+
+  // ============================================
   // SCREENSHOT CONFIGURATION
   // ============================================
   screenshot: {
@@ -1900,6 +2614,60 @@ spider.getActivityCategories()       // Categories with activities
 spider.getActivityPresets()          // All presets
 spider.getPresetByName(name)         // Specific preset
 spider.validateActivityList(names)   // Validate custom list
+```
+
+### Pattern Matching API
+
+```javascript
+// Match URL against configured patterns
+const match = spider.matchUrl('https://example.com/dp/B08N5WRWNW');
+// Returns: { pattern: 'product', params: { asin: 'B08N5WRWNW' }, activities: [...], metadata: {...} }
+
+// Quick check if URL matches any pattern (excluding default)
+const matches = spider.urlMatchesPattern('https://example.com/dp/123');
+// Returns: true
+
+// Get all configured pattern names
+const names = spider.getPatternNames();
+// Returns: ['product', 'category', 'blog']
+
+// Add pattern at runtime
+spider.addPattern('newPattern', {
+  match: '/new/:id',
+  activities: ['seo_meta_tags'],
+  metadata: { type: 'new' }
+});
+
+// Remove pattern
+spider.removePattern('oldPattern');
+
+// Filter URLs by pattern
+const filtered = spider.filterUrlsByPattern(
+  ['https://example.com/dp/AAA', 'https://example.com/cart'],
+  ['product']  // Optional: specific patterns to match
+);
+// Returns: [{ url: '...', match: { pattern: 'product', params: {...} } }]
+```
+
+### Discovery API
+
+```javascript
+// Get discovery statistics
+const stats = spider.getDiscoveryStats();
+// Returns: { enabled: true, discovered: 150, queued: 120, maxUrls: 1000, remaining: 850 }
+
+// Reset discovery state (clear discovered URLs)
+spider.resetDiscovery();
+
+// Enable discovery at runtime
+spider.enableDiscovery({
+  maxDepth: 5,
+  maxUrls: 2000,
+  followPatterns: ['product', 'category']
+});
+
+// Disable discovery
+spider.disableDiscovery();
 ```
 
 ### Detection API (via PuppeteerPlugin)
@@ -2318,6 +3086,206 @@ Until you delete them or TTL expires. Configure TTL for automatic cleanup:
 ```javascript
 ttl: { enabled: true, queue: { ttl: 604800000 } }  // 7 days
 ```
+
+---
+
+### URL Pattern Matching
+
+**Q: What pattern syntax is supported?**
+
+SpiderPlugin supports Express-style path matching:
+- `:param` - Required parameter (e.g., `/dp/:asin`)
+- `:param?` - Optional parameter (e.g., `/item/:id?`)
+- `*` - Wildcard, matches anything except `/`
+- `**` - Greedy wildcard, matches anything including `/`
+- Full JavaScript regex (e.g., `/\/dp\/([A-Z0-9]{10})/i`)
+
+**Q: How are parameters extracted?**
+
+Parameters are automatically extracted from the URL path and added to metadata:
+
+```javascript
+// Pattern: '/dp/:asin'
+// URL: 'https://amazon.com/dp/B08N5WRWNW'
+// Result: { params: { asin: 'B08N5WRWNW' }, metadata: { asin: 'B08N5WRWNW' } }
+```
+
+For query strings, use the `extract` option:
+
+```javascript
+patterns: {
+  search: {
+    match: '/s',
+    extract: { query: 'k', page: 'page' }  // ?k=laptops&page=2
+  }
+}
+```
+
+**Q: How do I match URLs with multiple parameters?**
+
+Chain parameters in the path:
+
+```javascript
+patterns: {
+  blogPost: {
+    match: '/blog/:year/:month/:slug',
+    activities: ['seo_content_analysis']
+  }
+}
+// Matches: /blog/2024/01/my-post
+// Extracts: { year: '2024', month: '01', slug: 'my-post' }
+```
+
+**Q: What's the `default` pattern for?**
+
+The `default` pattern matches any URL that doesn't match other patterns:
+
+```javascript
+patterns: {
+  product: { match: '/dp/:asin', activities: ['seo_meta_tags', 'screenshot_full'] },
+  default: { activities: ['seo_meta_tags'] }  // Everything else gets minimal analysis
+}
+```
+
+**Q: How does pattern priority work?**
+
+Higher `priority` values are matched first. Use this when patterns overlap:
+
+```javascript
+patterns: {
+  specificProduct: {
+    match: /\/dp\/B08N5WRWNW/,  // Specific ASIN
+    priority: 20,
+    activities: ['full']
+  },
+  product: {
+    match: '/dp/:asin',
+    priority: 10,
+    activities: ['seo_meta_tags']
+  }
+}
+// B08N5WRWNW matches specificProduct (priority 20)
+// Other ASINs match product (priority 10)
+```
+
+**Q: Can I add patterns at runtime?**
+
+Yes, use the `addPattern` method:
+
+```javascript
+spider.addPattern('newCategory', {
+  match: '/category/:name',
+  activities: ['seo_links_analysis'],
+  metadata: { type: 'category' }
+});
+
+// Remove when no longer needed
+spider.removePattern('newCategory');
+```
+
+---
+
+### Auto-Discovery
+
+**Q: What is auto-discovery?**
+
+Auto-discovery automatically finds and enqueues new URLs from the pages you crawl. When enabled, the spider extracts all links from each page and adds matching ones to the queue.
+
+**Q: How do I enable auto-discovery?**
+
+```javascript
+const spider = new SpiderPlugin({
+  namespace: 'crawler',
+  discovery: {
+    enabled: true,
+    maxDepth: 3,     // Follow links up to 3 levels deep
+    maxUrls: 500     // Discover max 500 URLs
+  }
+});
+```
+
+**Q: How do I limit which URLs are discovered?**
+
+Use `followPatterns` to only discover URLs matching specific patterns:
+
+```javascript
+discovery: {
+  enabled: true,
+  followPatterns: ['product', 'category']  // Only these pattern types
+}
+```
+
+Or use regex filtering:
+
+```javascript
+discovery: {
+  enabled: true,
+  followRegex: /\/(products|items)\//,      // Only follow these paths
+  ignoreRegex: /\/(cart|checkout|login)\//  // Never follow these
+}
+```
+
+**Q: How does depth tracking work?**
+
+Each discovered URL tracks how deep it is from the seed URL:
+- Seed URL (manually enqueued): depth 0
+- Links from seed: depth 1
+- Links from depth 1 pages: depth 2
+- etc.
+
+`maxDepth: 3` means stop following links after depth 3.
+
+**Q: What URLs are ignored by default?**
+
+Auto-discovery ignores:
+- Static assets (.css, .js, .png, .jpg, etc.)
+- mailto: and tel: links
+- javascript: links
+- Common non-content pages (/login, /logout, /cart, /checkout, /privacy, /terms)
+- URLs already discovered or queued
+
+**Q: Can I crawl subdomains?**
+
+Yes, configure domain rules:
+
+```javascript
+discovery: {
+  enabled: true,
+  sameDomainOnly: true,       // Stay on same main domain
+  includeSubdomains: true,    // Allow shop.example.com when crawling example.com
+  // Or explicitly whitelist:
+  allowedDomains: ['example.com', 'shop.example.com', 'blog.example.com'],
+  blockedDomains: ['ads.example.com']
+}
+```
+
+**Q: How do I monitor discovery progress?**
+
+```javascript
+const stats = spider.getDiscoveryStats();
+console.log(stats);
+// {
+//   enabled: true,
+//   discovered: 150,   // Unique URLs found
+//   queued: 120,       // Enqueued for crawling
+//   maxUrls: 500,
+//   maxDepth: 3,
+//   remaining: 350     // Slots remaining
+// }
+```
+
+**Q: How do I reset discovery for a new crawl?**
+
+```javascript
+spider.resetDiscovery();  // Clears discovered/queued URL tracking
+```
+
+**Q: What's the difference between `followPatterns` and `followRegex`?**
+
+- `followPatterns`: Uses your defined patterns from the `patterns` config
+- `followRegex`: Raw regex applied to the full URL
+
+Use `followPatterns` when you have well-defined URL structures. Use `followRegex` for quick filtering without defining patterns.
 
 ---
 
