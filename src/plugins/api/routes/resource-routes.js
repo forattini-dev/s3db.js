@@ -188,14 +188,22 @@ export function createResourceRoutes(resource, version, config = {}, Hono) {
   });
 
   // Register custom routes from resource.config.api (if defined)
+  // Skip reserved keys: guard, protected, description (these are API config, not routes)
+  const RESERVED_API_KEYS = ['guard', 'protected', 'description'];
   if (resource.config?.api && typeof resource.config.api === 'object') {
     for (const [routeDef, handler] of Object.entries(resource.config.api)) {
+      // Skip reserved API configuration keys
+      if (RESERVED_API_KEYS.includes(routeDef)) {
+        continue;
+      }
+
+      // Skip non-function handlers (route handlers must be functions)
+      if (typeof handler !== 'function') {
+        continue;
+      }
+
       try {
         const { method, path } = parseCustomRoute(routeDef);
-
-        if (typeof handler !== 'function') {
-          throw new Error(`Handler for route "${routeDef}" must be a function`);
-        }
 
         // Register the custom route
         // The handler receives the full Hono context
