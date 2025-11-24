@@ -81,15 +81,18 @@ export class LinkDiscoverer {
     const links = []
     const baseUrlObj = new URL(baseUrl)
 
-    // Extract href attributes
-    const hrefRegex = /<a[^>]+href=["']([^"']+)["'][^>]*>/gi
+    // Extract href attributes and anchor text
+    const hrefRegex = /<a[^>]+href=["']([^"']+)["'][^>]*>([^<]*)<\/a>/gi
     let match
 
     while ((match = hrefRegex.exec(html)) !== null) {
-      const href = match[0]
       const url = match[1]
+      const anchorText = match[2] ? match[2].trim() : ''
 
       if (!url || url.trim() === '') continue
+
+      // Skip hash-only links (e.g., #section)
+      if (url.startsWith('#')) continue
 
       try {
         // Resolve relative URLs
@@ -103,10 +106,6 @@ export class LinkDiscoverer {
 
         // Apply filters
         if (!this._shouldFollow(resolvedUrl, baseUrlObj)) continue
-
-        // Extract anchor text
-        const anchorMatch = href.match(/>([^<]*)</i)
-        const anchorText = anchorMatch ? anchorMatch[1].trim() : ''
 
         // Match against patterns
         let patternMatch = null

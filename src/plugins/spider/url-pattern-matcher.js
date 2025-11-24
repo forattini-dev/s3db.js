@@ -76,26 +76,33 @@ export class URLPatternMatcher {
       regexStr = path.slice(0, queryIndex)
     }
 
-    // Escape special regex characters (except our patterns)
-    regexStr = regexStr.replace(/[.+^${}()|[\]\\]/g, '\\$&')
+    // First, replace our special patterns with placeholders to protect them
+    // Replace ** first (before escaping)
+    regexStr = regexStr.replace(/\*\*/g, '___DOUBLE_STAR___')
 
-    // Replace ** (match anything including /)
-    regexStr = regexStr.replace(/\\\*\\\*/g, '.*')
+    // Replace * (before escaping)
+    regexStr = regexStr.replace(/\*/g, '___SINGLE_STAR___')
 
-    // Replace * (match anything except /)
-    regexStr = regexStr.replace(/\\\*/g, '[^/]*')
-
-    // Replace :param? (optional parameter)
+    // Replace :param? (before escaping)
     regexStr = regexStr.replace(/:(\w+)\?/g, (_, name) => {
       paramNames.push(name)
-      return '([^/]*)?'
+      return '___OPT_PARAM___'
     })
 
-    // Replace :param (required parameter)
+    // Replace :param (before escaping)
     regexStr = regexStr.replace(/:(\w+)/g, (_, name) => {
       paramNames.push(name)
-      return '([^/]+)'
+      return '___REQ_PARAM___'
     })
+
+    // Now escape special regex characters
+    regexStr = regexStr.replace(/[.+^${}()|[\]\\]/g, '\\$&')
+
+    // Restore placeholders with actual regex patterns
+    regexStr = regexStr.replace(/___DOUBLE_STAR___/g, '.*')
+    regexStr = regexStr.replace(/___SINGLE_STAR___/g, '[^/]+')
+    regexStr = regexStr.replace(/___OPT_PARAM___/g, '([^/]*)')
+    regexStr = regexStr.replace(/___REQ_PARAM___/g, '([^/]+)')
 
     // Handle query string parameters
     if (queryPattern) {
@@ -125,8 +132,8 @@ export class URLPatternMatcher {
       regexStr += queryRegex
     }
 
-    // Anchor the pattern
-    const regex = new RegExp(`^${regexStr}(?:[?#].*)?$`, 'i')
+    // Allow optional trailing slash and anchor the pattern
+    const regex = new RegExp(`^${regexStr}\\/?(?:[?#].*)?$`, 'i')
 
     return { regex, paramNames }
   }
