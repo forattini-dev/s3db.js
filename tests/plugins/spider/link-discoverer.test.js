@@ -590,6 +590,186 @@ Disallow:
     })
   })
 
+  describe('Sitemap integration', () => {
+    test('should discover URLs from XML sitemap', async () => {
+      const sitemap = `<?xml version="1.0"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+  <url><loc>https://example.com/page1</loc><lastmod>2024-01-15</lastmod></url>
+  <url><loc>https://example.com/page2</loc></url>
+</urlset>`
+
+      discoverer = new LinkDiscoverer({
+        useSitemaps: true,
+        respectRobotsTxt: false,
+        sitemapFetcher: async () => ({ content: sitemap })
+      })
+
+      const links = await discoverer.discoverFromSitemaps('https://example.com', {
+        autoDiscover: false,
+        sitemapUrls: ['https://example.com/sitemap.xml']
+      })
+
+      expect(links).toHaveLength(2)
+      expect(links[0].url).toBe('https://example.com/page1')
+      expect(links[0].metadata.fromSitemap).toBe(true)
+      expect(links[0].metadata.lastmod).toBe('2024-01-15')
+    })
+
+    test('should discover URLs from text sitemap', async () => {
+      const sitemap = `https://example.com/page1
+https://example.com/page2
+https://example.com/page3`
+
+      discoverer = new LinkDiscoverer({
+        useSitemaps: true,
+        respectRobotsTxt: false,
+        sitemapFetcher: async () => ({ content: sitemap })
+      })
+
+      const links = await discoverer.discoverFromSitemaps('https://example.com', {
+        autoDiscover: false,
+        sitemapUrls: ['https://example.com/sitemap.txt']
+      })
+
+      expect(links).toHaveLength(3)
+    })
+
+    test('should discover URLs from RSS feed', async () => {
+      const rss = `<?xml version="1.0"?>
+<rss version="2.0">
+  <channel>
+    <item>
+      <title>Post 1</title>
+      <link>https://example.com/blog/post1</link>
+    </item>
+    <item>
+      <title>Post 2</title>
+      <link>https://example.com/blog/post2</link>
+    </item>
+  </channel>
+</rss>`
+
+      discoverer = new LinkDiscoverer({
+        useSitemaps: true,
+        respectRobotsTxt: false,
+        sitemapFetcher: async () => ({ content: rss })
+      })
+
+      const links = await discoverer.discoverFromSitemaps('https://example.com', {
+        autoDiscover: false,
+        sitemapUrls: ['https://example.com/rss.xml']
+      })
+
+      expect(links).toHaveLength(2)
+      expect(links[0].metadata.title).toBe('Post 1')
+    })
+
+    test('should filter sitemap URLs by robots.txt', async () => {
+      const sitemap = `<?xml version="1.0"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+  <url><loc>https://example.com/public</loc></url>
+  <url><loc>https://example.com/admin/secret</loc></url>
+</urlset>`
+
+      const robotsTxt = `User-agent: *
+Disallow: /admin/`
+
+      discoverer = new LinkDiscoverer({
+        useSitemaps: true,
+        respectRobotsTxt: true,
+        sitemapFetcher: async () => ({ content: sitemap }),
+        robotsFetcher: async () => robotsTxt
+      })
+
+      const links = await discoverer.discoverFromSitemaps('https://example.com', {
+        autoDiscover: false,
+        sitemapUrls: ['https://example.com/sitemap.xml'],
+        checkRobots: true
+      })
+
+      expect(links).toHaveLength(1)
+      expect(links[0].url).toBe('https://example.com/public')
+      expect(discoverer.getStats().blockedByRobots).toBe(1)
+    })
+
+    test('should track fromSitemap in stats', async () => {
+      const sitemap = `<?xml version="1.0"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+  <url><loc>https://example.com/page1</loc></url>
+  <url><loc>https://example.com/page2</loc></url>
+</urlset>`
+
+      discoverer = new LinkDiscoverer({
+        useSitemaps: true,
+        respectRobotsTxt: false,
+        sitemapFetcher: async () => ({ content: sitemap })
+      })
+
+      await discoverer.discoverFromSitemaps('https://example.com', {
+        autoDiscover: false,
+        sitemapUrls: ['https://example.com/sitemap.xml']
+      })
+
+      const stats = discoverer.getStats()
+      expect(stats.fromSitemap).toBe(2)
+      expect(stats.discovered).toBe(2)
+    })
+
+    test('should parse sitemap directly', async () => {
+      const sitemap = `<?xml version="1.0"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+  <url><loc>https://example.com/page</loc></url>
+</urlset>`
+
+      discoverer = new LinkDiscoverer({
+        useSitemaps: true,
+        sitemapFetcher: async () => ({ content: sitemap })
+      })
+
+      const entries = await discoverer.parseSitemap('https://example.com/sitemap.xml')
+
+      expect(entries).toHaveLength(1)
+      expect(entries[0].url).toBe('https://example.com/page')
+      expect(entries[0].source).toBe('sitemap')
+    })
+
+    test('should return empty when sitemap parser is disabled', async () => {
+      discoverer = new LinkDiscoverer({ useSitemaps: false })
+
+      const links = await discoverer.discoverFromSitemaps('https://example.com')
+      expect(links).toHaveLength(0)
+
+      const entries = await discoverer.parseSitemap('https://example.com/sitemap.xml')
+      expect(entries).toHaveLength(0)
+    })
+
+    test('should clear sitemap cache on reset', async () => {
+      const sitemap = `<?xml version="1.0"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+  <url><loc>https://example.com/page</loc></url>
+</urlset>`
+
+      discoverer = new LinkDiscoverer({
+        useSitemaps: true,
+        respectRobotsTxt: false,
+        sitemapFetcher: async () => ({ content: sitemap })
+      })
+
+      await discoverer.discoverFromSitemaps('https://example.com', {
+        autoDiscover: false,
+        sitemapUrls: ['https://example.com/sitemap.xml']
+      })
+
+      expect(discoverer.getStats().fromSitemap).toBe(1)
+      expect(discoverer.getStats().sitemapStats.sitemapsParsed).toBe(1)
+
+      discoverer.reset({ clearSitemapCache: true })
+
+      expect(discoverer.getStats().fromSitemap).toBe(0)
+      expect(discoverer.getStats().sitemapStats.sitemapsParsed).toBe(0)
+    })
+  })
+
   describe('Edge cases', () => {
     test('should handle empty href', () => {
       const html = `

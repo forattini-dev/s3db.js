@@ -11,6 +11,7 @@
  */
 
 import { RobotsParser } from './robots-parser.js'
+import { SitemapParser } from './sitemap-parser.js'
 
 export class LinkDiscoverer {
   constructor(config = {}) {
@@ -31,6 +32,9 @@ export class LinkDiscoverer {
       // Robots.txt configuration
       robotsUserAgent: config.robotsUserAgent || 's3db-spider',
       robotsCacheTimeout: config.robotsCacheTimeout || 3600000, // 1 hour
+      // Sitemap configuration
+      useSitemaps: config.useSitemaps !== false,
+      sitemapMaxUrls: config.sitemapMaxUrls || 10000,
       // Default ignore patterns (common non-content pages)
       defaultIgnore: config.defaultIgnore || [
         /\.(css|js|json|xml|ico|png|jpg|jpeg|gif|svg|webp|woff|woff2|ttf|eot|pdf|zip|tar|gz)$/i,
@@ -63,12 +67,24 @@ export class LinkDiscoverer {
         })
       : null
 
+    // Sitemap parser
+    this.sitemapParser = config.useSitemaps !== false
+      ? new SitemapParser({
+          userAgent: this.config.robotsUserAgent,
+          maxUrls: this.config.sitemapMaxUrls,
+          fetcher: config.sitemapFetcher || null
+        })
+      : null
+
     // Discovered URLs tracking
     this.discovered = new Set()
     this.queued = new Set()
 
     // URLs blocked by robots.txt
     this.blockedByRobots = new Set()
+
+    // URLs discovered from sitemaps
+    this.fromSitemap = new Set()
   }
 
   /**
@@ -261,6 +277,166 @@ export class LinkDiscoverer {
   }
 
   /**
+   * Discover URLs from sitemaps
+   *
+   * @param {string} url - Base URL or sitemap URL
+   * @param {Object} options - Options
+   * @param {boolean} options.autoDiscover - Auto-discover sitemaps from robots.txt (default: true)
+   * @param {string[]} options.sitemapUrls - Explicit sitemap URLs to parse
+   * @param {boolean} options.checkRobots - Check robots.txt for each URL (default: true)
+   * @returns {Promise<Array<Object>>} Discovered URLs with metadata
+   */
+  async discoverFromSitemaps(url, options = {}) {
+    if (!this.sitemapParser) return []
+
+    const opts = {
+      autoDiscover: options.autoDiscover !== false,
+      sitemapUrls: options.sitemapUrls || [],
+      checkRobots: options.checkRobots !== false
+    }
+
+    const sitemapUrls = [...opts.sitemapUrls]
+
+    // Auto-discover sitemaps from robots.txt
+    if (opts.autoDiscover) {
+      try {
+        const urlObj = new URL(url)
+        const domain = `${urlObj.protocol}//${urlObj.host}`
+        const robotsSitemaps = await this.sitemapParser.discoverFromRobotsTxt(`${domain}/robots.txt`)
+        sitemapUrls.push(...robotsSitemaps)
+      } catch {
+        // Ignore errors
+      }
+    }
+
+    // If no sitemaps found, try common locations
+    if (sitemapUrls.length === 0) {
+      try {
+        const urlObj = new URL(url)
+        const domain = `${urlObj.protocol}//${urlObj.host}`
+        sitemapUrls.push(`${domain}/sitemap.xml`)
+      } catch {
+        return []
+      }
+    }
+
+    // Parse all sitemaps
+    const allEntries = []
+    const processedSitemaps = new Set()
+
+    for (const sitemapUrl of sitemapUrls) {
+      if (processedSitemaps.has(sitemapUrl)) continue
+      processedSitemaps.add(sitemapUrl)
+
+      try {
+        const entries = await this.sitemapParser.parse(sitemapUrl)
+        allEntries.push(...entries)
+      } catch {
+        // Ignore individual sitemap errors
+      }
+    }
+
+    // Convert sitemap entries to link format and filter
+    const links = []
+    const baseUrlObj = new URL(url)
+
+    for (const entry of allEntries) {
+      if (this.discovered.size >= this.config.maxUrls) break
+      if (!entry.url) continue
+
+      try {
+        const entryUrl = new URL(entry.url)
+        const normalizedUrl = this._normalizeUrl(entryUrl)
+
+        // Skip if already discovered
+        if (this.discovered.has(normalizedUrl)) continue
+
+        // Apply domain filters
+        if (!this._shouldFollow(entryUrl, baseUrlObj)) continue
+
+        // Check robots.txt if enabled
+        if (opts.checkRobots && this.robotsParser) {
+          const robotsResult = await this.robotsParser.isAllowed(normalizedUrl)
+          if (!robotsResult.allowed) {
+            this.blockedByRobots.add(normalizedUrl)
+            continue
+          }
+        }
+
+        // Match against patterns
+        let patternMatch = null
+        if (this.patternMatcher) {
+          patternMatch = this.patternMatcher.match(normalizedUrl)
+        }
+
+        // Check if we should follow based on pattern
+        if (!this._shouldFollowPattern(patternMatch)) continue
+
+        // Mark as discovered
+        this.discovered.add(normalizedUrl)
+        this.fromSitemap.add(normalizedUrl)
+
+        links.push({
+          url: normalizedUrl,
+          depth: 0,
+          sourceUrl: entry.source || 'sitemap',
+          pattern: patternMatch?.pattern || null,
+          params: patternMatch?.params || {},
+          activities: patternMatch?.activities || [],
+          metadata: {
+            ...patternMatch?.metadata,
+            fromSitemap: true,
+            lastmod: entry.lastmod || null,
+            changefreq: entry.changefreq || null,
+            priority: entry.priority || null,
+            title: entry.title || null
+          }
+        })
+
+      } catch {
+        // Invalid URL, skip
+      }
+    }
+
+    return links
+  }
+
+  /**
+   * Parse a specific sitemap URL
+   *
+   * @param {string} sitemapUrl - URL to the sitemap
+   * @param {Object} options - Parse options
+   * @returns {Promise<Array<Object>>} Raw sitemap entries
+   */
+  async parseSitemap(sitemapUrl, options = {}) {
+    if (!this.sitemapParser) return []
+
+    try {
+      return await this.sitemapParser.parse(sitemapUrl, options)
+    } catch {
+      return []
+    }
+  }
+
+  /**
+   * Probe common sitemap locations for a domain
+   *
+   * @param {string} url - Base URL
+   * @returns {Promise<Array<{url: string, exists: boolean, format?: string}>>}
+   */
+  async probeSitemapLocations(url) {
+    if (!this.sitemapParser) return []
+
+    try {
+      const urlObj = new URL(url)
+      const domain = `${urlObj.protocol}//${urlObj.host}`
+      return await this.sitemapParser.probeCommonLocations(domain)
+    } catch {
+      return []
+    }
+  }
+
+  /**
    * Normalize URL for deduplication
    * @private
    */
@@ -394,10 +570,12 @@ export class LinkDiscoverer {
       discovered: this.discovered.size,
       queued: this.queued.size,
       blockedByRobots: this.blockedByRobots.size,
+      fromSitemap: this.fromSitemap.size,
       maxUrls: this.config.maxUrls,
       maxDepth: this.config.maxDepth,
       remaining: this.config.maxUrls - this.discovered.size,
-      robotsCacheSize: this.robotsParser?.getCacheStats()?.size || 0
+      robotsCacheSize: this.robotsParser?.getCacheStats()?.size || 0,
+      sitemapStats: this.sitemapParser?.getStats() || null
     }
   }
 
@@ -405,14 +583,21 @@ export class LinkDiscoverer {
    * Reset discovery state
    * @param {Object} options - Reset options
    * @param {boolean} options.clearRobotsCache - Also clear robots.txt cache
+   * @param {boolean} options.clearSitemapCache - Also clear sitemap cache
    */
   reset(options = {}) {
     this.discovered.clear()
     this.queued.clear()
     this.blockedByRobots.clear()
+    this.fromSitemap.clear()
 
     if (options.clearRobotsCache && this.robotsParser) {
       this.robotsParser.clearCache()
+    }
+
+    if (options.clearSitemapCache && this.sitemapParser) {
+      this.sitemapParser.clearCache()
+      this.sitemapParser.resetStats()
     }
   }
 
