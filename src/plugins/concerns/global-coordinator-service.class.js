@@ -11,10 +11,10 @@
  * - Graceful fallback if storage unavailable
  * - Observable metrics and diagnostics
  *
- * Storage Layout:
- * - plg_coordinator_global/<namespace>/state.json          - Leader lease and epoch
- * - plg_coordinator_global/<namespace>/workers/<id>.json   - Worker heartbeat
- * - plg_coordinator_global/<namespace>/metadata.json       - Service metadata
+ * Storage Layout (follows plugin= convention):
+ * - plugin=coordinator/<namespace>/state.json          - Leader lease and epoch
+ * - plugin=coordinator/<namespace>/workers/<id>.json   - Worker heartbeat
+ * - plugin=coordinator/<namespace>/metadata.json       - Service metadata
  *
  * @example
  * const service = new GlobalCoordinatorService({
@@ -706,25 +706,27 @@ export class GlobalCoordinatorService extends EventEmitter {
       throw new Error('GlobalCoordinatorService: database client not available');
     }
     if (!this._pluginStorage) {
-      this._pluginStorage = new CoordinatorPluginStorage(this.database.client, 'global-coordinator');
+      this._pluginStorage = new CoordinatorPluginStorage(this.database.client, 'coordinator');
     }
     return this._pluginStorage;
   }
 
   /**
    * Get state key for storage
+   * Uses plugin= convention: plugin=coordinator/<namespace>/state.json
    * @private
    */
   _getStateKey() {
-    return `plg_coordinator_global/${this.namespace}/state.json`;
+    return this.storage.getPluginKey(null, this.namespace, 'state.json');
   }
 
   /**
    * Get workers prefix for listing
+   * Uses plugin= convention: plugin=coordinator/<namespace>/workers/
    * @private
    */
   _getWorkersPrefix() {
-    return `plg_coordinator_global/${this.namespace}/workers/`;
+    return this.storage.getPluginKey(null, this.namespace, 'workers') + '/';
   }
 
   /**
@@ -732,7 +734,7 @@ export class GlobalCoordinatorService extends EventEmitter {
    * @private
    */
   _getWorkerKey(workerId) {
-    return `${this._getWorkersPrefix()}${workerId}.json`;
+    return this.storage.getPluginKey(null, this.namespace, 'workers', `${workerId}.json`);
   }
 
   /**
@@ -740,7 +742,7 @@ export class GlobalCoordinatorService extends EventEmitter {
    * @private
    */
   _getMetadataKey() {
-    return `plg_coordinator_global/${this.namespace}/metadata.json`;
+    return this.storage.getPluginKey(null, this.namespace, 'metadata.json');
   }
 
   // ==================== INTERNAL: UTILITIES ====================
@@ -802,7 +804,7 @@ export class GlobalCoordinatorService extends EventEmitter {
 }
 
 class CoordinatorPluginStorage extends PluginStorage {
-  constructor(client, pluginSlug = 'global-coordinator') {
+  constructor(client, pluginSlug = 'coordinator') {
     super(client, pluginSlug);
   }
 

@@ -10,10 +10,10 @@
  * Note: These tests verify GlobalCoordinatorService integration at the core level.
  * For full end-to-end plugin integration tests, see plugin-specific test suites.
  *
- * Storage Verification:
- * - plg_coordinator_global/<namespace>/state.json - Leader lease
- * - plg_coordinator_global/<namespace>/workers/<id>.json - Worker heartbeats
- * - plg_coordinator_global/<namespace>/metadata.json - Service metadata
+ * Storage Verification (follows plugin= convention):
+ * - plugin=coordinator/<namespace>/state.json - Leader lease
+ * - plugin=coordinator/<namespace>/workers/<id>.json - Worker heartbeats
+ * - plugin=coordinator/<namespace>/metadata.json - Service metadata
  */
 
 import { describe, it, expect, beforeAll, afterAll } from '@jest/globals';
@@ -325,19 +325,19 @@ describe('GlobalCoordinatorService - Integration Tests', () => {
     it('should use correct storage key formats', async () => {
       const coordinator = await database.getGlobalCoordinator('storage-format-test');
 
-      // Verify key formats
+      // Verify key formats (should follow plugin= convention)
       const stateKey = coordinator._getStateKey();
-      expect(stateKey).toContain('plg_coordinator_global/');
+      expect(stateKey).toContain('plugin=coordinator/');
       expect(stateKey).toContain('storage-format-test');
       expect(stateKey).toContain('/state.json');
 
       const workersPrefix = coordinator._getWorkersPrefix();
-      expect(workersPrefix).toContain('plg_coordinator_global/');
+      expect(workersPrefix).toContain('plugin=coordinator/');
       expect(workersPrefix).toContain('storage-format-test');
       expect(workersPrefix).toContain('/workers/');
 
       const metadataKey = coordinator._getMetadataKey();
-      expect(metadataKey).toContain('plg_coordinator_global/');
+      expect(metadataKey).toContain('plugin=coordinator/');
       expect(metadataKey).toContain('storage-format-test');
       expect(metadataKey).toContain('/metadata.json');
 
