@@ -7,6 +7,7 @@
  * - resource: Resource name (default: 'plg_api_apikey_users')
  * - createResource: Auto-create resource (default: true)
  * - keyField: Field containing API key (default: 'apiKey')
+ * - partitionName: Partition name for O(1) lookups (default: auto-detect from keyField)
  * - headerName: Header name (default: 'X-API-Key')
  * - queryParam: Query param name (optional, e.g., 'api_key')
  * - optional: Allow requests without auth (default: false)
@@ -17,6 +18,7 @@
  *   config: {
  *     resource: 'api_clients',
  *     keyField: 'apiKey',
+ *     partitionName: 'byApiKey',  // Optional: explicit partition name
  *     headerName: 'X-API-Key',
  *     queryParam: 'api_key'
  *   }
@@ -57,6 +59,7 @@ export async function createApiKeyHandler(config = {}, database) {
     headerName = 'X-API-Key',
     queryParam = null,
     keyField = 'apiKey',
+    partitionName = null,  // Optional: explicit partition name
     optional = false
   } = config;
 
@@ -68,7 +71,8 @@ export async function createApiKeyHandler(config = {}, database) {
   const manager = new APIKeyResourceManager(database, 'apikey', config);
   const authResource = await manager.getOrCreateResource();
 
-  logger.debug(`API Key driver initialized with resource: ${authResource.name}, keyField: ${keyField}`);
+  const resolvedPartitionName = partitionName || `by${keyField.charAt(0).toUpperCase()}${keyField.slice(1)}`;
+  logger.debug(`API Key driver initialized: resource=${authResource.name}, keyField=${keyField}, partition=${resolvedPartitionName}`);
 
   return async (c, next) => {
     // Try header first
@@ -96,15 +100,15 @@ export async function createApiKeyHandler(config = {}, database) {
     try {
       let users;
 
-      // Try to use partition lookup if available (O(1) instead of O(n))
-      const partitionName = `by${keyField.charAt(0).toUpperCase()}${keyField.slice(1)}`;
-      const hasPartition = authResource.partitions && authResource.partitions[partitionName];
+      // Determine partition name: explicit config or auto-detect
+      const resolvedPartitionName = partitionName || `by${keyField.charAt(0).toUpperCase()}${keyField.slice(1)}`;
+      const hasPartition = authResource.partitions && authResource.partitions[resolvedPartitionName];
 
       if (hasPartition) {
-        logger.debug(`Using partition ${partitionName} for O(1) API key lookup`);
-        users = await authResource.listPartition(partitionName, { [keyField]: apiKey }, { limit: 1 });
+        logger.debug(`Using partition ${resolvedPartitionName} for O(1) API key lookup`);
+        users = await authResource.listPartition(resolvedPartitionName, { [keyField]: apiKey }, { limit: 1 });
       } else {
-        logger.debug(`No partition found for ${keyField}, falling back to query (O(n) scan)`);
+        logger.debug(`No partition found (${resolvedPartitionName}), falling back to query (O(n) scan)`);
         users = await authResource.query({ [keyField]: apiKey }, { limit: 1 });
       }
 
