@@ -343,6 +343,61 @@ export class TechDetector {
   }
 
   /**
+   * Selective fingerprinting based on requested activities
+   *
+   * @param {string} html - HTML content
+   * @param {Array<string>} activities - List of activity names to execute
+   * @returns {Object} Detected technologies
+   */
+  fingerprintSelective(html, activities = []) {
+    // If no activities specified, run all
+    if (!activities || activities.length === 0) {
+      return this.fingerprint(html)
+    }
+
+    const result = {
+      frameworks: [],
+      analytics: [],
+      marketing: [],
+      cdn: [],
+      webServers: [],
+      cms: [],
+      libraries: []
+    }
+
+    // Map activities to detection functions
+    if (activities.includes('tech_frameworks')) {
+      result.frameworks = this._detectFrameworks(html)
+    }
+
+    if (activities.includes('tech_analytics')) {
+      result.analytics = this._detectAnalytics(html)
+    }
+
+    if (activities.includes('tech_marketing')) {
+      result.marketing = this._detectMarketing(html)
+    }
+
+    if (activities.includes('tech_cdn')) {
+      result.cdn = this._detectCDN(html)
+    }
+
+    if (activities.includes('tech_web_server')) {
+      result.webServers = this._detectWebServers(html)
+    }
+
+    if (activities.includes('tech_cms')) {
+      result.cms = this._detectCMS(html)
+    }
+
+    if (activities.includes('tech_libraries')) {
+      result.libraries = this._detectLibraries(html)
+    }
+
+    return result
+  }
+
+  /**
    * Fingerprint technologies on page
    *
    * @param {string} html - HTML content

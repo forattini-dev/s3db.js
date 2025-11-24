@@ -39,6 +39,107 @@ export class SecurityAnalyzer {
   }
 
   /**
+   * Selective security analysis based on requested activities
+   *
+   * @param {Object} page - Puppeteer page object
+   * @param {string} baseUrl - Base URL
+   * @param {string} html - HTML content (optional)
+   * @param {Array<string>} activities - List of activity names to execute
+   * @returns {Object} Security analysis results
+   */
+  async analyzeSelective(page, baseUrl, html = null, activities = []) {
+    // If no activities specified, run all
+    if (!activities || activities.length === 0) {
+      return this.analyze(page, baseUrl, html)
+    }
+
+    const result = {
+      securityHeaders: null,
+      csp: null,
+      cors: null,
+      consoleLogs: null,
+      tls: null,
+      captcha: null,
+      websockets: null,
+      vulnerabilities: [],
+      securityScore: 0
+    }
+
+    try {
+      // Capture response headers from first request
+      let responseHeaders = {}
+      const captureHeaders = async (response) => {
+        if (response.url() === baseUrl || response.url().startsWith(baseUrl)) {
+          const headers = response.headers()
+          responseHeaders = { ...headers }
+        }
+      }
+
+      page.on('response', captureHeaders)
+
+      // Capture console logs if requested
+      let consoleLogs = []
+      if (activities.includes('security_console_logs')) {
+        page.on('console', (msg) => {
+          consoleLogs.push({
+            type: msg.type(),
+            text: msg.text(),
+            location: msg.location(),
+            args: msg.args().length
+          })
+        })
+      }
+
+      // Map activities to analysis functions
+      if (activities.includes('security_headers')) {
+        result.securityHeaders = this._analyzeSecurityHeaders(responseHeaders)
+      }
+
+      if (activities.includes('security_csp')) {
+        result.csp = this._analyzeCSP(responseHeaders)
+      }
+
+      if (activities.includes('security_cors')) {
+        result.cors = this._analyzeCORS(responseHeaders, baseUrl)
+      }
+
+      if (activities.includes('security_console_logs') && consoleLogs.length > 0) {
+        result.consoleLogs = {
+          total: consoleLogs.length,
+          byType: this._groupByType(consoleLogs),
+          logs: consoleLogs.slice(0, this.config.maxConsoleLogLines)
+        }
+      }
+
+      if (activities.includes('security_tls')) {
+        result.tls = this._analyzeTLS(baseUrl, responseHeaders)
+      }
+
+      if (activities.includes('security_websockets')) {
+        result.websockets = await this._captureWebSockets(page)
+      }
+
+      if (activities.includes('security_captcha')) {
+        const pageContent = html || (await page.content())
+        result.captcha = this._detectCaptcha(pageContent)
+      }
+
+      if (activities.includes('security_vulnerabilities')) {
+        result.vulnerabilities = this._checkVulnerabilities(responseHeaders, result)
+      }
+
+      // Calculate security score
+      result.securityScore = this._calculateSecurityScore(result)
+
+      page.removeListener('response', captureHeaders)
+
+      return result
+    } catch (error) {
+      return result
+    }
+  }
+
+  /**
    * Comprehensive security analysis
    *
    * @param {Object} page - Puppeteer page object

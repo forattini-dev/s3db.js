@@ -178,7 +178,8 @@ export class SpiderPlugin extends Plugin {
       securityAnalysis: `${this.config.resourcePrefix}_security_analysis`,
       screenshots: `${this.config.resourcePrefix}_screenshots`,
       contentAnalysis: `${this.config.resourcePrefix}_content_analysis`,
-      storageAnalysis: `${this.config.resourcePrefix}_storage_analysis`
+      storageAnalysis: `${this.config.resourcePrefix}_storage_analysis`,
+      assetsAnalysis: `${this.config.resourcePrefix}_assets_analysis`
     }
 
     // Plugin instances
@@ -392,6 +393,22 @@ export class SpiderPlugin extends Plugin {
         },
         behavior: 'body-overflow',
         timestamps: true
+      },
+      assetsAnalysis: {
+        name: this.resourceNames.assetsAnalysis,
+        attributes: {
+          targetId: 'string|required',
+          url: 'string|required',
+          stylesheets: 'array',
+          scripts: 'array',
+          images: 'array',
+          videos: 'array',
+          audios: 'array',
+          summary: 'object',
+          createdAt: 'number'
+        },
+        behavior: 'body-overflow',
+        timestamps: true
       }
     }
 
@@ -410,7 +427,18 @@ export class SpiderPlugin extends Plugin {
   }
 
   /**
-   * Check if a category's activities should be executed
+   * Check if a specific activity should be executed
+   * @private
+   */
+  _shouldExecuteActivity(task, activityName) {
+    if (!task.activities || task.activities.length === 0) {
+      return true // Default to all if no activities specified
+    }
+    return task.activities.includes(activityName)
+  }
+
+  /**
+   * Check if ANY activity from a category should be executed
    * @private
    */
   _shouldExecuteCategory(task, category) {
@@ -420,6 +448,22 @@ export class SpiderPlugin extends Plugin {
 
     const categoryActivities = getActivitiesByCategory(category)
     return categoryActivities.some((activity) => task.activities.includes(activity.name))
+  }
+
+  /**
+   * Get which specific activities from a category should run
+   * @private
+   */
+  _getRequestedActivities(task, category) {
+    if (!task.activities || task.activities.length === 0) {
+      // Return all activities from category
+      return getActivitiesByCategory(category).map(a => a.name)
+    }
+
+    const categoryActivities = getActivitiesByCategory(category)
+    return categoryActivities
+      .filter(activity => task.activities.includes(activity.name))
+      .map(a => a.name)
   }
 
   /**
@@ -437,9 +481,8 @@ export class SpiderPlugin extends Plugin {
           this.logger.debug({ activities: task.activities }, `Activities: ${task.activities.join(', ')}`)
         }
 
-        // Open browser page
-        const page = await this.puppeteerPlugin.openPage({
-          url: task.url,
+        // Open browser page using navigate method
+        const page = await this.puppeteerPlugin.navigate(task.url, {
           waitUntil: 'networkidle2'
         })
 
@@ -451,17 +494,19 @@ export class SpiderPlugin extends Plugin {
         // SEO Analysis - only if SEO activities are requested
         let seoAnalysis = null
         if (this.config.seo.enabled && this._shouldExecuteCategory(task, 'seo')) {
-          seoAnalysis = this.seoAnalyzer.analyze(html, task.url)
+          const seoActivities = this._getRequestedActivities(task, 'seo')
+          seoAnalysis = this.seoAnalyzer.analyzeSelective(html, task.url, seoActivities)
           // 🪵 Debug: executed SEO analysis
-          this.logger.debug({ url: task.url }, `Executed SEO analysis for ${task.url}`)
+          this.logger.debug({ url: task.url, activities: seoActivities }, `Executed SEO analysis for ${task.url}`)
         }
 
         // Tech Detection - only if technology activities are requested
         let techFingerprint = null
         if (this.config.techDetection.enabled && this._shouldExecuteCategory(task, 'technology')) {
-          techFingerprint = this.techDetector.fingerprint(html)
+          const techActivities = this._getRequestedActivities(task, 'technology')
+          techFingerprint = this.techDetector.fingerprintSelective(html, techActivities)
           // 🪵 Debug: executed tech detection
-          this.logger.debug({ url: task.url }, `Executed tech detection for ${task.url}`)
+          this.logger.debug({ url: task.url, activities: techActivities }, `Executed tech detection for ${task.url}`)
         }
 
         // Performance Metrics - only if performance activities are requested
@@ -475,9 +520,10 @@ export class SpiderPlugin extends Plugin {
         // Security Analysis - only if security activities are requested
         let securityAnalysis = null
         if (this.config.security.enabled && this._shouldExecuteCategory(task, 'security')) {
-          securityAnalysis = await this.securityAnalyzer.analyze(page, task.url, html)
+          const securityActivities = this._getRequestedActivities(task, 'security')
+          securityAnalysis = await this.securityAnalyzer.analyzeSelective(page, task.url, html, securityActivities)
           // 🪵 Debug: executed security analysis
-          this.logger.debug({ url: task.url }, `Executed security analysis for ${task.url}`)
+          this.logger.debug({ url: task.url, activities: securityActivities }, `Executed security analysis for ${task.url}`)
         }
 
         // Screenshot Capture - only if screenshot activities are requested
@@ -542,6 +588,27 @@ export class SpiderPlugin extends Plugin {
             this.logger.debug({ url: task.url }, `Analyzed storage (localStorage/IndexedDB/sessionStorage) for ${task.url}`)
           } catch (error) {
             this.logger.error(`[SpiderPlugin] Failed to analyze storage for ${task.url}:`, error)
+          }
+        }
+
+        // Assets Analysis - extract from SEO analysis or run separately
+        let assetsAnalysis = null
+        if (this._shouldExecuteCategory(task, 'assets')) {
+          try {
+            // Assets are already extracted by SEO analyzer, but we can also extract directly
+            if (seoAnalysis && seoAnalysis.assets) {
+              assetsAnalysis = seoAnalysis.assets
+            } else {
+              // Extract assets directly from HTML if SEO analysis wasn't run
+              assetsAnalysis = this.seoAnalyzer._extractAssets(
+                new DOMParser().parseFromString(html, 'text/html'),
+                task.url
+              )
+            }
+            // 🪵 Debug: analyzed assets
+            this.logger.debug({ url: task.url }, `Analyzed assets (CSS/JS/images/videos/audios) for ${task.url}`)
+          } catch (error) {
+            this.logger.error(`[SpiderPlugin] Failed to analyze assets for ${task.url}:`, error)
           }
         }
 
@@ -645,6 +712,18 @@ export class SpiderPlugin extends Plugin {
                 targetId: task.id,
                 url: task.url,
                 ...storageAnalysis
+              })
+            })
+          }
+
+          // Store assets analysis (CSS, JS, images, videos, audios) if available
+          if (assetsAnalysis) {
+            const assetsResource = await this.database.getResource(this.resourceNames.assetsAnalysis)
+            await tryFn(async () => {
+              return await assetsResource.insert({
+                targetId: task.id,
+                url: task.url,
+                ...assetsAnalysis
               })
             })
           }
@@ -794,6 +873,196 @@ export class SpiderPlugin extends Plugin {
   async getScreenshots(query = {}) {
     const screenshotResource = await this.database.getResource(this.resourceNames.screenshots)
     return await screenshotResource.query(query)
+  }
+
+  /**
+   * Get security analysis records
+   *
+   * @param {Object} [query] - Query parameters
+   * @returns {Promise<Array>} Array of security analysis records
+   */
+  async getSecurityAnalysis(query = {}) {
+    const securityResource = await this.database.getResource(this.resourceNames.securityAnalysis)
+    return await securityResource.query(query)
+  }
+
+  /**
+   * Get content analysis records (iframes, tracking pixels)
+   *
+   * @param {Object} [query] - Query parameters
+   * @returns {Promise<Array>} Array of content analysis records
+   */
+  async getContentAnalysis(query = {}) {
+    const contentResource = await this.database.getResource(this.resourceNames.contentAnalysis)
+    return await contentResource.query(query)
+  }
+
+  /**
+   * Get storage analysis records (localStorage, IndexedDB, sessionStorage)
+   *
+   * @param {Object} [query] - Query parameters
+   * @returns {Promise<Array>} Array of storage analysis records
+   */
+  async getStorageAnalysis(query = {}) {
+    const storageResource = await this.database.getResource(this.resourceNames.storageAnalysis)
+    return await storageResource.query(query)
+  }
+
+  /**
+   * Get performance metrics records
+   *
+   * @param {Object} [query] - Query parameters
+   * @returns {Promise<Array>} Array of performance metrics records
+   */
+  async getPerformanceMetrics(query = {}) {
+    const resultsResource = await this.database.getResource(this.resourceNames.results)
+    const results = await resultsResource.query(query)
+    return results.filter(r => r.performanceMetrics).map(r => ({
+      targetId: r.targetId,
+      url: r.url,
+      ...r.performanceMetrics
+    }))
+  }
+
+  /**
+   * Get assets analysis records (CSS, JS, images, videos, audios)
+   *
+   * @param {Object} [query] - Query parameters
+   * @returns {Promise<Array>} Array of assets analysis records
+   */
+  async getAssetsAnalysis(query = {}) {
+    const assetsResource = await this.database.getResource(this.resourceNames.assetsAnalysis)
+    return await assetsResource.query(query)
+  }
+
+  // ============================================
+  // PUPPETEER DETECTION API (exposed from PuppeteerPlugin)
+  // ============================================
+
+  /**
+   * Detect anti-bot services and CAPTCHA implementations on a page
+   * Exposes PuppeteerPlugin's detectAntiBotServices method
+   *
+   * @param {Page} page - Puppeteer page object
+   * @returns {Promise<Object>} Anti-bot detection results
+   */
+  async detectAntiBotServices(page) {
+    if (!this.puppeteerPlugin?.antiBotDetector) {
+      throw new PluginError('Anti-bot detector not initialized. Ensure PuppeteerPlugin is initialized with consoleMonitor enabled.')
+    }
+    return await this.puppeteerPlugin.detectAntiBotServices(page)
+  }
+
+  /**
+   * Detect browser fingerprinting capabilities and attempts
+   *
+   * @param {Page} page - Puppeteer page object
+   * @returns {Promise<Object>} Fingerprinting detection results
+   */
+  async detectFingerprinting(page) {
+    if (!this.puppeteerPlugin?.antiBotDetector) {
+      throw new PluginError('Anti-bot detector not initialized. Ensure PuppeteerPlugin is initialized with consoleMonitor enabled.')
+    }
+    return await this.puppeteerPlugin.detectFingerprinting(page)
+  }
+
+  /**
+   * Comprehensive anti-bot and fingerprinting detection
+   *
+   * @param {Page} page - Puppeteer page object
+   * @returns {Promise<Object>} Combined anti-bot and fingerprinting results
+   */
+  async detectAntiBotsAndFingerprinting(page) {
+    if (!this.puppeteerPlugin?.antiBotDetector) {
+      throw new PluginError('Anti-bot detector not initialized. Ensure PuppeteerPlugin is initialized with consoleMonitor enabled.')
+    }
+    return await this.puppeteerPlugin.detectAntiBotsAndFingerprinting(page)
+  }
+
+  /**
+   * Detect WebRTC peer connections and ICE candidates
+   *
+   * @param {Page} page - Puppeteer page object
+   * @returns {Promise<Object>} WebRTC detection results
+   */
+  async detectWebRTC(page) {
+    if (!this.puppeteerPlugin?.webrtcStreamsDetector) {
+      throw new PluginError('WebRTC/Streams detector not initialized. Ensure PuppeteerPlugin is initialized with consoleMonitor enabled.')
+    }
+    return await this.puppeteerPlugin.detectWebRTC(page)
+  }
+
+  /**
+   * Detect media streams (audio, video, display capture)
+   *
+   * @param {Page} page - Puppeteer page object
+   * @returns {Promise<Object>} Media streams detection results
+   */
+  async detectMediaStreams(page) {
+    if (!this.puppeteerPlugin?.webrtcStreamsDetector) {
+      throw new PluginError('WebRTC/Streams detector not initialized. Ensure PuppeteerPlugin is initialized with consoleMonitor enabled.')
+    }
+    return await this.puppeteerPlugin.detectMediaStreams(page)
+  }
+
+  /**
+   * Detect streaming protocols (HLS, DASH, RTMP, etc.)
+   *
+   * @param {Page} page - Puppeteer page object
+   * @returns {Promise<Object>} Streaming protocols detection results
+   */
+  async detectStreamingProtocols(page) {
+    if (!this.puppeteerPlugin?.webrtcStreamsDetector) {
+      throw new PluginError('WebRTC/Streams detector not initialized. Ensure PuppeteerPlugin is initialized with consoleMonitor enabled.')
+    }
+    return await this.puppeteerPlugin.detectStreamingProtocols(page)
+  }
+
+  /**
+   * Comprehensive WebRTC and streaming detection
+   *
+   * @param {Page} page - Puppeteer page object
+   * @returns {Promise<Object>} Combined WebRTC and streaming results
+   */
+  async detectWebRTCAndStreams(page) {
+    if (!this.puppeteerPlugin?.webrtcStreamsDetector) {
+      throw new PluginError('WebRTC/Streams detector not initialized. Ensure PuppeteerPlugin is initialized with consoleMonitor enabled.')
+    }
+    return await this.puppeteerPlugin.detectWebRTCAndStreams(page)
+  }
+
+  /**
+   * Capture all storage data (localStorage, sessionStorage, IndexedDB) from page
+   *
+   * @param {Page} page - Puppeteer page object
+   * @returns {Promise<Object>} Storage data
+   */
+  async captureAllStorage(page) {
+    if (!this.puppeteerPlugin?.storageManager) {
+      throw new PluginError('Storage manager not initialized. Ensure PuppeteerPlugin is initialized with consoleMonitor enabled.')
+    }
+    return await this.puppeteerPlugin.captureAllStorage(page)
+  }
+
+  /**
+   * Get access to the underlying PuppeteerPlugin for advanced usage
+   *
+   * @returns {PuppeteerPlugin} The internal PuppeteerPlugin instance
+   */
+  getPuppeteerPlugin() {
+    return this.puppeteerPlugin
+  }
+
+  /**
+   * Navigate to a URL using the underlying PuppeteerPlugin
+   * Useful for manual page operations outside the queue
+   *
+   * @param {string} url - URL to navigate to
+   * @param {Object} options - Navigation options
+   * @returns {Promise<Page>} Puppeteer page object
+   */
+  async navigate(url, options = {}) {
+    return await this.puppeteerPlugin.navigate(url, options)
   }
 
   /**

@@ -28,6 +28,86 @@ export class SEOAnalyzer {
   }
 
   /**
+   * Selective SEO analysis based on requested activities
+   *
+   * @param {string} html - HTML content
+   * @param {string} baseUrl - Base URL for relative links
+   * @param {Array<string>} activities - List of activity names to execute
+   * @returns {Object} Analysis results with SEO score
+   */
+  analyzeSelective(html, baseUrl, activities = []) {
+    // If no activities specified, run all
+    if (!activities || activities.length === 0) {
+      return this.analyze(html, baseUrl)
+    }
+
+    const result = {
+      metaTags: null,
+      openGraph: null,
+      twitterCard: null,
+      canonical: null,
+      alternates: [],
+      assets: null,
+      onPageSEO: null,
+      accessibility: null,
+      internalLinks: null,
+      keywordOptimization: null,
+      seoScore: 0
+    }
+
+    try {
+      // Parse HTML
+      const parser = new DOMParser()
+      const doc = parser.parseFromString(html, 'text/html')
+
+      // Map activities to analysis functions
+      if (activities.includes('seo_meta_tags')) {
+        result.metaTags = this._extractMetaTags(doc)
+        result.canonical = this._extractCanonical(doc)
+        result.alternates = this._extractAlternates(doc)
+      }
+
+      if (activities.includes('seo_opengraph')) {
+        result.openGraph = this._extractOpenGraph(doc)
+      }
+
+      if (activities.includes('seo_twitter_card')) {
+        result.twitterCard = this._extractTwitterCard(doc)
+      }
+
+      if (activities.includes('seo_heading_structure') || activities.includes('seo_content_analysis')) {
+        result.onPageSEO = this._analyzeOnPageSEO(doc, html)
+      }
+
+      if (activities.includes('seo_accessibility')) {
+        result.accessibility = this._analyzeAccessibility(doc, html)
+      }
+
+      if (activities.includes('seo_links_analysis')) {
+        result.internalLinks = this._analyzeInternalLinks(doc, baseUrl)
+      }
+
+      // Calculate SEO score only if we have data
+      result.seoScore = this._calculateSEOScore(result)
+    } catch (error) {
+      // Fallback to regex-based extraction
+      if (activities.includes('seo_meta_tags')) {
+        result.metaTags = this._extractMetaTagsRegex(html)
+        result.canonical = this._extractCanonicalRegex(html)
+        result.alternates = this._extractAlternatesRegex(html)
+      }
+      if (activities.includes('seo_opengraph')) {
+        result.openGraph = this._extractOpenGraphRegex(html)
+      }
+      if (activities.includes('seo_twitter_card')) {
+        result.twitterCard = this._extractTwitterCardRegex(html)
+      }
+    }
+
+    return result
+  }
+
+  /**
    * Comprehensive SEO analysis
    *
    * @param {string} html - HTML content
