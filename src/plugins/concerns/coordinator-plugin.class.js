@@ -269,7 +269,9 @@ export class CoordinatorPlugin extends Plugin {
       throw new Error(`[${this.constructor.name}] Database not available - cannot initialize coordinator`);
     }
 
-    const namespace = this.namespace || 'default';
+    // Use a shared 'default' namespace for ALL plugins in this database
+    // NOT this.namespace (which is plugin-specific like 'eventualconsistency')
+    const namespace = 'default';
 
     // Get or create global coordinator for this namespace
     this._globalCoordinator = await this.database.getGlobalCoordinator(namespace, {
