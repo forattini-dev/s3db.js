@@ -21,6 +21,7 @@ import { analyzeIFrames, detectTrackingPixels } from './spider/content-analyzer.
 import { analyzeAllStorage } from './spider/storage-analyzer.js'
 import { URLPatternMatcher } from './spider/url-pattern-matcher.js'
 import { LinkDiscoverer } from './spider/link-discoverer.js'
+import { DeepDiscovery } from './spider/deep-discovery.js'
 
 /**
  * SpiderPlugin - All-in-one web crawler suite
@@ -1495,3 +1496,18 @@ export class SpiderPlugin extends Plugin {
 }
 
 export default SpiderPlugin
+
+// Export spider components for standalone use
+export {
+  LinkDiscoverer,
+  DeepDiscovery,
+  URLPatternMatcher,
+  AVAILABLE_ACTIVITIES,
+  ACTIVITY_CATEGORIES,
+  ACTIVITY_PRESETS,
+  getActivitiesByCategory,
+  getAllActivities,
+  getCategoriesWithActivities,
+  validateActivities,
+  getPreset
+}
