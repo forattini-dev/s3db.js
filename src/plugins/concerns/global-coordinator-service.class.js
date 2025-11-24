@@ -11,10 +11,10 @@
  * - Graceful fallback if storage unavailable
  * - Observable metrics and diagnostics
  *
- * Storage Layout (follows plugin= convention):
- * - plugin=coordinator/<namespace>/state.json          - Leader lease and epoch
- * - plugin=coordinator/<namespace>/workers/<id>.json   - Worker heartbeat
- * - plugin=coordinator/<namespace>/metadata.json       - Service metadata
+ * Storage Layout (self-documenting key-value format):
+ * - plugin=coordinator/namespace={name}/state.json              - Leader lease and epoch
+ * - plugin=coordinator/namespace={name}/workers/worker={id}.json - Worker heartbeat
+ * - plugin=coordinator/namespace={name}/metadata.json           - Service metadata
  *
  * @example
  * const service = new GlobalCoordinatorService({
@@ -713,28 +713,29 @@ export class GlobalCoordinatorService extends EventEmitter {
 
   /**
    * Get state key for storage
-   * Uses plugin= convention: plugin=coordinator/<namespace>/state.json
+   * Self-documenting format: plugin=coordinator/namespace={name}/state.json
    * @private
    */
   _getStateKey() {
-    return this.storage.getPluginKey(null, this.namespace, 'state.json');
+    return this.storage.getPluginKey(null, `namespace=${this.namespace}`, 'state.json');
   }
 
   /**
    * Get workers prefix for listing
-   * Uses plugin= convention: plugin=coordinator/<namespace>/workers/
+   * Self-documenting format: plugin=coordinator/namespace={name}/workers/
    * @private
    */
   _getWorkersPrefix() {
-    return this.storage.getPluginKey(null, this.namespace, 'workers') + '/';
+    return this.storage.getPluginKey(null, `namespace=${this.namespace}`, 'workers') + '/';
   }
 
   /**
    * Get worker key for storage
+   * Self-documenting format: plugin=coordinator/namespace={name}/workers/worker={id}.json
    * @private
    */
   _getWorkerKey(workerId) {
-    return this.storage.getPluginKey(null, this.namespace, 'workers', `${workerId}.json`);
+    return this.storage.getPluginKey(null, `namespace=${this.namespace}`, 'workers', `worker=${workerId}.json`);
   }
 
   /**
@@ -742,7 +743,7 @@ export class GlobalCoordinatorService extends EventEmitter {
    * @private
    */
   _getMetadataKey() {
-    return this.storage.getPluginKey(null, this.namespace, 'metadata.json');
+    return this.storage.getPluginKey(null, `namespace=${this.namespace}`, 'metadata.json');
   }
 
   // ==================== INTERNAL: UTILITIES ====================

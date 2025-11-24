@@ -10,10 +10,10 @@
  * Note: These tests verify GlobalCoordinatorService integration at the core level.
  * For full end-to-end plugin integration tests, see plugin-specific test suites.
  *
- * Storage Verification (follows plugin= convention):
- * - plugin=coordinator/<namespace>/state.json - Leader lease
- * - plugin=coordinator/<namespace>/workers/<id>.json - Worker heartbeats
- * - plugin=coordinator/<namespace>/metadata.json - Service metadata
+ * Storage Verification (self-documenting key-value format):
+ * - plugin=coordinator/namespace={name}/state.json - Leader lease
+ * - plugin=coordinator/namespace={name}/workers/worker={id}.json - Worker heartbeats
+ * - plugin=coordinator/namespace={name}/metadata.json - Service metadata
  */
 
 import { describe, it, expect, beforeAll, afterAll } from '@jest/globals';
@@ -325,21 +325,26 @@ describe('GlobalCoordinatorService - Integration Tests', () => {
     it('should use correct storage key formats', async () => {
       const coordinator = await database.getGlobalCoordinator('storage-format-test');
 
-      // Verify key formats (should follow plugin= convention)
+      // Verify key formats (should follow self-documenting key-value convention)
       const stateKey = coordinator._getStateKey();
       expect(stateKey).toContain('plugin=coordinator/');
-      expect(stateKey).toContain('storage-format-test');
+      expect(stateKey).toContain('namespace=storage-format-test');
       expect(stateKey).toContain('/state.json');
 
       const workersPrefix = coordinator._getWorkersPrefix();
       expect(workersPrefix).toContain('plugin=coordinator/');
-      expect(workersPrefix).toContain('storage-format-test');
+      expect(workersPrefix).toContain('namespace=storage-format-test');
       expect(workersPrefix).toContain('/workers/');
 
       const metadataKey = coordinator._getMetadataKey();
       expect(metadataKey).toContain('plugin=coordinator/');
-      expect(metadataKey).toContain('storage-format-test');
+      expect(metadataKey).toContain('namespace=storage-format-test');
       expect(metadataKey).toContain('/metadata.json');
+
+      // Verify worker key format includes worker= prefix
+      const testWorkerId = 'test-worker-123';
+      const workerKey = coordinator._getWorkerKey(testWorkerId);
+      expect(workerKey).toContain('worker=test-worker-123.json');
 
       await coordinator.stop();
     });
