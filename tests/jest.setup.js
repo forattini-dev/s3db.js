@@ -35,6 +35,11 @@ const forceCleanup = async () => {
       console.log('[Cleanup] All databases disconnected');
     }
 
+    // Clear all MemoryClient storage (brute-force for OOM in tests)
+    const { MemoryClient } = await import('#src/clients/memory-client.class.js');
+    MemoryClient.clearAllStorage();
+    console.log('[Cleanup] MemoryClient storage cleared');
+
     // Clear all timers
     if (typeof jest !== 'undefined' && jest.clearAllTimers) {
       jest.clearAllTimers();
@@ -133,16 +138,19 @@ global.forceCleanup = forceCleanup;
 
 // CRITICAL: Add global afterEach to prevent database leaks
 // This runs after EVERY test to ensure databases are disconnected
-if (typeof afterEach !== 'undefined') {
-  afterEach(async () => {
-    if (global._testDatabases && global._testDatabases.size > 0) {
-      const databases = Array.from(global._testDatabases);
-      await Promise.allSettled(databases.map(db => {
-        if (db && typeof db.disconnect === 'function') {
-          return db.disconnect().catch(() => {});
+    if (typeof afterEach !== 'undefined') {
+      afterEach(async () => {
+        const { MemoryClient } = await import('#src/clients/memory-client.class.js');
+        if (global._testDatabases && global._testDatabases.size > 0) {
+          const databases = Array.from(global._testDatabases);
+          await Promise.allSettled(databases.map(db => {
+            if (db && typeof db.disconnect === 'function') {
+              return db.disconnect().catch(() => {});
+            }
+          }));
+          // Don't clear the set, just disconnect. Individual tests will remove themselves.
         }
-      }));
-      // Don't clear the set, just disconnect. Individual tests will remove themselves.
+        // Aggressively clear ALL MemoryClient storage after each test
+        MemoryClient.clearAllStorage();
+      });
     }
-  });
-}

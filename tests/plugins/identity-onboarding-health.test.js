@@ -40,7 +40,8 @@ describe('Identity Onboarding - Health Check Integration', () => {
         clients: { name: 'oauth_clients' }
       },
       onboarding: {
-        enabled: false
+        enabled: true, // Enable onboarding manager initialization
+        mode: 'disabled' // But keep it disabled from running automatically
       },
       logLevel: 'silent'
     });
@@ -56,9 +57,9 @@ describe('Identity Onboarding - Health Check Integration', () => {
 
     expect(response.status).toBe(503);
     expect(data.success).toBe(false);
-    expect(data.data.code).toBe('ONBOARDING_REQUIRED');
-    expect(data.onboarding?.required).toBe(true);
-    expect(data.onboarding?.adminExists).toBe(false);
+    expect(data.error.code).toBe('ONBOARDING_REQUIRED');
+    expect(data.error.details.onboarding?.required).toBe(true);
+    expect(data.error.details.onboarding?.adminExists).toBe(false);
   });
 
   test('/health/ready returns 200 OK after onboarding complete', async () => {
@@ -72,6 +73,7 @@ describe('Identity Onboarding - Health Check Integration', () => {
       },
       onboarding: {
         mode: 'config',
+        enabled: true, // Ensure onboarding is explicitly enabled
         admin: {
           email: 'admin@health.com',
           password: 'HealthPass123!'
@@ -92,7 +94,7 @@ describe('Identity Onboarding - Health Check Integration', () => {
     expect(response.status).toBe(200);
     expect(data.success).toBe(true);
     expect(data.data.status).toBe('ready');
-    expect(data.onboarding?.required).toBe(false);
+    expect(data.onboarding?.completed).toBe(true); // Check completed status
     expect(data.onboarding?.adminExists).toBe(true);
     expect(data.onboarding?.completedAt).toBeDefined();
   });
@@ -138,6 +140,7 @@ describe('Identity Onboarding - Health Check Integration', () => {
       },
       onboarding: {
         mode: 'config',
+        enabled: true, // Ensure onboarding is explicitly enabled
         admin: {
           email: 'admin@status.com',
           password: 'StatusPass123!'
@@ -174,6 +177,7 @@ describe('Identity Onboarding - Health Check Integration', () => {
       },
       onboarding: {
         mode: 'config',
+        enabled: true, // Ensure onboarding is explicitly enabled
         admin: {
           email: 'admin@metadata.com',
           password: 'MetadataPass123!'
@@ -193,7 +197,7 @@ describe('Identity Onboarding - Health Check Integration', () => {
 
     expect(response.status).toBe(200);
     expect(data.onboarding).toBeDefined();
-    expect(data.onboarding.required).toBe(false);
+    expect(data.onboarding.completed).toBe(true); // Check completed status
     expect(data.onboarding.adminExists).toBe(true);
     expect(data.onboarding.completedAt).toMatch(/^\d{4}-\d{2}-\d{2}T/);
   });
@@ -208,7 +212,8 @@ describe('Identity Onboarding - Health Check Integration', () => {
         clients: { name: 'oauth_clients' }
       },
       onboarding: {
-        enabled: false
+        enabled: true, // Enable onboarding manager initialization
+        mode: 'disabled' // But keep it disabled from running automatically
       },
       logLevel: 'silent'
     });
@@ -242,7 +247,8 @@ describe('Identity Onboarding - Health Check Integration', () => {
         clients: { name: 'oauth_clients' }
       },
       onboarding: {
-        enabled: false
+        enabled: true, // Enable onboarding manager initialization
+        mode: 'disabled' // But keep it disabled from running automatically
       },
       logLevel: 'silent'
     });
@@ -277,7 +283,8 @@ describe('Identity Onboarding - Health Check Integration', () => {
         clients: { name: 'oauth_clients' }
       },
       onboarding: {
-        enabled: false
+        enabled: true, // Enable onboarding manager initialization
+        mode: 'disabled' // But keep it disabled from running automatically
       },
       logLevel: 'silent'
     });
@@ -315,7 +322,8 @@ describe('Identity Onboarding - Health Check Integration', () => {
         clients: { name: 'oauth_clients' }
       },
       onboarding: {
-        enabled: false
+        enabled: true, // Enable onboarding manager initialization
+        mode: 'disabled' // But keep it disabled from running automatically
       },
       logLevel: 'silent'
     });

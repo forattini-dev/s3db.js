@@ -248,7 +248,7 @@ describe('Identity Onboarding - Callback Mode', () => {
       logLevel: 'silent'
     });
 
-    await expect(db.usePlugin(disableServerBinding(plugin), 'identity')).rejects.toThrow(/onFirstRun callback/);
+    await expect(db.usePlugin(disableServerBinding(plugin), 'identity')).rejects.toThrow(/onFirstRun' is required/);
   });
 
   test('throws error if onFirstRun is not a function', async () => {

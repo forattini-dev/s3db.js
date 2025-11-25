@@ -68,6 +68,7 @@ describe('S3QueuePlugin - Edge Cases', () => {
       });
 
       await plugin.install(database);
+      plugin.logger.level = 'debug'; // Force debug level for test
 
       const logSpy = jest.spyOn(plugin.logger, 'debug').mockImplementation();
 
@@ -99,6 +100,7 @@ describe('S3QueuePlugin - Edge Cases', () => {
       });
 
       await plugin.install(database);
+      plugin.logger.level = 'debug'; // Force debug level for test
 
       const logSpy = jest.spyOn(plugin.logger, 'debug').mockImplementation();
 
