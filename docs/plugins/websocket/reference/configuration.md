@@ -14,6 +14,7 @@
 - [Authentication Options](#authentication-options)
 - [Rate Limiting Options](#rate-limiting-options)
 - [CORS Options](#cors-options)
+- [Health Check Options](#health-check-options)
 - [Resource Options](#resource-options)
 - [Complete Example](#complete-example)
 
@@ -42,6 +43,9 @@ new WebSocketPlugin({
 
   // CORS
   cors: { /* ... */ },
+
+  // Health checks (Kubernetes-compatible)
+  health: { /* ... */ },
 
   // Resources
   resources: { /* ... */ }
@@ -366,6 +370,69 @@ cors: {
 - `'*'` - Allow all origins (default)
 - Specific origin - Only allow that origin
 - Note: For production, specify exact origins
+
+---
+
+## Health Check Options
+
+The WebSocket plugin provides Kubernetes-compatible health endpoints. See the [Health Checks Guide](../guides/health-checks.md) for detailed usage.
+
+### `health.enabled`
+
+| Type | Default | Required |
+|------|---------|----------|
+| `boolean` | `true` | No |
+
+Enable or disable health check endpoints.
+
+```javascript
+health: {
+  enabled: false  // Disable health endpoints
+}
+```
+
+**Endpoints when enabled:**
+- `GET /health` - Generic health status
+- `GET /health/live` - Liveness probe
+- `GET /health/ready` - Readiness probe
+
+### `health.readiness.checks`
+
+| Type | Default | Required |
+|------|---------|----------|
+| `array` | `[]` | No |
+
+Custom health checks for external dependencies.
+
+```javascript
+health: {
+  readiness: {
+    checks: [
+      {
+        name: 'redis',
+        timeout: 5000,      // Timeout in ms
+        optional: false,    // If true, won't fail readiness
+        check: async () => {
+          await redis.ping();
+          return { healthy: true };
+        }
+      }
+    ]
+  }
+}
+```
+
+**Check function return:**
+```javascript
+{
+  healthy: boolean,    // Required: is the check passing?
+  // ... additional fields are included in response
+}
+```
+
+**Built-in checks:**
+- `s3db` - Database connection and resources count
+- `websocket` - WebSocket server status and client count
 
 ---
 
