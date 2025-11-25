@@ -119,6 +119,7 @@ export class ApiServer {
 
     this.openApiGenerator = new OpenAPIGeneratorCached({
       database: this.options.database,
+      app: this.app,
       logger: this.logger,
       options: {
         auth: this.options.auth,
@@ -148,12 +149,17 @@ export class ApiServer {
       const { serve } = await import('@hono/node-server');
       const { swaggerUI } = await import('@hono/swagger-ui');
       const { cors } = await import('hono/cors');
+      const { ApiApp } = await import('./app.class.js');
 
       this.Hono = Hono;
       this.serve = serve;
       this.swaggerUI = swaggerUI;
       this.cors = cors;
-      this.app = new Hono();
+      this.ApiApp = ApiApp;
+      this.app = new ApiApp({
+        db: this.options.database,
+        resources: this.options.database?.resources
+      });
 
       if (this.failban) {
         await this.failban.initialize();
