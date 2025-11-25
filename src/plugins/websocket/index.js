@@ -76,6 +76,11 @@ export class WebSocketPlugin extends Plugin {
         origin: options.cors?.origin || '*'
       },
 
+      // Health checks (Kubernetes-compatible)
+      health: typeof options.health === 'object'
+        ? options.health
+        : { enabled: options.health !== false },
+
       // Custom message handlers
       messageHandlers: options.messageHandlers || {}
     };
@@ -138,6 +143,7 @@ export class WebSocketPlugin extends Plugin {
       maxPayloadSize: this.config.maxPayloadSize,
       rateLimit: this.config.rateLimit,
       cors: this.config.cors,
+      health: this.config.health,
       startupBanner: this.config.startupBanner,
       logLevel: this.logLevel,
       logger: this.logger

@@ -14,6 +14,7 @@
 
 import { EventEmitter } from 'events';
 import { idGenerator } from '../../concerns/id.js';
+import { HealthManager } from './server/health-manager.class.js';
 
 export class WebSocketServer extends EventEmitter {
   constructor(options = {}) {
@@ -35,6 +36,7 @@ export class WebSocketServer extends EventEmitter {
     this.rateLimit = options.rateLimit || { enabled: false };
     this.cors = options.cors || { enabled: true, origin: '*' };
     this.startupBanner = options.startupBanner !== false;
+    this.health = options.health ?? { enabled: true };
 
     // Runtime state
     this.wss = null;
@@ -46,6 +48,9 @@ export class WebSocketServer extends EventEmitter {
 
     // Resource event listeners
     this._resourceListeners = new Map();
+
+    // Health manager
+    this.healthManager = null;
 
     // Metrics
     this.metrics = {
@@ -65,8 +70,19 @@ export class WebSocketServer extends EventEmitter {
     const { WebSocketServer: WSServer } = await import('ws');
     const { createServer } = await import('http');
 
+    // Initialize health manager if enabled
+    if (this.health?.enabled !== false) {
+      this.healthManager = new HealthManager({
+        database: this.database,
+        wsServer: this,
+        healthConfig: this.health,
+        logLevel: this.logLevel,
+        logger: this.logger
+      });
+    }
+
     // Create HTTP server for WebSocket upgrade
-    this.httpServer = createServer((req, res) => {
+    this.httpServer = createServer(async (req, res) => {
       // Handle CORS preflight for HTTP fallback
       if (this.cors.enabled) {
         res.setHeader('Access-Control-Allow-Origin', this.cors.origin);
@@ -80,15 +96,10 @@ export class WebSocketServer extends EventEmitter {
         return;
       }
 
-      // Health check endpoint
-      if (req.url === '/health') {
-        res.writeHead(200, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({
-          status: 'ok',
-          connections: this.clients.size,
-          uptime: process.uptime()
-        }));
-        return;
+      // Health check endpoints (Kubernetes-compatible)
+      if (this.healthManager && req.url?.startsWith('/health')) {
+        const handled = await this.healthManager.handleRequest(req, res);
+        if (handled) return;
       }
 
       res.writeHead(426, { 'Content-Type': 'text/plain' });

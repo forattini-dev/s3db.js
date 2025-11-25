@@ -13,6 +13,7 @@
 | **[Configuration Reference](./reference/configuration.md)** | Complete options reference |
 | **[Client Protocol Guide](./guides/client-protocol.md)** | WebSocket message protocol |
 | **[Authentication Guide](./guides/authentication.md)** | JWT, API Key, OIDC setup |
+| **[Health Checks Guide](./guides/health-checks.md)** | Kubernetes-compatible health endpoints |
 | **[Examples](./examples/README.md)** | Real-world use cases |
 | **[FAQ](./faq.md)** | Frequently asked questions |
 
