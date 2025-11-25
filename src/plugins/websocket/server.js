@@ -15,6 +15,7 @@
 import { EventEmitter } from 'events';
 import { idGenerator } from '../../concerns/id.js';
 import { HealthManager } from './server/health-manager.class.js';
+import { ChannelManager } from './server/channel-manager.class.js';
 
 export class WebSocketServer extends EventEmitter {
   constructor(options = {}) {
@@ -37,6 +38,7 @@ export class WebSocketServer extends EventEmitter {
     this.cors = options.cors || { enabled: true, origin: '*' };
     this.startupBanner = options.startupBanner !== false;
     this.health = options.health ?? { enabled: true };
+    this.channels = options.channels || { enabled: true };
 
     // Runtime state
     this.wss = null;
@@ -51,6 +53,9 @@ export class WebSocketServer extends EventEmitter {
 
     // Health manager
     this.healthManager = null;
+
+    // Channel manager (presence, rooms)
+    this.channelManager = null;
 
     // Metrics
     this.metrics = {
@@ -76,6 +81,16 @@ export class WebSocketServer extends EventEmitter {
         database: this.database,
         wsServer: this,
         healthConfig: this.health,
+        logLevel: this.logLevel,
+        logger: this.logger
+      });
+    }
+
+    // Initialize channel manager if enabled
+    if (this.channels?.enabled !== false) {
+      this.channelManager = new ChannelManager({
+        database: this.database,
+        authGuard: this.channels?.guards || {},
         logLevel: this.logLevel,
         logger: this.logger
       });
@@ -404,6 +419,23 @@ export class WebSocketServer extends EventEmitter {
 
         case 'delete':
           response = await this._handleDelete(clientId, payload);
+          break;
+
+        // Channel operations (Pusher-style)
+        case 'join':
+          response = await this._handleJoinChannel(clientId, payload);
+          break;
+
+        case 'leave':
+          response = await this._handleLeaveChannel(clientId, payload);
+          break;
+
+        case 'channel:message':
+          response = await this._handleChannelMessage(clientId, payload);
+          break;
+
+        case 'channel:update':
+          response = await this._handleChannelUpdate(clientId, payload);
           break;
 
         default:
@@ -740,6 +772,237 @@ export class WebSocketServer extends EventEmitter {
   }
 
   /**
+   * Handle join channel request (Pusher-style)
+   * @private
+   */
+  async _handleJoinChannel(clientId, payload) {
+    const { channel, userInfo = {} } = payload;
+    const client = this.clients.get(clientId);
+
+    if (!this.channelManager) {
+      return {
+        type: 'error',
+        code: 'CHANNELS_DISABLED',
+        message: 'Channels feature is disabled'
+      };
+    }
+
+    if (!channel) {
+      return {
+        type: 'error',
+        code: 'INVALID_REQUEST',
+        message: 'Channel name is required'
+      };
+    }
+
+    const result = await this.channelManager.join(clientId, channel, client.user, userInfo);
+
+    if (!result.success) {
+      return {
+        type: 'error',
+        code: result.code || 'JOIN_FAILED',
+        message: result.error
+      };
+    }
+
+    // For presence channels, broadcast member_joined to other members
+    if (result.type === 'presence') {
+      this._broadcastToChannel(channel, {
+        type: 'presence:member_joined',
+        channel,
+        member: result.me,
+        timestamp: new Date().toISOString()
+      }, clientId); // Exclude the joining client
+    }
+
+    this.emit('channel.joined', { clientId, channel, type: result.type });
+
+    return {
+      type: 'channel:joined',
+      channel,
+      channelType: result.type,
+      members: result.members,
+      me: result.me
+    };
+  }
+
+  /**
+   * Handle leave channel request
+   * @private
+   */
+  async _handleLeaveChannel(clientId, payload) {
+    const { channel } = payload;
+
+    if (!this.channelManager) {
+      return {
+        type: 'error',
+        code: 'CHANNELS_DISABLED',
+        message: 'Channels feature is disabled'
+      };
+    }
+
+    if (!channel) {
+      return {
+        type: 'error',
+        code: 'INVALID_REQUEST',
+        message: 'Channel name is required'
+      };
+    }
+
+    const channelInfo = this.channelManager.getChannelInfo(channel);
+    const result = this.channelManager.leave(clientId, channel);
+
+    if (!result.success) {
+      return {
+        type: 'error',
+        code: result.code || 'LEAVE_FAILED',
+        message: result.error
+      };
+    }
+
+    // For presence channels, broadcast member_left to remaining members
+    if (channelInfo?.type === 'presence' && result.member) {
+      this._broadcastToChannel(channel, {
+        type: 'presence:member_left',
+        channel,
+        member: result.member,
+        timestamp: new Date().toISOString()
+      });
+    }
+
+    this.emit('channel.left', { clientId, channel });
+
+    return {
+      type: 'channel:left',
+      channel
+    };
+  }
+
+  /**
+   * Handle channel message (broadcast to channel members)
+   * @private
+   */
+  async _handleChannelMessage(clientId, payload) {
+    const { channel, data, event = 'message' } = payload;
+    const client = this.clients.get(clientId);
+
+    if (!this.channelManager) {
+      return {
+        type: 'error',
+        code: 'CHANNELS_DISABLED',
+        message: 'Channels feature is disabled'
+      };
+    }
+
+    if (!channel || data === undefined) {
+      return {
+        type: 'error',
+        code: 'INVALID_REQUEST',
+        message: 'Channel and data are required'
+      };
+    }
+
+    // Check if client is in the channel
+    if (!this.channelManager.isInChannel(clientId, channel)) {
+      return {
+        type: 'error',
+        code: 'NOT_IN_CHANNEL',
+        message: 'You must join the channel first'
+      };
+    }
+
+    // Broadcast to all members except sender
+    const delivered = this._broadcastToChannel(channel, {
+      type: 'channel:message',
+      channel,
+      event,
+      data,
+      from: {
+        clientId,
+        userId: client.user?.id
+      },
+      timestamp: new Date().toISOString()
+    }, clientId);
+
+    return {
+      type: 'channel:sent',
+      channel,
+      delivered
+    };
+  }
+
+  /**
+   * Handle channel update (update member info in presence channel)
+   * @private
+   */
+  async _handleChannelUpdate(clientId, payload) {
+    const { channel, userInfo } = payload;
+
+    if (!this.channelManager) {
+      return {
+        type: 'error',
+        code: 'CHANNELS_DISABLED',
+        message: 'Channels feature is disabled'
+      };
+    }
+
+    if (!channel || !userInfo) {
+      return {
+        type: 'error',
+        code: 'INVALID_REQUEST',
+        message: 'Channel and userInfo are required'
+      };
+    }
+
+    const result = this.channelManager.updateMemberInfo(clientId, channel, userInfo);
+
+    if (!result.success) {
+      return {
+        type: 'error',
+        code: 'UPDATE_FAILED',
+        message: result.error
+      };
+    }
+
+    // Broadcast member_updated to other members
+    this._broadcastToChannel(channel, {
+      type: 'presence:member_updated',
+      channel,
+      member: result.member,
+      timestamp: new Date().toISOString()
+    }, clientId);
+
+    return {
+      type: 'channel:updated',
+      channel,
+      member: result.member
+    };
+  }
+
+  /**
+   * Broadcast message to all members in a channel
+   * @private
+   */
+  _broadcastToChannel(channelName, message, excludeClientId = null) {
+    if (!this.channelManager) return 0;
+
+    const clientIds = this.channelManager.getChannelClients(channelName);
+    let delivered = 0;
+
+    for (const clientId of clientIds) {
+      if (excludeClientId && clientId === excludeClientId) continue;
+
+      const client = this.clients.get(clientId);
+      if (client && client.ws.readyState === 1) {
+        this._send(client.ws, message);
+        delivered++;
+      }
+    }
+
+    return delivered;
+  }
+
+  /**
    * Handle client disconnect
    * @private
    */
@@ -758,6 +1021,22 @@ export class WebSocketServer extends EventEmitter {
     // Remove from all subscriptions
     for (const [resource, subscribers] of this.subscriptions) {
       subscribers.delete(clientId);
+    }
+
+    // Remove from all channels and broadcast presence:member_left
+    if (this.channelManager) {
+      const leftChannels = this.channelManager.leaveAll(clientId);
+      for (const { channel, member } of leftChannels) {
+        if (member) {
+          // This was a presence channel, broadcast member_left
+          this._broadcastToChannel(channel, {
+            type: 'presence:member_left',
+            channel,
+            member,
+            timestamp: new Date().toISOString()
+          });
+        }
+      }
     }
 
     // Remove client
@@ -1004,6 +1283,7 @@ export class WebSocketServer extends EventEmitter {
       subscriptions: Object.fromEntries(
         Array.from(this.subscriptions.entries()).map(([k, v]) => [k, v.size])
       ),
+      channels: this.channelManager?.getStats() || null,
       metrics: { ...this.metrics }
     };
   }

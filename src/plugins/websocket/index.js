@@ -81,6 +81,11 @@ export class WebSocketPlugin extends Plugin {
         ? options.health
         : { enabled: options.health !== false },
 
+      // Channels (Pusher-style presence, rooms)
+      channels: typeof options.channels === 'object'
+        ? options.channels
+        : { enabled: options.channels !== false },
+
       // Custom message handlers
       messageHandlers: options.messageHandlers || {}
     };
@@ -144,6 +149,7 @@ export class WebSocketPlugin extends Plugin {
       rateLimit: this.config.rateLimit,
       cors: this.config.cors,
       health: this.config.health,
+      channels: this.config.channels,
       startupBanner: this.config.startupBanner,
       logLevel: this.logLevel,
       logger: this.logger
@@ -280,7 +286,65 @@ export class WebSocketPlugin extends Plugin {
       errors: 0
     };
   }
+
+  // ============================================
+  // Channel Methods (Pusher-style)
+  // ============================================
+
+  /**
+   * Get channel info
+   * @param {string} channelName - Channel name
+   * @returns {Object|null}
+   */
+  getChannel(channelName) {
+    return this.server?.channelManager?.getChannelInfo(channelName) || null;
+  }
+
+  /**
+   * List all channels
+   * @param {Object} options - { type?: 'public'|'private'|'presence', prefix?: string }
+   * @returns {Array}
+   */
+  listChannels(options = {}) {
+    return this.server?.channelManager?.listChannels(options) || [];
+  }
+
+  /**
+   * Get members in a presence channel
+   * @param {string} channelName - Channel name
+   * @returns {Array}
+   */
+  getChannelMembers(channelName) {
+    return this.server?.channelManager?.getMembers(channelName) || [];
+  }
+
+  /**
+   * Broadcast message to all members in a channel
+   * @param {string} channelName - Channel name
+   * @param {Object} message - Message to broadcast
+   * @param {string} excludeClientId - Optional client to exclude
+   */
+  broadcastToChannel(channelName, message, excludeClientId = null) {
+    if (!this.server) return 0;
+    return this.server._broadcastToChannel(channelName, message, excludeClientId);
+  }
+
+  /**
+   * Get channel statistics
+   * @returns {Object}
+   */
+  getChannelStats() {
+    return this.server?.channelManager?.getStats() || {
+      channels: 0,
+      totalMembers: 0,
+      byType: { public: 0, private: 0, presence: 0 },
+      clients: 0
+    };
+  }
 }
 
 // Export server class for advanced usage
 export { WebSocketServer };
+
+// Export channel manager for advanced usage
+export { ChannelManager } from './server/channel-manager.class.js';
