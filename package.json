@@ -89,6 +89,7 @@
     "test:ts": "tsc --noEmit --project tests/typescript/tsconfig.json",
     "test:coverage": "S3DB_LOG_LEVEL=error node --no-warnings --experimental-vm-modules node_modules/jest/bin/jest.js --coverage --runInBand && pnpm run test:ts",
     "test:serial": "S3DB_LOG_LEVEL=error node --no-warnings --experimental-vm-modules node_modules/jest/bin/jest.js --runInBand",
+    "test:serial:safe": "S3DB_LOG_LEVEL=error node --no-warnings --experimental-vm-modules node_modules/jest/bin/jest.js --runInBand --logHeapUsage",
     "test:plugins": "S3DB_LOG_LEVEL=error node --max-old-space-size=24576 --no-warnings --experimental-vm-modules node_modules/jest/bin/jest.js tests/plugins/ --testTimeout=60000",
     "test:low-memory": "S3DB_LOG_LEVEL=error node --max-old-space-size=4096 --no-warnings --experimental-vm-modules node_modules/jest/bin/jest.js --maxWorkers=2 --workerIdleMemoryLimit=512MB",
     "test:full": "pnpm run test:js && pnpm run test:ts",
@@ -190,7 +191,8 @@
     "puppeteer": "^24.29.1",
     "puppeteer-extra": "^3.0.0",
     "puppeteer-extra-plugin-stealth": "^2.0.0",
-    "user-agents": "^1.0.0"
+    "user-agents": "^1.0.0",
+    "ws": "^8.0.0"
   },
   "peerDependenciesMeta": {
     "@aws-sdk/client-acm": {
@@ -371,6 +373,9 @@
       "optional": true
     },
     "ioredis": {
+      "optional": true
+    },
+    "ws": {
       "optional": true
     }
   },

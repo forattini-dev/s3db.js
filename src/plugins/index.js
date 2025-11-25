@@ -115,6 +115,9 @@ export const lazyLoadPlugin = async (pluginName) => {
 
     // Queue consumer (amqplib, @aws-sdk/client-sqs)
     QueueConsumerPlugin: () => import('./queue-consumer.plugin.js').then(m => m.QueueConsumerPlugin),
+
+    // WebSocket (ws, jose)
+    WebSocketPlugin: () => import('./websocket/index.js').then(m => m.WebSocketPlugin),
   };
 
   const loader = pluginMap[pluginName];
@@ -149,6 +152,7 @@ export const loadReconPlugin = () => lazyLoadPlugin('ReconPlugin');
 export const loadKubernetesInventoryPlugin = () => lazyLoadPlugin('KubernetesInventoryPlugin');
 export const loadSMTPPlugin = () => lazyLoadPlugin('SMTPPlugin');
 export const loadQueueConsumerPlugin = () => lazyLoadPlugin('QueueConsumerPlugin');
+export const loadWebSocketPlugin = () => lazyLoadPlugin('WebSocketPlugin');
 
 /**
  * Direct re-exports from plugin modules (lazy loaded)
@@ -190,6 +194,7 @@ export { ReconPlugin } from './recon.plugin.js';
 export { GeoPlugin } from './geo.plugin.js';
 export { ReplicatorPlugin } from './replicator.plugin.js';
 export { QueueConsumerPlugin } from './queue-consumer.plugin.js';
+export { WebSocketPlugin, WebSocketServer } from './websocket/index.js';
 
 /**
  * API Plugin utilities (re-exported from './api/index.js')

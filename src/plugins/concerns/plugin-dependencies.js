@@ -231,6 +231,24 @@ export const PLUGIN_DEPENDENCIES = {
     name: 'ghost-cursor',
     docsUrl: 'https://github.com/Xetera/ghost-cursor',
     dependencies: {}
+  },
+  'websocket-plugin': {
+    name: 'WebSocket Plugin',
+    docsUrl: 'https://github.com/forattini-dev/s3db.js/blob/main/docs/plugins/websocket.md',
+    dependencies: {
+      'ws': {
+        version: '^8.0.0',
+        description: 'WebSocket client and server implementation',
+        installCommand: 'pnpm add ws',
+        npmUrl: 'https://www.npmjs.com/package/ws'
+      },
+      'jose': {
+        version: '^5.0.0 || ^6.0.0',
+        description: 'Universal JOSE and JWE implementation (for JWT token validation)',
+        installCommand: 'pnpm add jose',
+        npmUrl: 'https://www.npmjs.com/package/jose'
+      }
+    }
   }
 };
 
