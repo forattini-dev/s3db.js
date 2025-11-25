@@ -222,6 +222,9 @@ export default {
     'ghost-cursor',
     'merge-deep',
 
+    // Peer dependencies - WebSocket (WebSocketPlugin)
+    'ws',
+
     // Peer dependencies - Cloud providers (CloudInventoryPlugin)
     '@azure/identity',
     '@azure/arm-compute',
