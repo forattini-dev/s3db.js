@@ -1,7 +1,7 @@
 /**
  * ChannelManager - Manages channels, rooms, and presence for WebSocket plugin
  *
- * Implements Pusher-style channel types:
+ * Implements channel types:
  * - public-* : Anyone can join, no auth required
  * - private-* : Requires authorization via guard
  * - presence-* : Private + tracks online members with metadata

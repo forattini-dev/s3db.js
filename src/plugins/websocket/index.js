@@ -81,7 +81,7 @@ export class WebSocketPlugin extends Plugin {
         ? options.health
         : { enabled: options.health !== false },
 
-      // Channels (Pusher-style presence, rooms)
+      // Channels (presence, rooms)
       channels: typeof options.channels === 'object'
         ? options.channels
         : { enabled: options.channels !== false },
@@ -288,7 +288,7 @@ export class WebSocketPlugin extends Plugin {
   }
 
   // ============================================
-  // Channel Methods (Pusher-style)
+  // Channel Methods
   // ============================================
 
   /**

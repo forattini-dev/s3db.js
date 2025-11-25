@@ -421,7 +421,7 @@ export class WebSocketServer extends EventEmitter {
           response = await this._handleDelete(clientId, payload);
           break;
 
-        // Channel operations (Pusher-style)
+        // Channel operations
         case 'join':
           response = await this._handleJoinChannel(clientId, payload);
           break;
@@ -772,7 +772,7 @@ export class WebSocketServer extends EventEmitter {
   }
 
   /**
-   * Handle join channel request (Pusher-style)
+   * Handle join channel request
    * @private
    */
   async _handleJoinChannel(clientId, payload) {

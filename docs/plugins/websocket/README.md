@@ -12,7 +12,7 @@
 |----------|-------------|
 | **[Configuration Reference](./reference/configuration.md)** | Complete options reference |
 | **[Client Protocol Guide](./guides/client-protocol.md)** | WebSocket message protocol |
-| **[Channels & Presence Guide](./guides/channels.md)** | Pusher-style channels with presence |
+| **[Channels & Presence Guide](./guides/channels.md)** | Rooms and presence tracking |
 | **[Authentication Guide](./guides/authentication.md)** | JWT, API Key, OIDC setup |
 | **[Health Checks Guide](./guides/health-checks.md)** | Kubernetes-compatible health endpoints |
 | **[Examples](./examples/README.md)** | Real-world use cases |
@@ -45,7 +45,7 @@ await db.usePlugin(wsPlugin);
 
 **Key Features:**
 - Real-time subscriptions to resource changes (insert/update/delete)
-- **Pusher-style channels** (public, private, presence)
+- **Channels & Rooms** (public, private, presence)
 - **Presence tracking** - know who's online with custom user info
 - Multiple authentication methods (JWT, API Key, OIDC)
 - Guards for row-level security

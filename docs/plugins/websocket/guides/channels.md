@@ -1,6 +1,6 @@
 # Channels & Presence Guide
 
-> Pusher-style channels with real-time presence tracking
+> Channels, rooms, and real-time presence tracking
 
 [← Back to WebSocket Plugin](../README.md)
 
@@ -20,7 +20,7 @@
 
 ## Overview
 
-The WebSocket plugin implements Pusher-style channels for organized real-time communication:
+The WebSocket plugin implements channels for organized real-time communication:
 
 | Feature | Description |
 |---------|-------------|
