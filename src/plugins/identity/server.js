@@ -174,6 +174,7 @@ export class IdentityServer {
     this.isRunning = false;
     this.initialized = false;
     this.logger = this.options.logger;
+    this.logger.debug({ configuredPort: options.port, configuredHost: options.host }, '[Identity Server] Initializing');
   }
 
   /**
@@ -350,7 +351,9 @@ export class IdentityServer {
       if (this.options.identityPlugin && typeof this.options.identityPlugin.getOnboardingStatus === 'function') {
         try {
           onboardingStatus = await this.options.identityPlugin.getOnboardingStatus();
+          this.logger.debug({ onboardingStatus }, '[Identity Server] Fetched onboarding status');
         } catch (error) {
+          this.logger.debug({ error: error.message }, '[Identity Server] Error fetching onboarding status (non-fatal)');
           // Non-fatal - continue without onboarding status
         }
       }
@@ -359,7 +362,7 @@ export class IdentityServer {
         const response = formatter.error('Service not ready', {
           status: 503,
           code: 'NOT_READY',
-          onboarding: onboardingStatus
+          details: { onboarding: onboardingStatus } // Pass onboarding metadata in details
         });
         return c.json(response, 503);
       }
@@ -369,10 +372,12 @@ export class IdentityServer {
         const response = formatter.error('First run setup required', {
           status: 503,
           code: 'ONBOARDING_REQUIRED',
-          onboarding: {
-            required: true,
-            adminExists: false,
-            mode: onboardingStatus.mode
+          details: { // Pass onboarding metadata in details
+            onboarding: {
+              required: true,
+              adminExists: false,
+              mode: onboardingStatus.mode
+            }
           }
         });
         return c.json(response, 503);
@@ -629,6 +634,7 @@ export class IdentityServer {
     }
 
     const { port, host } = this.options;
+    this.logger.debug({ configuredPort: port, configuredHost: host }, '[Identity Server] Attempting to start server');
 
     return new Promise((resolve, reject) => {
       try {
@@ -638,6 +644,8 @@ export class IdentityServer {
           hostname: host
         }, (info) => {
           this.isRunning = true;
+          // Update port with actual bound port (handle port: 0)
+          this.options.port = info.port;
           this.logger.info(`[Identity Server] Server listening on http://${info.address}:${info.port}`);
           this.logger.info(`[Identity Server] Issuer: ${this.options.issuer}`);
           this.logger.info(`[Identity Server] Discovery: ${this.options.issuer}/.well-known/openid-configuration`);
@@ -647,6 +655,14 @@ export class IdentityServer {
         reject(err);
       }
     });
+  }
+
+  /**
+   * Get the server port
+   * @returns {number} Port number
+   */
+  get port() {
+    return this.options.port;
   }
 
   /**
@@ -660,6 +676,7 @@ export class IdentityServer {
     }
 
     if (this.server && typeof this.server.close === 'function') {
+      this.logger.debug('[Identity Server] Attempting to close server instance');
       await new Promise((resolve) => {
         this.server.close(() => {
           this.isRunning = false;

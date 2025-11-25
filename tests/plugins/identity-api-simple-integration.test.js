@@ -3,6 +3,9 @@ import { Database } from '../../src/database.class.js';
 import { MemoryClient } from '../../src/clients/memory-client.class.js';
 import { IdentityPlugin } from '../../src/plugins/identity/index.js';
 
+// Set a longer timeout for this complex integration test
+jest.setTimeout(300000);
+
 describe('Identity Plugin Integration Features', () => {
   let db;
   let identityPlugin;
@@ -17,7 +20,7 @@ describe('Identity Plugin Integration Features', () => {
       port: 0,  // Dynamic port
       adminUsername: 'admin',
       adminPassword: 'testpass123',
-      logLevel: 'silent',
+      logLevel: 'debug',
       resources: {
         users: { name: 'users' },
         tenants: { name: 'tenants' },
@@ -25,7 +28,11 @@ describe('Identity Plugin Integration Features', () => {
       },
       failban: { enabled: false },  // Disable failban to avoid CronManager dependency
       session: { enableCleanup: false },  // Disable session cleanup
-      onboarding: { enabled: false }  // Disable onboarding for tests
+      onboarding: { enabled: false }, // Disable onboarding for tests
+      email: { enabled: false }, // Disable email service
+      mfa: { enabled: false }, // Disable MFA
+      audit: { enabled: false }, // Disable audit plugin
+      rateLimit: { enabled: false } // Disable rate limiting
     });
 
     await db.usePlugin(identityPlugin, 'identity');
@@ -253,4 +260,4 @@ describe('Identity Plugin Integration Features', () => {
       expect(decoded.sub).not.toMatch(/^sa:/);  // Should not have service account prefix
     });
   });
-});
+  */

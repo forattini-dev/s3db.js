@@ -474,47 +474,71 @@ export class IdentityPlugin extends Plugin {
    * Install plugin
    */
   async onInstall() {
+    this.logger.debug('[Identity Plugin] onInstall() START', Date.now());
+
     if (this.config.logLevel) {
       this.logger.info('[Identity Plugin] Installing...');
     }
 
     // Validate dependencies
     try {
+      const startDeps = Date.now();
       await this._validateDependencies();
+      this.logger.debug('[Identity Plugin] _validateDependencies() took', Date.now() - startDeps, 'ms');
     } catch (err) {
       this.logger.error('[Identity Plugin] Dependency validation failed:', err.message);
       throw err;
     }
 
     // Create user-managed resources (users, tenants, clients) with merged attributes
+    const startUserResources = Date.now();
     await this._createUserManagedResources();
+    this.logger.debug('[Identity Plugin] _createUserManagedResources() took', Date.now() - startUserResources, 'ms');
 
     // Create OAuth2 internal resources (keys, auth_codes, sessions, etc.)
+    const startOAuth2Resources = Date.now();
     await this._createOAuth2Resources();
+    this.logger.debug('[Identity Plugin] _createOAuth2Resources() took', Date.now() - startOAuth2Resources, 'ms');
 
     // Initialize OAuth2 Server
+    const startOAuth2Server = Date.now();
     await this._initializeOAuth2Server();
+    this.logger.debug('[Identity Plugin] _initializeOAuth2Server() took', Date.now() - startOAuth2Server, 'ms');
 
     // Initialize Session Manager
+    const startSessionManager = Date.now();
     await this._initializeSessionManager();
+    this.logger.debug('[Identity Plugin] _initializeSessionManager() took', Date.now() - startSessionManager, 'ms');
 
     // Initialize Email Service
+    const startEmailService = Date.now();
     await this._initializeEmailService();
+    this.logger.debug('[Identity Plugin] _initializeEmailService() took', Date.now() - startEmailService, 'ms');
 
     // Initialize Failban Manager
+    const startFailbanManager = Date.now();
     await this._initializeFailbanManager();
+    this.logger.debug('[Identity Plugin] _initializeFailbanManager() took', Date.now() - startFailbanManager, 'ms');
 
     // Initialize Audit Plugin
+    const startAuditPlugin = Date.now();
     await this._initializeAuditPlugin();
+    this.logger.debug('[Identity Plugin] _initializeAuditPlugin() took', Date.now() - startAuditPlugin, 'ms');
 
     // Initialize MFA Manager
+    const startMFAManager = Date.now();
     await this._initializeMFAManager();
+    this.logger.debug('[Identity Plugin] _initializeMFAManager() took', Date.now() - startMFAManager, 'ms');
 
     // Initialize authentication drivers
+    const startAuthDrivers = Date.now();
     await this._initializeAuthDrivers();
+    this.logger.debug('[Identity Plugin] _initializeAuthDrivers() took', Date.now() - startAuthDrivers, 'ms');
 
     // Run onboarding if enabled and first run detected
+    const startOnboarding = Date.now();
     await this._runOnboarding();
+    this.logger.debug('[Identity Plugin] _runOnboarding() took', Date.now() - startOnboarding, 'ms');
 
     // Expose integration metadata in plugin registry for downstream consumers
     this._exposeIntegrationMetadata();
@@ -522,6 +546,7 @@ export class IdentityPlugin extends Plugin {
     if (this.config.logLevel) {
       this.logger.info('[Identity Plugin] Installed successfully');
     }
+    this.logger.debug('[Identity Plugin] onInstall() END', Date.now());
   }
 
   /**
@@ -564,6 +589,8 @@ export class IdentityPlugin extends Plugin {
    * @private
    */
   async _createOAuth2Resources() {
+    this.logger.debug('[Identity Plugin] _createOAuth2Resources() START', Date.now());
+
     const names = this.internalResourceNames;
 
     // 1. OAuth Keys Resource (RSA keys for token signing)
@@ -746,8 +773,11 @@ export class IdentityPlugin extends Plugin {
    * @private
    */
   async _createUserManagedResources() {
+    this.logger.debug('[Identity Plugin] _createUserManagedResources() START', Date.now());
+
     // 1. Create Users Resource
     const usersConfig = this.config.resources.users;
+
 
     // Base config for users
     const usersBaseConfig = {
@@ -1640,12 +1670,15 @@ export class IdentityPlugin extends Plugin {
    */
   async getOnboardingStatus() {
     if (!this.onboardingManager) {
+      this.logger.debug('[Identity Plugin] Onboarding manager not initialized in getOnboardingStatus');
       return {
         completed: false,
         error: 'Onboarding manager not initialized'
       };
     }
-    return this.onboardingManager.getOnboardingStatus();
+    const status = await this.onboardingManager.getOnboardingStatus();
+    this.logger.debug({ status }, '[Identity Plugin] getOnboardingStatus result');
+    return status;
   }
 
   /**

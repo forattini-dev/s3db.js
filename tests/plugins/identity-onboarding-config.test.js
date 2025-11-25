@@ -174,7 +174,7 @@ describe('Identity Onboarding - Config Mode', () => {
       logLevel: 'silent'
     });
 
-    await expect(db.usePlugin(disableServerBinding(plugin), 'identity')).rejects.toThrow(/admin configuration/);
+    await expect(db.usePlugin(disableServerBinding(plugin), 'identity')).rejects.toThrow(/admin" is required/);
   });
 
   test('throws error if config.admin.email missing', async () => {
