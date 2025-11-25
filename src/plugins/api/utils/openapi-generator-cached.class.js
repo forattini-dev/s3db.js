@@ -13,8 +13,9 @@ import { generateOpenAPISpec } from './openapi-generator.js';
 import { createHash } from 'crypto';
 
 export class OpenAPIGeneratorCached {
-  constructor({ database, options, logger = null }) {
+  constructor({ database, app = null, options, logger = null }) {
     this.database = database;
+    this.app = app;
     this.options = options;
     this.logger = logger;
 
@@ -48,7 +49,7 @@ export class OpenAPIGeneratorCached {
     }
 
     const startTime = Date.now();
-    this.cache = generateOpenAPISpec(this.database, this.options);
+    this.cache = generateOpenAPISpec(this.database, { ...this.options, app: this.app });
     this.cacheKey = currentKey;
 
     if (this.options.logLevel) {
@@ -98,7 +99,16 @@ export class OpenAPIGeneratorCached {
         title: this.options.title,
         version: this.options.version,
         description: this.options.description
-      }
+      },
+
+      // ApiApp routes metadata (if available)
+      appRoutes: this.app ? this.app.getRoutes().map(r => ({
+        method: r.method,
+        path: r.path,
+        description: r.description,
+        operationId: r.operationId,
+        tags: r.tags
+      })) : []
     };
 
     // Hash the components

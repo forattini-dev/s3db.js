@@ -237,7 +237,7 @@ export function createResourceRoutes(resource, version, config = {}, Hono) {
 
   // LIST - GET /{version}/{resource}
   if (methods.includes('GET')) {
-    app.get('/', guardMiddleware(guards, 'list', { globalGuards }), asyncHandler(async (c) => {
+    const listHandler = asyncHandler(async (c) => {
       const query = c.req.query();
       const limit = parseInt(query.limit) || 100;
       const offset = parseInt(query.offset) || 0;
@@ -336,12 +336,36 @@ export function createResourceRoutes(resource, version, config = {}, Hono) {
       c.header('X-Page-Count', Math.ceil(total / limit).toString());
 
       return c.json(response, response._status);
-    }));
+    });
+
+    app.describe({
+      description: `List ${resourceName} records with pagination and filtering`,
+      tags: [resourceName],
+      operationId: `list_${resourceName}`,
+      responseSchema: {
+        type: 'object',
+        properties: {
+          success: { type: 'boolean' },
+          data: { type: 'array', items: { type: 'object' } },
+          pagination: {
+            type: 'object',
+            properties: {
+              total: { type: 'integer' },
+              limit: { type: 'integer' },
+              offset: { type: 'integer' },
+              page: { type: 'integer' },
+              pageSize: { type: 'integer' },
+              pageCount: { type: 'integer' }
+            }
+          }
+        }
+      }
+    }).get('/', guardMiddleware(guards, 'list', { globalGuards }), listHandler);
   }
 
   // GET ONE - GET /{version}/{resource}/:id
   if (methods.includes('GET')) {
-    app.get('/:id', guardMiddleware(guards, 'get', { globalGuards }), asyncHandler(async (c) => {
+    const getHandler = asyncHandler(async (c) => {
       const id = c.req.param('id');
       const query = c.req.query();
       const partition = query.partition;
@@ -405,12 +429,25 @@ export function createResourceRoutes(resource, version, config = {}, Hono) {
 
       const response = formatter.success(filteredItem);
       return c.json(response, response._status);
-    }));
+    });
+
+    app.describe({
+      description: `Get single ${resourceName} record by ID with optional relation population`,
+      tags: [resourceName],
+      operationId: `get_${resourceName}`,
+      responseSchema: {
+        type: 'object',
+        properties: {
+          success: { type: 'boolean' },
+          data: { type: 'object' }
+        }
+      }
+    }).get('/:id', guardMiddleware(guards, 'get', { globalGuards }), getHandler);
   }
 
   // CREATE - POST /{version}/{resource}
   if (methods.includes('POST')) {
-    app.post('/', guardMiddleware(guards, 'create', { globalGuards }), asyncHandler(async (c) => {
+    const createHandler = asyncHandler(async (c) => {
       const data = await c.req.json();
 
       // Validation middleware will run if enabled
@@ -450,12 +487,25 @@ export function createResourceRoutes(resource, version, config = {}, Hono) {
       // Return full representation (default)
       const response = formatter.created(filteredItem, location);
       return c.json(response, response._status);
-    }));
+    });
+
+    app.describe({
+      description: `Create new ${resourceName} record`,
+      tags: [resourceName],
+      operationId: `create_${resourceName}`,
+      responseSchema: {
+        type: 'object',
+        properties: {
+          success: { type: 'boolean' },
+          data: { type: 'object' }
+        }
+      }
+    }).post('/', guardMiddleware(guards, 'create', { globalGuards }), createHandler);
   }
 
   // UPDATE (full) - PUT /{version}/{resource}/:id
   if (methods.includes('PUT')) {
-    app.put('/:id', guardMiddleware(guards, 'update', { globalGuards }), asyncHandler(async (c) => {
+    const updateHandler = asyncHandler(async (c) => {
       const id = c.req.param('id');
       const data = await c.req.json();
 
@@ -519,12 +569,25 @@ export function createResourceRoutes(resource, version, config = {}, Hono) {
 
       const response = formatter.success(filteredUpdated);
       return c.json(response, response._status);
-    }));
+    });
+
+    app.describe({
+      description: `Update ${resourceName} record (full replacement with merge)`,
+      tags: [resourceName],
+      operationId: `update_${resourceName}`,
+      responseSchema: {
+        type: 'object',
+        properties: {
+          success: { type: 'boolean' },
+          data: { type: 'object' }
+        }
+      }
+    }).put('/:id', guardMiddleware(guards, 'update', { globalGuards }), updateHandler);
   }
 
   // UPDATE (partial) - PATCH /{version}/{resource}/:id
   if (methods.includes('PATCH')) {
-    app.patch('/:id', guardMiddleware(guards, 'update', { globalGuards }), asyncHandler(async (c) => {
+    const patchHandler = asyncHandler(async (c) => {
       const id = c.req.param('id');
       const data = await c.req.json();
 
@@ -590,12 +653,25 @@ export function createResourceRoutes(resource, version, config = {}, Hono) {
 
       const response = formatter.success(filteredUpdated);
       return c.json(response, response._status);
-    }));
+    });
+
+    app.describe({
+      description: `Partially update ${resourceName} record (merge with existing)`,
+      tags: [resourceName],
+      operationId: `patch_${resourceName}`,
+      responseSchema: {
+        type: 'object',
+        properties: {
+          success: { type: 'boolean' },
+          data: { type: 'object' }
+        }
+      }
+    }).patch('/:id', guardMiddleware(guards, 'update', { globalGuards }), patchHandler);
   }
 
   // DELETE - DELETE /{version}/{resource}/:id
   if (methods.includes('DELETE')) {
-    app.delete('/:id', guardMiddleware(guards, 'delete', { globalGuards }), asyncHandler(async (c) => {
+    const deleteHandler = asyncHandler(async (c) => {
       const id = c.req.param('id');
 
       // Check if exists
@@ -633,7 +709,19 @@ export function createResourceRoutes(resource, version, config = {}, Hono) {
 
       // Return 204 No Content (without body, as per HTTP spec)
       return c.body(null, 204);
-    }));
+    });
+
+    app.describe({
+      description: `Delete ${resourceName} record by ID`,
+      tags: [resourceName],
+      operationId: `delete_${resourceName}`,
+      responseSchema: {
+        type: 'object',
+        properties: {
+          success: { type: 'boolean' }
+        }
+      }
+    }).delete('/:id', guardMiddleware(guards, 'delete', { globalGuards }), deleteHandler);
   }
 
   // HEAD - HEAD /{version}/{resource}

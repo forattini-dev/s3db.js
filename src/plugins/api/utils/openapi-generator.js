@@ -1363,7 +1363,8 @@ export function generateOpenAPISpec(database, config = {}) {
     resources: resourceConfigs = {},
     versionPrefix: globalVersionPrefix,
     basePath = '',
-    routes: pluginRoutes = {}
+    routes: pluginRoutes = {},
+    app = null  // ApiApp instance with enhanced metadata
   } = config;
   const normalizedBasePath = normalizeBasePath(basePath);
 
@@ -1839,6 +1840,97 @@ For detailed information about each endpoint, see the sections below.`;
       basePrefix: normalizedBasePath,
       versionPrefix: globalVersionPrefix || ''
     });
+  }
+
+  // Process ApiApp routes with enhanced metadata (if available)
+  if (app && typeof app.getRoutes === 'function') {
+    const appRoutes = app.getRoutes();
+
+    for (const route of appRoutes) {
+      if (!route.path || !route.method) continue;
+
+      const fullPath = applyBasePath(normalizedBasePath, route.path);
+      const openApiPath = convertPathToOpenAPI(fullPath);
+      const methodLower = route.method.toLowerCase();
+
+      // Skip if already documented (CRUD routes are already added above)
+      const opKey = `${route.method.toUpperCase()} ${openApiPath}`;
+      if (documentedCustomRouteOperations.has(opKey)) {
+        continue;
+      }
+
+      // Initialize path object if needed
+      if (!spec.paths[openApiPath]) {
+        spec.paths[openApiPath] = {};
+      }
+
+      // Build operation object from ApiApp metadata
+      const operation = {
+        summary: route.description || `${route.method.toUpperCase()} ${route.path}`,
+        operationId: route.operationId || `${methodLower}_${route.path.replace(/[^a-zA-Z0-9]/g, '_')}`,
+        tags: route.tags || [CUSTOM_ROUTES_TAG]
+      };
+
+      // Add description if different from summary
+      if (route.description && route.summary && route.description !== route.summary) {
+        operation.summary = route.summary;
+        operation.description = route.description;
+      }
+
+      // Add response schema if available
+      if (route.responseSchema) {
+        operation.responses = {
+          '200': {
+            description: 'Successful response',
+            content: {
+              'application/json': {
+                schema: route.responseSchema
+              }
+            }
+          }
+        };
+      } else {
+        operation.responses = {
+          '200': {
+            description: 'Successful response'
+          }
+        };
+      }
+
+      // Add request body schema if available
+      if (route.requestSchema) {
+        operation.requestBody = {
+          required: true,
+          content: {
+            'application/json': {
+              schema: route.requestSchema
+            }
+          }
+        };
+      }
+
+      // Add security if configured
+      const pathSecurity = resolveSecurityForPath(fullPath);
+      if (pathSecurity) {
+        operation.security = pathSecurity;
+      }
+
+      // Ensure tags exist in spec.tags
+      if (route.tags) {
+        for (const tag of route.tags) {
+          if (!spec.tags.some(t => t.name === tag)) {
+            spec.tags.push({
+              name: tag,
+              description: `Routes for ${tag}`
+            });
+          }
+        }
+      }
+
+      spec.paths[openApiPath][methodLower] = operation;
+      documentedCustomRouteOperations.add(opKey);
+      customRoutesUsed = true;
+    }
   }
 
   // Add authentication endpoints if enabled
