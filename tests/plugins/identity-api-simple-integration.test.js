@@ -260,3 +260,4 @@ describe('Identity Plugin Integration Features', () => {
       expect(decoded.sub).not.toMatch(/^sa:/);  // Should not have service account prefix
     });
   });
+});
