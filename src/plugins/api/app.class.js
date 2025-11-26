@@ -71,10 +71,11 @@ export class ApiApp {
       compiledValidator
     };
 
-    this.routes.push(route);
-
     // Build middleware chain (deterministic order)
     const chain = this._buildMiddlewareChain(route, handler);
+    route.handlers = chain;
+
+    this.routes.push(route);
 
     // Register with Hono
     const methodLower = method.toLowerCase();
@@ -707,6 +708,15 @@ export class ApiApp {
         }
         if (p.startsWith('pattern:')) {
           schema.pattern = p.substring(8);
+        }
+        if (p === 'email') {
+          schema.format = 'email';
+        }
+        if (p === 'url') {
+          schema.format = 'uri';
+        }
+        if (p === 'uuid' || p === 'uuidv4') {
+          schema.format = 'uuid';
         }
       });
 

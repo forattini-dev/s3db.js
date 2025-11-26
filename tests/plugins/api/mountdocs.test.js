@@ -61,9 +61,10 @@ describe('mountDocs + OpenAPI + Code Samples', () => {
       const mockCtx = {
         json: (data) => ({ jsonData: data })
       };
+      const mockHonoCtx = { get: (k) => k === 'ctx' ? mockCtx : null };
 
       // Handler is async, need to await
-      const result = await openapiRoute.handlers[openapiRoute.handlers.length - 1](mockCtx);
+      const result = await openapiRoute.handlers[openapiRoute.handlers.length - 1](mockHonoCtx);
       const spec = result.jsonData;
 
       // Verify route is in spec
@@ -75,6 +76,7 @@ describe('mountDocs + OpenAPI + Code Samples', () => {
 
   describe('OpenAPI Spec Generation', () => {
     test('includes all error responses', async () => {
+      app.guard('isAuthenticated', async () => true);
       app.post('/users', {
         description: 'Create user',
         guards: ['isAuthenticated'],
@@ -121,7 +123,8 @@ describe('mountDocs + OpenAPI + Code Samples', () => {
 
       const openapiRoute = app.getRoutes().find(r => r.path === '/openapi.json');
       const mockCtx = { json: (data) => ({ jsonData: data }) };
-      const result = await openapiRoute.handlers[openapiRoute.handlers.length - 1](mockCtx);
+      const mockHonoCtx = { get: (k) => k === 'ctx' ? mockCtx : null };
+      const result = await openapiRoute.handlers[openapiRoute.handlers.length - 1](mockHonoCtx);
       const spec = result.jsonData;
 
       expect(spec.servers).toHaveLength(2);
@@ -224,7 +227,8 @@ describe('mountDocs + OpenAPI + Code Samples', () => {
 
       const openapiRoute = app.getRoutes().find(r => r.path === '/openapi.json');
       const mockCtx = { json: (data) => ({ jsonData: data }) };
-      const result = await openapiRoute.handlers[openapiRoute.handlers.length - 1](mockCtx);
+      const mockHonoCtx = { get: (k) => k === 'ctx' ? mockCtx : null };
+      const result = await openapiRoute.handlers[openapiRoute.handlers.length - 1](mockHonoCtx);
       const spec = result.jsonData;
 
       const operation = spec.paths['/test'].get;

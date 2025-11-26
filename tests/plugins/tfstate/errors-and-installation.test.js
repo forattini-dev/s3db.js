@@ -113,9 +113,9 @@ describe('TfStatePlugin - Installation', () => {
       },
     });
 
-    expect(plugin.resourceName).toBe('plg_custom_resources');
-    expect(plugin.stateFilesName).toBe('plg_custom_states');
-    expect(plugin.diffsName).toBe('plg_custom_history');
+    expect(plugin.resourceName).toBe('custom_resources');
+    expect(plugin.stateFilesName).toBe('custom_states');
+    expect(plugin.diffsName).toBe('custom_history');
     expect(plugin.trackDiffs).toBe(false);
     expect(plugin.autoSync).toBe(true);
     expect(plugin.logLevel || plugin.options?.logLevel).toBe('debug');

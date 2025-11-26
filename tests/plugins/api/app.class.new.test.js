@@ -222,6 +222,7 @@ describe('ApiApp v2 - Architecture Tests', () => {
     });
 
     test('group() inherits tags and guards', () => {
+      app.guard('isAdmin', async () => true);
       const admin = app.group('/admin', {
         tags: ['Admin'],
         guards: ['isAdmin']

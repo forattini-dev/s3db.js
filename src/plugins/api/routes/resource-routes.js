@@ -162,6 +162,14 @@ function parseCustomRoute(routeDef) {
  */
 export function createResourceRoutes(resource, version, config = {}, Hono) {
   const app = new Hono();
+
+  // Polyfill describe if missing (to prevent crash and allow chaining)
+  if (!app.describe) {
+    app.describe = function(meta) {
+      return this;
+    };
+  }
+
   const {
     methods = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'HEAD', 'OPTIONS'],
     customMiddleware = [],

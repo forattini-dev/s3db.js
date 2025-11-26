@@ -227,7 +227,7 @@ describe('Identity Onboarding - Health Check Integration', () => {
     await plugin.completeOnboarding({
       admin: {
         email: 'admin@api.com',
-        password: 'ApiPass123!'
+        password: 'ApiPass123456!'
       }
     });
 

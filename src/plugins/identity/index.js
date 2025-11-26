@@ -85,7 +85,7 @@ export class IdentityPlugin extends Plugin {
 
     this.config = {
       // Server configuration
-      port: options.port || 4000,
+      port: options.port !== undefined ? options.port : 4000,
       host: options.host || '0.0.0.0',
       logLevel: options.logLevel || 'info',
 
