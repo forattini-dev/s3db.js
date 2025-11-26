@@ -36,7 +36,6 @@ describe('Identity Plugin Integration Features', () => {
     });
 
     await db.usePlugin(identityPlugin, 'identity');
-    await identityPlugin.initialize();
   });
 
   afterAll(async () => {
