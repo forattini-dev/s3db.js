@@ -1,8 +1,9 @@
 export default {
-  // RESOURCE LIMITS - Use 25% of system resources
-  maxWorkers: '25%',
-  // Limit memory usage per worker to 1GB
-  workerIdleMemoryLimit: '1GB',
+  // RESOURCE LIMITS - Use fixed number of workers to prevent system freeze
+  // maxWorkers: '25%' caused issues on high-core machines
+  maxWorkers: 2,
+  // Limit memory usage per worker to 1GB to prevent OOM
+  workerIdleMemoryLimit: '1024MB',
   testTimeout: 120000, // Increased to 120s for CI/slow environments
   testEnvironment: 'node',
 

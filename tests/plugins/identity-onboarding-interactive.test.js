@@ -274,7 +274,7 @@ describe('Identity Onboarding - Interactive Mode', () => {
 
   test('throws error if enquirer not installed', async () => {
     jest.unstable_mockModule('enquirer', () => {
-      throw new Error('Cannot find module 'enquirer'');
+      throw new Error("Cannot find module 'enquirer'");
     });
 
     const plugin = new IdentityPlugin({
