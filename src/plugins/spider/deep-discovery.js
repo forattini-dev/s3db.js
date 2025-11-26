@@ -99,7 +99,9 @@ export class DeepDiscovery {
       frameworks: [],
       platforms: [],
       subdomains: [],
-      exposedPaths: []
+      exposedPaths: [],
+      ampPages: [],
+      robotsDirectives: {}
     }
 
     // 1. Analyze robots.txt first (reveals structure)
@@ -1012,7 +1014,7 @@ export class DeepDiscovery {
    */
   _estimateCrawlBudget() {
     const totalUrls = this.discovered.sitemaps.reduce((sum, s) => sum + (s.urlCount || 0), 0)
-    const crawlDelay = this.discovered.robotsDirectives.crawlDelay || 0
+    const crawlDelay = this.discovered.robotsDirectives?.crawlDelay || 0
 
     return {
       estimatedPageCount: totalUrls,
