@@ -8,7 +8,7 @@
 
 <p align="center">
   <strong>Extend your database with powerful plugins</strong><br>
-  <em>24 production-ready plugins • Zero core modifications • Infinite possibilities</em>
+  <em>26 production-ready plugins • Zero core modifications • Infinite possibilities</em>
 </p>
 
 ---
@@ -47,6 +47,7 @@ Plugin documentation quality is indicated with badges:
 | **[⚡ Eventual Consistency](./eventual-consistency.md)** | Transaction-based counters | Balances, analytics, aggregations | [→](./eventual-consistency.md) |
 | **[🔍 FullText](./fulltext.md)** | Full-text search capabilities | Search, content discovery | [→](./fulltext.md) |
 | **[🌍 Geo](./geo.md)** | Location-based queries & proximity search | Store locators, routing | [→](./geo.md) |
+| **[🕸️ Graph](./graphs.md)** | Graph database with vertices, edges, A* pathfinding | Social networks, recommendations, knowledge graphs | [→](./graphs.md) |
 | **[🔐 Identity](./identity/README.md)** | OAuth2/OIDC authentication with MFA | SSO, user management, whitelabel UI | [→](./identity/README.md) |
 | **[☸️ Kubernetes Inventory](./kubernetes-inventory/)** | Multi-cluster K8s inventory with versioning & diffs | CMDB, compliance, cluster monitoring | [→](./kubernetes-inventory/) |
 | **[📥 Importer](./importer.md)** | Multi-format data import | JSON, CSV, bulk migrations | [→](./importer.md) |
@@ -65,6 +66,7 @@ Plugin documentation quality is indicated with badges:
 | **[📧 SMTP](./smtp.md)** | Enterprise email delivery with 4 providers & webhooks | Transactional email, notifications, email server mode | [→](./smtp.md) |
 | **[🏗️ Tfstate](./tfstate.md)** | Track Terraform infrastructure changes | DevOps, infrastructure monitoring | [→](./tfstate.md) |
 | **[🏆 Tournament](./tournament.md)** | Esports & sports tournament engine | Brackets, match reporting, leagues | [→](./tournament.md) |
+| **[🌳 Tree](./trees.md)** | Hierarchical data with Nested Set & Adjacency List | Categories, org charts, file systems | [→](./trees.md) |
 | **[⏳ TTL](./ttl/)** | Automatic record expiration | Sessions, cache invalidation | [→](./ttl/) |
 | **[🎯 Vector](./vector/)** | Vector similarity search (cosine, euclidean) | RAG, semantic search, ML | [→](./vector/) |
 
