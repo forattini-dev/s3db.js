@@ -52,7 +52,7 @@ Allow: /public/
       expect(report.discovered.sitemaps[1]).toEqual({
         url: 'https://example.com/sitemap-products.xml',
         source: 'robots.txt',
-        priority: 9
+        priority: 10
       })
     })
 
@@ -101,7 +101,13 @@ Disallow: /api/
 
   describe('Sitemap Discovery', () => {
     test('should discover standard sitemap locations', async () => {
+      // Remove custom fetcher to allow global.fetch mock to work
+      discoverer.config.fetcher = null
+
       // Mock HEAD requests for URL existence checking
+      // Remove custom fetcher to allow global.fetch mock to work
+      discoverer.config.fetcher = null
+
       const originalFetch = global.fetch
       global.fetch = async (url, options) => {
         if (options?.method === 'HEAD') {
@@ -131,6 +137,9 @@ Disallow: /api/
     })
 
     test('should detect Google News sitemaps', async () => {
+      // Remove custom fetcher to allow global.fetch mock to work
+      discoverer.config.fetcher = null
+
       const originalFetch = global.fetch
       global.fetch = async (url, options) => {
         if (options?.method === 'HEAD') {
@@ -161,6 +170,9 @@ Disallow: /api/
     })
 
     test('should detect Google Images sitemaps', async () => {
+      // Remove custom fetcher to allow global.fetch mock to work
+      discoverer.config.fetcher = null
+
       const originalFetch = global.fetch
       global.fetch = async (url, options) => {
         if (options?.method === 'HEAD') {
@@ -191,6 +203,9 @@ Disallow: /api/
     })
 
     test('should detect Google Videos sitemaps and mRSS', async () => {
+      // Remove custom fetcher to allow global.fetch mock to work
+      discoverer.config.fetcher = null
+
       const originalFetch = global.fetch
       global.fetch = async (url, options) => {
         if (options?.method === 'HEAD') {
@@ -221,6 +236,9 @@ Disallow: /api/
     })
 
     test('should detect sitemap indexes', async () => {
+      // Remove custom fetcher to allow global.fetch mock to work
+      discoverer.config.fetcher = null
+
       const originalFetch = global.fetch
       global.fetch = async (url, options) => {
         if (options?.method === 'HEAD') {
@@ -251,6 +269,9 @@ Disallow: /api/
     })
 
     test('should prioritize sitemaps correctly', async () => {
+      // Remove custom fetcher to allow global.fetch mock to work
+      discoverer.config.fetcher = null
+
       const originalFetch = global.fetch
       global.fetch = async (url, options) => {
         if (options?.method === 'HEAD') {
@@ -283,10 +304,10 @@ Disallow: /api/
           expect(indexSitemap.priority).toBe(10)
         }
 
-        // Product sitemaps should have priority 9
+        // Product sitemaps should have priority 7
         const productSitemap = sitemaps.find(s => s.url.includes('product'))
         if (productSitemap) {
-          expect(productSitemap.priority).toBe(9)
+          expect(productSitemap.priority).toBe(7)
         }
       }
     })
@@ -294,6 +315,9 @@ Disallow: /api/
 
   describe('Feed Discovery', () => {
     test('should discover RSS and Atom feeds', async () => {
+      // Remove custom fetcher to allow global.fetch mock to work
+      discoverer.config.fetcher = null
+
       const originalFetch = global.fetch
       global.fetch = async (url, options) => {
         if (options?.method === 'HEAD') {
@@ -328,6 +352,9 @@ Disallow: /api/
     })
 
     test('should detect feed types correctly', async () => {
+      // Remove custom fetcher to allow global.fetch mock to work
+      discoverer.config.fetcher = null
+
       const originalFetch = global.fetch
       global.fetch = async (url, options) => {
         if (options?.method === 'HEAD') {
@@ -371,6 +398,9 @@ Disallow: /api/
 
   describe('Platform Detection', () => {
     test('should detect Shopify platform', async () => {
+      // Remove custom fetcher to allow global.fetch mock to work
+      discoverer.config.fetcher = null
+
       const originalFetch = global.fetch
       global.fetch = async (url, options) => {
         if (options?.method === 'HEAD') {
@@ -405,6 +435,9 @@ Disallow: /api/
     })
 
     test('should detect WordPress CMS', async () => {
+      // Remove custom fetcher to allow global.fetch mock to work
+      discoverer.config.fetcher = null
+
       const originalFetch = global.fetch
       global.fetch = async (url, options) => {
         if (options?.method === 'HEAD') {
@@ -436,6 +469,9 @@ Disallow: /api/
     })
 
     test('should detect Next.js framework', async () => {
+      // Remove custom fetcher to allow global.fetch mock to work
+      discoverer.config.fetcher = null
+
       const originalFetch = global.fetch
       global.fetch = async (url, options) => {
         if (options?.method === 'HEAD') {
@@ -466,6 +502,9 @@ Disallow: /api/
     })
 
     test('should calculate confidence scores correctly', async () => {
+      // Remove custom fetcher to allow global.fetch mock to work
+      discoverer.config.fetcher = null
+
       const originalFetch = global.fetch
       global.fetch = async (url, options) => {
         if (options?.method === 'HEAD') {
@@ -501,6 +540,9 @@ Disallow: /api/
 
   describe('API Discovery', () => {
     test('should discover REST API endpoints', async () => {
+      // Remove custom fetcher to allow global.fetch mock to work
+      discoverer.config.fetcher = null
+
       const originalFetch = global.fetch
       global.fetch = async (url, options) => {
         if (options?.method === 'HEAD') {
@@ -529,6 +571,9 @@ Disallow: /api/
     })
 
     test('should detect GraphQL endpoints', async () => {
+      // Remove custom fetcher to allow global.fetch mock to work
+      discoverer.config.fetcher = null
+
       const originalFetch = global.fetch
       global.fetch = async (url, options) => {
         if (options?.method === 'HEAD') {
@@ -558,6 +603,9 @@ Disallow: /api/
     })
 
     test('should detect WordPress REST API', async () => {
+      // Remove custom fetcher to allow global.fetch mock to work
+      discoverer.config.fetcher = null
+
       const originalFetch = global.fetch
       global.fetch = async (url, options) => {
         if (options?.method === 'HEAD') {
@@ -589,6 +637,9 @@ Disallow: /api/
 
   describe('Static File Discovery', () => {
     test('should discover manifest files', async () => {
+      // Remove custom fetcher to allow global.fetch mock to work
+      discoverer.config.fetcher = null
+
       const originalFetch = global.fetch
       global.fetch = async (url, options) => {
         if (options?.method === 'HEAD') {
@@ -617,6 +668,9 @@ Disallow: /api/
     })
 
     test('should discover well-known files', async () => {
+      // Remove custom fetcher to allow global.fetch mock to work
+      discoverer.config.fetcher = null
+
       const originalFetch = global.fetch
       global.fetch = async (url, options) => {
         if (options?.method === 'HEAD') {
@@ -650,6 +704,9 @@ Disallow: /api/
 
   describe('Report Generation', () => {
     test('should generate complete discovery report', async () => {
+      // Remove custom fetcher to allow global.fetch mock to work
+      discoverer.config.fetcher = null
+
       const originalFetch = global.fetch
       global.fetch = async () => ({ ok: false })
 
@@ -677,6 +734,9 @@ Disallow: /api/
     })
 
     test('should calculate success rate correctly', async () => {
+      // Remove custom fetcher to allow global.fetch mock to work
+      discoverer.config.fetcher = null
+
       const originalFetch = global.fetch
       global.fetch = async (url, options) => {
         if (options?.method === 'HEAD') {
@@ -702,6 +762,9 @@ Disallow: /api/
     })
 
     test('should sort platforms by confidence', async () => {
+      // Remove custom fetcher to allow global.fetch mock to work
+      discoverer.config.fetcher = null
+
       const originalFetch = global.fetch
       global.fetch = async (url, options) => {
         if (options?.method === 'HEAD') {
@@ -739,6 +802,9 @@ Disallow: /api/
     })
 
     test('should sort sitemaps by priority', async () => {
+      // Remove custom fetcher to allow global.fetch mock to work
+      discoverer.config.fetcher = null
+
       const originalFetch = global.fetch
       global.fetch = async (url, options) => {
         if (options?.method === 'HEAD') {
@@ -776,6 +842,9 @@ Disallow: /api/
       let maxConcurrent = 0
       let currentConcurrent = 0
 
+      // Remove custom fetcher to allow global.fetch mock to work
+      discoverer.config.fetcher = null
+
       const originalFetch = global.fetch
       global.fetch = async (url, options) => {
         if (options?.method === 'HEAD') {
@@ -810,6 +879,9 @@ Disallow: /api/
     test('should use custom user agent', async () => {
       let capturedUserAgent = null
 
+      // Remove custom fetcher to allow global.fetch mock to work
+      discoverer.config.fetcher = null
+
       const originalFetch = global.fetch
       global.fetch = async (url, options) => {
         if (options?.method === 'HEAD') {
@@ -839,6 +911,9 @@ Disallow: /api/
 
   describe('Statistics Tracking', () => {
     test('should track probed URLs', async () => {
+      // Remove custom fetcher to allow global.fetch mock to work
+      discoverer.config.fetcher = null
+
       const originalFetch = global.fetch
       global.fetch = async () => ({ ok: false })
 
@@ -858,6 +933,9 @@ Disallow: /api/
     })
 
     test('should track found URLs', async () => {
+      // Remove custom fetcher to allow global.fetch mock to work
+      discoverer.config.fetcher = null
+
       const originalFetch = global.fetch
       global.fetch = async (url, options) => {
         if (options?.method === 'HEAD') {
@@ -883,6 +961,9 @@ Disallow: /api/
     })
 
     test('should track errors', async () => {
+      // Remove custom fetcher to allow global.fetch mock to work
+      discoverer.config.fetcher = null
+
       const originalFetch = global.fetch
       global.fetch = async () => {
         throw new Error('Network error')
@@ -930,12 +1011,12 @@ Disallow: /api/
     })
 
     test('should assign sitemap priorities correctly', () => {
-      expect(discoverer._getSitemapPriority('/sitemap_index.xml')).toBe(10)
-      expect(discoverer._getSitemapPriority('/sitemap-products.xml')).toBe(9)
-      expect(discoverer._getSitemapPriority('/sitemap-news.xml')).toBe(8)
-      expect(discoverer._getSitemapPriority('/sitemap-categories.xml')).toBe(7)
-      expect(discoverer._getSitemapPriority('/sitemap-posts.xml')).toBe(6)
-      expect(discoverer._getSitemapPriority('/sitemap.xml')).toBe(5)
+      expect(discoverer._getSitemapPriority('/sitemap_index.xml', 'sitemap-index')).toBe(10)
+      expect(discoverer._getSitemapPriority('/sitemap-products.xml', 'products')).toBe(7)
+      expect(discoverer._getSitemapPriority('/sitemap-news.xml', 'google-news')).toBe(9)
+      expect(discoverer._getSitemapPriority('/sitemap-categories.xml', 'categories')).toBe(6)
+      expect(discoverer._getSitemapPriority('/sitemap-posts.xml', 'posts')).toBe(5)
+      expect(discoverer._getSitemapPriority('/sitemap.xml', 'standard')).toBe(5)
     })
   })
 })

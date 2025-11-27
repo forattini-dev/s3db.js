@@ -1151,6 +1151,7 @@ export class Database extends SafeEventEmitter {
             autoDecrypt: serializableDef.autoDecrypt,
             cache: serializableDef.cache,
             asyncEvents: serializableDef.asyncEvents,
+            asyncPartitions: serializableDef.asyncPartitions,
             hooks: serializableDef.hooks,
             idSize: resource.idSize,
             idGenerator: resource.idGeneratorType,

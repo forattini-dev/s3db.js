@@ -2,8 +2,9 @@ export default {
   // RESOURCE LIMITS - Use fixed number of workers to prevent system freeze
   // maxWorkers: '25%' caused issues on high-core machines
   maxWorkers: 2,
-  // Limit memory usage per worker to 1GB to prevent OOM
-  workerIdleMemoryLimit: '1024MB',
+  // Limit memory per worker - forces Jest to restart workers when they use too much
+  // Lower value = more aggressive memory cleanup but slower tests
+  workerIdleMemoryLimit: '512MB',
   testTimeout: 120000, // Increased to 120s for CI/slow environments
   testEnvironment: 'node',
 

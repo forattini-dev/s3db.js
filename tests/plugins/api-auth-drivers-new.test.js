@@ -51,6 +51,8 @@ describe('API Plugin - Auth Drivers (New API)', () => {
 
     beforeAll(async () => {
       port = getRandomPort();
+      db = createDatabaseForTest(`api-auth-jwt-${Date.now()}`, { logLevel: 'silent' });
+      await db.connect();
 
       apiPlugin = new ApiPlugin({
         port,
@@ -142,6 +144,8 @@ describe('API Plugin - Auth Drivers (New API)', () => {
 
     beforeAll(async () => {
       port = getRandomPort();
+      db = createDatabaseForTest(`api-auth-apikey-${Date.now()}`, { logLevel: 'silent' });
+      await db.connect();
 
       apiPlugin = new ApiPlugin({
         port,
@@ -230,6 +234,8 @@ describe('API Plugin - Auth Drivers (New API)', () => {
 
     beforeAll(async () => {
       port = getRandomPort();
+      db = createDatabaseForTest(`api-auth-basic-${Date.now()}`, { logLevel: 'silent' });
+      await db.connect();
 
       apiPlugin = new ApiPlugin({
         port,
@@ -313,6 +319,8 @@ describe('API Plugin - Auth Drivers (New API)', () => {
 
     beforeAll(async () => {
       port = getRandomPort();
+      db = createDatabaseForTest(`api-auth-multi-${Date.now()}`, { logLevel: 'silent' });
+      await db.connect();
 
       apiPlugin = new ApiPlugin({
         port,

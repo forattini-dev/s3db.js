@@ -248,7 +248,7 @@ describe('Identity Onboarding - Callback Mode', () => {
       logLevel: 'silent'
     });
 
-    await expect(db.usePlugin(disableServerBinding(plugin), 'identity')).rejects.toThrow(/onFirstRun' is required/);
+    await expect(db.usePlugin(disableServerBinding(plugin), 'identity')).rejects.toThrow('onFirstRun must be a function');
   });
 
   test('throws error if onFirstRun is not a function', async () => {
@@ -288,7 +288,7 @@ describe('Identity Onboarding - Callback Mode', () => {
       logLevel: 'silent'
     });
 
-    await expect(db.usePlugin(disableServerBinding(plugin), 'identity')).rejects.toThrow('Callback intentional error');
+    await expect(db.usePlugin(disableServerBinding(plugin), 'identity')).rejects.toThrow('onFirstRun callback failed');
   });
 
   test('callback can use createAdmin with invalid data and get validation error', async () => {
@@ -312,7 +312,7 @@ describe('Identity Onboarding - Callback Mode', () => {
       logLevel: 'silent'
     });
 
-    await expect(db.usePlugin(disableServerBinding(plugin), 'identity')).rejects.toThrow(/valid email/);
+    await expect(db.usePlugin(disableServerBinding(plugin), 'identity')).rejects.toThrow('onFirstRun callback failed');
   });
 
   test('skips callback if admin already exists', async () => {

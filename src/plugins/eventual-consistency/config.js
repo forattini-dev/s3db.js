@@ -105,7 +105,8 @@ export function createConfig(options, detectedTimezone) {
     autoCheckpoint: checkpoints.auto !== false,
 
     // Debug
-    logLevel: options.logLevel || 'info'
+    logLevel: options.logLevel || 'info',
+    verbose: options.verbose ?? false
   };
 }
 

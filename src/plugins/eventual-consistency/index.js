@@ -146,8 +146,7 @@ export class EventualConsistencyPlugin extends CoordinatorPlugin {
    */
   async _startWorkerLoop() {
     const interval = Math.max(1000, this.config.workerInterval || 5000);
-    const cronManagerModule = await import('#src/concerns/cron-manager.js');
-    const { getCronManager } = cronManagerModule;
+    const { getCronManager } = await import('../../concerns/cron-manager.js');
     const cronManager = getCronManager();
 
     if (cronManager && !cronManager.disabled) {

@@ -31,13 +31,21 @@ export class ApiApp {
   }
 
   /**
-   * Explicit route registration
-   * @param {string} method - HTTP method (GET, POST, PUT, PATCH, DELETE)
-   * @param {string} path - Route path
-   * @param {Object} options - Route options (meta, schema, guards, priority)
-   * @param {Function} handler - Route handler (receives RouteContext)
+   * Explicit route registration OR sub-app mounting
+   * @param {string} methodOrPath - HTTP method OR route path (for mounting)
+   * @param {string|Object} pathOrApp - Route path OR Hono sub-app
+   * @param {Object} [options] - Route options
+   * @param {Function} [handler] - Route handler
    */
-  route(method, path, options = {}, handler) {
+  route(methodOrPath, pathOrApp, options = {}, handler) {
+    // Hono-style mounting: app.route('/path', subApp)
+    if (typeof methodOrPath === 'string' && methodOrPath.startsWith('/')) {
+      return this.hono.route(methodOrPath, pathOrApp);
+    }
+
+    const method = methodOrPath;
+    const path = pathOrApp;
+
     const {
       description = null,
       summary = null,
@@ -128,7 +136,17 @@ export class ApiApp {
   /**
    * Register global middleware with priority
    */
-  use(middleware, { priority = DEFAULT_PRIORITY, name = null } = {}) {
+  use(pathOrMiddleware, middlewareOrOptions, maybeOptions = {}) {
+    // Support Hono-style signature: use(path, middleware) as well as use(middleware, options)
+    const isPathSignature = typeof pathOrMiddleware === 'string';
+    const middleware = isPathSignature ? middlewareOrOptions : pathOrMiddleware;
+    const options = isPathSignature ? maybeOptions : middlewareOrOptions || {};
+
+    if (typeof middleware !== 'function') {
+      throw new Error('Middleware must be a function');
+    }
+
+    const { priority = DEFAULT_PRIORITY, name = null } = options || {};
     this.middlewares.push({
       fn: middleware,
       priority,
@@ -233,12 +251,12 @@ export class ApiApp {
       servers = [],
       jsonPath = '/openapi.json',
       htmlPath = '/docs',
-      includeCodeSamples = true
+      includeCodeSamples = false
     } = options;
 
     // JSON endpoint - generates spec on request to reflect new routes
-    this.get(jsonPath, {}, async (ctx) => {
-      const spec = await this._generateOpenAPISpec({
+    this.get(jsonPath, {}, (ctx) => {
+      const spec = this._generateOpenAPISpec({
         title,
         version,
         description,
@@ -300,7 +318,7 @@ export class ApiApp {
    * Useful for external integrations or custom documentation
    */
   async generateOpenAPI(info = {}) {
-    return await this._generateOpenAPISpec({
+    return this._generateOpenAPISpec({
       title: info.title || 'API Documentation',
       version: info.version || '1.0.0',
       description: info.description || 'Auto-generated API documentation'
@@ -789,7 +807,7 @@ export class ApiApp {
   /**
    * Generate OpenAPI spec (enhanced with code samples and all errors)
    */
-  async _generateOpenAPISpec({ title, version, description, servers = [], includeCodeSamples = true }) {
+  _generateOpenAPISpec({ title, version, description, servers = [], includeCodeSamples = false }) {
     const spec = {
       openapi: '3.1.0',
       info: { title, version, description },
@@ -853,7 +871,7 @@ export class ApiApp {
               examples: {
                 default: {
                   summary: 'Example request',
-                  value: await this._generateExampleFromSchema(route.requestSchema)
+                  value: this._generateExampleFromSchema(route.requestSchema)
                 }
               }
             }
@@ -867,12 +885,12 @@ export class ApiApp {
       }
 
       // Build responses with ALL possible errors
-      operation.responses = await this._generateAllResponses(route);
+      operation.responses = this._generateAllResponses(route);
 
       // Add code samples if requested
       if (includeCodeSamples) {
         const baseUrl = servers[0]?.url || 'http://localhost:3000';
-        operation['x-codeSamples'] = await this._generateCodeSamples(route, baseUrl);
+        operation['x-codeSamples'] = this._generateCodeSamples(route, baseUrl);
       }
 
       spec.paths[path][route.method.toLowerCase()] = operation;
@@ -884,7 +902,7 @@ export class ApiApp {
   /**
    * Generate ALL possible responses for a route
    */
-  async _generateAllResponses(route) {
+  _generateAllResponses(route) {
     const responses = {};
 
     // 200 - Success
@@ -903,7 +921,7 @@ export class ApiApp {
             success: {
               summary: 'Successful response',
               value: route.responseSchema
-                ? await this._generateExampleFromSchema(route.responseSchema)
+                ? this._generateExampleFromSchema(route.responseSchema)
                 : { success: true, data: {} }
             }
           }
