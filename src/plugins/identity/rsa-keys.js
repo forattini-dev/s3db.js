@@ -157,10 +157,7 @@ export function verifyRS256Token(token, publicKey) {
       return null; // Expired
     }
 
-    return {
-      header,
-      payload
-    };
+    return payload;
   } catch (err) {
     return null;
   }
@@ -257,10 +254,24 @@ export class KeyManager {
   }
 
   /**
-   * Get key by kid
+   * Get key by kid, reloading from resource if necessary
    */
-  getKey(kid) {
-    return this.keysByKid.get(kid) || null;
+  async getKey(kid) {
+    const cached = this.keysByKid.get(kid);
+    if (cached) {
+      return cached;
+    }
+
+    // Try to find in resource
+    if (this.keyResource) {
+      const [found] = await this.keyResource.query({ kid });
+      if (found) {
+        this._storeKeyRecord(found);
+        return this.keysByKid.get(kid);
+      }
+    }
+
+    return null;
   }
 
   /**
@@ -342,7 +353,7 @@ export class KeyManager {
       return null;
     }
 
-    const key = this.getKey(kid);
+    const key = await this.getKey(kid);
 
     if (!key) {
       return null;

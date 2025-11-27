@@ -155,14 +155,10 @@ export class CoordinatorPlugin extends Plugin {
     // This needs to happen before we return to ensure we receive events
     await this._initializeGlobalCoordinator();
 
-    // ✨ FIX: Run election process (jitter, cold start) in BACKGROUND
-    // This ensures we don't block db.connect() and resource operations
-    // while waiting for startup jitter or cold start duration.
-    this._runBackgroundElection().catch(err => {
-      this.logger.warn({ error: err.message }, 'Background election process failed');
-    });
+    // Apply jitter/cold start before returning so startup waits for the spread window
+    await this._runBackgroundElection();
 
-    this.logger.debug({ workerId: this.workerId }, `Coordination initialized (election in background)`);
+    this.logger.debug({ workerId: this.workerId }, `Coordination initialized (startup jitter applied)`);
   }
 
   /**
@@ -186,6 +182,7 @@ export class CoordinatorPlugin extends Plugin {
     } else {
       // When skipping cold start, immediately check leadership
       const leader = await this.getLeader();
+       const wasCoordinator = this.isCoordinator;
       this.isCoordinator = leader === this.workerId;
 
       this.logger.debug(
@@ -194,7 +191,7 @@ export class CoordinatorPlugin extends Plugin {
       );
 
       // Notify if we became coordinator
-      if (this.isCoordinator) {
+      if (this.isCoordinator && !wasCoordinator) {
         await this.onBecomeCoordinator();
       }
 

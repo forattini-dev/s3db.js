@@ -87,24 +87,37 @@ export function errorHandler(err, c) {
     details
   });
 
-  // Log error (except for expected errors like 404)
-  if (status >= 500) {
+    // Log error (except for expected errors like 404)
+    if (status >= 500) {
     this.logger.error('[API Plugin] Error:', {
-      message: err.message,
+      message: err.message || err.toString(),
       code,
       status,
       stack: err.stack,
-      details
+      details,
+      originalError: err, // Log the raw error object directly
     });
-  } else if (status >= 400 && status < 500 && (c.get('logLevel') === 'debug' || c.get('logLevel') === 'trace')) {
-    this.logger.warn('[API Plugin] Client error:', {
-      message: err.message,
-      code,
-      status,
-      details
-    });
-  }
+    } else if (status >= 400 && status < 500 && (c.get('logLevel') === 'debug' || c.get('logLevel') === 'trace')) {
+      // Custom replacer for JSON.stringify to handle non-enumerable properties like message, stack
+      const customReplacer = (key, value) => {
+        if (value instanceof Error) {
+          const errorObject = {};
+          Object.getOwnPropertyNames(value).forEach(propName => {
+            errorObject[propName] = value[propName];
+          });
+          return errorObject;
+        }
+        return value;
+      };
 
+      this.logger.warn('[API Plugin] Client error:', {
+        message: err.message || err.toString(),
+        code,
+        status,
+        details,
+        originalError: JSON.stringify(err, customReplacer), // Use custom replacer
+      });
+    }
   return c.json(response, response._status);
 }
 

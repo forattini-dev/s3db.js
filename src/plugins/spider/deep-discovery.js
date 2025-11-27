@@ -727,17 +727,18 @@ export class DeepDiscovery {
   async _urlExists(url) {
     if (this.config.fetcher) {
       try {
-        await this.config.fetcher(url)
-        return true
+        const result = await this.config.fetcher(url)
+        return !!result
       } catch {
         return false
       }
     }
 
-    try {
-      const controller = new AbortController()
-      const timeout = setTimeout(() => controller.abort(), this.config.timeout)
+    // If no fetcher, use global fetch - let errors propagate to _probeUrls
+    const controller = new AbortController()
+    const timeout = setTimeout(() => controller.abort(), this.config.timeout)
 
+    try {
       const response = await fetch(url, {
         method: 'HEAD',
         signal: controller.signal,
@@ -746,8 +747,9 @@ export class DeepDiscovery {
 
       clearTimeout(timeout)
       return response.ok
-    } catch {
-      return false
+    } catch (err) {
+      clearTimeout(timeout)
+      throw err
     }
   }
 
@@ -756,6 +758,21 @@ export class DeepDiscovery {
    * @private
    */
   async _getContentType(url) {
+    if (this.config.fetcher) {
+      try {
+        const result = await this.config.fetcher(url);
+        // If fetcher returns object with contentType, use it
+        if (result && typeof result === 'object' && result.contentType) {
+          return result.contentType;
+        }
+        // If fetcher returns string (content), we can't easily guess type, so unknown
+        // Or we could try to guess from content, but 'unknown' is safer for now
+        return 'unknown';
+      } catch {
+        return 'unknown';
+      }
+    }
+
     try {
       const response = await fetch(url, {
         method: 'HEAD',

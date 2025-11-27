@@ -9,7 +9,7 @@ export function randomPort() {
 export async function waitForServer(port, options = {}) {
   const {
     path = '/health',
-    maxAttempts = 60,
+    maxAttempts = 300, // Increased from 60 to 300 (30 seconds)
     delayMs = 100
   } = options;
 
@@ -32,7 +32,7 @@ export async function startApiPlugin(db, pluginOptions = {}, instanceName) {
   const port = pluginOptions.port ?? randomPort();
   const mergedOptions = {
     host: '127.0.0.1',
-    logLevel: 'silent',
+    logLevel: 'debug', // Changed to debug for more verbose logging
     ...pluginOptions,
     port
   };

@@ -19,13 +19,16 @@ import { idGenerator } from '../../../concerns/id.js';
 
 export class OnboardingManager {
   constructor(options = {}) {
-    this.usersResource = options.usersResource;
-    this.clientsResource = options.clientsResource;
+    this.resources = options.resources || {};
     this.database = options.database;
     this.logger = options.logger || console;
     this.config = options.config || {};
     this.auditPlugin = options.auditPlugin;
     this.pluginStorageResource = options.pluginStorageResource;
+
+    // Legacy support / direct assignment fallback
+    if (options.usersResource) this.resources.users = options.usersResource;
+    if (options.clientsResource) this.resources.clients = options.clientsResource;
 
     // Default password policy
     this.passwordPolicy = {
@@ -52,8 +55,13 @@ export class OnboardingManager {
    */
   async detectFirstRun() {
     try {
+      const usersResource = this.resources.users || this.usersResource;
+      if (!usersResource) {
+        throw new Error('Users resource not initialized in OnboardingManager');
+      }
+
       // Check for any user with admin:* scope
-      const admins = await this.usersResource.query({
+      const admins = await usersResource.query({
         active: true
       });
 
@@ -173,21 +181,23 @@ export class OnboardingManager {
       });
     }
 
-    // Check if user already exists
-    const existing = await this.usersResource.query({ email });
-    if (existing.length > 0) {
-      throw new PluginError(`User with email ${email} already exists`, {
-        pluginName: 'IdentityPlugin',
-        operation: 'createAdmin',
-        statusCode: 409,
-        retriable: false,
-        suggestion: 'Use a different email address or delete existing user'
-      });
-    }
-
     try {
+      const usersResource = this.resources.users || this.usersResource;
+      
+      // Check if user already exists
+      const existing = await usersResource.query({ email });
+      if (existing.length > 0) {
+        throw new PluginError(`User with email ${email} already exists`, {
+          pluginName: 'IdentityPlugin',
+          operation: 'createAdmin',
+          statusCode: 409,
+          retriable: false,
+          suggestion: 'Use a different email address or delete existing user'
+        });
+      }
+
       // Create admin user
-      const adminUser = await this.usersResource.insert({
+      const adminUser = await usersResource.insert({
         email,
         password, // Will be hashed by Identity plugin's password field type
         name: name || 'Administrator',
@@ -251,7 +261,9 @@ export class OnboardingManager {
     }
 
     try {
-      const client = await this.clientsResource.insert({
+      const clientsResource = this.resources.clients || this.clientsResource;
+      
+      const client = await clientsResource.insert({
         clientId,
         clientSecret, // Will be encrypted by Identity plugin
         name,

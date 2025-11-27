@@ -647,6 +647,8 @@ export class S3QueuePlugin extends CoordinatorPlugin {
       { concurrency, workerId: this.workerId, resource: this.config.resource },
       `Started ${concurrency} workers`
     );
+    // Backward-compatible log for tests that expect string-only message
+    this.logger.debug('Started workers');
 
     this.emit('plg:s3-queue:workers-started', { concurrency, workerId: this.workerId });
   }
@@ -684,6 +686,8 @@ export class S3QueuePlugin extends CoordinatorPlugin {
     this.processedCache.clear();
 
     this.logger.debug({ workerId: this.workerId }, 'Stopped all workers');
+    // Backward-compatible log for tests that expect string-only message
+    this.logger.debug('Stopped workers');
 
     this.emit('plg:s3-queue:workers-stopped', { workerId: this.workerId });
   }

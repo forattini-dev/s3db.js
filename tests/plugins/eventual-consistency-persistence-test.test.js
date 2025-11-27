@@ -127,6 +127,11 @@ describe('EventualConsistencyPlugin - Resource Persistence', () => {
     // Save connection string for reconnection
     const connectionString = database.connectionString;
 
+    // Mock destroy to prevent wiping MemoryClient storage (simulate S3 persistence)
+    if (database.client && database.client.destroy) {
+      database.client.destroy = () => {};
+    }
+
     // Step 2: Disconnect
     await database.disconnect();
 

@@ -814,21 +814,21 @@ export class GlobalCoordinatorService extends EventEmitter {
 
     // Priority 1: Kubernetes POD_NAME (most stable in k8s)
     if (env.POD_NAME) {
-      return `gcs-${env.POD_NAME}`;
+      return `gcs-${env.POD_NAME}-${++serviceCounter}`;
     }
 
     // Priority 2: HOSTNAME (stable in containers/VMs)
     if (env.HOSTNAME) {
-      return `gcs-${env.HOSTNAME}`;
+      return `gcs-${env.HOSTNAME}-${++serviceCounter}`;
     }
 
     // Priority 3: database.id (stable per database instance)
     if (this.database && this.database.id) {
-      return `gcs-${this.database.id}`;
+      return `gcs-${this.database.id}-${++serviceCounter}`;
     }
 
     // Fallback: timestamp + random (for development/testing)
-    return `gcs-${this.namespace}-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
+    return `gcs-${this.namespace}-${Date.now()}-${Math.random().toString(36).slice(2, 9)}-${++serviceCounter}`;
   }
 }
 
@@ -940,7 +940,8 @@ class CoordinatorPluginStorage extends PluginStorage {
       .map(key => {
         const parts = key.split('/');
         const filename = parts[parts.length - 1];
-        return filename.replace('.json', '');
+        const rawId = filename.replace('.json', '');
+        return rawId.startsWith('worker=') ? rawId.slice('worker='.length) : rawId;
       })
       .filter(id => id)
       .sort((a, b) => a.localeCompare(b));

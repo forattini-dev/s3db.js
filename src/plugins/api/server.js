@@ -234,7 +234,7 @@ export class ApiServer {
       });
       this.router.mount(this.app, this.events);
 
-      this.app.onError((err, c) => errorHandler(err, c));
+      this.app.onError(errorHandler.bind(this));
       this.app.notFound((c) => {
         const response = formatter.error('Route not found', {
           status: 404,
@@ -601,8 +601,12 @@ export class ApiServer {
               "connect-src 'self'"
             ].join('; ');
           }
-          c.header('Content-Security-Policy', cspHeader);
-          return swaggerHandler(c);
+          const res = swaggerHandler(c);
+          if (res?.headers) {
+            res.headers.set('Content-Security-Policy', cspHeader);
+            res.headers.delete('Content-Security-Policy-Report-Only');
+          }
+          return res;
         });
       } else {
         // Default: Redoc UI
@@ -629,7 +633,6 @@ export class ApiServer {
               "connect-src 'self'"
             ].join('; ');
           }
-          c.header('Content-Security-Policy', cspHeader);
           const html = [
             '<!DOCTYPE html>',
             '<html lang="en">',
@@ -647,7 +650,12 @@ export class ApiServer {
             '</body>',
             '</html>'
           ].join('\n');
-          return c.html(html);
+          const res = c.html(html);
+          if (res?.headers) {
+            res.headers.set('Content-Security-Policy', cspHeader);
+            res.headers.delete('Content-Security-Policy-Report-Only');
+          }
+          return res;
         });
         if (this.options.logLevel) {
           this.logger.debug('Redoc UI route registered');

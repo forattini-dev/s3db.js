@@ -318,7 +318,7 @@ export class OAuth2Server {
 
     const accessToken = this.keyManager.createToken({
       iss: this.issuer,
-      sub: resolvedClientId,
+      sub: `sa:${resolvedClientId}`,
       aud: audienceClaim,
       scope: scopeValidation.scopes.join(' '),
       token_type: 'access_token',
@@ -370,7 +370,7 @@ export class OAuth2Server {
     // Validate code expiration
     const expiresAtMs = this.parseAuthCodeExpiry(authCode.expiresAt);
     if (!Number.isFinite(expiresAtMs)) {
-      await this.authCodeResource.remove(authCode.id);
+      await this.authCodeResource.delete(authCode.id);
       return res.status(400).json({
         error: 'invalid_grant',
         error_description: 'Authorization code is invalid'
@@ -378,7 +378,7 @@ export class OAuth2Server {
     }
 
     if (expiresAtMs <= Date.now()) {
-      await this.authCodeResource.remove(authCode.id);
+      await this.authCodeResource.delete(authCode.id);
       return res.status(400).json({
         error: 'invalid_grant',
         error_description: 'Authorization code has expired'
@@ -480,7 +480,7 @@ export class OAuth2Server {
     }
 
     // Delete used authorization code
-    await this.authCodeResource.remove(authCode.id);
+    await this.authCodeResource.delete(authCode.id);
 
     return res.status(200).json(response);
   }
@@ -1094,7 +1094,7 @@ export class OAuth2Server {
   _buildServiceAccountContext(client, scopes = []) {
     const audiences = this._resolveClientAudiences(client);
     const context = {
-      client_id: client?.clientId || null,
+      clientId: client?.clientId || null,
       name: client?.name || client?.clientName || client?.displayName || client?.clientId || 'service-account',
       scopes,
       audiences

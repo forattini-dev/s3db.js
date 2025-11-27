@@ -264,21 +264,23 @@ describe('SqsReplicator - Additional Coverage Tests', () => {
       send: jest.fn().mockRejectedValue(new Error('SQS error'))
     };
     
-    const replicator = new SqsReplicator({ queueUrl: 'test-queue', logLevel: 'debug' });
+    const mockLogger = {
+      warn: jest.fn(),
+      info: jest.fn(),
+      error: jest.fn(),
+      debug: jest.fn()
+    };
+
+    const replicator = new SqsReplicator({ queueUrl: 'test-queue', logger: mockLogger });
     replicator.sqsClient = errorClient;
     replicator.enabled = true;
     replicator.resources = { users: true };
-
-    // Mock console.warn to avoid output during test
-    const consoleSpy = jest.spyOn(console, 'warn').mockImplementation();
 
     const result = await replicator.replicate('users', 'insert', { id: '1' }, '1');
 
     expect(result.success).toBe(false);
     expect(result.error).toBe('SQS error');
-    expect(consoleSpy).toHaveBeenCalled();
-    
-    consoleSpy.mockRestore();
+    expect(mockLogger.warn).toHaveBeenCalled();
   });
 
   test('should handle batch replication', async () => {

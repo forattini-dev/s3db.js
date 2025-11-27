@@ -392,6 +392,7 @@ export class IdentityPlugin extends Plugin {
       authDrivers: options.authDrivers || {}
     };
 
+    // Internal state
     this.server = null;
     this.oauth2Server = null;
     this.sessionManager = null;
@@ -399,6 +400,25 @@ export class IdentityPlugin extends Plugin {
     this.failbanManager = null;
     this.auditPlugin = null;
     this.mfaManager = null;
+    this.onboardingManager = new OnboardingManager({
+      db: null, // Will be set during install
+      config: {
+        enabled: this.config.onboarding.enabled,
+        mode: this.config.onboarding.mode,
+        admin: this.config.onboarding.admin,
+        callback: this.config.onboarding.onFirstRun,
+        force: this.config.onboarding.force
+      },
+      resources: {
+        users: this.config.resources.users, // Will be resolved during install
+        tenants: this.config.resources.tenants,
+        clients: this.config.resources.clients
+      },
+      options: {
+        issuer: this.config.issuer,
+        logLevel: this.config.logLevel
+      }
+    });
 
     // Internal plugin resources (prefixed with plg_)
     this.oauth2KeysResource = null;
@@ -907,6 +927,7 @@ export class IdentityPlugin extends Plugin {
 
     await this.oauth2Server.initialize();
     this.oauth2Server.setIdentityPlugin(this);
+    this.keyManager = this.oauth2Server.keyManager; // Expose keyManager for testing
 
     if (this.config.logLevel) {
       this.logger.info('[Identity Plugin] OAuth2 Server initialized');
@@ -1591,19 +1612,13 @@ export class IdentityPlugin extends Plugin {
     }
 
     // Initialize onboarding manager
-    this.onboardingManager = new OnboardingManager({
-      usersResource: this.usersResource,
-      clientsResource: this.clientsResource,
-      database: this.database,
-      logger: this.logger,
-      config: {
-        ...this.config.onboarding,
-        issuer: this.config.issuer,
-        logLevel: this.config.logLevel
-      },
-      auditPlugin: this.auditPlugin,
-      pluginStorageResource: null // Will be set when plugin storage is available
-    });
+    this.onboardingManager.db = this.database;
+    this.onboardingManager.resources = {
+      users: this.usersResource,
+      tenants: this.tenantsResource,
+      clients: this.clientsResource
+    };
+    this.onboardingManager.auditPlugin = this.auditPlugin;
 
     // Detect first run
     const firstRun = await this.onboardingManager.detectFirstRun();
