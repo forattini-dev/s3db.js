@@ -43,11 +43,13 @@ export class SwissFormat extends BaseFormat {
       errors.push('At least 1 round required');
     }
 
-    // Validate advance/eliminate thresholds
-    if (config.advanceWins && config.eliminateLosses) {
-      if (config.advanceWins + config.eliminateLosses - 1 > rounds) {
-        errors.push('Advance wins + eliminate losses cannot exceed rounds + 1');
-      }
+    // Validate advance/eliminate thresholds are achievable within configured rounds
+    if (config.advanceWins && config.advanceWins > rounds) {
+      errors.push('Advance wins cannot exceed total rounds');
+    }
+
+    if (config.eliminateLosses && config.eliminateLosses > rounds) {
+      errors.push('Elimination losses cannot exceed total rounds');
     }
 
     return { valid: errors.length === 0, errors };

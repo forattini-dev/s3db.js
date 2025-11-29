@@ -1095,6 +1095,7 @@ export class OAuth2Server {
     const audiences = this._resolveClientAudiences(client);
     const context = {
       clientId: client?.clientId || null,
+      client_id: client?.clientId || null,
       name: client?.name || client?.clientName || client?.displayName || client?.clientId || 'service-account',
       scopes,
       audiences

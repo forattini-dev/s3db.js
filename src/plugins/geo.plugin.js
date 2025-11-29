@@ -357,10 +357,9 @@ export class GeoPlugin extends Plugin {
           precision = optimalZoom;
 
           if (plugin.logLevel === 'debug' || plugin.logLevel === 'trace') {
-            this.logger.info(
-              `[GeoPlugin] Auto-selected zoom${optimalZoom} (${plugin._getPrecisionDistance(optimalZoom)}km cells) ` +
-              `for ${radius}km radius query`
-            );
+            const zoomMsg = `[GeoPlugin] Auto-selected zoom${optimalZoom} (${plugin._getPrecisionDistance(optimalZoom)}km cells) for ${radius}km radius query`;
+            this.logger.info(zoomMsg);
+            console.log(zoomMsg);
           }
         } else {
           // Legacy single partition
@@ -397,10 +396,9 @@ export class GeoPlugin extends Plugin {
           allRecords = partitionResults.flat();
 
           if (plugin.logLevel === 'debug' || plugin.logLevel === 'trace') {
-            this.logger.info(
-              `[GeoPlugin] findNearby searched ${geohashesToSearch.length} ${partitionName} partitions, ` +
-              `found ${allRecords.length} candidates`
-            );
+            const msg = `[GeoPlugin] findNearby searched ${geohashesToSearch.length} ${partitionName} partitions, found ${allRecords.length} candidates`;
+            this.logger.info(msg);
+            console.log(msg);
           }
         } else {
           // Fallback to full scan if partition doesn't exist
@@ -471,10 +469,9 @@ export class GeoPlugin extends Plugin {
           precision = optimalZoom;
 
           if (plugin.logLevel === 'debug' || plugin.logLevel === 'trace') {
-            this.logger.info(
-              `[GeoPlugin] Auto-selected zoom${optimalZoom} (${plugin._getPrecisionDistance(optimalZoom)}km cells) ` +
-              `for ${approximateRadius.toFixed(1)}km bounding box`
-            );
+            const zoomMsg = `[GeoPlugin] Auto-selected zoom${optimalZoom} (${plugin._getPrecisionDistance(optimalZoom)}km cells) for ${approximateRadius.toFixed(1)}km bounding box`;
+            this.logger.info(zoomMsg);
+            console.log(zoomMsg);
           }
         } else {
           // Legacy single partition
@@ -510,10 +507,9 @@ export class GeoPlugin extends Plugin {
           allRecords = partitionResults.flat();
 
           if (plugin.logLevel === 'debug' || plugin.logLevel === 'trace') {
-            this.logger.info(
-              `[GeoPlugin] findInBounds searched ${geohashesToSearch.length} ${partitionName} partitions, ` +
-              `found ${allRecords.length} candidates`
-            );
+            const msg = `[GeoPlugin] findInBounds searched ${geohashesToSearch.length} ${partitionName} partitions, found ${allRecords.length} candidates`;
+            this.logger.info(msg);
+            console.log(msg);
           }
         } else {
           // Fallback to full scan if partition doesn't exist

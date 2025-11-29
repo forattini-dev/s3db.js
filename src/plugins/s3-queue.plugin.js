@@ -596,6 +596,7 @@ export class S3QueuePlugin extends CoordinatorPlugin {
   async startProcessing(handler = null, options = {}) {
     if (this.isRunning) {
       this.logger.debug({ resource: this.config.resource }, 'Already running');
+      this.logger.debug('Already running');
       return;
     }
 

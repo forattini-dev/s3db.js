@@ -79,10 +79,11 @@ export class SingleEliminationFormat extends BaseFormat {
 
   onMatchComplete(bracket, completedMatch) {
     const newMatches = [];
+    const completedMatchId = completedMatch.metadata?.matchRef || completedMatch.id;
 
     // Find the match in bracket and update
     for (const round of bracket.matches) {
-      const match = round.find(m => m.id === completedMatch.id);
+      const match = round.find(m => m.id === completedMatchId);
       if (match) {
         match.winnerId = completedMatch.winnerId;
         match.loserId = completedMatch.loserId;
@@ -166,13 +167,13 @@ export class SingleEliminationFormat extends BaseFormat {
     const finalMatch = finalRound[0];
 
     const finalComplete = matches.some(m =>
-      m.id === finalMatch.id && m.status === 'completed'
+      (m.metadata?.matchRef || m.id) === finalMatch.id && m.status === 'completed'
     );
 
     // Check 3rd place match if enabled
     if (bracket.thirdPlaceMatch) {
       const thirdPlaceComplete = matches.some(m =>
-        m.id === '3RD' && m.status === 'completed'
+        (m.metadata?.matchRef || m.id) === '3RD' && m.status === 'completed'
       );
       return finalComplete && thirdPlaceComplete;
     }
@@ -184,7 +185,9 @@ export class SingleEliminationFormat extends BaseFormat {
     if (!this.isComplete(bracket, matches)) return null;
 
     const finalRound = bracket.matches[bracket.matches.length - 1];
-    const finalMatch = matches.find(m => m.id === finalRound[0].id);
+    const finalMatch = matches.find(m =>
+      (m.metadata?.matchRef || m.id) === finalRound[0].id
+    );
 
     return finalMatch?.winnerId || null;
   }
