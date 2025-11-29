@@ -503,6 +503,7 @@ export class ApiPlugin extends Plugin {
       maxBodySize: this.config.maxBodySize,
       logLevel: this.config.logLevel,
       auth: this.config.auth,
+      compression: this.config.compression,
       docsEnabled: this.config.docs.enabled,
       docsUI: this.config.docs.ui,
       docsCsp: this.config.docs.csp,

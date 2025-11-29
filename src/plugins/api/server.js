@@ -54,7 +54,8 @@ export class ApiServer {
       apiDescription: options.docs?.description || options.apiDescription || 'Auto-generated REST API for s3db.js resources',
       maxBodySize: options.maxBodySize || 10 * 1024 * 1024,
       startupBanner: options.startupBanner !== false,
-      rootRoute: options.rootRoute // undefined = default splash, false = disabled, function = custom handler
+      rootRoute: options.rootRoute, // undefined = default splash, false = disabled, function = custom handler
+      compression: options.compression || { enabled: false }
     };
 
     // Logger from APIPlugin
@@ -252,11 +253,63 @@ export class ApiServer {
 
     const { port, host } = this.options;
 
+    let fetchHandler = this.app.fetch;
+    if (this.options.compression?.enabled) {
+      const { threshold = 1024 } = this.options.compression;
+      const { gzipSync, deflateSync } = await import('node:zlib');
+      const baseFetch = this.app.fetch;
+
+      fetchHandler = async (req, env, ctx) => {
+        const res = await baseFetch(req, env, ctx);
+
+        // Skip if already encoded
+        const existingEncoding = res.headers.get('content-encoding');
+        if (existingEncoding) return res;
+
+        const acceptEncoding = req.headers.get('accept-encoding') || '';
+        const wantsGzip = acceptEncoding.includes('gzip');
+        const wantsDeflate = acceptEncoding.includes('deflate');
+        if (!wantsGzip && !wantsDeflate) return res;
+
+        const contentType = res.headers.get('content-type') || '';
+        const isTextLike = contentType.startsWith('text/') || contentType.includes('json');
+        if (!isTextLike) return res;
+
+        const source = typeof res.clone === 'function' ? res.clone() : res;
+        const buffer = Buffer.from(await source.arrayBuffer());
+        if (buffer.length < threshold) {
+          // When a clone isn't available, rebuild the response to avoid locked streams
+          if (source === res) {
+            const headers = new Headers(res.headers);
+            return new Response(buffer, {
+              status: res.status,
+              statusText: res.statusText,
+              headers
+            });
+          }
+          return res;
+        }
+
+        const encoding = wantsGzip ? 'gzip' : 'deflate';
+        const compressed = encoding === 'gzip' ? gzipSync(buffer) : deflateSync(buffer);
+        const headers = new Headers(res.headers);
+        headers.set('Content-Encoding', encoding);
+        headers.set('Vary', 'Accept-Encoding');
+        headers.delete('Content-Length');
+
+        return new Response(compressed, {
+          status: res.status,
+          statusText: res.statusText,
+          headers
+        });
+      };
+    }
+
     return new Promise((resolve, reject) => {
       try {
         this.server = this.serve(
           {
-            fetch: this.app.fetch,
+            fetch: fetchHandler,
             port,
             hostname: host,
             // ⚡ OPTIMIZATION: HTTP Keep-Alive (20-30% latency reduction)
