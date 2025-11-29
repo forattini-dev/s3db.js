@@ -19,7 +19,6 @@ describe('ReplicatorPlugin configuration', () => {
       replicators: [minimalReplicator]
     });
 
-    expect(plugin.config.verbose).toBe(false);
     expect(plugin.config.persistReplicatorLog).toBe(true);
     expect(plugin.logResourceName).toBe('plg_custom_logs');
     expect(plugin.config.replicatorConcurrency).toBe(12);

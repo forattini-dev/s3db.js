@@ -3,14 +3,16 @@ import { VectorPlugin } from '../../src/plugins/vector.plugin.js';
 
 describe('VectorPlugin - Unit Tests (Mocked)', () => {
   describe('validateVectorStorage - Complete Coverage', () => {
-    test('should warn with console when vector exceeds threshold without auto-fix', () => {
-      const consoleWarnSpy = jest.spyOn(console, 'warn').mockImplementation();
-
+    test('should detect large vectors and emit warning event when autofix is disabled', () => {
       const plugin = new VectorPlugin({
-      logLevel: 'silent',
+        logLevel: 'silent',
         storageThreshold: 100,
         autoFixBehavior: false
       });
+
+      // Track warning events
+      const warningEvents = [];
+      plugin.on('plg:vector:storage-warning', (data) => warningEvents.push(data));
 
       // Mock database with resources
       plugin.database = {
@@ -35,12 +37,10 @@ describe('VectorPlugin - Unit Tests (Mocked)', () => {
       // Call validation
       plugin.validateVectorStorage();
 
-      // Should have warned 4 times (all console.warn calls)
-      expect(consoleWarnSpy).toHaveBeenCalled();
-      expect(consoleWarnSpy.mock.calls[0][0]).toContain('testResource');
-      expect(consoleWarnSpy.mock.calls[0][0]).toContain('large vector fields');
-
-      consoleWarnSpy.mockRestore();
+      // Should emit warning event for the large vector
+      expect(warningEvents.length).toBeGreaterThan(0);
+      expect(warningEvents[0].resource).toBe('testResource');
+      expect(warningEvents[0].totalEstimatedBytes).toBeGreaterThan(100);
     });
 
     test('should auto-fix when enabled', () => {
