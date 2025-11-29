@@ -10,6 +10,7 @@ import { createBasicAuthHandler } from './basic-auth.js';
 import { createOAuth2Handler } from './oauth2-auth.js';
 import { OIDCClient } from './oidc-client.js';
 import { unauthorized } from '../utils/response-formatter.js';
+import { getCookie } from 'hono/cookie';
 
 /**
  * Create authentication middleware that supports multiple auth methods
@@ -110,9 +111,65 @@ export async function createAuthMiddleware(options = {}) {
   }
 
   // Return combined middleware
+  const hasMultipleMethods = middlewares.length > 1;
+
   return async (c, next) => {
+    let attempted = false;
+    let lastErrorResponse = null;
+
+    const hasCredentials = (name) => {
+      if (name === 'jwt') {
+        if (c.req.header('authorization')) return true;
+        if (jwtConfig.cookieName) {
+          try {
+            return !!getCookie(c, jwtConfig.cookieName);
+          } catch {
+            return false;
+          }
+        }
+        return false;
+      }
+
+      if (name === 'apiKey') {
+        const headerName = apiKeyConfig.headerName || 'X-API-Key';
+        if (c.req.header(headerName)) return true;
+
+        if (apiKeyConfig.queryParam) {
+          return !!c.req.query(apiKeyConfig.queryParam);
+        }
+        return false;
+      }
+
+      if (name === 'basic') {
+        if (c.req.header('authorization')) return true;
+        if (basicConfig.cookieName) {
+          try {
+            return !!getCookie(c, basicConfig.cookieName);
+          } catch {
+            return false;
+          }
+        }
+        return false;
+      }
+
+      if (name === 'oauth2') {
+        return !!c.req.header('authorization');
+      }
+
+      return false;
+    };
+
     // Try each auth method
     for (const { name, middleware } of middlewares) {
+      const credentialsPresent = hasCredentials(name);
+
+      // When multiple methods are configured, skip drivers that don't have credentials
+      if (!credentialsPresent && hasMultipleMethods) {
+        continue;
+      }
+
+      attempted = attempted || credentialsPresent || !hasMultipleMethods;
+
       // Create a temporary next that captures success
       let authSuccess = false;
       const tempNext = async () => {
@@ -124,6 +181,15 @@ export async function createAuthMiddleware(options = {}) {
 
       // ✨ If middleware returned a response (redirect, JSON, etc), return it immediately
       if (result !== undefined && result !== null) {
+        const statusCode = typeof result?.status === 'number'
+          ? result.status
+          : (typeof result?._status === 'number' ? result._status : null);
+
+        if (statusCode === 401 || statusCode === 403) {
+          lastErrorResponse = result;
+          continue;
+        }
+
         return result;
       }
 
@@ -134,6 +200,21 @@ export async function createAuthMiddleware(options = {}) {
     }
 
     // No auth method succeeded
+    if (!attempted) {
+      if (optional) {
+        return await next();
+      }
+
+      const response = unauthorized(
+        `Authentication required. Supported methods: ${methods.join(', ')}`
+      );
+      return c.json(response, response._status);
+    }
+
+    if (lastErrorResponse) {
+      return lastErrorResponse;
+    }
+
     if (optional) {
       return await next();
     }

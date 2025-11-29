@@ -63,17 +63,31 @@ export class RouteContext {
   }
 
   // Error response helper
-  error(message, { status = 400, code = 'ERROR', details = null } = {}) {
+  error(message, statusOrOptions = {}, detailsOverride = null) {
+    const isNumber = typeof statusOrOptions === 'number';
+    const providedStatus = isNumber ? statusOrOptions : statusOrOptions?.status;
+    const providedCode = isNumber ? null : statusOrOptions?.code;
+    const providedDetails = isNumber ? detailsOverride : (statusOrOptions?.details ?? detailsOverride ?? null);
+    const errorObj = typeof message === 'string'
+      ? new Error(message)
+      : (message || new Error('Unknown error'));
+    const resolvedStatus = providedStatus ?? this._getErrorStatus(errorObj);
+    const resolvedCode = providedCode ?? this._getErrorCode(errorObj);
+    const stack = process.env.NODE_ENV !== 'production' && errorObj.stack
+      ? errorObj.stack.split('\n').map(line => line.trim())
+      : undefined;
+
     const response = {
       success: false,
       error: {
-        message,
-        code,
-        status,
-        ...(details ? { details } : {})
+        message: errorObj.message || message,
+        code: resolvedCode,
+        status: resolvedStatus,
+        ...(providedDetails ? { details: providedDetails } : {}),
+        ...(stack ? { stack } : {})
       }
     };
-    return this.c.json(response, status);
+    return this.c.json(response, resolvedStatus);
   }
 
   // Standard error responses
@@ -99,6 +113,37 @@ export class RouteContext {
 
   serverError(message = 'Internal server error', details = null) {
     return this.error(message, { status: 500, code: 'INTERNAL_ERROR', details });
+  }
+
+  _getErrorCode(error) {
+    if (error.code) return error.code;
+    if (error.name && error.name !== 'Error') return error.name;
+    return 'INTERNAL_ERROR';
+  }
+
+  _getErrorStatus(error) {
+    if (error.status) return error.status;
+    if (error.statusCode) return error.statusCode;
+    if (error.httpStatus) return error.httpStatus;
+
+    const errorName = error.name || '';
+    const errorMsg = error.message || '';
+
+    if (errorName === 'ValidationError') return 400;
+    if (errorName === 'UnauthorizedError') return 401;
+    if (errorName === 'ForbiddenError') return 403;
+    if (errorName === 'NotFoundError') return 404;
+    if (errorName === 'ConflictError') return 409;
+    if (errorName === 'TooManyRequestsError') return 429;
+
+    if (/not found/i.test(errorMsg)) return 404;
+    if (/unauthorized|unauthenticated/i.test(errorMsg)) return 401;
+    if (/forbidden|access denied/i.test(errorMsg)) return 403;
+    if (/invalid|validation|bad request/i.test(errorMsg)) return 400;
+    if (/conflict|already exists/i.test(errorMsg)) return 409;
+    if (/rate limit|too many/i.test(errorMsg)) return 429;
+
+    return 500;
   }
 
   // Direct JSON response (for custom cases)

@@ -1,9 +1,9 @@
-/**
 import { createLogger } from '../../../concerns/logger.js';
 
 // Module-level logger
 const logger = createLogger({ name: 'ErrorHelper', level: 'info' });
 
+/**
  * Error Helper Middleware
  *
  * Adds a standardized error response method to Hono context: c.error()

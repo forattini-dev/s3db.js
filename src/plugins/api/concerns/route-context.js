@@ -265,19 +265,30 @@ export class RouteContext {
 
   /**
    * Send error response
-   * @param {string} message - Error message
+   * @param {string|Error|Object} message - Error message or error object
    * @param {number} status - HTTP status code
    * @returns {Response} Error response
    */
-  error(message, status = 400) {
+  error(message, status = 400, details = null) {
+    const errorObj = typeof message === 'string'
+      ? new Error(message)
+      : (message || new Error('Unknown error'));
+    const resolvedStatus = status || getErrorStatus(errorObj);
+    const code = getErrorCode(errorObj);
+    const stack = process.env.NODE_ENV !== 'production' && errorObj.stack
+      ? errorObj.stack.split('\n').map(line => line.trim())
+      : undefined;
+
     return this.c.json({
       success: false,
       error: {
-        message,
-        code: 'ERROR',
-        status
+        message: errorObj.message || message,
+        code,
+        status: resolvedStatus,
+        ...(details ? { details } : {}),
+        ...(stack ? { stack } : {})
       }
-    }, status);
+    }, resolvedStatus);
   }
 
   /**
@@ -522,6 +533,37 @@ export class RouteContext {
   hasPartitionFilters() {
     return this._partitionFilters && this._partitionFilters.length > 0;
   }
+}
+
+function getErrorCode(error) {
+  if (error.code) return error.code;
+  if (error.name && error.name !== 'Error') return error.name;
+  return 'INTERNAL_ERROR';
+}
+
+function getErrorStatus(error) {
+  if (error.status) return error.status;
+  if (error.statusCode) return error.statusCode;
+  if (error.httpStatus) return error.httpStatus;
+
+  const errorName = error.name || '';
+  const errorMsg = error.message || '';
+
+  if (errorName === 'ValidationError') return 400;
+  if (errorName === 'UnauthorizedError') return 401;
+  if (errorName === 'ForbiddenError') return 403;
+  if (errorName === 'NotFoundError') return 404;
+  if (errorName === 'ConflictError') return 409;
+  if (errorName === 'TooManyRequestsError') return 429;
+
+  if (/not found/i.test(errorMsg)) return 404;
+  if (/unauthorized|unauthenticated/i.test(errorMsg)) return 401;
+  if (/forbidden|access denied/i.test(errorMsg)) return 403;
+  if (/invalid|validation|bad request/i.test(errorMsg)) return 400;
+  if (/conflict|already exists/i.test(errorMsg)) return 409;
+  if (/rate limit|too many/i.test(errorMsg)) return 429;
+
+  return 500;
 }
 
 /**

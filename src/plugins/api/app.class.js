@@ -251,7 +251,7 @@ export class ApiApp {
       servers = [],
       jsonPath = '/openapi.json',
       htmlPath = '/docs',
-      includeCodeSamples = false
+      includeCodeSamples = true
     } = options;
 
     // JSON endpoint - generates spec on request to reflect new routes
@@ -321,7 +321,8 @@ export class ApiApp {
     return this._generateOpenAPISpec({
       title: info.title || 'API Documentation',
       version: info.version || '1.0.0',
-      description: info.description || 'Auto-generated API documentation'
+      description: info.description || 'Auto-generated API documentation',
+      includeCodeSamples: info.includeCodeSamples !== undefined ? info.includeCodeSamples : true
     });
   }
 
@@ -807,7 +808,7 @@ export class ApiApp {
   /**
    * Generate OpenAPI spec (enhanced with code samples and all errors)
    */
-  _generateOpenAPISpec({ title, version, description, servers = [], includeCodeSamples = false }) {
+  _generateOpenAPISpec({ title, version, description, servers = [], includeCodeSamples = true }) {
     const spec = {
       openapi: '3.1.0',
       info: { title, version, description },
@@ -1193,31 +1194,125 @@ export class ApiApp {
   /**
    * Generate code samples for route
    */
-  async _generateCodeSamples(route, baseUrl) {
-    try {
-      const { CodeSamplesGenerator } = await import('./utils/code-samples-generator.js');
-      const samples = CodeSamplesGenerator.generate(route, baseUrl);
+  _generateCodeSamples(route, baseUrl) {
+    const url = `${baseUrl}${route.path}`;
+    const bodyExample = route.requestSchema
+      ? JSON.stringify(this._generateExampleFromSchema(route.requestSchema), null, 2)
+      : null;
+    const authHeader = route.guards && route.guards.length > 0
+      ? '\n  -H "Authorization: Bearer <token>"'
+      : '';
 
-      return [
-        { lang: 'cURL', source: samples.curl },
-        { lang: 'Node.js', source: samples.nodejs },
-        { lang: 'JavaScript', source: samples.javascript },
-        { lang: 'Python', source: samples.python },
-        { lang: 'PHP', source: samples.php },
-        { lang: 'Go', source: samples.go }
-      ];
-    } catch (err) {
-      console.warn('Could not load CodeSamplesGenerator:', err.message);
-      return [];
-    }
+    const curlSample = [
+      `curl -X ${route.method}`,
+      `  "${url}"`,
+      '  -H "Content-Type: application/json"',
+      authHeader.trim() ? `  ${authHeader.trim()}` : '',
+      bodyExample ? `  -d '${bodyExample}'` : ''
+    ].filter(Boolean).join('\n');
+
+    const jsFetch = [
+      "await fetch('" + url + "', {",
+      `  method: '${route.method}',`,
+      '  headers: {',
+      "    'Content-Type': 'application/json'," + (authHeader ? "\n    'Authorization': 'Bearer <token>'" : ''),
+      '  },',
+      bodyExample ? `  body: JSON.stringify(${bodyExample.replace(/\n/g, '\n  ')})` : '',
+      '});'
+    ].filter(Boolean).join('\n');
+
+    const nodeSample = [
+      "import fetch from 'node-fetch';",
+      '',
+      jsFetch
+    ].join('\n');
+
+    const pythonSample = [
+      'import requests',
+      '',
+      `url = "${url}"`,
+      bodyExample ? `data = ${bodyExample}` : 'data = {}',
+      'headers = {',
+      "  'Content-Type': 'application/json'," + (authHeader ? "\n  'Authorization': 'Bearer <token>'" : ''),
+      '}',
+      '',
+      `resp = requests.${route.method.toLowerCase()}(url, json=data, headers=headers)`
+    ].join('\n');
+
+    const phpSample = [
+      "<?php",
+      `$url = "${url}";`,
+      '$opts = [',
+      "  'http' => [",
+      `    'method' => '${route.method}',`,
+      '    ' + "header => \"Content-Type: application/json" + (authHeader ? "\\r\\nAuthorization: Bearer <token>\"" : "\"") + ',',
+      bodyExample ? `    'content' => json_encode(${bodyExample.replace(/\n/g, '')}),` : '',
+      '  ]',
+      '];',
+      '$context = stream_context_create($opts);',
+      '$result = file_get_contents($url, false, $context);'
+    ].filter(Boolean).join('\n');
+
+    const goSample = [
+      'package main',
+      '',
+      'import (',
+      '  "bytes"',
+      '  "net/http"',
+      ')',
+      '',
+      'func main() {',
+      `  url := "${url}"`,
+      bodyExample ? `  body := []byte(\`${bodyExample}\`)` : '  body := []byte(`{}`)',
+      `  req, _ := http.NewRequest("${route.method}", url, bytes.NewBuffer(body))`,
+      '  req.Header.Set("Content-Type", "application/json")',
+      authHeader ? '  req.Header.Set("Authorization", "Bearer <token>")' : '',
+      '  http.DefaultClient.Do(req)',
+      '}'
+    ].filter(Boolean).join('\n');
+
+    return [
+      { lang: 'cURL', source: curlSample },
+      { lang: 'Node.js', source: nodeSample },
+      { lang: 'JavaScript', source: jsFetch },
+      { lang: 'Python', source: pythonSample },
+      { lang: 'PHP', source: phpSample },
+      { lang: 'Go', source: goSample }
+    ];
   }
 
-  async _generateExampleFromSchema(schema) {
-    try {
-      const { CodeSamplesGenerator } = await import('./utils/code-samples-generator.js');
-      return CodeSamplesGenerator.generateExampleFromSchema(schema);
-    } catch (err) {
-      return {};
+  _generateExampleFromSchema(schema = {}) {
+    if (!schema || typeof schema !== 'object') return {};
+    if (schema.example !== undefined) return schema.example;
+
+    if (schema.type === 'array' && schema.items) {
+      return [this._generateExampleFromSchema(schema.items)];
     }
+
+    if (schema.type === 'object' && schema.properties) {
+      const example = {};
+      for (const [key, prop] of Object.entries(schema.properties)) {
+        example[key] = this._generateExampleFromSchema(prop);
+      }
+      return example;
+    }
+
+    const type = schema.type || 'string';
+    if (type === 'string') {
+      if (schema.format === 'email') return 'user@example.com';
+      if (schema.format === 'uuid') return '00000000-0000-4000-8000-000000000000';
+      if (schema.format === 'date-time') return new Date().toISOString();
+      return schema.example || 'example';
+    }
+    if (type === 'integer' || type === 'number') {
+      const min = schema.minimum ?? schema.min ?? 0;
+      const max = schema.maximum ?? schema.max ?? min + 100;
+      return schema.example ?? Math.max(min, Math.min(max, min + 1));
+    }
+    if (type === 'boolean') {
+      return schema.example ?? true;
+    }
+
+    return schema.example ?? {};
   }
 }

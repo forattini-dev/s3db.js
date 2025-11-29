@@ -6,6 +6,7 @@
  */
 export async function createCompressionMiddleware(compressionConfig, logger) {
   const { threshold } = compressionConfig;
+  const zlib = await import('node:zlib');
 
   // Content types that should NOT be compressed (already compressed)
   const skipContentTypes = [
@@ -88,6 +89,10 @@ export async function createCompressionMiddleware(compressionConfig, logger) {
 
     // Check Accept-Encoding header
     const acceptEncoding = c.req.header('accept-encoding') || '';
+    // Debug helper for tests - visible only when logLevel provided
+    if (logger?.debug) {
+      logger.debug({ acceptEncoding }, '[Compression] middleware invoked');
+    }
 
     // Determine encoding (prioritize brotli > gzip > deflate)
     let encoding = null;
@@ -105,27 +110,25 @@ export async function createCompressionMiddleware(compressionConfig, logger) {
     }
 
     try {
-      // Use CompressionStream for gzip/deflate (stream-based, avoids ReadableStream lock)
-      // Brotli ('br') requires different approach as CompressionStream doesn't support it yet
+      const bodyBuffer = Buffer.from(await c.res.arrayBuffer());
+
       if (encoding === 'gzip' || encoding === 'deflate') {
-        const stream = new CompressionStream(encoding);
-        c.res = new Response(c.res.body.pipeThrough(stream), c.res);
+        const compressed = encoding === 'gzip'
+          ? zlib.gzipSync(bodyBuffer)
+          : zlib.deflateSync(bodyBuffer);
+        c.res = new Response(compressed, c.res);
         c.res.headers.delete('Content-Length');
-        c.res.headers.set('Content-Encoding', encoding);
+        c.res.headers.set('Content-Encoding', encoding === 'deflate' ? 'deflate' : 'gzip');
       } else if (encoding === 'br') {
-        // For brotli, we need to use zlib.brotliCompress (not stream-based)
-        // This requires consuming the body, which can cause issues
-        // For now, fallback to gzip if available, otherwise skip
+        // For brotli, fallback to gzip if supported by client
         if (acceptEncoding.includes('gzip')) {
-          const stream = new CompressionStream('gzip');
-          c.res = new Response(c.res.body.pipeThrough(stream), c.res);
+          const compressed = zlib.gzipSync(bodyBuffer);
+          c.res = new Response(compressed, c.res);
           c.res.headers.delete('Content-Length');
           c.res.headers.set('Content-Encoding', 'gzip');
         }
-        // Otherwise skip - no brotli support yet without consuming stream
       }
     } catch (err) {
-      // Compression failed, log and continue with uncompressed response
       if (logger) {
         logger.error({ error: err.message }, 'Compression error');
       }
