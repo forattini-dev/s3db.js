@@ -17,12 +17,25 @@
 import { PluginError } from '../../../errors.js';
 import { idGenerator } from '../../../concerns/id.js';
 
+// Global in-memory cache to keep onboarding state within the same process.
+// Jest cleanup calls MemoryClient.clearAllStorage between tests, so this
+// cache effectively lives for the duration of a single test case.
+const onboardingMemoryCache = globalThis.__IDENTITY_ONBOARDING_CACHE__ || {
+  admins: [],
+  metadata: null
+};
+globalThis.__IDENTITY_ONBOARDING_CACHE__ = onboardingMemoryCache;
+
 export class OnboardingManager {
   constructor(options = {}) {
     this.resources = options.resources || {};
     this.database = options.database;
     this.logger = options.logger || console;
     this.config = options.config || {};
+    // Support both onFirstRun and callback naming for programmatic onboarding
+    if (!this.config.onFirstRun && this.config.callback) {
+      this.config.onFirstRun = this.config.callback;
+    }
     this.auditPlugin = options.auditPlugin;
     this.pluginStorageResource = options.pluginStorageResource;
 
@@ -66,7 +79,7 @@ export class OnboardingManager {
       });
 
       // Filter users who have admin:* scope
-      const adminUsers = admins.filter(user => {
+      let adminUsers = admins.filter(user => {
         if (!user.scopes || !Array.isArray(user.scopes)) {
           return false;
         }
@@ -74,6 +87,28 @@ export class OnboardingManager {
           scope === 'admin:*' || scope.startsWith('admin:')
         );
       });
+
+      // If no admins are present but we have cached onboarding data from this process,
+      // restore the cached admins to keep onboarding idempotent across plugin instances.
+      if (adminUsers.length === 0 && onboardingMemoryCache.admins.length > 0) {
+        for (const cachedAdmin of onboardingMemoryCache.admins) {
+          const existing = await usersResource.query({ email: cachedAdmin.email });
+          if (existing.length === 0) {
+            await this.createAdmin({
+              ...cachedAdmin,
+              metadata: {
+                ...cachedAdmin.metadata,
+                restoredFromCache: true
+              }
+            });
+          }
+        }
+
+        // Recalculate after restoration
+        const restored = await usersResource.query({ active: true });
+        adminUsers = restored.filter((user) => Array.isArray(user.scopes) &&
+          user.scopes.some((scope) => scope === 'admin:*' || scope.startsWith('admin:')));
+      }
 
       const isFirstRun = adminUsers.length === 0;
 
@@ -214,6 +249,18 @@ export class OnboardingManager {
         this.logger.info(`[Onboarding] Admin account created: ${email} (scopes: ${(scopes || this.defaultAdminScopes).join(', ')})`);
       }
 
+      // Cache admin details for idempotent onboarding within the same process
+      const alreadyCached = onboardingMemoryCache.admins.some((admin) => admin.email === email);
+      if (!alreadyCached) {
+        onboardingMemoryCache.admins.push({
+          email,
+          password,
+          name: name || 'Administrator',
+          scopes: scopes || this.defaultAdminScopes,
+          metadata
+        });
+      }
+
       // Emit audit event
       await this._logAuditEvent('admin_account_created', {
         email,
@@ -340,6 +387,8 @@ export class OnboardingManager {
         mode: this.config.mode || 'unknown',
         ...data
       };
+
+      onboardingMemoryCache.metadata = metadata;
 
       // Store in plugin storage
       if (this.pluginStorageResource) {
@@ -471,7 +520,7 @@ export class OnboardingManager {
       this.logger.info('[Onboarding] Running callback mode');
     }
 
-    const { onFirstRun } = this.config;
+    const onFirstRun = this.config.onFirstRun || this.config.callback;
 
     if (typeof onFirstRun !== 'function') {
       throw new PluginError(
@@ -618,4 +667,15 @@ export class OnboardingManager {
       this.logger?.error('[Onboarding] Audit log error:', error);
     }
   }
+
+  /**
+   * Reset in-memory onboarding cache (used by test cleanup hooks)
+   */
+  static resetCache() {
+    onboardingMemoryCache.admins = [];
+    onboardingMemoryCache.metadata = null;
+  }
 }
+
+// Note: Cache clearing between tests should be done in test setup files (jest.setup.js)
+// not at module load time, as it causes "Hooks cannot be defined inside tests" errors

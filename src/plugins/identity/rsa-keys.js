@@ -126,7 +126,7 @@ export function verifyRS256Token(token, publicKey) {
   try {
     const parts = token.split('.');
     if (parts.length !== 3) {
-      return null;
+      return [false, null, null];
     }
 
     const [encodedHeader, encodedPayload, signature] = parts;
@@ -138,28 +138,24 @@ export function verifyRS256Token(token, publicKey) {
 
     const isValid = verify.verify(publicKey, signature, 'base64url');
 
-    if (!isValid) {
-      return null;
-    }
-
     // Decode header and payload
     const header = JSON.parse(Buffer.from(encodedHeader, 'base64url').toString());
     const payload = JSON.parse(Buffer.from(encodedPayload, 'base64url').toString());
 
     // Verify algorithm
     if (header.alg !== 'RS256') {
-      return null;
+      return [false, null, header];
     }
 
     // Check expiration
     const now = Math.floor(Date.now() / 1000);
     if (payload.exp && payload.exp < now) {
-      return null; // Expired
+      return [false, payload, header]; // Expired but decoded
     }
 
-    return payload;
+    return [isValid, payload, header];
   } catch (err) {
-    return null;
+    return [false, null, null];
   }
 }
 
@@ -359,7 +355,13 @@ export class KeyManager {
       return null;
     }
 
-    return verifyRS256Token(token, key.publicKey);
+    const [valid, payload, header] = verifyRS256Token(token, key.publicKey);
+
+    if (!valid || !payload) {
+      return null;
+    }
+
+    return { payload, header, kid };
   }
 
   /**

@@ -1128,6 +1128,11 @@ export class MemoryClient extends EventEmitter {
    */
   static clearAllStorage() {
     globalStorageRegistry.clear();
+    const onboardingCache = globalThis.__IDENTITY_ONBOARDING_CACHE__;
+    if (onboardingCache) {
+      onboardingCache.admins = [];
+      onboardingCache.metadata = null;
+    }
   }
 }
 

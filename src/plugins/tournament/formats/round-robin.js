@@ -62,10 +62,10 @@ export class RoundRobinFormat extends BaseFormat {
   }
 
   getInitialMatches(bracket) {
-    // Return first round matches
+    // Pre-create the full schedule so consumers can see the entire bracket upfront
     if (!bracket.schedule.matches.length) return [];
 
-    return bracket.schedule.matches[0].map(match => ({
+    return bracket.schedule.matches.flat().map(match => ({
       ...this.createMatchTemplate({
         phase: 'league',
         round: match.round,
@@ -82,34 +82,28 @@ export class RoundRobinFormat extends BaseFormat {
     const newMatches = [];
     const roundMatches = bracket.schedule.matches.flat();
 
+    // Mark the completed match inside the schedule so round completion checks work
+    const matchKey = completedMatch.metadata?.matchRef || completedMatch.id;
+    const scheduleMatch = roundMatches.find((m) => m.id === matchKey);
+    if (scheduleMatch) {
+      scheduleMatch.status = 'completed';
+      scheduleMatch.winnerId = completedMatch.winnerId;
+      scheduleMatch.score1 = completedMatch.score1;
+      scheduleMatch.score2 = completedMatch.score2;
+    }
+
     // Find completed matches in current round
     const currentRoundMatches = roundMatches.filter(m => m.round === bracket.currentRound);
     const completedInRound = currentRoundMatches.filter(m =>
-      m.status === 'completed' || m.id === completedMatch.id
+      m.status === 'completed' || m.id === matchKey
     );
 
     // Check if round is complete
     if (completedInRound.length === currentRoundMatches.length) {
-      // Move to next round
+      // Move to next round for tracking purposes
       const nextRoundIndex = bracket.currentRound;
-
       if (nextRoundIndex < bracket.schedule.matches.length) {
         bracket.currentRound++;
-
-        // Return next round matches
-        for (const match of bracket.schedule.matches[nextRoundIndex]) {
-          newMatches.push({
-            ...this.createMatchTemplate({
-              phase: 'league',
-              round: match.round,
-              matchNumber: match.matchNumber,
-              participant1Id: match.participant1Id,
-              participant2Id: match.participant2Id,
-              bestOf: match.bestOf || this.config.bestOf
-            }),
-            id: match.id
-          });
-        }
       }
     }
 

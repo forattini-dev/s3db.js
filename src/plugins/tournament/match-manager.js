@@ -35,10 +35,11 @@ export class MatchManager {
 
     if (!tournamentId) throw new Error('Tournament ID is required');
 
-    // Always generate unique ID - use provided id as a reference in metadata
-    const matchRefId = data.id;
+    // Respect provided bracket match IDs but namespace stored IDs per tournament to avoid collisions
+    const matchRefId = data.id || idGenerator();
+    const matchId = `${tournamentId}:${matchRefId}`;
     const match = await this.resource.insert({
-      id: idGenerator(),
+      id: matchId,
       tournamentId,
       phase,
       round,
@@ -58,7 +59,9 @@ export class MatchManager {
       scheduledAt,
       startedAt: null,
       completedAt: null,
-      metadata: { ...metadata, matchRef: matchRefId }
+      metadata: matchRefId
+        ? { ...metadata, matchRef: matchRefId }
+        : { ...metadata }
     });
 
     this.plugin.emit('plg:tournament:match-created', { match });
@@ -244,12 +247,12 @@ export class MatchManager {
 
     // Advance winner to next match if applicable
     if (winnerId && match.nextMatchId) {
-      await this._advanceToMatch(match.nextMatchId, winnerId, 'winner');
+      await this._advanceToMatch(match.nextMatchId, winnerId, 'winner', match.tournamentId);
     }
 
     // Move loser to losers bracket if applicable (double elimination)
     if (loserId && match.loserNextMatchId) {
-      await this._advanceToMatch(match.loserNextMatchId, loserId, 'loser');
+      await this._advanceToMatch(match.loserNextMatchId, loserId, 'loser', match.tournamentId);
     }
 
     return updatedMatch;
@@ -293,11 +296,11 @@ export class MatchManager {
 
     // Advance winner
     if (match.nextMatchId) {
-      await this._advanceToMatch(match.nextMatchId, winnerId, 'winner');
+      await this._advanceToMatch(match.nextMatchId, winnerId, 'winner', match.tournamentId);
     }
 
     if (loserId && match.loserNextMatchId) {
-      await this._advanceToMatch(match.loserNextMatchId, loserId, 'loser');
+      await this._advanceToMatch(match.loserNextMatchId, loserId, 'loser', match.tournamentId);
     }
 
     return updatedMatch;
@@ -383,10 +386,20 @@ export class MatchManager {
   /**
    * Advance participant to next match
    */
-  async _advanceToMatch(matchId, participantId, slot) {
-    const match = await this.resource.get(matchId);
+  async _advanceToMatch(matchId, participantId, slot, tournamentId = null) {
+    const targetMatchId = tournamentId ? `${tournamentId}:${matchId}` : matchId;
+    let match;
+    try {
+      match = await this.resource.get(targetMatchId);
+    } catch (err) {
+      if (err.code === 'NoSuchKey' || err.name === 'NoSuchKey') {
+        this.logger.warn({ matchId: targetMatchId, participantId }, 'Next match not found for advancement');
+        return;
+      }
+      throw err;
+    }
     if (!match) {
-      this.logger.warn({ matchId, participantId }, 'Next match not found for advancement');
+      this.logger.warn({ matchId: targetMatchId, participantId }, 'Next match not found for advancement');
       return;
     }
 

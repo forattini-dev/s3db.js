@@ -19,6 +19,7 @@ export class InteractiveWizard {
     this.config = options.config || {};
     this.passwordPolicy = options.passwordPolicy || {};
     this.maxPasswordAttempts = this.config.interactive?.maxPasswordAttempts || 3;
+    this.maxEmailAttempts = this.config.interactive?.maxEmailAttempts || 3;
     this.timeout = this.config.interactive?.timeout || 300000; // 5 minutes
   }
 
@@ -77,24 +78,48 @@ export class InteractiveWizard {
   }
 
   /**
-   * Prompt for admin email
-   * @private
-   */
+  * Prompt for admin email
+  * @private
+  */
   async _promptEmail(Input) {
-    const prompt = new Input({
-      message: '👤 Admin Email:',
-      validate: (value) => {
-        if (!value || !value.trim()) {
-          return 'Email is required';
-        }
-        if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value)) {
-          return 'Please enter a valid email address';
-        }
-        return true;
-      }
-    });
+    let attempts = 0;
 
-    return prompt.run();
+    while (attempts < this.maxEmailAttempts) {
+      attempts++;
+
+      const prompt = new Input({
+        name: 'email',
+        message: '👤 Admin Email:',
+        validate: (value) => {
+          if (!value || !value.trim()) {
+            return 'Email is required';
+          }
+          if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value)) {
+            return 'Please enter a valid email address';
+          }
+          return true;
+        }
+      });
+
+      const email = await prompt.run();
+
+      // Manual validation to support mocked prompts in tests
+      if (/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email || '')) {
+        return email;
+      }
+
+      console.log('❌ Invalid email address. Please try again.\n');
+    }
+
+    throw new PluginError(
+      `Max email attempts (${this.maxEmailAttempts}) exceeded`,
+      {
+        pluginName: 'IdentityPlugin',
+        operation: 'runInteractiveMode',
+        statusCode: 400,
+        retriable: false
+      }
+    );
   }
 
   /**
@@ -154,9 +179,10 @@ export class InteractiveWizard {
   /**
    * Prompt for password (single attempt)
    * @private
-   */
+  */
   async _promptPasswordOnce(Password) {
     const prompt = new Password({
+      name: 'password',
       message: '🔒 Admin Password:',
       mask: '*',
       validate: (value) => {
@@ -173,9 +199,10 @@ export class InteractiveWizard {
   /**
    * Prompt for password confirmation
    * @private
-   */
+  */
   async _promptPasswordConfirm(Password) {
     const prompt = new Password({
+      name: 'confirmPassword',
       message: '🔒 Confirm Password:',
       mask: '*',
       validate: (value) => {
@@ -192,9 +219,10 @@ export class InteractiveWizard {
   /**
    * Prompt for admin name (optional)
    * @private
-   */
+  */
   async _promptName(Input) {
     const prompt = new Input({
+      name: 'name',
       message: '📝 Display Name (optional):',
       initial: 'Administrator'
     });

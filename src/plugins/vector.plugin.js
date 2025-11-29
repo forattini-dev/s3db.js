@@ -151,6 +151,10 @@ export class VectorPlugin extends Plugin {
             this.logger.warn(`   Current behavior: '${resource.behavior || 'default'}'`);
             this.logger.warn(`   Recommendation: Add behavior: 'body-overflow' or 'body-only' to resource configuration`);
             this.logger.warn(`   Large vectors will exceed S3 metadata limit (2047 bytes) and cause errors.`);
+            console.warn(
+              `[VectorPlugin] Large vector fields detected on ${resource.name}; estimated ${totalVectorSize} bytes. ` +
+              `Recommend setting behavior to body-overflow/body-only to avoid S3 metadata limits.`
+            );
           }
         }
       }

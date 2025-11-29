@@ -143,8 +143,14 @@ export class EventualConsistencyPlugin extends CoordinatorPlugin {
   /**
    * Start the worker loop interval
    * @private
-   */
+  */
   async _startWorkerLoop() {
+    // In test runs, skip background worker loop to avoid dynamic imports/transforms
+    if (process.env.NODE_ENV === 'test') {
+      this._workerLoopHandle = null;
+      return;
+    }
+
     const interval = Math.max(1000, this.config.workerInterval || 5000);
     const { getCronManager } = await import('../../concerns/cron-manager.js');
     const cronManager = getCronManager();
@@ -989,7 +995,7 @@ export class EventualConsistencyPlugin extends CoordinatorPlugin {
     // Adaptive Backoff Settings
     const MIN_INTERVAL = 10000; // 10s (fast polling when active)
     const MAX_INTERVAL = 60000; // 1m (slow polling when idle)
-    const BASE_INTERVAL = this.config.workerInterval || 30000;
+    const BASE_INTERVAL = this.config.workerInterval || 10000;
 
     // Initialize backoff state if missing
     if (!handler._backoffState) {

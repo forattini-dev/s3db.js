@@ -39,7 +39,7 @@ export function createConfig(options, detectedTimezone) {
     ticketTTL: coordinator.ticketTTL ?? 300000, // 5min ticket expiration
 
     // Worker settings
-    workerInterval: coordinator.workerInterval ?? 30000, // 30s ticket claim interval (increased to reduce S3 load)
+    workerInterval: coordinator.workerInterval ?? 10000, // 10s ticket claim interval (matches coordinator expectations)
     workerClaimLimit: coordinator.workerClaimLimit ?? 1, // tickets to claim per iteration
     // Cohort (timezone)
     cohort: {
