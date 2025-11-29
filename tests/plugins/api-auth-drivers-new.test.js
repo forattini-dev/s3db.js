@@ -428,6 +428,8 @@ describe('API Plugin - Auth Drivers (New API)', () => {
 
     beforeAll(async () => {
       port = getRandomPort();
+      db = createDatabaseForTest(`api-auth-openapi-${Date.now()}`, { logLevel: 'silent' });
+      await db.connect();
 
       apiPlugin = new ApiPlugin({
         port,
