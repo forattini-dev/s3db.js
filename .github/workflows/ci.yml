@@ -1,0 +1,520 @@
+name: CI/CD Pipeline
+
+on:
+  push:
+    branches: ['main']
+    tags: ['v*']
+  pull_request:
+    branches: ['main']
+
+# Cancel previous runs on same PR/branch
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  quality:
+    name: Quality Check
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        node-version: [20, 22, 23]
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - name: Setup Node.js ${{ matrix.node-version }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node-version }}
+          registry-url: 'https://registry.npmjs.org'
+          cache: 'pnpm'
+
+      - name: Install Dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build
+        run: pnpm run build
+
+      - name: Type Check
+        run: pnpm run test:ts
+
+      - name: Start MinIO
+        run: |
+          docker run -d \
+            --name minio \
+            -p 9000:9000 \
+            -e MINIO_ROOT_USER=minioadmin \
+            -e MINIO_ROOT_PASSWORD=minioadmin123 \
+            minio/minio:latest \
+            server /data --quiet
+
+          timeout 30s bash -c 'until curl -sf http://localhost:9000/minio/health/live; do sleep 1; done'
+
+          docker run --rm --network="host" \
+            -e AWS_ACCESS_KEY_ID=minioadmin \
+            -e AWS_SECRET_ACCESS_KEY=minioadmin123 \
+            amazon/aws-cli \
+            --endpoint-url http://localhost:9000 \
+            s3 mb s3://s3db 2>/dev/null || true
+
+      - name: Run Tests
+        run: pnpm test
+        env:
+          AWS_ACCESS_KEY_ID: minioadmin
+          AWS_SECRET_ACCESS_KEY: minioadmin123
+          AWS_ENDPOINT: http://localhost:9000
+          AWS_REGION: us-east-1
+          AWS_BUCKET: s3db
+          AWS_FORCE_PATH_STYLE: true
+          BUCKET_CONNECTION_STRING: s3://minioadmin:minioadmin123@s3db?endpoint=http://localhost:9000&region=us-east-1&forcePathStyle=true
+
+  release-next:
+    name: Release Next
+    needs: quality
+    if: |
+      github.event_name == 'push' &&
+      github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+      packages: write
+
+    steps:
+      - name: Check if version bump commit
+        id: check
+        run: |
+          COMMIT_MSG="${{ github.event.head_commit.message }}"
+          if [[ "$COMMIT_MSG" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "skip=true" >> $GITHUB_OUTPUT
+            echo "Skipping: commit message '$COMMIT_MSG' is a version bump"
+          else
+            echo "skip=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Checkout
+        if: steps.check.outputs.skip != 'true'
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup pnpm
+        if: steps.check.outputs.skip != 'true'
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - name: Setup Node.js (NPM Registry)
+        if: steps.check.outputs.skip != 'true'
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          registry-url: 'https://registry.npmjs.org'
+          cache: 'pnpm'
+
+      - name: Install Dependencies
+        if: steps.check.outputs.skip != 'true'
+        run: pnpm install --frozen-lockfile
+
+      - name: Bump Version (Next)
+        if: steps.check.outputs.skip != 'true'
+        id: version
+        run: |
+          CURRENT_VERSION=$(node -p "require('./package.json').version")
+          SHA=$(git rev-parse --short HEAD)
+          BASE_VERSION=$(echo $CURRENT_VERSION | cut -d'-' -f1)
+          NEW_VERSION="$BASE_VERSION-next.$SHA"
+
+          echo "New version: $NEW_VERSION"
+          npm version $NEW_VERSION --no-git-tag-version
+          echo "version=$NEW_VERSION" >> $GITHUB_OUTPUT
+
+      - name: Build
+        if: steps.check.outputs.skip != 'true'
+        run: pnpm run build
+
+      - name: Publish to NPM (Next)
+        if: steps.check.outputs.skip != 'true'
+        run: pnpm publish --tag next --no-git-checks
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      - name: Setup Node.js (GitHub Packages)
+        if: steps.check.outputs.skip != 'true'
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          registry-url: 'https://npm.pkg.github.com'
+          scope: '@forattini-dev'
+
+      - name: Publish to GitHub Packages (Next)
+        if: steps.check.outputs.skip != 'true'
+        run: |
+          node -e "
+            const pkg = require('./package.json');
+            pkg.name = '@forattini-dev/s3db.js';
+            pkg.publishConfig = { registry: 'https://npm.pkg.github.com' };
+            require('fs').writeFileSync('package.json', JSON.stringify(pkg, null, 2));
+          "
+          pnpm publish --tag next --no-git-checks
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Job Summary
+        if: steps.check.outputs.skip != 'true'
+        run: |
+          echo "## 🚀 Next Release Published" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Property | Value |" >> $GITHUB_STEP_SUMMARY
+          echo "|----------|-------|" >> $GITHUB_STEP_SUMMARY
+          echo "| **Version** | \`${{ steps.version.outputs.version }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Tag** | \`next\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Commit** | [\`${GITHUB_SHA::7}\`](${{ github.server_url }}/${{ github.repository }}/commit/${{ github.sha }}) |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Branch** | \`${{ github.ref_name }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### 📦 Installation" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "\`\`\`bash" >> $GITHUB_STEP_SUMMARY
+          echo "# NPM" >> $GITHUB_STEP_SUMMARY
+          echo "npm install s3db.js@next" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "# PNPM" >> $GITHUB_STEP_SUMMARY
+          echo "pnpm add s3db.js@next" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "# Specific version" >> $GITHUB_STEP_SUMMARY
+          echo "npm install s3db.js@${{ steps.version.outputs.version }}" >> $GITHUB_STEP_SUMMARY
+          echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### 🔗 Links" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "- [NPM Package](https://www.npmjs.com/package/s3db.js?activeTab=versions)" >> $GITHUB_STEP_SUMMARY
+          echo "- [GitHub Packages](https://github.com/${{ github.repository }}/pkgs/npm/s3db.js)" >> $GITHUB_STEP_SUMMARY
+
+      - name: Skip Summary
+        if: steps.check.outputs.skip == 'true'
+        run: |
+          echo "## ⏭️ Release Skipped" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "Version bump commit detected. Skipping @next release." >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "The stable release will be published via the tag workflow." >> $GITHUB_STEP_SUMMARY
+
+  # Build binaries for each platform (only on tags)
+  build-binaries:
+    name: Build ${{ matrix.platform }}
+    needs: quality
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            platform: linux-x64
+          - os: macos-13
+            platform: macos-x64
+          - os: macos-14
+            platform: macos-arm64
+          - os: windows-latest
+            platform: win-x64
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install Dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build Package
+        run: pnpm run build
+
+      - name: Build Standalone Binaries
+        shell: bash
+        run: |
+          mkdir -p bin/standalone
+
+          # Build CLI binary
+          npx @yao-pkg/pkg bin/cli.js \
+            --targets node22-${{ matrix.platform == 'linux-x64' && 'linux-x64' || matrix.platform == 'macos-x64' && 'macos-x64' || matrix.platform == 'macos-arm64' && 'macos-arm64' || 'win-x64' }} \
+            --output bin/standalone/s3db-${{ matrix.platform }}${{ matrix.platform == 'win-x64' && '.exe' || '' }} \
+            --compress GZip
+
+          # Build MCP binary
+          npx @yao-pkg/pkg mcp/entrypoint.js \
+            --targets node22-${{ matrix.platform == 'linux-x64' && 'linux-x64' || matrix.platform == 'macos-x64' && 'macos-x64' || matrix.platform == 'macos-arm64' && 'macos-arm64' || 'win-x64' }} \
+            --output bin/standalone/s3db-mcp-${{ matrix.platform }}${{ matrix.platform == 'win-x64' && '.exe' || '' }} \
+            --compress GZip
+
+          ls -lh bin/standalone/
+
+      - name: Upload Binaries
+        uses: actions/upload-artifact@v4
+        with:
+          name: binaries-${{ matrix.platform }}
+          path: bin/standalone/
+          retention-days: 7
+
+  release-stable:
+    name: Release Stable
+    needs: [quality, build-binaries]
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+      packages: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - name: Setup Node.js (NPM Registry)
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          registry-url: 'https://registry.npmjs.org'
+          cache: 'pnpm'
+
+      - name: Install Dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build
+        run: pnpm run build
+
+      - name: Publish to NPM (Stable)
+        run: pnpm publish --no-git-checks
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      - name: Setup Node.js (GitHub Packages)
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          registry-url: 'https://npm.pkg.github.com'
+          scope: '@forattini-dev'
+
+      - name: Publish to GitHub Packages (Stable)
+        run: |
+          node -e "
+            const pkg = require('./package.json');
+            pkg.name = '@forattini-dev/s3db.js';
+            pkg.publishConfig = { registry: 'https://npm.pkg.github.com' };
+            require('fs').writeFileSync('package.json', JSON.stringify(pkg, null, 2));
+          "
+          pnpm publish --no-git-checks
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Download All Binaries
+        uses: actions/download-artifact@v4
+        with:
+          pattern: binaries-*
+          path: all-binaries/
+          merge-multiple: true
+
+      - name: List Binaries
+        run: |
+          echo "Built binaries:"
+          find all-binaries/ -type f -exec ls -lh {} \;
+
+      - name: Generate Changelog
+        id: changelog
+        run: |
+          PREV_TAG=$(git describe --tags --abbrev=0 HEAD^ 2>/dev/null || echo "")
+          CURRENT_TAG=${GITHUB_REF#refs/tags/}
+
+          echo "## What's Changed" > CHANGELOG_BODY.md
+          echo "" >> CHANGELOG_BODY.md
+
+          if [ -n "$PREV_TAG" ]; then
+            echo "Changes since $PREV_TAG:" >> CHANGELOG_BODY.md
+            echo "" >> CHANGELOG_BODY.md
+
+            FEATURES=$(git log $PREV_TAG..HEAD --pretty=format:"- %s" --grep="^feat" 2>/dev/null || true)
+            if [ -n "$FEATURES" ]; then
+              echo "### 🚀 Features" >> CHANGELOG_BODY.md
+              echo "$FEATURES" >> CHANGELOG_BODY.md
+              echo "" >> CHANGELOG_BODY.md
+            fi
+
+            FIXES=$(git log $PREV_TAG..HEAD --pretty=format:"- %s" --grep="^fix" 2>/dev/null || true)
+            if [ -n "$FIXES" ]; then
+              echo "### 🐛 Bug Fixes" >> CHANGELOG_BODY.md
+              echo "$FIXES" >> CHANGELOG_BODY.md
+              echo "" >> CHANGELOG_BODY.md
+            fi
+
+            DOCS=$(git log $PREV_TAG..HEAD --pretty=format:"- %s" --grep="^docs" 2>/dev/null || true)
+            if [ -n "$DOCS" ]; then
+              echo "### 📚 Documentation" >> CHANGELOG_BODY.md
+              echo "$DOCS" >> CHANGELOG_BODY.md
+              echo "" >> CHANGELOG_BODY.md
+            fi
+
+            PERF=$(git log $PREV_TAG..HEAD --pretty=format:"- %s" --grep="^perf" 2>/dev/null || true)
+            if [ -n "$PERF" ]; then
+              echo "### ⚡ Performance" >> CHANGELOG_BODY.md
+              echo "$PERF" >> CHANGELOG_BODY.md
+              echo "" >> CHANGELOG_BODY.md
+            fi
+
+            TESTS=$(git log $PREV_TAG..HEAD --pretty=format:"- %s" --grep="^test" 2>/dev/null || true)
+            if [ -n "$TESTS" ]; then
+              echo "### ✅ Tests" >> CHANGELOG_BODY.md
+              echo "$TESTS" >> CHANGELOG_BODY.md
+              echo "" >> CHANGELOG_BODY.md
+            fi
+
+            CHORE=$(git log $PREV_TAG..HEAD --pretty=format:"- %s" --grep="^ci\|^chore" 2>/dev/null || true)
+            if [ -n "$CHORE" ]; then
+              echo "### 🔧 Maintenance" >> CHANGELOG_BODY.md
+              echo "$CHORE" >> CHANGELOG_BODY.md
+              echo "" >> CHANGELOG_BODY.md
+            fi
+
+            echo "### 👥 Contributors" >> CHANGELOG_BODY.md
+            CONTRIBUTORS=$(curl -s -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+              "https://api.github.com/repos/${{ github.repository }}/compare/$PREV_TAG...$CURRENT_TAG" \
+              | jq -r '.commits[].author.login // empty' | sort -u | grep -v '^$' || true)
+            if [ -n "$CONTRIBUTORS" ]; then
+              echo "$CONTRIBUTORS" | while read -r user; do
+                if [[ ! "$user" =~ \  ]]; then
+                  echo "- @$user" >> CHANGELOG_BODY.md
+                else
+                  echo "- $user" >> CHANGELOG_BODY.md
+                fi
+              done
+            else
+              git log $PREV_TAG..HEAD --pretty=format:"- %an" | sort -u >> CHANGELOG_BODY.md
+            fi
+            echo "" >> CHANGELOG_BODY.md
+          else
+            echo "Initial release! 🎉" >> CHANGELOG_BODY.md
+          fi
+
+          echo "" >> CHANGELOG_BODY.md
+          echo "---" >> CHANGELOG_BODY.md
+          echo "" >> CHANGELOG_BODY.md
+          if [ -n "$PREV_TAG" ]; then
+            echo "**Full Changelog**: https://github.com/${{ github.repository }}/compare/$PREV_TAG...$CURRENT_TAG" >> CHANGELOG_BODY.md
+          fi
+          echo "" >> CHANGELOG_BODY.md
+          echo "## 📦 Installation" >> CHANGELOG_BODY.md
+          echo "" >> CHANGELOG_BODY.md
+          echo "\`\`\`bash" >> CHANGELOG_BODY.md
+          echo "# NPM" >> CHANGELOG_BODY.md
+          echo "npm install s3db.js@${CURRENT_TAG#v}" >> CHANGELOG_BODY.md
+          echo "" >> CHANGELOG_BODY.md
+          echo "# PNPM" >> CHANGELOG_BODY.md
+          echo "pnpm add s3db.js@${CURRENT_TAG#v}" >> CHANGELOG_BODY.md
+          echo "" >> CHANGELOG_BODY.md
+          echo "# GitHub Packages" >> CHANGELOG_BODY.md
+          echo "npm install @forattini-dev/s3db.js@${CURRENT_TAG#v} --registry=https://npm.pkg.github.com" >> CHANGELOG_BODY.md
+          echo "\`\`\`" >> CHANGELOG_BODY.md
+          echo "" >> CHANGELOG_BODY.md
+          echo "## 🖥️ Standalone Binaries" >> CHANGELOG_BODY.md
+          echo "" >> CHANGELOG_BODY.md
+          echo "Download pre-built binaries below (no Node.js required):" >> CHANGELOG_BODY.md
+          echo "" >> CHANGELOG_BODY.md
+          echo "| Platform | CLI | MCP Server |" >> CHANGELOG_BODY.md
+          echo "|----------|-----|------------|" >> CHANGELOG_BODY.md
+          echo "| Linux x64 | \`s3db-linux-x64\` | \`s3db-mcp-linux-x64\` |" >> CHANGELOG_BODY.md
+          echo "| macOS Intel | \`s3db-macos-x64\` | \`s3db-mcp-macos-x64\` |" >> CHANGELOG_BODY.md
+          echo "| macOS Apple Silicon | \`s3db-macos-arm64\` | \`s3db-mcp-macos-arm64\` |" >> CHANGELOG_BODY.md
+          echo "| Windows x64 | \`s3db-win-x64.exe\` | \`s3db-mcp-win-x64.exe\` |" >> CHANGELOG_BODY.md
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          body_path: CHANGELOG_BODY.md
+          draft: false
+          prerelease: false
+          generate_release_notes: false
+          files: all-binaries/*
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Job Summary
+        run: |
+          VERSION=${GITHUB_REF#refs/tags/v}
+          echo "## 🎉 Stable Release Published" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Property | Value |" >> $GITHUB_STEP_SUMMARY
+          echo "|----------|-------|" >> $GITHUB_STEP_SUMMARY
+          echo "| **Version** | \`$VERSION\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Tag** | \`latest\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Git Tag** | [\`v$VERSION\`](${{ github.server_url }}/${{ github.repository }}/releases/tag/v$VERSION) |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### 📦 Installation" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "\`\`\`bash" >> $GITHUB_STEP_SUMMARY
+          echo "# NPM (latest)" >> $GITHUB_STEP_SUMMARY
+          echo "npm install s3db.js" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "# PNPM" >> $GITHUB_STEP_SUMMARY
+          echo "pnpm add s3db.js" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "# Specific version" >> $GITHUB_STEP_SUMMARY
+          echo "npm install s3db.js@$VERSION" >> $GITHUB_STEP_SUMMARY
+          echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### 🖥️ Binaries" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Platform | Size |" >> $GITHUB_STEP_SUMMARY
+          echo "|----------|------|" >> $GITHUB_STEP_SUMMARY
+          find all-binaries/ -type f -exec basename {} \; | sort | while read file; do
+            SIZE=$(du -h "all-binaries/$file" | cut -f1)
+            echo "| \`$file\` | $SIZE |" >> $GITHUB_STEP_SUMMARY
+          done
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### 🔗 Links" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "- [GitHub Release](${{ github.server_url }}/${{ github.repository }}/releases/tag/v$VERSION)" >> $GITHUB_STEP_SUMMARY
+          echo "- [NPM Package](https://www.npmjs.com/package/s3db.js)" >> $GITHUB_STEP_SUMMARY
+          echo "- [GitHub Packages](https://github.com/${{ github.repository }}/pkgs/npm/s3db.js)" >> $GITHUB_STEP_SUMMARY
+
+  # Status check for branch protection
+  ci-status:
+    name: CI Status
+    runs-on: ubuntu-latest
+    needs: [quality]
+    if: always()
+
+    steps:
+      - name: Check Status
+        run: |
+          if [ "${{ needs.quality.result }}" != "success" ]; then
+            echo "CI Failed"
+            echo "- Quality: ${{ needs.quality.result }}"
+            exit 1
+          fi
+          echo "CI Passed - All quality checks successful"
