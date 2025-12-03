@@ -2909,45 +2909,22 @@ export class Resource extends AsyncEventEmitter {
    * });
    */
   async list({ partition = null, partitionValues = {}, limit, offset = 0 } = {}) {
-    const listStart = Date.now();
-    const log = this.database?.logger || console;
-    log.debug({ resource: this.name, partition, limit, offset }, `[LIST] START`);
-
     // Execute beforeList hooks
-    const hooksStart = Date.now();
     await this.executeHooks('beforeList', { partition, partitionValues, limit, offset });
-    const hooksMs = Date.now() - hooksStart;
-    log.debug({ resource: this.name, hooksMs }, `[LIST] beforeList hooks complete`);
 
     const [ok, err, result] = await tryFn(async () => {
       if (!partition) {
-        log.debug({ resource: this.name }, `[LIST] calling listMain`);
-        const mainStart = Date.now();
-        const res = await this.listMain({ limit, offset });
-        log.debug({ resource: this.name, ms: Date.now() - mainStart, count: res?.length }, `[LIST] listMain complete`);
-        return res;
+        return this.listMain({ limit, offset });
       }
-      log.debug({ resource: this.name, partition }, `[LIST] calling listPartition`);
-      const partStart = Date.now();
-      const res = await this.listPartition({ partition, partitionValues, limit, offset });
-      log.debug({ resource: this.name, partition, ms: Date.now() - partStart, count: res?.length }, `[LIST] listPartition complete`);
-      return res;
+      return this.listPartition({ partition, partitionValues, limit, offset });
     });
+
     if (!ok) {
-      log.warn({ resource: this.name, error: err?.message }, `[LIST] ERROR`);
       return this.handleListError(err, { partition, partitionValues });
     }
 
     // Execute afterList hooks
-    const afterHooksStart = Date.now();
-    const finalResult = await this.executeHooks('afterList', result);
-    log.debug({ resource: this.name, afterHooksMs: Date.now() - afterHooksStart }, `[LIST] afterList hooks complete`);
-
-    const totalMs = Date.now() - listStart;
-    if (totalMs > 100) {
-      log.warn({ resource: this.name, totalMs, hooksMs, count: finalResult?.length }, `[PERF] SLOW LIST detected`);
-    }
-    return finalResult;
+    return this.executeHooks('afterList', result);
   }
 
   async listMain({ limit, offset = 0 }) {
