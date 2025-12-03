@@ -101,27 +101,16 @@ describe('TasksPool', () => {
 
   describe('Concurrency Limit', () => {
     test('should enforce concurrency limit', async () => {
-      const executions = []
-      const startTimes = []
-      const endTimes = []
-
-      const promises = [1, 2, 3, 4].map((n) =>
+      const results = await Promise.all([1, 2, 3, 4].map((n) =>
         pool.enqueue(async () => {
-          startTimes.push(Date.now())
-          executions.push(n)
           await sleep(50)
-          endTimes.push(Date.now())
           return n
         })
-      )
-
-      const results = await Promise.all(promises)
+      ))
 
       expect(results).toEqual([1, 2, 3, 4])
-      // With concurrency=2, first 2 should start simultaneously
-      // Third and fourth should start after first batch completes (order may vary slightly)
-      expect(executions.length).toBe(4)
-      expect(new Set(executions)).toEqual(new Set([1, 2, 3, 4]))
+      // All 4 tasks should complete successfully
+      expect(new Set(results)).toEqual(new Set([1, 2, 3, 4]))
     })
 
     test('should respect concurrency limit with varying durations', async () => {

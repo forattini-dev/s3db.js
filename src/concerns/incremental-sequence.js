@@ -642,7 +642,6 @@ export class IncrementalSequence {
       reservedAt: Date.now()
     };
 
-    this.logger.trace?.({ fieldName, batch }, 'Reserved ID batch');
 
     return batch;
   }
@@ -675,7 +674,6 @@ export class IncrementalSequence {
    * @returns {Promise<boolean>} Success
    */
   async reset(fieldName, value) {
-    this.logger.trace?.({ fieldName, value }, 'Resetting sequence');
 
     // Clear local batch if exists
     this.localBatches.delete(fieldName);

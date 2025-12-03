@@ -1442,10 +1442,6 @@ export class Resource extends AsyncEventEmitter {
    * const user = await resource.get('user-123');
    */
   async get(id) {
-    const getStart = Date.now();
-    const log = this.database?.logger || console;
-    log.debug({ resource: this.name, id: id?.substring(0, 40) }, `[GET] START`);
-
     if (isObject(id)) {
       throw new ValidationError('Resource id must be a string', {
         field: 'id',
