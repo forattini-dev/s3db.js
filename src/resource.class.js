@@ -1464,27 +1464,11 @@ export class Resource extends AsyncEventEmitter {
     }
 
     // Execute beforeGet hooks
-    const hooksStart = Date.now();
-    log.debug({ resource: this.name, id: id?.substring(0, 40) }, `[GET] executing beforeGet hooks`);
     await this.executeHooks('beforeGet', { id });
-    const hooksMs = Date.now() - hooksStart;
-    log.debug({ resource: this.name, id: id?.substring(0, 40), hooksMs }, `[GET] beforeGet hooks complete`);
 
     const key = this.getResourceKey(id);
-    log.debug({ resource: this.name, id: id?.substring(0, 40), key: key?.substring(0, 60) }, `[GET] calling client.getObject`);
-
-    const s3Start = Date.now();
     const [ok, err, request] = await tryFn(() => this.client.getObject(key));
-    const s3Ms = Date.now() - s3Start;
-    log.debug({ resource: this.name, id: id?.substring(0, 40), s3Ms, ok, hasErr: !!err }, `[GET] client.getObject complete`);
 
-    // 🔍 PERF DEBUG: Log slow get operations
-    const totalMs = Date.now() - getStart;
-    if (totalMs > 100) {
-      log.warn({ resource: this.name, id: id?.substring(0, 40), totalMs, hooksMs, s3Ms }, `[PERF] SLOW GET detected`);
-    }
-    // LOG: resultado do headObject
-    // eslint-disable-next-line no-console
     if (!ok) {
       throw mapAwsError(err, {
         bucket: this.client.config.bucket,

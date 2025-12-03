@@ -390,7 +390,7 @@ export class CronManager {
     const jobName = typeof name === 'string' ? name : String(name);
 
     if (!this.jobs.has(name)) {
-      this.logger.warn({ name: jobName }, `Job '${jobName}' not found`);
+      this.logger.trace?.({ name: jobName }, `Job '${jobName}' not found`);
       return false;
     }
 
