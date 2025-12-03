@@ -46,35 +46,8 @@ jobs:
       - name: Type Check
         run: pnpm run test:ts
 
-      - name: Start MinIO
-        run: |
-          docker run -d \
-            --name minio \
-            -p 9000:9000 \
-            -e MINIO_ROOT_USER=minioadmin \
-            -e MINIO_ROOT_PASSWORD=minioadmin123 \
-            minio/minio:latest \
-            server /data --quiet
-
-          timeout 30s bash -c 'until curl -sf http://localhost:9000/minio/health/live; do sleep 1; done'
-
-          docker run --rm --network="host" \
-            -e AWS_ACCESS_KEY_ID=minioadmin \
-            -e AWS_SECRET_ACCESS_KEY=minioadmin123 \
-            amazon/aws-cli \
-            --endpoint-url http://localhost:9000 \
-            s3 mb s3://s3db 2>/dev/null || true
-
       - name: Run Tests
         run: pnpm test
-        env:
-          AWS_ACCESS_KEY_ID: minioadmin
-          AWS_SECRET_ACCESS_KEY: minioadmin123
-          AWS_ENDPOINT: http://localhost:9000
-          AWS_REGION: us-east-1
-          AWS_BUCKET: s3db
-          AWS_FORCE_PATH_STYLE: true
-          BUCKET_CONNECTION_STRING: s3://minioadmin:minioadmin123@s3db?endpoint=http://localhost:9000&region=us-east-1&forcePathStyle=true
 
   release-next:
     name: Release Next
