@@ -1414,10 +1414,6 @@ export class Resource extends AsyncEventEmitter {
 
       // Emit insert event with standardized naming
       this._emitStandardized('inserted', finalResult, finalResult?.id || insertedObject?.id);
-
-      // 🪵 Debug log: successful insert
-      this.logger.debug({ id: finalResult?.id || insertedObject?.id }, 'insert completed');
-
       return finalResult;
     } else {
       // Sync mode: execute all hooks including partition creation
@@ -1425,11 +1421,6 @@ export class Resource extends AsyncEventEmitter {
 
       // Emit insert event with standardized naming
       this._emitStandardized('inserted', finalResult, finalResult?.id || insertedObject?.id);
-
-      // 🪵 Debug log: successful insert
-      this.logger.debug({ id: finalResult?.id || insertedObject?.id }, 'insert completed');
-
-      // Return the final object
       return finalResult;
     }
   }
@@ -2932,47 +2923,24 @@ export class Resource extends AsyncEventEmitter {
   }
 
   async listPartition({ partition, partitionValues, limit, offset = 0 }) {
-    const listPartStart = Date.now();
-    const log = this.database?.logger || console;
-    log.debug({ resource: this.name, partition, limit, offset }, `[LISTPARTITION] START`);
-
     if (!this.config.partitions?.[partition]) {
-      log.debug({ resource: this.name, partition }, `[LISTPARTITION] partition not found, returning empty`);
       this._emitStandardized("list", { partition, partitionValues, count: 0, errors: 0 });
       return [];
     }
+
     const partitionDef = this.config.partitions[partition];
     const prefix = this.buildPartitionPrefix(partition, partitionDef, partitionValues);
-    log.debug({ resource: this.name, prefix: prefix?.substring(0, 80) }, `[LISTPARTITION] built prefix`);
 
-    // Optimization: Use getKeysPage for server-side pagination instead of getAllKeys
-    const keysStart = Date.now();
     const [ok, err, keys] = await tryFn(() => this.client.getKeysPage({
       prefix,
       offset,
       amount: limit || 1000
     }));
-    const keysMs = Date.now() - keysStart;
-    log.debug({ resource: this.name, keysMs, keysCount: keys?.length }, `[LISTPARTITION] getKeysPage complete`);
 
-    if (!ok) {
-      log.warn({ resource: this.name, error: err?.message }, `[LISTPARTITION] ERROR in getKeysPage`);
-      throw err;
-    }
+    if (!ok) throw err;
 
-    // Keys are already paginated by the client
     const filteredIds = this.extractIdsFromKeys(keys);
-    log.debug({ resource: this.name, idsCount: filteredIds?.length }, `[LISTPARTITION] extracted IDs`);
-
-    const processStart = Date.now();
     const results = await this.processPartitionResults(filteredIds, partition, partitionDef, keys);
-    const processMs = Date.now() - processStart;
-    log.debug({ resource: this.name, processMs, resultsCount: results?.length }, `[LISTPARTITION] processPartitionResults complete`);
-
-    const totalMs = Date.now() - listPartStart;
-    if (totalMs > 100) {
-      log.warn({ resource: this.name, totalMs, keysMs, processMs, count: results?.length }, `[PERF] SLOW LISTPARTITION detected`);
-    }
 
     this._emitStandardized("list", { partition, partitionValues, count: results.length, errors: 0 });
     return results;
@@ -3217,40 +3185,25 @@ export class Resource extends AsyncEventEmitter {
    * });
       */
   async page({ offset = 0, size = 100, partition = null, partitionValues = {}, skipCount = false } = {}) {
-    const pageStart = Date.now();
-    const log = this.database?.logger || console;
-    log.debug({ resource: this.name, offset, size, partition, skipCount }, `[PAGE] START`);
-
     const [ok, err, result] = await tryFn(async () => {
       // Get total count only if not skipped (for performance)
       let totalItems = null;
       let totalPages = null;
       if (!skipCount) {
-        const countStart = Date.now();
-        log.debug({ resource: this.name }, `[PAGE] calling count()`);
-        const [okCount, errCount, count] = await tryFn(() => this.count({ partition, partitionValues }));
-        const countMs = Date.now() - countStart;
-        log.debug({ resource: this.name, countMs, count, ok: okCount }, `[PAGE] count() complete`);
+        const [okCount, , count] = await tryFn(() => this.count({ partition, partitionValues }));
         if (okCount) {
           totalItems = count;
           totalPages = Math.ceil(totalItems / size);
-        } else {
-          totalItems = null;
-          totalPages = null;
         }
       }
+
       const page = Math.floor(offset / size);
       let items = [];
-      if (size <= 0) {
-        items = [];
-      } else {
-        const listStart = Date.now();
-        log.debug({ resource: this.name, partition, size, offset }, `[PAGE] calling list()`);
-        const [okList, errList, listResult] = await tryFn(() => this.list({ partition, partitionValues, limit: size, offset: offset }));
-        const listMs = Date.now() - listStart;
-        log.debug({ resource: this.name, listMs, itemsCount: listResult?.length, ok: okList }, `[PAGE] list() complete`);
+      if (size > 0) {
+        const [okList, , listResult] = await tryFn(() => this.list({ partition, partitionValues, limit: size, offset }));
         items = okList ? listResult : [];
       }
+
       const result = {
         items,
         totalItems,
@@ -3262,7 +3215,7 @@ export class Resource extends AsyncEventEmitter {
           requestedSize: size,
           requestedOffset: offset,
           actualItemsReturned: items.length,
-          skipCount: skipCount,
+          skipCount,
           hasTotalItems: totalItems !== null
         }
       };
@@ -3270,13 +3223,7 @@ export class Resource extends AsyncEventEmitter {
       return result;
     });
 
-    const totalMs = Date.now() - pageStart;
-    if (totalMs > 100) {
-      log.warn({ resource: this.name, totalMs, itemsCount: result?.items?.length }, `[PERF] SLOW PAGE detected`);
-    }
-
     if (ok) return result;
-    log.warn({ resource: this.name, error: err?.message }, `[PAGE] ERROR, returning fallback`);
     // Final fallback - return a safe result even if everything fails
     return {
       items: [],
