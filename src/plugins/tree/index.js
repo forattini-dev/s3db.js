@@ -12,7 +12,9 @@ import { NestedSetDriver } from './drivers/nested-set.js';
 import { AdjacencyListDriver } from './drivers/adjacency-list.js';
 import { TreeConfigurationError } from './errors.js';
 
+/** @class */
 export class TreePlugin extends Plugin {
+  /** @param {Object} options */
   constructor(options = {}) {
     super(options);
 

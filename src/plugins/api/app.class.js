@@ -16,7 +16,9 @@ import { RouteContext } from './route-context.class.js';
 
 const DEFAULT_PRIORITY = 100;
 
+/** @class */
 export class ApiApp {
+  /** @param {{ db?: any, resources?: any }} options */
   constructor({ db = null, resources = null } = {}) {
     this.hono = new Hono();
     this.routes = [];

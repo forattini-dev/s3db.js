@@ -5,7 +5,7 @@
     "moduleResolution": "Node",
     "esModuleInterop": true,
     "allowSyntheticDefaultImports": true,
-    "allowJs": true,
+    "allowJs": false,
     "strict": true,
     "noImplicitAny": true,
     "strictNullChecks": true,
@@ -23,17 +23,11 @@
     "noEmit": true
   },
   "include": [
-    "../../src/**/*",
-    "./**/*"
+    "../../dist/s3db.d.ts",
+    "./**/*.ts"
   ],
   "exclude": [
     "../../node_modules",
-    "../../dist",
-    "../../dist-ts",
-    "../../coverage",
-    "../../tests/**/*.test.js",
-    "../../examples",
-    "../../dist/**/*",
     "./runtime-test.ts"
   ]
 } 

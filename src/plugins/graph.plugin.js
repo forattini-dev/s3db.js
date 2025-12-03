@@ -42,7 +42,9 @@ import {
   InvalidEdgeError
 } from './graph.errors.js';
 
+/** @class */
 export class GraphPlugin extends Plugin {
+  /** @param {Object} options */
   constructor(options = {}) {
     super(options);
 
