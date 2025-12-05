@@ -1,4 +1,4 @@
-import { describe, test, expect, beforeAll, afterAll } from '@jest/globals';
+import { describe, test, expect, beforeAll, afterAll } from 'vitest';
 import { createDatabaseForTest } from '../config.js';
 import { calculateEncodedSize } from '../../src/concerns/metadata-encoding.js';
 

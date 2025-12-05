@@ -85,7 +85,8 @@ export class AdaptiveTuning {
     } else if (totalMemoryMB < 8192) {
       suggested = 30
     } else {
-      suggested = 50
+      // Cap max suggestion to 20 to prevent freezing on high-memory machines
+      suggested = 20
     }
 
     // Reduce if memory usage is already high
@@ -95,8 +96,8 @@ export class AdaptiveTuning {
       suggested = Math.max(1, Math.floor(suggested * 0.7))
     }
 
-    // Start conservative (50% of suggestion)
-    suggested = Math.max(this.minConcurrency, Math.floor(suggested * 0.5))
+    // Start conservative (50% of suggestion), but hard cap at 20
+    suggested = Math.min(Math.max(this.minConcurrency, Math.floor(suggested * 0.5)), 20)
 
     return suggested
   }
@@ -147,9 +148,16 @@ export class AdaptiveTuning {
    * @private
    */
   startMonitoring () {
+    // Use unref() to prevent the interval from keeping the process alive
+    // This is critical for tests - without unref(), Jest workers hang
     this.intervalId = setInterval(() => {
       this.adjust()
     }, this.adjustmentInterval)
+
+    // Allow Node.js to exit even if interval is running
+    if (this.intervalId.unref) {
+      this.intervalId.unref()
+    }
   }
 
   /**

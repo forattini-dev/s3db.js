@@ -521,6 +521,11 @@ export class CoordinatorPlugin extends Plugin {
       }
     }, intervalMs);
 
+    // Use unref() to prevent interval from keeping the process alive (important for tests)
+    if (timer.unref) {
+      timer.unref();
+    }
+
     return { type: 'manual', timer };
   }
 

@@ -1,4 +1,4 @@
-import { describe, expect, test, beforeEach, afterEach } from '@jest/globals';
+import { describe, expect, test, beforeEach, afterEach } from 'vitest';
 import { createDatabaseForTest, createTemporaryPathForTest } from '../config.js';
 import { BackupPlugin } from '../../src/plugins/backup.plugin.js';
 import { spawn } from 'child_process';

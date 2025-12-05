@@ -110,6 +110,11 @@ export class MemorySampler {
     this.timer = setInterval(() => {
       this.sample();
     }, this.sampleInterval);
+
+    // Use unref() to prevent interval from keeping the process alive (important for tests)
+    if (this.timer.unref) {
+      this.timer.unref();
+    }
   }
 
   /**

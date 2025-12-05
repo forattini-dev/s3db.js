@@ -39,10 +39,15 @@ export class MemoryClient extends EventEmitter {
       this.logger = createLogger({ name: 'MemoryClient', level: logLevel });
     }
     this.logger.debug({ id: this.id, bucket: this.bucket, keyPrefix: this.keyPrefix }, `MemoryClient constructor called`);
+
+    // Determine concurrency: config > env var > default (5)
+    const envConcurrency = process.env.S3DB_CONCURRENCY ? parseInt(process.env.S3DB_CONCURRENCY, 10) : null;
+    const defaultConcurrency = (envConcurrency && !isNaN(envConcurrency) && envConcurrency > 0) ? envConcurrency : 5;
+
     // Normalize execution config (mirrors S3Client taskExecutorConfig)
     this.taskExecutorConfig = {
       enabled: true,
-      concurrency: config.concurrency || 5,
+      concurrency: config.concurrency || defaultConcurrency,
       retries: config.retries ?? 3,
       retryDelay: config.retryDelay ?? 1000,
       timeout: config.timeout ?? 30000,
@@ -92,7 +97,10 @@ export class MemoryClient extends EventEmitter {
         maxObjectSize: config.maxObjectSize || 5 * 1024 * 1024 * 1024,
         persistPath: config.persistPath,
         autoPersist: config.autoPersist || false,
-        logLevel: this.logLevel
+        logLevel: this.logLevel,
+        // Memory management options
+        maxMemoryMB: config.maxMemoryMB,
+        evictionEnabled: config.evictionEnabled
       }));
     }
 

@@ -1,6 +1,22 @@
+import { describe, test, expect, beforeEach, afterEach, vi } from 'vitest';
 import { Database } from '../../src/database.class.js';
 import { MemoryClient } from '../../src/clients/memory-client.class.js';
-import { IdentityPlugin } from '../../src/plugins/identity/index.js';
+
+// Define mocks globally for the suite
+const mockInput = vi.fn();
+const mockPassword = vi.fn();
+
+// Mock enquirer by default
+vi.mock('enquirer', () => {
+  return {
+    Input: mockInput,
+    Password: mockPassword,
+    default: {
+      Input: mockInput,
+      Password: mockPassword
+    }
+  };
+});
 
 // Helper to prevent HTTP server from binding in tests
 function disableServerBinding(plugin) {
@@ -13,11 +29,18 @@ function disableServerBinding(plugin) {
 
 describe('Identity Onboarding - Interactive Mode', () => {
   let db;
-  let mockEnquirer;
   let originalStdin;
   let originalStdout;
+  let IdentityPlugin;
 
   beforeEach(async () => {
+    // Reset modules to ensure clean import of IdentityPlugin
+    vi.resetModules();
+    
+    // Re-import IdentityPlugin to pick up the mock
+    const module = await import('../../src/plugins/identity/index.js');
+    IdentityPlugin = module.IdentityPlugin;
+
     db = new Database({
       client: new MemoryClient({
         bucket: 'test-identity-onboarding-interactive',
@@ -31,10 +54,9 @@ describe('Identity Onboarding - Interactive Mode', () => {
     process.stdin.isTTY = true;
     process.stdout.isTTY = true;
 
-    mockEnquirer = {
-      Input: vi.fn(),
-      Password: vi.fn()
-    };
+    // Reset mock implementations
+    mockInput.mockReset();
+    mockPassword.mockReset();
   });
 
   afterEach(async () => {
@@ -46,11 +68,10 @@ describe('Identity Onboarding - Interactive Mode', () => {
     process.stdout.isTTY = originalStdout;
 
     vi.clearAllMocks();
-    jest.resetModules();
   });
 
   test('prompts for email, password, and name interactively', async () => {
-    mockEnquirer.Input.mockImplementation((options) => {
+    mockInput.mockImplementation(function(options) {
       return {
         run: async () => {
           if (options.name === 'email') return 'admin@interactive.com';
@@ -60,7 +81,7 @@ describe('Identity Onboarding - Interactive Mode', () => {
       };
     });
 
-    mockEnquirer.Password.mockImplementation((options) => {
+    mockPassword.mockImplementation(function(options) {
       return {
         run: async () => {
           if (options.name === 'password') return 'InteractivePass123!';
@@ -69,8 +90,6 @@ describe('Identity Onboarding - Interactive Mode', () => {
         }
       };
     });
-
-    jest.unstable_mockModule('enquirer', () => mockEnquirer);
 
     const plugin = new IdentityPlugin({
       port: 0,
@@ -100,7 +119,7 @@ describe('Identity Onboarding - Interactive Mode', () => {
   test('retries password prompt on mismatch', async () => {
     let passwordAttempt = 0;
 
-    mockEnquirer.Input.mockImplementation((options) => {
+    mockInput.mockImplementation(function(options) {
       return {
         run: async () => {
           if (options.name === 'email') return 'admin@retry.com';
@@ -110,7 +129,7 @@ describe('Identity Onboarding - Interactive Mode', () => {
       };
     });
 
-    mockEnquirer.Password.mockImplementation((options) => {
+    mockPassword.mockImplementation(function(options) {
       return {
         run: async () => {
           passwordAttempt++;
@@ -125,8 +144,6 @@ describe('Identity Onboarding - Interactive Mode', () => {
         }
       };
     });
-
-    jest.unstable_mockModule('enquirer', () => mockEnquirer);
 
     const plugin = new IdentityPlugin({
       port: 0,
@@ -154,7 +171,7 @@ describe('Identity Onboarding - Interactive Mode', () => {
   test('validates password strength interactively', async () => {
     let passwordAttempt = 0;
 
-    mockEnquirer.Input.mockImplementation((options) => {
+    mockInput.mockImplementation(function(options) {
       return {
         run: async () => {
           if (options.name === 'email') return 'admin@strength.com';
@@ -164,7 +181,7 @@ describe('Identity Onboarding - Interactive Mode', () => {
       };
     });
 
-    mockEnquirer.Password.mockImplementation((options) => {
+    mockPassword.mockImplementation(function(options) {
       return {
         run: async () => {
           passwordAttempt++;
@@ -179,8 +196,6 @@ describe('Identity Onboarding - Interactive Mode', () => {
         }
       };
     });
-
-    jest.unstable_mockModule('enquirer', () => mockEnquirer);
 
     const plugin = new IdentityPlugin({
       port: 0,
@@ -207,7 +222,7 @@ describe('Identity Onboarding - Interactive Mode', () => {
   test('fails after max password attempts', async () => {
     let passwordAttempt = 0;
 
-    mockEnquirer.Input.mockImplementation((options) => {
+    mockInput.mockImplementation(function(options) {
       return {
         run: async () => {
           if (options.name === 'email') return 'admin@maxattempts.com';
@@ -217,7 +232,7 @@ describe('Identity Onboarding - Interactive Mode', () => {
       };
     });
 
-    mockEnquirer.Password.mockImplementation((options) => {
+    mockPassword.mockImplementation(function(options) {
       return {
         run: async () => {
           passwordAttempt++;
@@ -227,8 +242,6 @@ describe('Identity Onboarding - Interactive Mode', () => {
         }
       };
     });
-
-    jest.unstable_mockModule('enquirer', () => mockEnquirer);
 
     const plugin = new IdentityPlugin({
       port: 0,
@@ -272,11 +285,16 @@ describe('Identity Onboarding - Interactive Mode', () => {
   });
 
   test('throws error if enquirer not installed', async () => {
-    jest.unstable_mockModule('enquirer', () => {
+    // Special case: we need to mock module not found
+    vi.doMock('enquirer', () => {
       throw new Error("Cannot find module 'enquirer'");
     });
+    
+    // Re-import to pick up the failing mock
+    const module = await import('../../src/plugins/identity/index.js');
+    const IdentityPluginNoEnquirer = module.IdentityPlugin;
 
-    const plugin = new IdentityPlugin({
+    const plugin = new IdentityPluginNoEnquirer({
       port: 0,
       issuer: 'http://localhost:4000',
       resources: {
@@ -291,10 +309,16 @@ describe('Identity Onboarding - Interactive Mode', () => {
     });
 
     await expect(db.usePlugin(disableServerBinding(plugin), 'identity')).rejects.toThrow(/enquirer/);
+    
+    // Restore default mock for other tests
+    vi.doMock('enquirer', () => ({
+      Input: mockInput,
+      Password: mockPassword
+    }));
   });
 
   test('uses default name if empty provided', async () => {
-    mockEnquirer.Input.mockImplementation((options) => {
+    mockInput.mockImplementation(function(options) {
       return {
         run: async () => {
           if (options.name === 'email') return 'admin@default-name.com';
@@ -304,7 +328,7 @@ describe('Identity Onboarding - Interactive Mode', () => {
       };
     });
 
-    mockEnquirer.Password.mockImplementation((options) => {
+    mockPassword.mockImplementation(function(options) {
       return {
         run: async () => {
           if (options.name === 'password') return 'DefaultNamePass123!';
@@ -313,8 +337,6 @@ describe('Identity Onboarding - Interactive Mode', () => {
         }
       };
     });
-
-    jest.unstable_mockModule('enquirer', () => mockEnquirer);
 
     const plugin = new IdentityPlugin({
       port: 0,
@@ -342,7 +364,7 @@ describe('Identity Onboarding - Interactive Mode', () => {
   test('validates email format interactively', async () => {
     let emailAttempt = 0;
 
-    mockEnquirer.Input.mockImplementation((options) => {
+    mockInput.mockImplementation(function(options) {
       return {
         run: async () => {
           if (options.name === 'email') {
@@ -356,7 +378,7 @@ describe('Identity Onboarding - Interactive Mode', () => {
       };
     });
 
-    mockEnquirer.Password.mockImplementation((options) => {
+    mockPassword.mockImplementation(function(options) {
       return {
         run: async () => {
           if (options.name === 'password') return 'ValidEmailPass123!';
@@ -365,8 +387,6 @@ describe('Identity Onboarding - Interactive Mode', () => {
         }
       };
     });
-
-    jest.unstable_mockModule('enquirer', () => mockEnquirer);
 
     const plugin = new IdentityPlugin({
       port: 0,
@@ -392,7 +412,7 @@ describe('Identity Onboarding - Interactive Mode', () => {
   });
 
   test('skips interactive mode if admin already exists', async () => {
-    mockEnquirer.Input.mockImplementation((options) => {
+    mockInput.mockImplementation(function(options) {
       return {
         run: async () => {
           if (options.name === 'email') return 'admin@first.com';
@@ -402,7 +422,7 @@ describe('Identity Onboarding - Interactive Mode', () => {
       };
     });
 
-    mockEnquirer.Password.mockImplementation((options) => {
+    mockPassword.mockImplementation(function(options) {
       return {
         run: async () => {
           if (options.name === 'password') return 'FirstPass123!';
@@ -411,8 +431,6 @@ describe('Identity Onboarding - Interactive Mode', () => {
         }
       };
     });
-
-    jest.unstable_mockModule('enquirer', () => mockEnquirer);
 
     const plugin1 = new IdentityPlugin({
       port: 0,
@@ -443,7 +461,7 @@ describe('Identity Onboarding - Interactive Mode', () => {
     await db2.connect();
 
     let enquirerCalled = false;
-    mockEnquirer.Input.mockImplementation((options) => {
+    mockInput.mockImplementation(function(options) {
       enquirerCalled = true;
       return { run: async () => '' };
     });
@@ -474,7 +492,7 @@ describe('Identity Onboarding - Interactive Mode', () => {
   });
 
   test('custom interactive banner message', async () => {
-    mockEnquirer.Input.mockImplementation((options) => {
+    mockInput.mockImplementation(function(options) {
       return {
         run: async () => {
           if (options.name === 'email') return 'admin@banner.com';
@@ -484,7 +502,7 @@ describe('Identity Onboarding - Interactive Mode', () => {
       };
     });
 
-    mockEnquirer.Password.mockImplementation((options) => {
+    mockPassword.mockImplementation(function(options) {
       return {
         run: async () => {
           if (options.name === 'password') return 'BannerPass123!';
@@ -493,8 +511,6 @@ describe('Identity Onboarding - Interactive Mode', () => {
         }
       };
     });
-
-    jest.unstable_mockModule('enquirer', () => mockEnquirer);
 
     const plugin = new IdentityPlugin({
       port: 0,

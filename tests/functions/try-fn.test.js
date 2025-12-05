@@ -1,3 +1,4 @@
+import { describe, test, it, expect, beforeAll, afterAll } from "vitest";
 import { tryFn } from '#src/concerns/try-fn.js';
 
 describe('tryFn', () => {

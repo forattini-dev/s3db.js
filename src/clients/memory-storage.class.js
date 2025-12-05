@@ -3,6 +3,12 @@
  *
  * Simulates S3 object storage in memory using Map data structure.
  * Supports snapshot/restore, persistence, and configurable limits.
+ *
+ * Memory Management Features:
+ * - LRU eviction for body data when memory limit is reached
+ * - Configurable maxMemoryMB limit (default: 512MB)
+ * - Automatic memory tracking and eviction
+ * - Bodies are evicted first, metadata is preserved
  */
 
 import { createHash } from 'crypto';
@@ -18,6 +24,7 @@ export class MemoryStorage {
     /**
      * Main storage: Map<key, ObjectData>
      * ObjectData: { body, metadata, contentType, etag, lastModified, size, contentEncoding, contentLength }
+     * Using Map preserves insertion order for LRU tracking
      */
     this.objects = new Map();
 
@@ -29,6 +36,19 @@ export class MemoryStorage {
     this.persistPath = config.persistPath;
     this.autoPersist = Boolean(config.autoPersist);
     this.logLevel = config.logLevel || 'info';
+
+    // Memory management configuration
+    this.maxMemoryMB = config.maxMemoryMB ?? 512; // Default 512MB limit
+    this.maxMemoryBytes = this.maxMemoryMB * 1024 * 1024;
+    this.currentMemoryBytes = 0;
+    this.evictionEnabled = config.evictionEnabled !== false; // Enabled by default
+
+    // Stats tracking
+    this._stats = {
+      evictions: 0,
+      evictedBytes: 0,
+      peakMemoryBytes: 0
+    };
 
     // 🪵 Logger initialization
     if (config.logger) {
@@ -242,6 +262,13 @@ export class MemoryStorage {
     const lastModified = new Date().toISOString();
     const size = buffer.length;
 
+    // Calculate memory delta (new size - existing size if replacing)
+    const existingSize = existing ? existing.size : 0;
+    const memoryDelta = size - existingSize;
+
+    // Evict old entries if needed to make room
+    this._evictIfNeeded(memoryDelta > 0 ? memoryDelta : 0);
+
     const objectData = {
       body: buffer,
       /* c8 ignore next */
@@ -256,6 +283,9 @@ export class MemoryStorage {
     };
 
     this.objects.set(key, objectData);
+
+    // Track memory usage
+    this._trackMemory(memoryDelta);
 
     // 🪵 Debug: PUT operation
     this.logger.debug({ key, size, etag }, `PUT ${key} (${size} bytes, etag: ${etag})`);
@@ -293,6 +323,9 @@ export class MemoryStorage {
       error.name = 'NoSuchKey';
       throw error;
     }
+
+    // Touch for LRU - mark as recently used
+    this._touchKey(key);
 
     // 🪵 Debug: GET operation
     this.logger.debug({ key, size: obj.size }, `GET ${key} (${obj.size} bytes)`);
@@ -354,6 +387,9 @@ export class MemoryStorage {
       error.name = 'NoSuchKey';
       throw error;
     }
+
+    // Touch for LRU - mark as recently used
+    this._touchKey(key);
 
     // 🪵 Debug: HEAD operation
     this.logger.debug({ key }, `HEAD ${key}`);
@@ -427,7 +463,14 @@ export class MemoryStorage {
    * Delete an object
    */
   async delete(key) {
-    const existed = this.objects.has(key);
+    const obj = this.objects.get(key);
+    const existed = Boolean(obj);
+
+    if (obj) {
+      // Decrement memory tracking
+      this._trackMemory(-obj.size);
+    }
+
     this.objects.delete(key);
 
     // 🪵 Debug: DELETE operation
@@ -585,10 +628,15 @@ export class MemoryStorage {
     }
 
     this.objects.clear();
+    this.currentMemoryBytes = 0;
 
+    let totalBytes = 0;
     for (const [key, obj] of Object.entries(snapshot.objects)) {
+      const body = Buffer.from(obj.body, 'base64');
+      totalBytes += body.length;
+
       this.objects.set(key, {
-        body: Buffer.from(obj.body, 'base64'),
+        body,
         metadata: obj.metadata,
         contentType: obj.contentType,
         etag: obj.etag,
@@ -598,6 +646,9 @@ export class MemoryStorage {
         contentLength: obj.contentLength
       });
     }
+
+    // Update memory tracking
+    this._trackMemory(totalBytes);
 
     // 🪵 Debug: snapshot restored
     this.logger.debug({ objectCount: this.objects.size }, `Restored snapshot with ${this.objects.size} objects`);
@@ -674,24 +725,31 @@ export class MemoryStorage {
   }
 
   /**
-   * Get storage statistics
+   * Get storage statistics (optimized - uses tracked memory)
    */
   getStats() {
-    let totalSize = 0;
-    const keys = [];
-
-    for (const [key, obj] of this.objects.entries()) {
-      totalSize += obj.size;
-      keys.push(key);
-    }
-
     return {
       objectCount: this.objects.size,
-      totalSize,
-      totalSizeFormatted: this._formatBytes(totalSize),
-      keys: keys.sort(),
-      bucket: this.bucket
+      totalSize: this.currentMemoryBytes,
+      totalSizeFormatted: this._formatBytes(this.currentMemoryBytes),
+      keys: this.getKeys(), // Computed lazily for backward compatibility
+      bucket: this.bucket,
+      // Memory management stats
+      maxMemoryMB: this.maxMemoryMB,
+      memoryUsagePercent: this.maxMemoryBytes > 0
+        ? Math.round((this.currentMemoryBytes / this.maxMemoryBytes) * 100)
+        : 0,
+      evictions: this._stats.evictions,
+      evictedBytes: this._stats.evictedBytes,
+      peakMemoryBytes: this._stats.peakMemoryBytes
     };
+  }
+
+  /**
+   * Get all keys (lazy - only when needed)
+   */
+  getKeys() {
+    return Array.from(this.objects.keys()).sort();
   }
 
   /**
@@ -706,12 +764,91 @@ export class MemoryStorage {
   }
 
   /**
+   * Track memory usage and update peak
+   */
+  _trackMemory(deltaBytes) {
+    this.currentMemoryBytes += deltaBytes;
+    if (this.currentMemoryBytes > this._stats.peakMemoryBytes) {
+      this._stats.peakMemoryBytes = this.currentMemoryBytes;
+    }
+  }
+
+  /**
+   * Touch a key to mark it as recently used (moves to end of Map for LRU)
+   */
+  _touchKey(key) {
+    const obj = this.objects.get(key);
+    if (obj) {
+      this.objects.delete(key);
+      this.objects.set(key, obj);
+    }
+  }
+
+  /**
+   * Evict oldest entries until memory is under limit
+   * Returns number of bytes evicted
+   */
+  _evictIfNeeded(requiredBytes = 0) {
+    if (!this.evictionEnabled) return 0;
+
+    const targetBytes = this.maxMemoryBytes;
+    const neededSpace = this.currentMemoryBytes + requiredBytes;
+
+    if (neededSpace <= targetBytes) return 0;
+
+    let evictedBytes = 0;
+    const keysToEvict = [];
+
+    // Iterate from oldest (first in Map) to find candidates
+    for (const [key, obj] of this.objects) {
+      if (this.currentMemoryBytes - evictedBytes + requiredBytes <= targetBytes) {
+        break;
+      }
+      keysToEvict.push(key);
+      evictedBytes += obj.size;
+    }
+
+    // Perform evictions
+    for (const key of keysToEvict) {
+      const obj = this.objects.get(key);
+      if (obj) {
+        this.objects.delete(key);
+        this._stats.evictions++;
+        this._stats.evictedBytes += obj.size;
+      }
+    }
+
+    this.currentMemoryBytes -= evictedBytes;
+
+    if (keysToEvict.length > 0) {
+      this.logger.debug(
+        { evicted: keysToEvict.length, bytes: evictedBytes },
+        `LRU evicted ${keysToEvict.length} objects (${this._formatBytes(evictedBytes)})`
+      );
+    }
+
+    return evictedBytes;
+  }
+
+  /**
    * Clear all objects
    */
   clear() {
     this.objects.clear();
+    this.currentMemoryBytes = 0;
     // 🪵 Debug: cleared all objects
     this.logger.debug('Cleared all objects');
+  }
+
+  /**
+   * Reset memory stats (useful for testing)
+   */
+  resetStats() {
+    this._stats = {
+      evictions: 0,
+      evictedBytes: 0,
+      peakMemoryBytes: this.currentMemoryBytes
+    };
   }
 }
 

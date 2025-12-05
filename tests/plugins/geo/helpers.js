@@ -1,4 +1,4 @@
-import { afterEach, beforeEach } from '@jest/globals';
+import { afterEach, beforeEach } from 'vitest';
 import { MemoryClient } from '../../../src/clients/memory-client.class.js';
 import { createMemoryDatabaseForTest } from '../../config.js';
 import { GeoPlugin } from '../../../src/plugins/geo.plugin.js';

@@ -8,7 +8,7 @@
  * - Usable binary space in metadata: ~1.5KB (~12,000 bits)
  */
 
-import { describe, test, expect, beforeAll, afterAll } from '@jest/globals';
+import { describe, test, expect, beforeAll, afterAll } from 'vitest';
 import { createDatabaseForTest } from '../config.js';
 import {
   encodeBuffer,

@@ -1,3 +1,4 @@
+import { describe, test, it, expect, beforeAll, afterAll } from "vitest";
 import { 
   calculateAttributeSizes, 
   calculateTotalSize, 

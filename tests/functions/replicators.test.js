@@ -1,4 +1,4 @@
-import { describe, test, expect, beforeEach, afterEach } from '@jest/globals';
+import { describe, test, expect, beforeEach, afterEach } from 'vitest';
 import { createDatabaseForTest } from '../config.js';
 import { MemoryClient } from '../../src/clients/memory-client.class.js';
 import BaseReplicator from '../../src/plugins/replicators/base-replicator.class.js';

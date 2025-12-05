@@ -1,4 +1,4 @@
-import { afterAll, afterEach, beforeAll, beforeEach } from '@jest/globals';
+import { afterAll, afterEach, beforeAll, beforeEach } from 'vitest';
 import { rm } from 'node:fs/promises';
 
 import { createMemoryDatabaseForTest, createTemporaryPathForTest } from '../../config.js';

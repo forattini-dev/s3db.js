@@ -1,4 +1,4 @@
-import { describe, test, expect } from '@jest/globals';
+import { describe, test, expect } from 'vitest';
 import { kmeans, findOptimalK } from '../../src/plugins/vector/kmeans.js';
 import { euclideanDistance, cosineDistance } from '../../src/plugins/vector/distances.js';
 

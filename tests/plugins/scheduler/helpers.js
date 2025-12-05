@@ -1,4 +1,4 @@
-import { jest } from '@jest/globals';
+import { vi } from 'vitest';
 
 import { SchedulerPlugin } from '../../../src/plugins/scheduler.plugin.js';
 
@@ -20,20 +20,20 @@ export function buildMockActions() {
   };
 
   const actions = {
-    testAction: jest.fn(async (...args) => {
+    testAction: vi.fn(async (...args) => {
       calls.testAction.push(args);
       return { success: true };
     }),
-    longRunningAction: jest.fn(async (...args) => {
+    longRunningAction: vi.fn(async (...args) => {
       calls.longRunningAction.push(args);
       await new Promise(resolve => setTimeout(resolve, 50)); // Simulate work
       return { done: true };
     }),
-    failingAction: jest.fn(async (...args) => {
+    failingAction: vi.fn(async (...args) => {
       calls.failingAction.push(args);
       throw new Error('Action failed');
     }),
-    timeoutAction: jest.fn(async (...args) => {
+    timeoutAction: vi.fn(async (...args) => {
       calls.timeoutAction.push(args);
       // Simulate timeout - never resolves
       return new Promise(() => {});
@@ -99,7 +99,7 @@ export function createTestPlugin(mockActions = buildMockActions(), overrides = {
   // Create hook functions with tracking and assertion methods
   const hooks = {};
   for (const hookName of ['onJobStart', 'onJobComplete', 'onJobError']) {
-    const hookFn = jest.fn((...args) => hookCalls[hookName].push(args));
+    const hookFn = vi.fn((...args) => hookCalls[hookName].push(args));
 
     hooks[hookName] = overrides[hookName] || hookFn;
   }

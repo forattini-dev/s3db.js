@@ -160,7 +160,10 @@ export class EventualConsistencyPlugin extends CoordinatorPlugin {
       await cronManager.scheduleInterval(interval, () => this.workerLoop(), jobName);
       this._workerLoopHandle = { stop: () => cronManager.stop(jobName) };
     } else {
-      this._workerLoopHandle = setInterval(() => this.workerLoop(), interval);
+      const handle = setInterval(() => this.workerLoop(), interval);
+      // Use unref() to prevent interval from keeping the process alive (important for tests)
+      if (handle.unref) handle.unref();
+      this._workerLoopHandle = handle;
     }
   }
 
@@ -951,7 +954,15 @@ export class EventualConsistencyPlugin extends CoordinatorPlugin {
 
     // Process all handlers concurrently
     // S3Client's TasksPool will manage the concurrency limit (default 10)
-    const taskResults = await Promise.all(tasks.map(task => this._processHandlerWork(task)));
+    // BUT creating thousands of promises at once causes memory pressure.
+    // Use TasksRunner to throttle the *initiation* of these tasks.
+    const { TasksRunner } = await import('../../tasks/tasks-runner.class.js');
+    const runner = new TasksRunner({ concurrency: 10 });
+    
+    const { results: taskResults } = await runner.process(tasks, async (task) => {
+      return await this._processHandlerWork(task);
+    });
+    runner.destroy();
 
     // Aggregate results
     let totalClaimed = 0;

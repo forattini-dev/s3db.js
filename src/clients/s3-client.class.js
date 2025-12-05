@@ -1,10 +1,9 @@
 import path from "path";
 import EventEmitter from "events";
 import { chunk } from "lodash-es";
-import { Agent as HttpAgent } from 'http';
-import { Agent as HttpsAgent } from 'https';
-import { NodeHttpHandler } from '@smithy/node-http-handler';
 import jsonStableStringify from "json-stable-stringify";
+
+import { ReckerHttpHandler } from "./recker-http-handler.js";
 
 import {
   S3Client as AwsS3Client,
@@ -56,8 +55,8 @@ export class S3Client extends EventEmitter {
     this.httpClientOptions = {
       keepAlive: true, // Enabled for better performance
       keepAliveMsecs: 1000, // 1 second keep-alive
-      maxSockets: httpClientOptions.maxSockets || 500, // High concurrency support
-      maxFreeSockets: httpClientOptions.maxFreeSockets || 100, // Better connection reuse
+      maxSockets: httpClientOptions.maxSockets || 50, // Match max safe concurrency
+      maxFreeSockets: httpClientOptions.maxFreeSockets || 10, // Better connection reuse
       timeout: 60000, // 60 second timeout
       ...httpClientOptions,
     };
@@ -99,13 +98,26 @@ export class S3Client extends EventEmitter {
    * @private
    */
   _normalizeTaskExecutorConfig(config) {
-    if (config === false || config?.enabled === false) {
+    // Env var overrides
+    const envEnabled = process.env.S3DB_EXECUTOR_ENABLED;
+    const envConcurrency = process.env.S3DB_CONCURRENCY;
+
+    if (config === false || config?.enabled === false || envEnabled === 'false' || envEnabled === '0') {
       return { enabled: false };
+    }
+
+    // Parse env concurrency if present
+    let defaultConcurrency = 10; // Safer default (was 50)
+    if (envConcurrency) {
+      const parsed = parseInt(envConcurrency, 10);
+      if (!isNaN(parsed) && parsed > 0) {
+        defaultConcurrency = parsed;
+      }
     }
 
     const normalized = {
       enabled: config.enabled ?? true, // ENABLED BY DEFAULT
-      concurrency: config.concurrency ?? 50, // Default: 50 concurrent operations per pool
+      concurrency: config.concurrency ?? defaultConcurrency,
       retries: config.retries ?? 3,
       retryDelay: config.retryDelay ?? 1000,
       timeout: config.timeout ?? 30000,
@@ -297,15 +309,8 @@ export class S3Client extends EventEmitter {
   }
 
   createClient() {
-    // Create HTTP agents with keep-alive configuration
-    const httpAgent = new HttpAgent(this.httpClientOptions);
-    const httpsAgent = new HttpsAgent(this.httpClientOptions);
-
-    // Create HTTP handler with agents
-    const httpHandler = new NodeHttpHandler({
-      httpAgent,
-      httpsAgent,
-    });
+    // Create HTTP handler using Recker (Undici-based)
+    const httpHandler = new ReckerHttpHandler(this.httpClientOptions);
 
     let options = {
       region: this.config.region,

@@ -1,12 +1,13 @@
+import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from 'vitest';
 import { Database } from '../../src/database.class.js';
 import { MemoryClient } from '../../src/clients/memory-client.class.js';
 
-jest.unstable_mockModule('../../src/plugins/concerns/plugin-dependencies.js', () => ({
+vi.mock('../../src/plugins/concerns/plugin-dependencies.js', () => ({
   requirePluginDependency: vi.fn()
 }));
 
-const { PuppeteerPlugin } = await import('../../src/plugins/puppeteer.plugin.js');
-const { ProxyManager } = await import('../../src/plugins/puppeteer/proxy-manager.js');
+import { PuppeteerPlugin } from '../../src/plugins/puppeteer.plugin.js';
+import { ProxyManager } from '../../src/plugins/puppeteer/proxy-manager.js';
 
 describe('PuppeteerPlugin - Proxy Pool & Binding', () => {
   let db;

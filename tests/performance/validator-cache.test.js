@@ -4,7 +4,7 @@
  * Validates that validator caching works correctly and provides expected memory savings
  */
 
-import { describe, it, expect, beforeEach, afterEach } from '@jest/globals';
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { Database } from '../../src/database.class.js';
 import { MemoryClient } from '../../src/clients/memory-client.class.js';
 import Schema from '../../src/schema.class.js';

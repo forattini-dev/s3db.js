@@ -48,6 +48,11 @@ export class PerformanceMonitor {
     this.intervalId = setInterval(() => {
       this.takeSnapshot()
     }, intervalMs)
+
+    // Use unref() to prevent interval from keeping the process alive (important for tests)
+    if (this.intervalId.unref) {
+      this.intervalId.unref()
+    }
   }
 
   /**

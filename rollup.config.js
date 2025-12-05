@@ -113,7 +113,7 @@ export default {
     }
 
     // Make peer dependencies external by pattern matching
-    if (id.startsWith('@aws-sdk/') && id !== '@aws-sdk/client-s3' && id !== '@aws-sdk/credential-providers' && id !== '@aws-sdk/s3-request-presigner' && id !== '@smithy/node-http-handler') {
+    if (id.startsWith('@aws-sdk/') && id !== '@aws-sdk/client-s3' && id !== '@aws-sdk/credential-providers' && id !== '@aws-sdk/s3-request-presigner') {
       return true;
     }
     if (id.startsWith('@google-cloud/') || id.startsWith('@azure/') || id.startsWith('@planetscale/') || id.startsWith('@libsql/') || id.startsWith('@tensorflow/') || id.startsWith('@xenova/')) {
@@ -126,8 +126,8 @@ export default {
       '@aws-sdk/credential-providers',
       '@aws-sdk/s3-request-presigner',
       '@modelcontextprotocol/sdk',
-      '@smithy/node-http-handler',
       '@supercharge/promise-pool',
+      'recker',
       'dotenv',
       'fastest-validator',
       'flat',

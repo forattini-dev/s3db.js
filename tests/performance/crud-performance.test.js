@@ -12,7 +12,7 @@
  * that write operations scale linearly with data size (not quadratically).
  */
 
-import { describe, it, expect, beforeEach, afterEach } from '@jest/globals';
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { Database } from '../../src/database.class.js';
 import { MemoryClient } from '../../src/clients/memory-client.class.js';
 import { clearValidatorCache } from '../../src/concerns/validator-cache.js';

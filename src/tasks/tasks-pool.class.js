@@ -213,7 +213,8 @@ export class TasksPool extends EventEmitter {
   _defaultAutoConcurrency () {
     try {
       const cpuCount = Math.max(1, cpus()?.length || 0)
-      return Math.min(Math.max(cpuCount * 4, 4), 64)
+      // Conservative default: 1x CPU count, min 4, max 20 (to prevent freezing)
+      return Math.min(Math.max(cpuCount, 4), 20)
     } catch {
       return 10
     }

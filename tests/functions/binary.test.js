@@ -4,7 +4,7 @@
  * Tests the binary encoding/decoding utilities and bitmap helpers.
  */
 
-import { describe, it, expect } from '@jest/globals';
+import { describe, it, expect } from 'vitest';
 import {
   encodeBuffer,
   decodeBuffer,
