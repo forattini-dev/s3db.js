@@ -5,7 +5,6 @@
  * and investigate potential S3 eventual consistency issues
  */
 
-import { describe, it, expect, beforeEach, afterEach } from '@jest/globals';
 import { EventualConsistencyPlugin } from '../../src/plugins/eventual-consistency/index.js';
 import { createDatabaseForTest } from '../config.js';
 

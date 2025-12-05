@@ -1,11 +1,12 @@
 /* istanbul ignore file */
 import fs from 'fs/promises';
+import os from 'os';
 import path, { join } from 'path';
 import { isString } from 'lodash-es';
 
 import {
-  SQSClient, 
-  CreateQueueCommand, 
+  SQSClient,
+  CreateQueueCommand,
   SendMessageCommand,
 } from "@aws-sdk/client-sqs";
 
@@ -15,11 +16,24 @@ import { CronManager } from '#src/concerns/cron-manager.js';
 import { ProcessManager } from '#src/concerns/process-manager.js';
 import { S3Client } from '#src/clients/s3-client.class.js';
 import { MemoryClient } from '#src/clients/memory-client.class.js';
+import { FileSystemClient } from '#src/clients/filesystem-client.class.js';
 
-const forceMemoryClients = (() => {
-  const rawValue = String(process.env.TEST_FORCE_MEMORY_CLIENT ?? 'true').toLowerCase();
+// Default to filesystem client to avoid memory pressure during tests
+const useFilesystemClient = (() => {
+  const rawValue = String(process.env.TEST_USE_FILESYSTEM_CLIENT ?? 'true').toLowerCase();
   return !['false', '0', 'off', 'no'].includes(rawValue);
 })();
+
+// Legacy flag for backward compatibility
+const forceMemoryClients = (() => {
+  const rawValue = String(process.env.TEST_FORCE_MEMORY_CLIENT ?? 'false').toLowerCase();
+  return !['false', '0', 'off', 'no'].includes(rawValue);
+})();
+
+// Base temp directory for filesystem tests (cross-platform using os.tmpdir())
+// Each test run gets a unique directory to avoid conflicts between parallel tests
+const testRunId = `${Date.now()}-${Math.random().toString(36).substring(2, 8)}`;
+const testTempBaseDir = path.join(os.tmpdir(), 's3db-tests', testRunId);
 
 
 export const sleep = ms => new Promise(r => setTimeout(r, ms));
@@ -73,6 +87,71 @@ export function createClientForTest(testName, options = {}) {
   return new S3Client(finalOptions);
 }
 
+/**
+ * Create a filesystem-based Database for testing
+ * Uses local filesystem instead of memory to avoid OOM issues
+ *
+ * @param {string} testName - Unique test identifier
+ * @param {object} options - Additional Database options
+ * @returns {Database} Database instance using FileSystemClient
+ */
+export function createFilesystemDatabaseForTest(testName, options = {}) {
+  if (!isString(testName)) {
+    throw new Error('testName must be a string');
+  }
+
+  // Create unique path for this test to avoid collisions
+  const uniqueId = `${testName}-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
+  const testBasePath = path.join(testTempBaseDir, uniqueId);
+
+  const filesystemClient = new FileSystemClient({
+    basePath: testBasePath,
+    bucket: 'test',
+    keyPrefix: s3Prefix(testName),
+    enforceLimits: options.enforceLimits || false,
+    logLevel: 'silent'
+  });
+
+  const params = {
+    client: filesystemClient,
+    logLevel: 'silent',
+    ...options,
+    loggerOptions: {
+      level: 'error',
+      ...(options.loggerOptions || {}),
+    },
+  };
+
+  if (!params.processManager) {
+    params.processManager = testProcessManager;
+  }
+
+  if (!params.cronManager) {
+    params.cronManager = testCronManager;
+  }
+
+  const database = new Database(params);
+
+  // Track for cleanup
+  if (typeof global !== 'undefined') {
+    global._testDatabases = global._testDatabases || new Set();
+    global._testDatabases.add(database);
+
+    const originalDisconnect = database.disconnect.bind(database);
+    database.disconnect = async function() {
+      try {
+        await originalDisconnect();
+        // Cleanup temp directory after disconnect
+        await fs.rm(testBasePath, { recursive: true, force: true }).catch(() => {});
+      } finally {
+        global._testDatabases?.delete(database);
+      }
+    };
+  }
+
+  return database;
+}
+
 export function createDatabaseForTest(testName, options = {}) {
   if (!isString(testName)) {
     throw new Error('testName must be a string');
@@ -80,11 +159,25 @@ export function createDatabaseForTest(testName, options = {}) {
 
   const {
     forceMemoryClient,
+    forceFilesystemClient,
     ...restOptions
   } = options;
 
-  const shouldUseMemory = (forceMemoryClient ?? forceMemoryClients) === true;
+  // Priority: explicit option > env var > default (filesystem)
+  const shouldUseMemory = forceMemoryClient === true || (forceMemoryClients && forceFilesystemClient !== true);
+  const shouldUseFilesystem = forceFilesystemClient === true || (useFilesystemClient && !shouldUseMemory);
 
+  // Use filesystem client by default (low memory usage)
+  if (
+    shouldUseFilesystem &&
+    !restOptions.client &&
+    !restOptions.connectionString &&
+    !restOptions.bucket
+  ) {
+    return createFilesystemDatabaseForTest(testName, restOptions);
+  }
+
+  // Use memory client if explicitly requested
   if (
     shouldUseMemory &&
     !restOptions.client &&
@@ -202,9 +295,9 @@ export async function createSqsQueueForTest(testName, options = {}) {
 
   const response = await sqsClient.send(command);
   const queueUrl = response.QueueUrl.replace(/https?:\/\/[^/]+/, 'http://localhost:4566');
-  
+
   await new Promise(resolve => setTimeout(resolve, 500));
-  
+
   return queueUrl;
 }
 

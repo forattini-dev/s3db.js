@@ -1,4 +1,3 @@
-import { describe, expect, jest, test } from '@jest/globals';
 
 import { GeoPlugin } from '../../../src/plugins/geo.plugin.js';
 import { setupGeoSuite } from './helpers.js';
@@ -67,7 +66,7 @@ describe('Geo Plugin - findNearby()', () => {
 
     await new Promise(resolve => setTimeout(resolve, 100));
 
-    const logSpy = jest.spyOn(console, 'log').mockImplementation();
+    const logSpy = vi.spyOn(console, 'log').mockImplementation();
 
     const nearby = await resource.findNearby({
       lat: SAO_PAULO.lat,
@@ -202,7 +201,7 @@ describe('Geo Plugin - findNearby()', () => {
     await resource.insert({ name: 'Store 1', latitude: SAO_PAULO.lat, longitude: SAO_PAULO.lon });
     await resource.insert({ name: 'Store 2', latitude: SAO_PAULO.lat + 0.01, longitude: SAO_PAULO.lon + 0.01 });
 
-    const logSpy = jest.spyOn(console, 'log').mockImplementation();
+    const logSpy = vi.spyOn(console, 'log').mockImplementation();
 
     await resource.findNearby({
       lat: SAO_PAULO.lat,
@@ -244,7 +243,7 @@ describe('Geo Plugin - findNearby()', () => {
       });
     }
 
-    const logSpy = jest.spyOn(console, 'log').mockImplementation();
+    const logSpy = vi.spyOn(console, 'log').mockImplementation();
 
     await resource.findNearby({ lat: SAO_PAULO.lat, lon: SAO_PAULO.lon, radius: 50, limit: 10 });
     const largeLog = logSpy.mock.calls.find(call => call[0].includes('50km radius'));

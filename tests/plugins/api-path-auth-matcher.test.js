@@ -9,7 +9,6 @@
  * - Path-based auth middleware
  */
 
-import { describe, it, expect, beforeAll, afterAll } from '@jest/globals';
 import {
   matchPath,
   findAuthRule,

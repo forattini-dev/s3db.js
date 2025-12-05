@@ -11,7 +11,6 @@
  * - When record is created, pending transactions are applied
  */
 
-import { describe, it, expect, beforeEach, afterEach } from '@jest/globals';
 import { EventualConsistencyPlugin } from '../../src/plugins/eventual-consistency/index.js';
 import { createDatabaseForTest } from '../config.js';
 import tryFn from '../../src/concerns/try-fn.js';

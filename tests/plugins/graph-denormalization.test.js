@@ -2,7 +2,6 @@
  * Graph Denormalization Test
  */
 
-import { describe, it, expect, beforeAll, afterAll, jest } from '@jest/globals';
 import { Database } from '../../src/database.class.js';
 import { GraphPlugin } from '../../src/plugins/graph.plugin.js';
 
@@ -66,8 +65,8 @@ describe('GraphPlugin - Denormalization', () => {
     await db.resources.users.graph.connect(charlie.id, dave.id);
 
     // Spy on users.getMany/get to ensure it's NOT called
-    const getSpy = jest.spyOn(db.resources.users, 'getMany');
-    const getSingleSpy = jest.spyOn(db.resources.users, 'get');
+    const getSpy = vi.spyOn(db.resources.users, 'getMany');
+    const getSingleSpy = vi.spyOn(db.resources.users, 'get');
 
     const neighbors = await db.resources.users.graph.neighbors(charlie.id);
 
@@ -95,7 +94,7 @@ describe('GraphPlugin - Denormalization', () => {
     });
 
     // neighbors() should fetch Frank from DB since edge has no _targetData
-    const getManySpy = jest.spyOn(db.resources.users, 'getMany');
+    const getManySpy = vi.spyOn(db.resources.users, 'getMany');
     
     const neighbors = await db.resources.users.graph.neighbors(eve.id);
     

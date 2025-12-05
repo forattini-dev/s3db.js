@@ -1,4 +1,3 @@
-import { describe, test, expect } from '@jest/globals';
 import { encodeDecimal, decodeDecimal, encodeFixedPoint, decodeFixedPoint, encodeFixedPointBatch, decodeFixedPointBatch } from '../../src/concerns/base62.js';
 
 /**

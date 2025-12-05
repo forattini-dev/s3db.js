@@ -5,12 +5,11 @@
  * Verifies that final consolidated values match expected results
  */
 
-import { describe, it, expect, beforeEach, afterEach, jest } from '@jest/globals';
 import { EventualConsistencyPlugin } from '../../src/plugins/eventual-consistency/index.js';
 import { createDatabaseForTest } from '../config.js';
 
 describe('EventualConsistencyPlugin - Multi-Field Operations & Consolidation', () => {
-  jest.setTimeout(120000);
+  /* TODO: Use vi.setConfig({ testTimeout: 120000 }) or test options */ vi.setConfig({ testTimeout: 120000 });
   let database;
   let urls;
 

@@ -1,4 +1,3 @@
-import { jest, describe, test, expect, beforeEach, afterEach } from '@jest/globals';
 
 import { ReconPlugin } from '#src/plugins/recon.plugin.js';
 
@@ -6,7 +5,7 @@ describe('ReconPlugin - Behavior Modes', () => {
   let emitSpy;
 
   beforeEach(() => {
-    jest.restoreAllMocks();
+    vi.restoreAllMocks();
   });
 
   afterEach(() => {
@@ -40,7 +39,7 @@ describe('ReconPlugin - Behavior Modes', () => {
     });
 
     test('emits behavior-applied event', async () => {
-      emitSpy = jest.spyOn(ReconPlugin.prototype, 'emit');
+      emitSpy = vi.spyOn(ReconPlugin.prototype, 'emit');
 
       new ReconPlugin({
       logLevel: 'silent',behavior: 'passive',

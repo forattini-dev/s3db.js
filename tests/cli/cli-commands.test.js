@@ -1,8 +1,6 @@
-import { describe, expect, test, beforeEach, afterEach, jest } from '@jest/globals';
 import { spawn } from 'child_process';
 import path from 'path';
 
-jest.setTimeout(120000);
 
 describe('CLI Commands Basic Tests', () => {
   

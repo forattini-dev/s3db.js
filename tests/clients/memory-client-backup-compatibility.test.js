@@ -1,4 +1,3 @@
-import { describe, it, expect } from '@jest/globals';
 import { MemoryClient } from '#src/clients/memory-client.class.js';
 import Database from '#src/database.class.js';
 

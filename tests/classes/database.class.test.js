@@ -1,5 +1,4 @@
 import { EventEmitter } from 'events';
-import { describe, expect, test, beforeEach, afterEach, it, jest } from '@jest/globals';
 
 import Database, { S3db } from '../../src/database.class.js';
 import { MemoryClient } from '#src/clients/memory-client.class.js';
@@ -232,8 +231,8 @@ describe('Database Class - Complete Journey', () => {
 describe('Database Plugin Lifecycle', () => {
   test('connect surfaces plugin install failures as DatabaseError', async () => {
     const installError = new Error('install explosion');
-    const installSpy = jest.fn().mockRejectedValue(installError);
-    const startSpy = jest.fn().mockResolvedValue();
+    const installSpy = vi.fn().mockRejectedValue(installError);
+    const startSpy = vi.fn().mockResolvedValue();
 
     class BrokenInstallPlugin {
       constructor() {
@@ -256,9 +255,9 @@ describe('Database Plugin Lifecycle', () => {
   });
 
   test('connect surfaces plugin start failures as DatabaseError', async () => {
-    const installSpy = jest.fn().mockResolvedValue();
+    const installSpy = vi.fn().mockResolvedValue();
     const startError = new Error('start explosion');
-    const startSpy = jest.fn().mockRejectedValue(startError);
+    const startSpy = vi.fn().mockRejectedValue(startError);
 
     class BrokenStartPlugin {
       constructor() {
@@ -297,7 +296,7 @@ describe('Database Constructor and Edge Cases', () => {
 
   test('should handle constructor with all options', () => {
     const mockClient = { bucket: 'test-bucket', keyPrefix: 'test/' };
-    const mockPlugin = { install: jest.fn(), start: jest.fn() };
+    const mockPlugin = { install: vi.fn(), start: vi.fn() };
 
     const db = new Database({
       logLevel: 'debug',  // Test expects verbose to be true
@@ -355,18 +354,18 @@ describe('Database Constructor and Edge Cases', () => {
 
 describe('Database Plugin System', () => {
   test('should start plugins with function plugins', async () => {
-    const installMock = jest.fn();
-    const startMock = jest.fn();
+    const installMock = vi.fn();
+    const startMock = vi.fn();
     function MockPlugin(db) {
       installMock(db);
       startMock();
       return {
-        beforeInstall: jest.fn(),
+        beforeInstall: vi.fn(),
         install: installMock,
-        afterInstall: jest.fn(),
-        beforeStart: jest.fn(),
+        afterInstall: vi.fn(),
+        beforeStart: vi.fn(),
         start: startMock,
-        afterStart: jest.fn()
+        afterStart: vi.fn()
       };
     }
 
@@ -379,15 +378,15 @@ describe('Database Plugin System', () => {
   });
 
   test('should start plugins with instance plugins', async () => {
-    const installMock = jest.fn();
-    const startMock = jest.fn();
+    const installMock = vi.fn();
+    const startMock = vi.fn();
     const mockPlugin = {
-      beforeInstall: jest.fn(),
+      beforeInstall: vi.fn(),
       install: installMock,
-      afterInstall: jest.fn(),
-      beforeStart: jest.fn(),
+      afterInstall: vi.fn(),
+      beforeStart: vi.fn(),
       start: startMock,
-      afterStart: jest.fn()
+      afterStart: vi.fn()
     };
 
     const db = await createDatabaseForTest('suite=classes/database-plugin-instance-test', {
@@ -399,8 +398,8 @@ describe('Database Plugin System', () => {
   });
 
   test('should handle plugins without hooks', async () => {
-    const installMock = jest.fn();
-    const startMock = jest.fn();
+    const installMock = vi.fn();
+    const startMock = vi.fn();
     const mockPlugin = {
       install: installMock,
       start: startMock
@@ -467,7 +466,7 @@ describe('Database Resource Updates and Versioning', () => {
       }
     });
 
-    const versionSpy = jest.spyOn(resource, 'emit');
+    const versionSpy = vi.spyOn(resource, 'emit');
 
     // Update resource to trigger version change
     await database.createResource({
@@ -646,8 +645,8 @@ describe('Database Metadata and File Operations', () => {
       attributes: { name: 'string|required' }
     });
 
-    const uploadSpy = jest.spyOn(database.client, 'putObject');
-    const emitSpy = jest.spyOn(database, 'emit');
+    const uploadSpy = vi.spyOn(database.client, 'putObject');
+    const emitSpy = vi.spyOn(database, 'emit');
 
     await database.uploadMetadataFile();
 
@@ -692,7 +691,7 @@ describe('Database Metadata and File Operations', () => {
       }
     };
 
-    const uploadSpy = jest.spyOn(database.client, 'putObject');
+    const uploadSpy = vi.spyOn(database.client, 'putObject');
 
     await database.uploadMetadataFile();
 
@@ -793,23 +792,31 @@ describe('Database Configuration and Status', () => {
 });
 
 describe('Database.generateDefinitionHash is stable and deterministic', () => {
-  const db = new Database({ logLevel: 'silent', client: { bucket: 'test', keyPrefix: 'test/' } });
-  const def1 = {
-    attributes: { name: 'string|required', email: 'email|required' },
-    options: { timestamps: true }
-  };
-  const def2 = {
-    attributes: { name: 'string|required', email: 'email|required' },
-    options: { timestamps: true }
-  };
-  expect(db.generateDefinitionHash(def1)).toBe(db.generateDefinitionHash(def2));
+  test('should generate same hash for identical definitions', () => {
+    const db = new Database({ logLevel: 'silent', client: { bucket: 'test', keyPrefix: 'test/' } });
+    const def1 = {
+      attributes: { name: 'string|required', email: 'email|required' },
+      options: { timestamps: true }
+    };
+    const def2 = {
+      attributes: { name: 'string|required', email: 'email|required' },
+      options: { timestamps: true }
+    };
+    expect(db.generateDefinitionHash(def1)).toBe(db.generateDefinitionHash(def2));
+  });
 
-      // Changing an attribute, the hash should change
-  const def3 = {
-    attributes: { name: 'string|required', email: 'email|required', extra: 'string' },
-    options: { timestamps: true }
-  };
-  expect(db.generateDefinitionHash(def1)).not.toBe(db.generateDefinitionHash(def3));
+  test('should generate different hash when attribute changes', () => {
+    const db = new Database({ logLevel: 'silent', client: { bucket: 'test', keyPrefix: 'test/' } });
+    const def1 = {
+      attributes: { name: 'string|required', email: 'email|required' },
+      options: { timestamps: true }
+    };
+    const def3 = {
+      attributes: { name: 'string|required', email: 'email|required', extra: 'string' },
+      options: { timestamps: true }
+    };
+    expect(db.generateDefinitionHash(def1)).not.toBe(db.generateDefinitionHash(def3));
+  });
 });
 
 describe('Database Definition Hash Stability', () => {

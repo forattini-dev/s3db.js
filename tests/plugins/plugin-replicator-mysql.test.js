@@ -1,4 +1,3 @@
-import { describe, test, expect, afterEach } from '@jest/globals';
 import MySQLReplicator from '#src/plugins/replicators/mysql-replicator.class.js';
 
 describe('MySQL Replicator Tests', () => {

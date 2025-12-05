@@ -4,7 +4,6 @@
  * Compares Dijkstra vs A* performance on a Grid graph.
  */
 
-import { describe, it, expect, beforeAll, afterAll } from '@jest/globals';
 import { Database } from '../../src/database.class.js';
 import { GraphPlugin } from '../../src/plugins/graph.plugin.js';
 

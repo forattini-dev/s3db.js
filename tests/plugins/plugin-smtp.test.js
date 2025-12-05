@@ -1,4 +1,3 @@
-import { describe, it, beforeEach, afterEach, expect } from '@jest/globals';
 import { SMTPPlugin } from '../../src/plugins/smtp.plugin.js';
 import {
   SMTPError,

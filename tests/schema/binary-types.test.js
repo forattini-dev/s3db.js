@@ -4,7 +4,6 @@
  * Tests the integration of buffer and bits primitive types in the schema validator.
  */
 
-import { describe, it, expect, beforeEach } from '@jest/globals';
 import { Schema } from '../../src/schema.class.js';
 import { createBitmap, setBit, getBit, countBits, clearBit, toggleBit } from '../../src/concerns/binary.js';
 

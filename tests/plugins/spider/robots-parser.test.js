@@ -1,4 +1,3 @@
-import { describe, expect, test, beforeEach } from '@jest/globals'
 import { RobotsParser } from '../../../src/plugins/spider/robots-parser.js'
 
 describe('RobotsParser', () => {

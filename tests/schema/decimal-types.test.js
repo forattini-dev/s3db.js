@@ -2,7 +2,6 @@
  * Tests for new decimal types: money, decimal, geo
  */
 
-import { describe, it, expect, beforeAll, afterAll } from '@jest/globals';
 import { createDatabaseForTest } from '../config.js';
 import { encodeMoney, decodeMoney } from '../../src/concerns/money.js';
 import { encodeGeoLat, decodeGeoLat, encodeGeoLon, decodeGeoLon } from '../../src/concerns/geo-encoding.js';

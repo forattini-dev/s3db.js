@@ -1,9 +1,8 @@
-import { describe, it, expect, beforeAll, afterAll, beforeEach, jest } from '@jest/globals';
 import { Database } from '../../src/database.class.js';
 import { MemoryClient } from '../../src/clients/memory-client.class.js';
 
 jest.unstable_mockModule('../../src/plugins/concerns/plugin-dependencies.js', () => ({
-  requirePluginDependency: jest.fn()
+  requirePluginDependency: vi.fn()
 }));
 
 const { PuppeteerPlugin } = await import('../../src/plugins/puppeteer.plugin.js');
@@ -110,8 +109,8 @@ describe('PuppeteerPlugin - Proxy Pool & Binding', () => {
         cookies: { enabled: false }
       });
 
-      puppeteerPlugin._importDependencies = jest.fn().mockResolvedValue();
-      puppeteerPlugin._warmupBrowserPool = jest.fn().mockResolvedValue();
+      puppeteerPlugin._importDependencies = vi.fn().mockResolvedValue();
+      puppeteerPlugin._warmupBrowserPool = vi.fn().mockResolvedValue();
 
       await db.usePlugin(puppeteerPlugin);
 
@@ -128,8 +127,8 @@ describe('PuppeteerPlugin - Proxy Pool & Binding', () => {
         }
       });
 
-      puppeteerPlugin._importDependencies = jest.fn().mockResolvedValue();
-      puppeteerPlugin._warmupBrowserPool = jest.fn().mockResolvedValue();
+      puppeteerPlugin._importDependencies = vi.fn().mockResolvedValue();
+      puppeteerPlugin._warmupBrowserPool = vi.fn().mockResolvedValue();
 
       await db.usePlugin(puppeteerPlugin);
 
@@ -154,8 +153,8 @@ describe('PuppeteerPlugin - Proxy Pool & Binding', () => {
         cookies: { enabled: false }
       });
 
-      puppeteerPlugin._importDependencies = jest.fn().mockResolvedValue();
-      puppeteerPlugin._warmupBrowserPool = jest.fn().mockResolvedValue();
+      puppeteerPlugin._importDependencies = vi.fn().mockResolvedValue();
+      puppeteerPlugin._warmupBrowserPool = vi.fn().mockResolvedValue();
 
       await db.usePlugin(puppeteerPlugin);
     });
@@ -213,8 +212,8 @@ describe('PuppeteerPlugin - Proxy Pool & Binding', () => {
         cookies: { enabled: false }
       });
 
-      puppeteerPlugin._importDependencies = jest.fn().mockResolvedValue();
-      puppeteerPlugin._warmupBrowserPool = jest.fn().mockResolvedValue();
+      puppeteerPlugin._importDependencies = vi.fn().mockResolvedValue();
+      puppeteerPlugin._warmupBrowserPool = vi.fn().mockResolvedValue();
 
       await db.usePlugin(puppeteerPlugin);
     });
@@ -326,8 +325,8 @@ describe('PuppeteerPlugin - Proxy Pool & Binding', () => {
         cookies: { enabled: false }
       });
 
-      puppeteerPlugin._importDependencies = jest.fn().mockResolvedValue();
-      puppeteerPlugin._warmupBrowserPool = jest.fn().mockResolvedValue();
+      puppeteerPlugin._importDependencies = vi.fn().mockResolvedValue();
+      puppeteerPlugin._warmupBrowserPool = vi.fn().mockResolvedValue();
 
       await db.usePlugin(puppeteerPlugin);
     });
@@ -386,8 +385,8 @@ describe('PuppeteerPlugin - Proxy Pool & Binding', () => {
         cookies: { enabled: false }
       });
 
-      puppeteerPlugin._importDependencies = jest.fn().mockResolvedValue();
-      puppeteerPlugin._warmupBrowserPool = jest.fn().mockResolvedValue();
+      puppeteerPlugin._importDependencies = vi.fn().mockResolvedValue();
+      puppeteerPlugin._warmupBrowserPool = vi.fn().mockResolvedValue();
 
       await db.usePlugin(puppeteerPlugin);
     });
@@ -426,8 +425,8 @@ describe('PuppeteerPlugin - Proxy Pool & Binding', () => {
         cookies: { enabled: false }
       });
 
-      puppeteerPlugin._importDependencies = jest.fn().mockResolvedValue();
-      puppeteerPlugin._warmupBrowserPool = jest.fn().mockResolvedValue();
+      puppeteerPlugin._importDependencies = vi.fn().mockResolvedValue();
+      puppeteerPlugin._warmupBrowserPool = vi.fn().mockResolvedValue();
 
       await db.usePlugin(puppeteerPlugin);
 
@@ -466,8 +465,8 @@ describe('PuppeteerPlugin - Proxy Pool & Binding', () => {
         cookies: { enabled: false }
       });
 
-      puppeteerPlugin._importDependencies = jest.fn().mockResolvedValue();
-      puppeteerPlugin._warmupBrowserPool = jest.fn().mockResolvedValue();
+      puppeteerPlugin._importDependencies = vi.fn().mockResolvedValue();
+      puppeteerPlugin._warmupBrowserPool = vi.fn().mockResolvedValue();
 
       await db.usePlugin(puppeteerPlugin);
 

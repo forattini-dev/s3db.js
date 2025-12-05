@@ -3,7 +3,6 @@
  * Tests setContent, content, hasContent, and deleteContent methods
  */
 
-import { describe, it, expect, beforeEach, afterEach } from '@jest/globals';
 import { createDatabaseForTest } from '../config.js';
 
 describe('Resource - Binary Content Management', () => {

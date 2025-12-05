@@ -1,4 +1,3 @@
-import { describe, it, expect, beforeEach, afterEach, jest } from '@jest/globals';
 import { createMemoryDatabaseForTest } from '../config.js';
 import { BackupPlugin } from '../../src/plugins/backup.plugin.js';
 import { mkdir, writeFile, readFile, unlink, stat, rmdir, access } from 'fs/promises';
@@ -35,9 +34,9 @@ describe('BackupPlugin (New Driver API)', () => {
       encryption: null,
       verification: false, // Disable for faster tests
       logLevel: 'silent',
-      onBackupStart: jest.fn(),
-      onBackupComplete: jest.fn(),
-      onBackupError: jest.fn()
+      onBackupStart: vi.fn(),
+      onBackupComplete: vi.fn(),
+      onBackupError: vi.fn()
     });
 
     await database.connect();
@@ -280,7 +279,7 @@ describe('BackupPlugin (New Driver API)', () => {
     });
 
     it('should handle hook execution errors gracefully', async () => {
-      plugin.config.onBackupStart = jest.fn().mockRejectedValue(new Error('Hook failed'));
+      plugin.config.onBackupStart = vi.fn().mockRejectedValue(new Error('Hook failed'));
       
       // Should still complete backup despite hook error
       await expect(plugin.backup('full')).rejects.toThrow('Hook failed');
@@ -289,7 +288,7 @@ describe('BackupPlugin (New Driver API)', () => {
 
   describe('Events', () => {
     it('should emit backup_start event', async () => {
-      const spy = jest.fn();
+      const spy = vi.fn();
       plugin.on('plg:backup:start', spy);
       
       await plugin.backup('full');
@@ -300,7 +299,7 @@ describe('BackupPlugin (New Driver API)', () => {
     });
 
     it('should emit backup_complete event', async () => {
-      const spy = jest.fn();
+      const spy = vi.fn();
       plugin.on('plg:backup:complete', spy);
       
       await plugin.backup('full');
@@ -312,7 +311,7 @@ describe('BackupPlugin (New Driver API)', () => {
     });
 
     it('should emit backup_error event on failure', async () => {
-      const spy = jest.fn();
+      const spy = vi.fn();
       plugin.on('plg:backup:error', spy);
       
       plugin.config.tempDir = '/invalid/path';
@@ -396,7 +395,7 @@ describe('BackupPlugin (New Driver API)', () => {
       // Add mock active backup
       plugin.activeBackups.add('test-backup');
       
-      const cancelSpy = jest.fn();
+      const cancelSpy = vi.fn();
       plugin.on('plg:backup:cancelled', cancelSpy);
       
       await plugin.stop();
@@ -406,7 +405,7 @@ describe('BackupPlugin (New Driver API)', () => {
     });
 
     it('should cleanup successfully', async () => {
-      const removeListenersSpy = jest.spyOn(plugin, 'removeAllListeners');
+      const removeListenersSpy = vi.spyOn(plugin, 'removeAllListeners');
       
       await plugin.stop();
       

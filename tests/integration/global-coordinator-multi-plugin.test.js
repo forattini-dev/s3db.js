@@ -16,7 +16,6 @@
  * - plugin=coordinator/namespace={name}/metadata.json - Service metadata
  */
 
-import { describe, it, expect, beforeAll, afterAll } from '@jest/globals';
 import { createDatabaseForTest, sleep } from '#tests/config.js';
 import { S3QueuePlugin } from '#src/plugins/s3-queue.plugin.js';
 

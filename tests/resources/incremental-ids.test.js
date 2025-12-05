@@ -4,7 +4,6 @@
  * Phase 1: idGenerator: 'incremental' support
  */
 
-import { describe, it, expect, beforeAll, afterAll } from '@jest/globals';
 import { Database } from '../../src/database.class.js';
 import { parseIncrementalConfig, formatIncrementalValue } from '../../src/concerns/incremental-sequence.js';
 

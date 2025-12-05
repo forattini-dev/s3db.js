@@ -1,5 +1,4 @@
 import { v4 as uuidv4 } from 'uuid';
-import { describe, expect, test, beforeEach, jest, afterEach } from '@jest/globals';
 
 import { ResourceError } from '#src/errors.js';
 import { Resource } from '#src/resource.class.js';
@@ -71,7 +70,7 @@ describe('Custom ID Generators - Real Integration Tests', () => {
 
   describe('idGenerator parameter', () => {
     test('should use custom function as ID generator', async () => {
-      const customGenerator = jest.fn(() => 'custom-id-123');
+      const customGenerator = vi.fn(() => 'custom-id-123');
       
       const resource = await database.createResource({
         name: 'custom-generator-resource',
@@ -247,7 +246,7 @@ describe('Custom ID Generators - Real Integration Tests', () => {
 
   describe('priority and precedence', () => {
     test('should prioritize idGenerator function over idSize', async () => {
-      const customGenerator = jest.fn(() => 'custom-id');
+      const customGenerator = vi.fn(() => 'custom-id');
       
       const resource = await database.createResource({
         name: 'priority-resource',

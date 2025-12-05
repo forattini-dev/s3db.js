@@ -1,4 +1,3 @@
-import { describe, beforeEach, test, expect, jest } from '@jest/globals';
 
 import { ReconPlugin } from '#src/plugins/recon.plugin.js';
 import { RouteContext } from '#src/plugins/api/concerns/route-context.js';
@@ -87,7 +86,7 @@ describe.skip('ReconPlugin API routes', () => {
   beforeEach(() => {
     pluginStub = {
       database: {},
-      emit: jest.fn(),
+      emit: vi.fn(),
       _deepClone: (value) => JSON.parse(JSON.stringify(value)),
       _stripRawFields: (value) => JSON.parse(JSON.stringify(value, (key, val) => {
         if (['raw', 'stdout', 'stderr'].includes(key)) {
@@ -95,14 +94,14 @@ describe.skip('ReconPlugin API routes', () => {
         }
         return val;
       })),
-      _collectStageSummaries: jest.fn(() => [
+      _collectStageSummaries: vi.fn(() => [
         { stage: 'dns', status: 'ok', summary: { records: { a: ['93.184.216.34'] } } },
         { stage: 'ports', status: 'ok', summary: { total: 1 } }
       ]),
-      getHostSummary: jest.fn(),
-      _loadLatestReport: jest.fn(),
-      _loadRecentDiffs: jest.fn(async (_, limit) => fakeDiffs.slice(0, Number(limit ?? fakeDiffs.length))),
-      getRecentAlerts: jest.fn(async (_, { limit } = {}) => {
+      getHostSummary: vi.fn(),
+      _loadLatestReport: vi.fn(),
+      _loadRecentDiffs: vi.fn(async (_, limit) => fakeDiffs.slice(0, Number(limit ?? fakeDiffs.length))),
+      getRecentAlerts: vi.fn(async (_, { limit } = {}) => {
         const size = limit === undefined ? fakeAlerts.length : Number(limit);
         return fakeAlerts.slice(0, Number.isFinite(size) ? size : fakeAlerts.length);
       })

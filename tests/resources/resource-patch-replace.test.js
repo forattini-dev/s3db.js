@@ -1,4 +1,3 @@
-import { describe, test, expect, beforeAll, afterAll, jest } from '@jest/globals';
 import { createDatabaseForTest } from '#tests/config.js';
 import { MemoryClient } from '../../src/clients/memory-client.class.js';
 
@@ -71,6 +70,7 @@ describe('Resource patch() and replace() Methods', () => {
     await database.disconnect();
     // Clear storage after all tests
     MemoryClient.clearAllStorage();
+    vi.clearAllMocks();
   });
 
   // ============================================================================
@@ -91,9 +91,9 @@ describe('Resource patch() and replace() Methods', () => {
       });
 
       // Spy on client methods to verify CopyObject is used
-      const headObjectSpy = jest.spyOn(enforceLimitsResource.client, 'headObject');
-      const copyObjectSpy = jest.spyOn(enforceLimitsResource.client, 'copyObject');
-      const getObjectSpy = jest.spyOn(enforceLimitsResource.client, 'getObject');
+      const headObjectSpy = vi.spyOn(enforceLimitsResource.client, 'headObject');
+      const copyObjectSpy = vi.spyOn(enforceLimitsResource.client, 'copyObject');
+      const getObjectSpy = vi.spyOn(enforceLimitsResource.client, 'getObject');
 
       // Patch status field
       const updated = await enforceLimitsResource.patch(id, { status: 'active' });
@@ -201,9 +201,9 @@ describe('Resource patch() and replace() Methods', () => {
         status: 'inactive'
       });
 
-      const headObjectSpy = jest.spyOn(truncateDataResource.client, 'headObject');
-      const copyObjectSpy = jest.spyOn(truncateDataResource.client, 'copyObject');
-      const getObjectSpy = jest.spyOn(truncateDataResource.client, 'getObject');
+      const headObjectSpy = vi.spyOn(truncateDataResource.client, 'headObject');
+      const copyObjectSpy = vi.spyOn(truncateDataResource.client, 'copyObject');
+      const getObjectSpy = vi.spyOn(truncateDataResource.client, 'getObject');
 
       const updated = await truncateDataResource.patch(id, { status: 'active' });
 
@@ -233,9 +233,9 @@ describe('Resource patch() and replace() Methods', () => {
         status: 'inactive'
       });
 
-      const getObjectSpy = jest.spyOn(bodyOverflowResource.client, 'getObject');
-      const putObjectSpy = jest.spyOn(bodyOverflowResource.client, 'putObject');
-      const copyObjectSpy = jest.spyOn(bodyOverflowResource.client, 'copyObject');
+      const getObjectSpy = vi.spyOn(bodyOverflowResource.client, 'getObject');
+      const putObjectSpy = vi.spyOn(bodyOverflowResource.client, 'putObject');
+      const copyObjectSpy = vi.spyOn(bodyOverflowResource.client, 'copyObject');
 
       const updated = await bodyOverflowResource.patch(id, { status: 'active' });
 
@@ -264,9 +264,9 @@ describe('Resource patch() and replace() Methods', () => {
         status: 'inactive'
       });
 
-      const getObjectSpy = jest.spyOn(bodyOnlyResource.client, 'getObject');
-      const putObjectSpy = jest.spyOn(bodyOnlyResource.client, 'putObject');
-      const copyObjectSpy = jest.spyOn(bodyOnlyResource.client, 'copyObject');
+      const getObjectSpy = vi.spyOn(bodyOnlyResource.client, 'getObject');
+      const putObjectSpy = vi.spyOn(bodyOnlyResource.client, 'putObject');
+      const copyObjectSpy = vi.spyOn(bodyOnlyResource.client, 'copyObject');
 
       const updated = await bodyOnlyResource.patch(id, { status: 'active' });
 
@@ -417,8 +417,8 @@ describe('Resource patch() and replace() Methods', () => {
         loginCount: 5
       });
 
-      const getObjectSpy = jest.spyOn(enforceLimitsResource.client, 'getObject');
-      const putObjectSpy = jest.spyOn(enforceLimitsResource.client, 'putObject');
+      const getObjectSpy = vi.spyOn(enforceLimitsResource.client, 'getObject');
+      const putObjectSpy = vi.spyOn(enforceLimitsResource.client, 'putObject');
 
       // Replace with completely new data (no GET should happen)
       const replaced = await enforceLimitsResource.replace(id, {
@@ -454,7 +454,7 @@ describe('Resource patch() and replace() Methods', () => {
         status: 'inactive'
       });
 
-      const getObjectSpy = jest.spyOn(bodyOverflowResource.client, 'getObject');
+      const getObjectSpy = vi.spyOn(bodyOverflowResource.client, 'getObject');
 
       const replaced = await bodyOverflowResource.replace(id, {
         name: 'New Name',
@@ -482,7 +482,7 @@ describe('Resource patch() and replace() Methods', () => {
         status: 'inactive'
       });
 
-      const getObjectSpy = jest.spyOn(bodyOnlyResource.client, 'getObject');
+      const getObjectSpy = vi.spyOn(bodyOnlyResource.client, 'getObject');
 
       const replaced = await bodyOnlyResource.replace(id, {
         name: 'New Name',
@@ -621,10 +621,10 @@ describe('Resource patch() and replace() Methods', () => {
       });
 
       // Measure update() - should do GET + PUT
-      const getObjectSpy = jest.spyOn(enforceLimitsResource.client, 'getObject');
-      const headObjectSpy = jest.spyOn(enforceLimitsResource.client, 'headObject');
-      const copyObjectSpy = jest.spyOn(enforceLimitsResource.client, 'copyObject');
-      const putObjectSpy = jest.spyOn(enforceLimitsResource.client, 'putObject');
+      const getObjectSpy = vi.spyOn(enforceLimitsResource.client, 'getObject');
+      const headObjectSpy = vi.spyOn(enforceLimitsResource.client, 'headObject');
+      const copyObjectSpy = vi.spyOn(enforceLimitsResource.client, 'copyObject');
+      const putObjectSpy = vi.spyOn(enforceLimitsResource.client, 'putObject');
 
       await enforceLimitsResource.update(id, { loginCount: 1 });
 
@@ -667,7 +667,7 @@ describe('Resource patch() and replace() Methods', () => {
         loginCount: 0
       });
 
-      const getObjectSpy = jest.spyOn(enforceLimitsResource.client, 'getObject');
+      const getObjectSpy = vi.spyOn(enforceLimitsResource.client, 'getObject');
 
       // replace() should NOT do GET
       await enforceLimitsResource.replace(id, {

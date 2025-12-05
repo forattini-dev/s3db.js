@@ -1,4 +1,3 @@
-import { describe, expect, test } from '@jest/globals';
 
 import { GeoPlugin } from '../../../src/plugins/geo.plugin.js';
 

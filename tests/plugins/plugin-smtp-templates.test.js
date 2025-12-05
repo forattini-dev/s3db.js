@@ -1,4 +1,3 @@
-import { describe, it, expect, beforeEach } from '@jest/globals';
 import { SMTPTemplateEngine, defaultHandlebarsHelpers } from '../../src/plugins/smtp/template-engine.js';
 import { TemplateError } from '../../src/plugins/smtp/errors.js';
 

@@ -1,10 +1,9 @@
-import { describe, expect, test, beforeEach, jest } from '@jest/globals';
 
 import { FullTextPlugin } from '#src/plugins/fulltext.plugin.js';
 import { createDatabaseForTest } from '#tests/config.js';
 
 describe('Full-Text Plugin', () => {
-  jest.setTimeout(30000); // 30 seconds timeout for all tests
+  /* TODO: Use vi.setConfig({ testTimeout: 30000 }) or test options */ vi.setConfig({ testTimeout: 30000 }); // 30 seconds timeout for all tests
   let database;
   let client;
   let fullTextPlugin;
@@ -723,7 +722,7 @@ describe('Full-Text Plugin', () => {
 
     test('should handle indexing errors gracefully', async () => {
       // Mock resource to simulate error
-      users.insert = jest.fn().mockRejectedValue(new Error('Insert failed'));
+      users.insert = vi.fn().mockRejectedValue(new Error('Insert failed'));
 
       const userData = {
         id: 'user-error',
@@ -738,7 +737,7 @@ describe('Full-Text Plugin', () => {
     test('should handle search errors gracefully', async () => {
       // Mock search to simulate error by returning empty array
       const originalSearch = fullTextPlugin.search.bind(fullTextPlugin);
-      fullTextPlugin.search = jest.fn().mockResolvedValue([]);
+      fullTextPlugin.search = vi.fn().mockResolvedValue([]);
 
       // Should return empty array instead of throwing
       const results = await fullTextPlugin.searchRecords('users', 'test');
@@ -751,7 +750,7 @@ describe('Full-Text Plugin', () => {
     test('should handle index rebuild errors gracefully', async () => {
       // Mock rebuild to simulate error
       const originalRebuildIndex = fullTextPlugin.rebuildIndex.bind(fullTextPlugin);
-      fullTextPlugin.rebuildIndex = jest.fn().mockRejectedValue(new Error('Rebuild failed'));
+      fullTextPlugin.rebuildIndex = vi.fn().mockRejectedValue(new Error('Rebuild failed'));
 
       await expect(fullTextPlugin.rebuildIndex('users')).rejects.toThrow('Rebuild failed');
       

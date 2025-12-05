@@ -7,13 +7,6 @@
  * - With Accept-Encoding: br → Brotli compression
  */
 
-import {
-  describe,
-  it,
-  expect,
-  beforeEach,
-  afterEach
-} from '@jest/globals';
 import { gunzip, brotliDecompress } from 'zlib';
 import { promisify } from 'util';
 import http from 'http';

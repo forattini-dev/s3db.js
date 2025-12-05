@@ -1,4 +1,3 @@
-import { describe, test, expect } from '@jest/globals';
 import { Plugin } from '#src/plugins/plugin.class.js';
 
 class DummyPlugin extends Plugin {

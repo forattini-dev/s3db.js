@@ -1,4 +1,3 @@
-import { describe, expect, it, beforeEach, afterEach } from '@jest/globals';
 import { createMemoryDatabaseForTest } from '../config.js';
 import { CookieFarmSuitePlugin } from '../../src/plugins/cookie-farm-suite.plugin.js';
 import { PuppeteerPlugin as BasePuppeteerPlugin } from '../../src/plugins/puppeteer.plugin.js';

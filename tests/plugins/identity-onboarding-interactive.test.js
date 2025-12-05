@@ -1,4 +1,3 @@
-import { describe, test, expect, beforeEach, afterEach, jest } from '@jest/globals';
 import { Database } from '../../src/database.class.js';
 import { MemoryClient } from '../../src/clients/memory-client.class.js';
 import { IdentityPlugin } from '../../src/plugins/identity/index.js';
@@ -33,8 +32,8 @@ describe('Identity Onboarding - Interactive Mode', () => {
     process.stdout.isTTY = true;
 
     mockEnquirer = {
-      Input: jest.fn(),
-      Password: jest.fn()
+      Input: vi.fn(),
+      Password: vi.fn()
     };
   });
 
@@ -46,7 +45,7 @@ describe('Identity Onboarding - Interactive Mode', () => {
     process.stdin.isTTY = originalStdin;
     process.stdout.isTTY = originalStdout;
 
-    jest.clearAllMocks();
+    vi.clearAllMocks();
     jest.resetModules();
   });
 

@@ -2,7 +2,6 @@
  * Unit tests for filterProtectedFields utility
  */
 
-import { describe, it, expect } from '@jest/globals';
 import { filterProtectedFields } from '../../../src/plugins/api/utils/response-formatter.js';
 
 describe('filterProtectedFields', () => {

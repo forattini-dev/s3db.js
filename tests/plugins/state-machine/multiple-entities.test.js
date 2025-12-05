@@ -1,4 +1,3 @@
-import { afterEach, beforeEach, describe, expect, it, jest } from '@jest/globals';
 import { createDatabaseForTest } from '../../config.js';
 import { StateMachinePlugin } from '../../../src/plugins/state-machine.plugin.js';
 
@@ -10,15 +9,15 @@ describe('StateMachinePlugin - Multiple Entities', () => {
 
   beforeEach(async () => {
     mockActions = {
-      onConfirmed: jest.fn().mockResolvedValue({ action: 'confirmed' }),
-      onShipped: jest.fn().mockResolvedValue({ action: 'shipped' }),
-      onError: jest.fn().mockRejectedValue(new Error('Action failed'))
+      onConfirmed: vi.fn().mockResolvedValue({ action: 'confirmed' }),
+      onShipped: vi.fn().mockResolvedValue({ action: 'shipped' }),
+      onError: vi.fn().mockRejectedValue(new Error('Action failed'))
     };
 
     mockGuards = {
-      canShip: jest.fn().mockResolvedValue(true),
-      cannotShip: jest.fn().mockResolvedValue(false),
-      guardError: jest.fn().mockRejectedValue(new Error('Guard failed'))
+      canShip: vi.fn().mockResolvedValue(true),
+      cannotShip: vi.fn().mockResolvedValue(false),
+      guardError: vi.fn().mockRejectedValue(new Error('Guard failed'))
     };
 
     database = createDatabaseForTest('suite=plugins/state-machine');

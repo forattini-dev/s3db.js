@@ -4,7 +4,6 @@
  * This test prevents production errors where plugins are implemented but not exported.
  */
 
-import { describe, it, expect } from '@jest/globals';
 
 describe('Plugin Exports', () => {
   it('should export all plugin classes as named exports from main package', async () => {

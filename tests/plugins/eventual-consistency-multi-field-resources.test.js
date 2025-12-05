@@ -5,7 +5,6 @@
  * for ALL configured fields, not just the first one.
  */
 
-import { describe, it, expect, beforeEach, afterEach, jest } from '@jest/globals';
 import { EventualConsistencyPlugin } from '../../src/plugins/eventual-consistency/index.js';
 import { createDatabaseForTest } from '../config.js';
 
@@ -67,7 +66,7 @@ describe('EventualConsistencyPlugin - Multi-Field Resource Creation', () => {
 
   });
 
-  jest.setTimeout(30000);
+  /* TODO: Use vi.setConfig({ testTimeout: 30000 }) or test options */ vi.setConfig({ testTimeout: 30000 });
 
   it('should create analytics resources for ALL configured fields when enabled', async () => {
 

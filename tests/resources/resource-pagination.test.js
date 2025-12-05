@@ -1,4 +1,3 @@
-import { describe, expect, test, beforeEach } from '@jest/globals';
 import { createDatabaseForTest } from '#tests/config.js';
 
 describe('Resource Pagination - Real Integration Tests', () => {

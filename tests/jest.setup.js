@@ -152,5 +152,23 @@ global.forceCleanup = forceCleanup;
         }
         // Aggressively clear ALL MemoryClient storage after each test
         MemoryClient.clearAllStorage();
+
+        // Force garbage collection if available (run with --expose-gc)
+        if (global.gc) {
+          global.gc();
+        }
+      });
+    }
+
+// Also add afterAll for extra cleanup
+    if (typeof afterAll !== 'undefined') {
+      afterAll(async () => {
+        const { MemoryClient } = await import('#src/clients/memory-client.class.js');
+        MemoryClient.clearAllStorage();
+
+        // Force garbage collection
+        if (global.gc) {
+          global.gc();
+        }
       });
     }

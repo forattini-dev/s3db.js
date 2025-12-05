@@ -4,7 +4,6 @@
  * Tests compression, TTL, locking, backup, journal, and stats features
  */
 
-import { describe, it, expect, beforeEach, afterEach, beforeAll, afterAll } from '@jest/globals';
 import { rm, readFile, readdir, stat } from 'fs/promises';
 import { existsSync } from 'fs';
 import path from 'path';

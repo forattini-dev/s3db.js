@@ -7,7 +7,6 @@
  * - No data corruption occurs when plugins change
  */
 
-import { describe, it, expect, beforeEach, afterEach } from '@jest/globals';
 import { createDatabaseForTest } from '../config.js';
 
 describe('Plugin Attribute Isolation', () => {

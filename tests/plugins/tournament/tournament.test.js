@@ -1,7 +1,6 @@
 /**
  * Tournament Plugin Tests
  */
-import { describe, it, expect, beforeAll, afterAll, beforeEach } from '@jest/globals';
 import { Database } from '../../../src/database.class.js';
 import { TournamentPlugin } from '../../../src/plugins/tournament.plugin.js';
 

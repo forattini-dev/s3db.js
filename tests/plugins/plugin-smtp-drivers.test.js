@@ -3,7 +3,6 @@
  * Tests for new driver pattern and multi-relay functionality
  */
 
-import { describe, it, expect, beforeEach, afterEach } from '@jest/globals';
 import { Database } from '../../src/database.class.js';
 import { MemoryClient } from '../../src/clients/memory-client.class.js';
 import { SMTPPlugin } from '../../src/plugins/smtp.plugin.js';

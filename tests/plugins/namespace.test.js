@@ -1,4 +1,3 @@
-import { describe, expect, it, jest, beforeEach, afterEach } from '@jest/globals';
 import {
   listPluginNamespaces,
   warnNamespaceUsage,
@@ -111,7 +110,7 @@ describe('Plugin Namespace Support', () => {
     let consoleWarnSpy;
 
     beforeEach(() => {
-      consoleWarnSpy = jest.spyOn(console, 'warn').mockImplementation(() => {});
+      consoleWarnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
     });
 
     afterEach(() => {

@@ -9,7 +9,6 @@
  * - OpenAPI security scheme generation
  */
 
-import { describe, it, expect, beforeAll, afterAll } from '@jest/globals';
 import { Database } from '../../src/database.class.js';
 import { ApiPlugin } from '../../src/plugins/api/index.js';
 import { createDatabaseForTest } from '../config.js';

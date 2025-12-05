@@ -1,4 +1,3 @@
-import { describe, test, expect, jest } from '@jest/globals';
 import { VectorPlugin } from '../../src/plugins/vector.plugin.js';
 
 describe('VectorPlugin - Unit Tests (Mocked)', () => {
@@ -372,7 +371,7 @@ describe('VectorPlugin - Unit Tests (Mocked)', () => {
             }
           }
         },
-        getAll: jest.fn().mockResolvedValue([])
+        getAll: vi.fn().mockResolvedValue([])
       };
 
       const searchMethod = plugin.createVectorSearchMethod(mockResource);
@@ -396,7 +395,7 @@ describe('VectorPlugin - Unit Tests (Mocked)', () => {
             }
           }
         },
-        list: jest.fn().mockResolvedValue([
+        list: vi.fn().mockResolvedValue([
           { id: '1', vector: [1, 0, 0] }
         ])
       };
@@ -425,7 +424,7 @@ describe('VectorPlugin - Unit Tests (Mocked)', () => {
             }
           }
         },
-        getAll: jest.fn().mockResolvedValue([
+        getAll: vi.fn().mockResolvedValue([
           { id: '1', vector: [1, 0, 0] },  // dist = 0
           { id: '2', vector: [0, 1, 0] },  // dist ~ 1 (cosine)
           { id: '3', vector: [-1, 0, 0] }  // dist ~ 2 (opposite)
@@ -456,7 +455,7 @@ describe('VectorPlugin - Unit Tests (Mocked)', () => {
             }
           }
         },
-        getAll: jest.fn().mockResolvedValue([
+        getAll: vi.fn().mockResolvedValue([
           { id: '1', vector: [1, 0, 0] },
           { id: '2' },  // No vector
           { id: '3', vector: null }  // Null vector
@@ -485,7 +484,7 @@ describe('VectorPlugin - Unit Tests (Mocked)', () => {
             }
           }
         },
-        getAll: jest.fn().mockResolvedValue([
+        getAll: vi.fn().mockResolvedValue([
           { id: '1', vector: [1, 0, 0] },
           { id: '2', vector: [1, 0] }  // Different dimension
         ])
@@ -516,7 +515,7 @@ describe('VectorPlugin - Unit Tests (Mocked)', () => {
             }
           }
         },
-        getAll: jest.fn().mockResolvedValue([])
+        getAll: vi.fn().mockResolvedValue([])
       };
 
       const clusterMethod = plugin.createClusteringMethod(mockResource);
@@ -540,7 +539,7 @@ describe('VectorPlugin - Unit Tests (Mocked)', () => {
             }
           }
         },
-        list: jest.fn().mockResolvedValue([
+        list: vi.fn().mockResolvedValue([
           { id: '1', vector: [0, 0] },
           { id: '2', vector: [1, 1] }
         ])
@@ -571,7 +570,7 @@ describe('VectorPlugin - Unit Tests (Mocked)', () => {
             }
           }
         },
-        getAll: jest.fn().mockResolvedValue([
+        getAll: vi.fn().mockResolvedValue([
           { id: '1', vector: [0, 0] },
           { id: '2', vector: [1, 1] }
         ])
@@ -674,21 +673,21 @@ describe('VectorPlugin - Unit Tests (Mocked)', () => {
       const plugin = new VectorPlugin();
 
       const mockResource1 = {
-        vectorSearch: jest.fn(),
-        cluster: jest.fn(),
-        vectorDistance: jest.fn(),
-        similarTo: jest.fn(),
-        findSimilar: jest.fn(),
-        distance: jest.fn()
+        vectorSearch: vi.fn(),
+        cluster: vi.fn(),
+        vectorDistance: vi.fn(),
+        similarTo: vi.fn(),
+        findSimilar: vi.fn(),
+        distance: vi.fn()
       };
 
       const mockResource2 = {
-        vectorSearch: jest.fn(),
-        cluster: jest.fn(),
-        vectorDistance: jest.fn(),
-        similarTo: jest.fn(),
-        findSimilar: jest.fn(),
-        distance: jest.fn()
+        vectorSearch: vi.fn(),
+        cluster: vi.fn(),
+        vectorDistance: vi.fn(),
+        similarTo: vi.fn(),
+        findSimilar: vi.fn(),
+        distance: vi.fn()
       };
 
       plugin.database = {
@@ -765,7 +764,7 @@ describe('VectorPlugin - Unit Tests (Mocked)', () => {
             }
           }
         },
-        list: jest.fn().mockResolvedValue([
+        list: vi.fn().mockResolvedValue([
           { id: '1', vector: [1, 0, 0] },
           { id: '2', vector: [0.9, 0.1, 0] }
         ])
@@ -797,7 +796,7 @@ describe('VectorPlugin - Unit Tests (Mocked)', () => {
             }
           }
         },
-        list: jest.fn().mockResolvedValue([
+        list: vi.fn().mockResolvedValue([
           { id: '1', vector: [0, 0] },
           { id: '2', vector: [1, 1] },
           { id: '3', vector: [10, 10] }

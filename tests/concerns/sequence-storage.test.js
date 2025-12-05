@@ -9,7 +9,6 @@
  * - Exponential backoff
  */
 
-import { describe, it, expect, beforeAll, afterAll, beforeEach } from '@jest/globals';
 import { Database } from '../../src/database.class.js';
 import {
   parseIncrementalConfig,

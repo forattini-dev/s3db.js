@@ -1,4 +1,3 @@
-import { describe, test, expect, beforeEach, afterEach, jest } from '@jest/globals';
 import { Database } from '../../src/database.class.js';
 import { MemoryClient } from '../../src/clients/memory-client.class.js';
 import { IdentityPlugin } from '../../src/plugins/identity/index.js';
@@ -9,7 +8,7 @@ describe('Identity Onboarding - Health Check Integration', () => {
   let server;
 
   // Increase timeout for HTTP server binding tests
-  jest.setTimeout(30000);
+  /* TODO: Use vi.setConfig({ testTimeout: 30000 }) or test options */ vi.setConfig({ testTimeout: 30000 });
 
   beforeEach(async () => {
     db = new Database({

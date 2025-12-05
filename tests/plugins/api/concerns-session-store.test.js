@@ -3,7 +3,6 @@
  * @group api
  */
 
-import { describe, test, expect, beforeEach, afterEach } from '@jest/globals';
 import {
   SessionStore,
   MemoryStore,
@@ -166,7 +165,7 @@ describe('RedisStore', () => {
   let callLog;
 
   beforeEach(() => {
-    // Mock Redis client (manual mocking without jest.fn())
+    // Mock Redis client (manual mocking without vi.fn())
     storage = new Map();
     callLog = [];
 

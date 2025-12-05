@@ -1,4 +1,3 @@
-import { describe, expect, test } from '@jest/globals';
 
 import ConnectionString from '#src/connection-string.class.js';
 

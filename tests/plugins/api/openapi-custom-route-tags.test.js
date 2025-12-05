@@ -4,7 +4,6 @@
  * Tests the automatic tag inference for custom routes in OpenAPI documentation
  */
 
-import { describe, test, expect, beforeEach, afterEach } from '@jest/globals';
 import { Database } from '#src/database.class.js';
 import { generateOpenAPISpec } from '#src/plugins/api/utils/openapi-generator.js';
 

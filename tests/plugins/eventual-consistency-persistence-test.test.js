@@ -5,7 +5,6 @@
  * with correct createdBy metadata
  */
 
-import { describe, it, expect, beforeEach, afterEach } from '@jest/globals';
 import { EventualConsistencyPlugin } from '../../src/plugins/eventual-consistency/index.js';
 import { createDatabaseForTest } from '../config.js';
 

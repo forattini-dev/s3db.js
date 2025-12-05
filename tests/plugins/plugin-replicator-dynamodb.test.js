@@ -1,4 +1,3 @@
-import { describe, test, expect, afterEach } from '@jest/globals';
 import DynamoDBReplicator from '#src/plugins/replicators/dynamodb-replicator.class.js';
 
 describe('DynamoDB Replicator Tests', () => {

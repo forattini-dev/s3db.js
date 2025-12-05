@@ -3,7 +3,6 @@
  * @group api
  */
 
-import { describe, test, expect } from '@jest/globals';
 import { deriveKey, deriveKeystore, deriveOidcKeys, deriveJwtKeys } from '../../../src/plugins/api/concerns/crypto.js';
 
 describe('HKDF Key Derivation', () => {

@@ -11,7 +11,6 @@
  * Note: EJS tests are skipped as it's a peer dependency
  */
 
-import { describe, it, expect } from '@jest/globals';
 import { setupTemplateEngine, jsxEngine } from '../../src/plugins/api/utils/template-engine.js';
 
 describe.skip('Template Engine - JSX', () => {

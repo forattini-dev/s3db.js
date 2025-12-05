@@ -1,4 +1,3 @@
-import { describe, it, expect } from '@jest/globals';
 import { MetricsCollector } from '../../../src/plugins/api/concerns/metrics-collector.js';
 
 describe('MetricsCollector - Prometheus output', () => {

@@ -1,4 +1,3 @@
-import { describe, test, expect, beforeEach, jest } from '@jest/globals'
 import { Benchmark, benchmark } from '../../src/concerns/benchmark.js'
 
 describe('Benchmark', () => {
@@ -92,21 +91,22 @@ describe('Benchmark', () => {
 
     test('should record multiple measurements', async () => {
       await bench.measure(async () => {
-        await sleep(10)
+        await sleep(5)
         return 1
       })
 
       await bench.measure(async () => {
-        await sleep(20)
+        await sleep(50)
         return 2
       })
 
       await bench.measure(async () => {
-        await sleep(15)
+        await sleep(10)
         return 3
       })
 
       expect(bench.results.length).toBe(3)
+      // Second measurement (50ms) should be significantly longer than first (5ms)
       expect(bench.results[1].duration).toBeGreaterThan(bench.results[0].duration)
     })
 
@@ -260,7 +260,7 @@ describe('Benchmark', () => {
 
   describe('report() - Console Reporting', () => {
     test('should report single measurement', async () => {
-      const consoleSpy = jest.spyOn(console, 'log').mockImplementation()
+      const consoleSpy = vi.spyOn(console, 'log').mockImplementation()
 
       await bench.measure(async () => {
         await sleep(10)
@@ -276,7 +276,7 @@ describe('Benchmark', () => {
     })
 
     test('should report statistics for multiple runs', async () => {
-      const consoleSpy = jest.spyOn(console, 'log').mockImplementation()
+      const consoleSpy = vi.spyOn(console, 'log').mockImplementation()
 
       await bench.measure(async () => await sleep(10))
       await bench.measure(async () => await sleep(20))
@@ -293,7 +293,7 @@ describe('Benchmark', () => {
     })
 
     test('should format durations with 2 decimal places', async () => {
-      const consoleSpy = jest.spyOn(console, 'log').mockImplementation()
+      const consoleSpy = vi.spyOn(console, 'log').mockImplementation()
 
       await bench.measure(async () => await sleep(10))
       await bench.measure(async () => await sleep(15))
@@ -368,11 +368,12 @@ describe('Benchmark', () => {
       const bench1 = new Benchmark('Benchmark 1')
       const bench2 = new Benchmark('Benchmark 2')
 
-      await bench1.measure(async () => await sleep(10))
-      await bench2.measure(async () => await sleep(20))
+      await bench1.measure(async () => await sleep(5))
+      await bench2.measure(async () => await sleep(50))
 
       expect(bench1.results.length).toBe(1)
       expect(bench2.results.length).toBe(1)
+      // bench2 (50ms) should be significantly longer than bench1 (5ms)
       expect(bench2.results[0].duration).toBeGreaterThan(bench1.results[0].duration)
     })
   })
@@ -406,7 +407,7 @@ describe('benchmark() - Helper Function', () => {
   const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
 
   test('should run benchmark and report', async () => {
-    const consoleSpy = jest.spyOn(console, 'log').mockImplementation()
+    const consoleSpy = vi.spyOn(console, 'log').mockImplementation()
 
     const result = await benchmark('Quick Test', async () => {
       await sleep(10)
@@ -422,7 +423,7 @@ describe('benchmark() - Helper Function', () => {
   })
 
   test('should measure and return result', async () => {
-    const consoleSpy = jest.spyOn(console, 'log').mockImplementation()
+    const consoleSpy = vi.spyOn(console, 'log').mockImplementation()
 
     await benchmark('Test Operation', async () => {
       await sleep(10)
@@ -435,7 +436,7 @@ describe('benchmark() - Helper Function', () => {
   })
 
   test('should handle errors', async () => {
-    const consoleSpy = jest.spyOn(console, 'log').mockImplementation()
+    const consoleSpy = vi.spyOn(console, 'log').mockImplementation()
 
     try {
       await benchmark('Failing Test', async () => {
@@ -449,7 +450,7 @@ describe('benchmark() - Helper Function', () => {
   })
 
   test('should work as one-liner', async () => {
-    const consoleSpy = jest.spyOn(console, 'log').mockImplementation()
+    const consoleSpy = vi.spyOn(console, 'log').mockImplementation()
 
     const bench = await benchmark('One-liner', async () => await sleep(5))
 

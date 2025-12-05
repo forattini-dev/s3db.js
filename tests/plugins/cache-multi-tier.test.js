@@ -1,4 +1,3 @@
-import { jest } from '@jest/globals';
 import MemoryCache from '../../src/plugins/cache/memory-cache.class.js';
 import MultiTierCache from '../../src/plugins/cache/multi-tier-cache.class.js';
 
@@ -397,7 +396,7 @@ describe('MultiTierCache', () => {
       const l2 = new MockCache({ name: 'L2' });
 
       // Make L1 throw error
-      jest.spyOn(l1, 'get').mockRejectedValueOnce(new Error('L1 error'));
+      vi.spyOn(l1, 'get').mockRejectedValueOnce(new Error('L1 error'));
 
       const cache = new MultiTierCache({
         drivers: [

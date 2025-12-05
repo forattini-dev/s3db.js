@@ -1,4 +1,3 @@
-import { beforeEach, describe, expect, test, jest } from '@jest/globals';
 
 import { CachePlugin } from '../../../../src/plugins/cache.plugin.js';
 import { MemoryCache } from '../../../../src/plugins/cache/index.js';
@@ -181,7 +180,7 @@ describe('Error handling', () => {
   test('propagates driver errors without crashing resource operations', async () => {
     const users = ctx.resource;
     const originalGet = ctx.cachePlugin.driver.get;
-    ctx.cachePlugin.driver.get = jest.fn().mockRejectedValue(new Error('Memory cache error'));
+    ctx.cachePlugin.driver.get = vi.fn().mockRejectedValue(new Error('Memory cache error'));
 
     await expect(users.count()).rejects.toThrow('Memory cache error');
 
@@ -191,7 +190,7 @@ describe('Error handling', () => {
   test('treats null driver responses as cache misses', async () => {
     const users = ctx.resource;
     const originalGet = ctx.cachePlugin.driver.get;
-    ctx.cachePlugin.driver.get = jest.fn().mockResolvedValue(null);
+    ctx.cachePlugin.driver.get = vi.fn().mockResolvedValue(null);
 
     expect(await users.count()).toBe(3);
 

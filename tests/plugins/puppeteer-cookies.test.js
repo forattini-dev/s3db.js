@@ -1,9 +1,8 @@
-import { describe, it, expect, beforeAll, afterAll, beforeEach, jest } from '@jest/globals';
 import { Database } from '../../src/database.class.js';
 import { MemoryClient } from '../../src/clients/memory-client.class.js';
 
 jest.unstable_mockModule('../../src/plugins/concerns/plugin-dependencies.js', () => ({
-  requirePluginDependency: jest.fn()
+  requirePluginDependency: vi.fn()
 }));
 
 const { PuppeteerPlugin } = await import('../../src/plugins/puppeteer.plugin.js');
@@ -51,8 +50,8 @@ describe('PuppeteerPlugin - CookieManager', () => {
       }
     });
 
-    puppeteerPlugin._importDependencies = jest.fn().mockResolvedValue();
-    puppeteerPlugin._warmupBrowserPool = jest.fn().mockResolvedValue();
+    puppeteerPlugin._importDependencies = vi.fn().mockResolvedValue();
+    puppeteerPlugin._warmupBrowserPool = vi.fn().mockResolvedValue();
 
     await db.usePlugin(puppeteerPlugin);
 
@@ -106,7 +105,7 @@ describe('PuppeteerPlugin - CookieManager', () => {
 
       // Mock page object
       const mockPage = {
-        cookies: jest.fn().mockResolvedValue([
+        cookies: vi.fn().mockResolvedValue([
           { name: 'cookie1', value: 'value1', domain: '.example.com' },
           { name: 'cookie2', value: 'value2', domain: '.example.com' }
         ]),
@@ -132,7 +131,7 @@ describe('PuppeteerPlugin - CookieManager', () => {
 
       // Create initial session
       const mockPage1 = {
-        cookies: jest.fn().mockResolvedValue([
+        cookies: vi.fn().mockResolvedValue([
           { name: 'cookie1', value: 'value1' }
         ]),
         _userAgent: 'Test UA',
@@ -143,7 +142,7 @@ describe('PuppeteerPlugin - CookieManager', () => {
 
       // Update with new cookies
       const mockPage2 = {
-        cookies: jest.fn().mockResolvedValue([
+        cookies: vi.fn().mockResolvedValue([
           { name: 'cookie1', value: 'value1' },
           { name: 'cookie2', value: 'value2' }
         ]),
@@ -162,7 +161,7 @@ describe('PuppeteerPlugin - CookieManager', () => {
       const sessionId = 'test_session_3';
 
       const mockPage = {
-        cookies: jest.fn().mockResolvedValue([]),
+        cookies: vi.fn().mockResolvedValue([]),
         _userAgent: 'Test',
         _viewport: {}
       };
@@ -188,7 +187,7 @@ describe('PuppeteerPlugin - CookieManager', () => {
       const sessionId = 'expired_session';
 
       const mockPage = {
-        cookies: jest.fn().mockResolvedValue([]),
+        cookies: vi.fn().mockResolvedValue([]),
         _userAgent: 'Test',
         _viewport: {}
       };
@@ -209,7 +208,7 @@ describe('PuppeteerPlugin - CookieManager', () => {
       const sessionId = 'overused_session';
 
       const mockPage = {
-        cookies: jest.fn().mockResolvedValue([]),
+        cookies: vi.fn().mockResolvedValue([]),
         _userAgent: 'Test',
         _viewport: {}
       };
@@ -230,7 +229,7 @@ describe('PuppeteerPlugin - CookieManager', () => {
       const sessionId = 'bad_session';
 
       const mockPage = {
-        cookies: jest.fn().mockResolvedValue([]),
+        cookies: vi.fn().mockResolvedValue([]),
         _userAgent: 'Test',
         _viewport: {}
       };
@@ -251,7 +250,7 @@ describe('PuppeteerPlugin - CookieManager', () => {
       const sessionId = 'healthy_session';
 
       const mockPage = {
-        cookies: jest.fn().mockResolvedValue([]),
+        cookies: vi.fn().mockResolvedValue([]),
         _userAgent: 'Test',
         _viewport: {}
       };
@@ -269,7 +268,7 @@ describe('PuppeteerPlugin - CookieManager', () => {
     beforeEach(async () => {
       // Create 3 sessions with different reputations
       const mockPage = {
-        cookies: jest.fn().mockResolvedValue([]),
+        cookies: vi.fn().mockResolvedValue([]),
         _userAgent: 'Test',
         _viewport: {}
       };
@@ -337,7 +336,7 @@ describe('PuppeteerPlugin - CookieManager', () => {
 
     it('should calculate stats correctly', async () => {
       const mockPage = {
-        cookies: jest.fn().mockResolvedValue([]),
+        cookies: vi.fn().mockResolvedValue([]),
         _userAgent: 'Test',
         _viewport: {}
       };
@@ -373,8 +372,8 @@ describe('PuppeteerPlugin - CookieManager', () => {
         }
       });
 
-      disabledPlugin._importDependencies = jest.fn().mockResolvedValue();
-      disabledPlugin._warmupBrowserPool = jest.fn().mockResolvedValue();
+      disabledPlugin._importDependencies = vi.fn().mockResolvedValue();
+      disabledPlugin._warmupBrowserPool = vi.fn().mockResolvedValue();
 
       await db.usePlugin(disabledPlugin);
 
@@ -396,8 +395,8 @@ describe('PuppeteerPlugin - CookieManager', () => {
         }
       });
 
-      disabledPlugin._importDependencies = jest.fn().mockResolvedValue();
-      disabledPlugin._warmupBrowserPool = jest.fn().mockResolvedValue();
+      disabledPlugin._importDependencies = vi.fn().mockResolvedValue();
+      disabledPlugin._warmupBrowserPool = vi.fn().mockResolvedValue();
 
       await db.usePlugin(disabledPlugin);
 

@@ -1,4 +1,3 @@
-import { describe, test, expect, afterEach } from '@jest/globals';
 import MongoDBReplicator from '#src/plugins/replicators/mongodb-replicator.class.js';
 
 describe('MongoDB Replicator Tests', () => {

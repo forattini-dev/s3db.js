@@ -4,7 +4,6 @@
  * Tests the integration of ip4 and ip6 primitive types in the schema validator.
  */
 
-import { describe, it, expect, beforeEach } from '@jest/globals';
 import { Schema } from '../../src/schema.class.js';
 
 describe('Schema - IP Types Integration', () => {

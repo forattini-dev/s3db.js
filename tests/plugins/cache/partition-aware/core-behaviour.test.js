@@ -1,4 +1,3 @@
-import { beforeEach, describe, expect, test, jest } from '@jest/globals';
 
 import { CachePlugin } from '../../../../src/plugins/cache.plugin.js';
 import { PartitionAwareFilesystemCache } from '../../../../src/plugins/cache/index.js';
@@ -137,7 +136,7 @@ describe('Error handling', () => {
     const driver = ctx.cachePlugin.driver;
     const originalGet = driver.get.bind(driver);
 
-    driver.get = jest.fn().mockRejectedValue(new Error('Filesystem cache error'));
+    driver.get = vi.fn().mockRejectedValue(new Error('Filesystem cache error'));
 
     const count = await users.count();
     expect(count).toBeGreaterThanOrEqual(0);

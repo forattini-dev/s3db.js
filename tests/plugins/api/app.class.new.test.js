@@ -2,7 +2,6 @@
  * Tests for ApiApp v2 - Explicit builder architecture
  */
 
-import { describe, test, expect, beforeEach } from '@jest/globals';
 import { ApiApp } from '../../../src/plugins/api/app.class.js';
 import { RouteContext } from '../../../src/plugins/api/route-context.class.js';
 

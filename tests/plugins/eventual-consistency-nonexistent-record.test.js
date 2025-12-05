@@ -5,7 +5,6 @@
  * This is the fix for the bug where the plugin tried to insert records with incomplete data.
  */
 
-import { describe, it, expect, beforeEach, afterEach } from '@jest/globals';
 import { EventualConsistencyPlugin } from '../../src/plugins/eventual-consistency/index.js';
 import { createDatabaseForTest } from '../config.js';
 

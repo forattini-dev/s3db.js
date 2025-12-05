@@ -2,7 +2,6 @@
  * Tests for mountDocs + OpenAPI generation + Code Samples
  */
 
-import { describe, test, expect, beforeEach } from '@jest/globals';
 import { ApiApp } from '../../../src/plugins/api/app.class.js';
 
 describe('mountDocs + OpenAPI + Code Samples', () => {

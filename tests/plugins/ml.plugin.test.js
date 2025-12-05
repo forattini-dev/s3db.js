@@ -4,7 +4,6 @@
  * Tests for the Machine Learning Plugin
  */
 
-import { describe, it, expect, beforeAll, afterAll } from '@jest/globals';
 import { Database, MLPlugin } from '../../src/index.js';
 import { createDatabaseForTest } from '../config.js';
 

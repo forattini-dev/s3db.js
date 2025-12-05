@@ -1,4 +1,3 @@
-import { describe, expect, test, beforeAll, afterAll } from '@jest/globals';
 import { createDatabaseForTest } from '#tests/config.js';
 import { Resource } from '../../src/resource.class.js';
 

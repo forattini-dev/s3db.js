@@ -1,4 +1,3 @@
-import { describe, test, expect, beforeEach, afterEach, jest } from '@jest/globals'
 import { TasksPool } from '../../src/tasks/tasks-pool.class.js'
 
 describe('TasksPool', () => {
@@ -885,7 +884,7 @@ describe('TasksPool', () => {
     })
 
     test('should invoke monitoring exporter with snapshots', async () => {
-      const exporter = jest.fn()
+      const exporter = vi.fn()
       const monitoringPool = new TasksPool({
         concurrency: 2,
         monitoring: { enabled: true, exporter, reportInterval: 0 },
@@ -906,8 +905,8 @@ describe('TasksPool', () => {
         getConcurrency () {
           return this.concurrency
         },
-        recordTaskMetrics: jest.fn(() => {}),
-        stop: jest.fn()
+        recordTaskMetrics: vi.fn(() => {}),
+        stop: vi.fn()
       }
       const tuningPool = new TasksPool({
         concurrency: 2,
@@ -984,7 +983,7 @@ describe('TasksPool', () => {
         monitoring: { enabled: false },
         features: { profile: 'light', emitEvents: false }
       })
-      const listener = jest.fn()
+      const listener = vi.fn()
       silentPool.on('pool:taskStarted', listener)
       await silentPool.enqueue(async () => 'ok')
       await silentPool.drain()

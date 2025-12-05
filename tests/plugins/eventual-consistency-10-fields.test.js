@@ -5,7 +5,6 @@
  * Expected: 10 transaction resources + 10 lock resources + 10 analytics resources = 30 total
  */
 
-import { describe, it, expect, beforeEach, afterEach } from '@jest/globals';
 import { EventualConsistencyPlugin } from '../../src/plugins/eventual-consistency/index.js';
 import { createDatabaseForTest } from '../config.js';
 

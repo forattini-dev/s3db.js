@@ -1,4 +1,3 @@
-import { describe, test, expect, beforeEach, afterEach, jest } from '@jest/globals'
 import { TasksRunner } from '../../src/tasks/tasks-runner.class.js'
 
 describe('TasksRunner', () => {
@@ -1256,7 +1255,7 @@ afterEach(async () => {
     })
 
     test('should destroy runner and cleanup listeners', () => {
-      const listener = jest.fn()
+      const listener = vi.fn()
       runner.on('taskComplete', listener)
 
       runner.destroy()
@@ -1355,7 +1354,7 @@ afterEach(async () => {
     })
 
     test('should invoke monitoring exporter with snapshots', async () => {
-      const exporter = jest.fn()
+      const exporter = vi.fn()
       const runner = new TasksRunner({
         concurrency: 2,
         monitoring: { enabled: true, exporter, reportInterval: 0 },
@@ -1378,10 +1377,10 @@ afterEach(async () => {
         getConcurrency () {
           return this.concurrency
         },
-        recordTaskMetrics: jest.fn().mockImplementation(() => {
+        recordTaskMetrics: vi.fn().mockImplementation(() => {
           this.concurrency = 3
         }),
-        stop: jest.fn()
+        stop: vi.fn()
       }
       const runner = new TasksRunner({
         concurrency: 1,
@@ -1457,7 +1456,7 @@ afterEach(async () => {
         monitoring: { enabled: false },
         features: { profile: 'light', emitEvents: false }
       })
-      const listener = jest.fn()
+      const listener = vi.fn()
       runnerWithSilentEvents.on('taskStart', listener)
       await runnerWithSilentEvents.enqueue(async () => 'ok')
       await runnerWithSilentEvents.drain()

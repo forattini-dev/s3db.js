@@ -1,4 +1,3 @@
-import { describe, expect, test, beforeEach } from '@jest/globals'
 import { LinkDiscoverer } from '../../../src/plugins/spider/link-discoverer.js'
 import { URLPatternMatcher } from '../../../src/plugins/spider/url-pattern-matcher.js'
 

@@ -7,13 +7,6 @@
  * - api.description - resource description for OpenAPI docs
  */
 
-import {
-  describe,
-  it,
-  expect,
-  beforeEach,
-  afterEach
-} from '@jest/globals';
 import { ApiPlugin } from '../../src/plugins/api/index.js';
 import { createMemoryDatabaseForTest } from '../config.js';
 

@@ -3,7 +3,6 @@
  * @group api
  */
 
-import { describe, test, expect, beforeEach, jest } from '@jest/globals';
 import {
   setChunkedCookie,
   getChunkedCookie,
@@ -165,7 +164,7 @@ describe('Cookie Chunking', () => {
 
     test('invokes overflow handler when provided', () => {
       const hugeValue = 'x'.repeat(50000);
-      const handler = jest.fn(() => true);
+      const handler = vi.fn(() => true);
 
       expect(() => {
         setChunkedCookie(mockContext, 'huge', hugeValue, {}, { onOverflow: handler });

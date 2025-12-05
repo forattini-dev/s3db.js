@@ -2,7 +2,6 @@
  * Graph Plugin Tests
  */
 
-import { jest, describe, it, expect, beforeAll, beforeEach, afterAll } from '@jest/globals';
 import { Database } from '../../src/database.class.js';
 import { GraphPlugin } from '../../src/plugins/graph.plugin.js';
 

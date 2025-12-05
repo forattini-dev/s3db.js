@@ -1,9 +1,8 @@
-import { describe, expect, test, beforeEach, afterEach, jest } from '@jest/globals';
 import { TreePlugin } from '#src/plugins/tree/index.js';
 import { createDatabaseForTest } from '#tests/config.js';
 
 describe('Tree Plugin (Adjacency List Driver)', () => {
-  jest.setTimeout(30000);
+  /* TODO: Use vi.setConfig({ testTimeout: 30000 }) or test options */ vi.setConfig({ testTimeout: 30000 });
   let database;
   let treePlugin;
   let categories;
@@ -136,7 +135,7 @@ describe('Tree Plugin (Adjacency List Driver)', () => {
 });
 
 describe('Tree Plugin - Multi-Tree Support (Adjacency List)', () => {
-  jest.setTimeout(30000);
+  /* TODO: Use vi.setConfig({ testTimeout: 30000 }) or test options */ vi.setConfig({ testTimeout: 30000 });
   let database;
   let treePlugin;
   let categories;

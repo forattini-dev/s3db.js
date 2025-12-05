@@ -3,7 +3,6 @@
  * Ensures that events have access to this.database after bind fix
  */
 
-import { describe, it, expect, beforeEach, afterEach } from '@jest/globals';
 import { createDatabaseForTest } from '#tests/config.js';
 
 describe('Resource Events - this.database Binding', () => {

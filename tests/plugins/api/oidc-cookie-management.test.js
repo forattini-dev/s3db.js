@@ -1,4 +1,3 @@
-import { describe, expect, test, jest } from '@jest/globals';
 import { createOidcUtils } from '../../../src/plugins/api/auth/oidc-auth.js';
 import { createMockHonoContext } from './helpers/mock-hono-context.js';
 
@@ -22,10 +21,10 @@ function createUtils(overrides = {}) {
 
 describe('OIDC cookie management', () => {
   test('deleteSession removes cookies and destroys session store entries', async () => {
-    const destroy = jest.fn().mockResolvedValue(undefined);
+    const destroy = vi.fn().mockResolvedValue(undefined);
     const store = {
-      set: jest.fn(),
-      get: jest.fn(),
+      set: vi.fn(),
+      get: vi.fn(),
       destroy
     };
 
@@ -55,9 +54,9 @@ describe('OIDC cookie management', () => {
 
   test('regenerateSession issues new session identifiers and caches data', async () => {
     const store = {
-      set: jest.fn().mockResolvedValue(undefined),
-      get: jest.fn(),
-      destroy: jest.fn().mockResolvedValue(undefined)
+      set: vi.fn().mockResolvedValue(undefined),
+      get: vi.fn(),
+      destroy: vi.fn().mockResolvedValue(undefined)
     };
 
     const utils = createUtils({ sessionStore: store });
@@ -83,9 +82,9 @@ describe('OIDC cookie management', () => {
   test('getCachedSession only hits the session store once per request', async () => {
     const sessionData = { sub: 'abc-123' };
     const store = {
-      set: jest.fn(),
-      destroy: jest.fn(),
-      get: jest.fn().mockResolvedValue(sessionData)
+      set: vi.fn(),
+      destroy: vi.fn(),
+      get: vi.fn().mockResolvedValue(sessionData)
     };
 
     const utils = createUtils({ sessionStore: store });
@@ -100,11 +99,11 @@ describe('OIDC cookie management', () => {
   });
 
   test('deleteSession logs warning when session cookie missing', async () => {
-    const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => {});
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
     const store = {
-      set: jest.fn(),
-      get: jest.fn(),
-      destroy: jest.fn()
+      set: vi.fn(),
+      get: vi.fn(),
+      destroy: vi.fn()
     };
 
     const utils = createUtils({ sessionStore: store });

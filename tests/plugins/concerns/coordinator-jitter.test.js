@@ -5,7 +5,6 @@
  * workers start simultaneously (e.g., during full pod restarts in Kubernetes).
  */
 
-import { describe, test, expect, beforeEach, afterEach, jest } from '@jest/globals';
 import { Database } from '#src/database.class.js';
 import { CoordinatorPlugin } from '#src/plugins/concerns/coordinator-plugin.class.js';
 

@@ -1,4 +1,3 @@
-import { afterEach, beforeEach, describe, expect, it } from '@jest/globals';
 import { EventualConsistencyPlugin } from '../../../src/plugins/eventual-consistency/index.js';
 import { createDatabaseForTest } from '../../config.js';
 import tryFn from '../../../src/concerns/try-fn.js';

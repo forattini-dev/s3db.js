@@ -1,4 +1,3 @@
-import { describe, test, expect, beforeEach } from '@jest/globals';
 import * as truncateData from '../../src/behaviors/truncate-data.js';
 
 describe('Truncate-Data Behavior Complete Tests', () => {

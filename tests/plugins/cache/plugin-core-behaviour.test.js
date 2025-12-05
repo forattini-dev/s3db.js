@@ -1,4 +1,3 @@
-import { afterEach, beforeEach, describe, expect, test } from '@jest/globals';
 
 import { createMemoryDatabaseForTest, createTemporaryPathForTest } from '../../config.js';
 import { CachePlugin } from '../../../src/plugins/cache.plugin.js';

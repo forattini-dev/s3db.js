@@ -1,4 +1,3 @@
-import { describe, expect, jest, test } from '@jest/globals';
 
 import { GeoPlugin } from '../../../src/plugins/geo.plugin.js';
 import { setupGeoSuite } from './helpers.js';
@@ -47,7 +46,7 @@ describe('Geo Plugin - Resource configuration', () => {
   });
 
   test('uses default precision when invalid precision provided', async () => {
-    const logSpy = jest.spyOn(console, 'log').mockImplementation();
+    const logSpy = vi.spyOn(console, 'log').mockImplementation();
 
     await ctx.createStoresResource();
 
@@ -82,7 +81,7 @@ describe('Geo Plugin - Resource configuration', () => {
       }
     });
 
-    const warnSpy = jest.spyOn(plugin.logger, 'warn').mockImplementation();
+    const warnSpy = vi.spyOn(plugin.logger, 'warn').mockImplementation();
 
     await ctx.db.usePlugin(plugin);
 

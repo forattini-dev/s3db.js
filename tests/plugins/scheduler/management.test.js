@@ -1,4 +1,3 @@
-import { afterEach, beforeEach, describe, expect, it, jest } from '@jest/globals';
 
 import { createDatabaseForTest } from '../../config.js';
 import { SchedulerPlugin } from '../../../src/plugins/scheduler.plugin.js';
@@ -45,7 +44,7 @@ describe('SchedulerPlugin - Management & Scheduling', () => {
     it('should enable disabled job', () => {
       expect(plugin.jobs.get('disabled_job').enabled).toBe(false);
 
-      const enableSpy = jest.fn();
+      const enableSpy = vi.fn();
       plugin.on('plg:scheduler:job-enabled', enableSpy);
 
       plugin.enableJob('disabled_job');
@@ -58,7 +57,7 @@ describe('SchedulerPlugin - Management & Scheduling', () => {
       plugin.enableJob('test_job');
       expect(plugin.jobs.get('test_job').enabled).toBe(true);
 
-      const disableSpy = jest.fn();
+      const disableSpy = vi.fn();
       plugin.on('plg:scheduler:job-disabled', disableSpy);
 
       plugin.disableJob('test_job');
@@ -219,7 +218,7 @@ describe('SchedulerPlugin - Management & Scheduling', () => {
       const resourceName = plugin.config.jobHistoryResource;
       const originalResource = plugin.database.resources[resourceName];
       plugin.database.resources[resourceName] = {
-        list: jest.fn().mockRejectedValue(new Error('Database error')),
+        list: vi.fn().mockRejectedValue(new Error('Database error')),
       };
 
       const history = await plugin.getJobHistory('test_job');
@@ -251,13 +250,13 @@ describe('SchedulerPlugin - Management & Scheduling', () => {
     });
 
     it('should add new job at runtime', () => {
-      const addSpy = jest.fn();
+      const addSpy = vi.fn();
       plugin.on('plg:scheduler:job-added', addSpy);
 
       plugin.addJob('runtime_job', {
         schedule: '@hourly',
         description: 'Job added at runtime',
-        action: jest.fn().mockResolvedValue({ added: true }),
+        action: vi.fn().mockResolvedValue({ added: true }),
         enabled: true,
       });
 
@@ -291,7 +290,7 @@ describe('SchedulerPlugin - Management & Scheduling', () => {
     });
 
     it('should remove existing job', () => {
-      const removeSpy = jest.fn();
+      const removeSpy = vi.fn();
       plugin.on('plg:scheduler:job-removed', removeSpy);
 
       plugin.removeJob('test_job');
@@ -417,7 +416,7 @@ describe('SchedulerPlugin - Management & Scheduling', () => {
     }, 60000);
 
     it('should handle hook execution errors gracefully', async () => {
-      plugin.config.onJobStart = jest.fn().mockRejectedValue(new Error('Hook failed'));
+      plugin.config.onJobStart = vi.fn().mockRejectedValue(new Error('Hook failed'));
 
       await plugin.runJob('test_job');
 

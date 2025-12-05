@@ -11,7 +11,6 @@
  * - API schema generation
  */
 
-import { describe, expect, test, beforeAll, afterAll } from '@jest/globals';
 import { createDatabaseForTest } from '#tests/config.js';
 
 describe.skip('Resource $schema Property [SKIPPED - HANGS]', () => {

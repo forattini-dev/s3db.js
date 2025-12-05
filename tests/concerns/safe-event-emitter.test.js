@@ -2,7 +2,6 @@
  * Tests for SafeEventEmitter - Auto-cleanup EventEmitter
  */
 
-import { afterEach, beforeEach, describe, expect, it, jest } from '@jest/globals';
 
 import { SafeEventEmitter, createSafeEventEmitter } from '../../src/concerns/safe-event-emitter.js';
 
@@ -22,7 +21,7 @@ describe('SafeEventEmitter', () => {
 
   describe('Basic EventEmitter Functionality', () => {
     it('should work as a drop-in EventEmitter replacement', () => {
-      const handler = jest.fn();
+      const handler = vi.fn();
       emitter.on('test', handler);
 
       emitter.emit('test', 'data');
@@ -32,7 +31,7 @@ describe('SafeEventEmitter', () => {
     });
 
     it('should support once() listeners', () => {
-      const handler = jest.fn();
+      const handler = vi.fn();
       emitter.once('test', handler);
 
       emitter.emit('test', 'first');
@@ -43,9 +42,9 @@ describe('SafeEventEmitter', () => {
     });
 
     it('should support multiple listeners', () => {
-      const handler1 = jest.fn();
-      const handler2 = jest.fn();
-      const handler3 = jest.fn();
+      const handler1 = vi.fn();
+      const handler2 = vi.fn();
+      const handler3 = vi.fn();
 
       emitter.on('test', handler1);
       emitter.on('test', handler2);
@@ -59,7 +58,7 @@ describe('SafeEventEmitter', () => {
     });
 
     it('should support removeListener()', () => {
-      const handler = jest.fn();
+      const handler = vi.fn();
       emitter.on('test', handler);
 
       emitter.removeListener('test', handler);
@@ -69,8 +68,8 @@ describe('SafeEventEmitter', () => {
     });
 
     it('should support removeAllListeners()', () => {
-      const handler1 = jest.fn();
-      const handler2 = jest.fn();
+      const handler1 = vi.fn();
+      const handler2 = vi.fn();
 
       emitter.on('event1', handler1);
       emitter.on('event2', handler2);
@@ -121,8 +120,8 @@ describe('SafeEventEmitter', () => {
 
   describe('Destroy and Cleanup', () => {
     it('should remove all listeners on destroy()', () => {
-      const handler1 = jest.fn();
-      const handler2 = jest.fn();
+      const handler1 = vi.fn();
+      const handler2 = vi.fn();
 
       emitter.on('event1', handler1);
       emitter.on('event2', handler2);
@@ -153,7 +152,7 @@ describe('SafeEventEmitter', () => {
     });
 
     it('should prevent emitting after destruction', () => {
-      const handler = jest.fn();
+      const handler = vi.fn();
       emitter.on('test', handler);
 
       emitter.destroy();
@@ -176,7 +175,7 @@ describe('SafeEventEmitter', () => {
   describe('Factory Function', () => {
     it('should create emitter via factory function', () => {
       const created = createSafeEventEmitter({ logLevel: 'silent' });
-      const handler = jest.fn();
+      const handler = vi.fn();
 
       created.on('test', handler);
       created.emit('test', 'data');
@@ -222,7 +221,7 @@ describe('SafeEventEmitter', () => {
       }
 
       const service = new MyService();
-      const handler = jest.fn();
+      const handler = vi.fn();
 
       service.on('data:added', handler);
       service.addData('test');
@@ -235,9 +234,9 @@ describe('SafeEventEmitter', () => {
     });
 
     it('should handle multiple event types', () => {
-      const onStart = jest.fn();
-      const onProgress = jest.fn();
-      const onComplete = jest.fn();
+      const onStart = vi.fn();
+      const onProgress = vi.fn();
+      const onComplete = vi.fn();
 
       emitter.on('start', onStart);
       emitter.on('progress', onProgress);
@@ -255,9 +254,9 @@ describe('SafeEventEmitter', () => {
 
     it('should clean up properly in complex scenarios', () => {
       const handlers = {
-        event1: jest.fn(),
-        event2: jest.fn(),
-        event3: jest.fn()
+        event1: vi.fn(),
+        event2: vi.fn(),
+        event3: vi.fn()
       };
 
       // Setup multiple listeners

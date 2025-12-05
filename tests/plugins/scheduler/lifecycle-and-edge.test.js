@@ -1,4 +1,3 @@
-import { afterEach, beforeEach, describe, expect, it, jest } from '@jest/globals';
 
 import { createDatabaseForTest } from '../../config.js';
 import { SchedulerPlugin } from '../../../src/plugins/scheduler.plugin.js';
@@ -109,7 +108,7 @@ describe('SchedulerPlugin - Lifecycle & Edge Cases', () => {
     });
 
     it('should cleanup successfully', async () => {
-      const removeListenersSpy = jest.spyOn(plugin, 'removeAllListeners');
+      const removeListenersSpy = vi.spyOn(plugin, 'removeAllListeners');
 
       await plugin.stop();
 
@@ -222,7 +221,7 @@ describe('SchedulerPlugin - Lifecycle & Edge Cases', () => {
     });
 
     it('should handle overlapping job executions correctly', async () => {
-      const slowAction = jest.fn().mockResolvedValue({ done: true });
+      const slowAction = vi.fn().mockResolvedValue({ done: true });
 
       plugin.addJob('slow_job', {
         schedule: '@daily',

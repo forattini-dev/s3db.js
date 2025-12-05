@@ -1,4 +1,3 @@
-import { afterEach, beforeEach, describe, expect, test } from '@jest/globals';
 import { rm } from 'fs/promises';
 
 import { FilesystemCache } from '../../../src/plugins/cache/filesystem-cache.class.js';

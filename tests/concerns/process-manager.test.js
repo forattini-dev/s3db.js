@@ -2,7 +2,6 @@
  * Tests for ProcessManager - Centralized lifecycle management
  */
 
-import { afterEach, beforeEach, describe, expect, it, jest } from '@jest/globals';
 
 import { ProcessManager, getProcessManager, resetProcessManager } from '../../src/concerns/process-manager.js';
 
@@ -23,7 +22,7 @@ describe('ProcessManager', () => {
 
   describe('Interval Management', () => {
     it('should register and track intervals', () => {
-      const fn = jest.fn();
+      const fn = vi.fn();
       pm.setInterval(fn, 100, 'test-interval');
 
       const status = pm.getStatus();
@@ -32,7 +31,7 @@ describe('ProcessManager', () => {
     });
 
     it('should execute interval function repeatedly', async () => {
-      const fn = jest.fn();
+      const fn = vi.fn();
       pm.setInterval(fn, 50, 'test-interval');
 
       await new Promise(resolve => setTimeout(resolve, 160));
@@ -41,7 +40,7 @@ describe('ProcessManager', () => {
     });
 
     it('should clear interval by name', async () => {
-      const fn = jest.fn();
+      const fn = vi.fn();
       pm.setInterval(fn, 50, 'test-interval');
 
       await new Promise(resolve => setTimeout(resolve, 60));
@@ -52,8 +51,8 @@ describe('ProcessManager', () => {
     });
 
     it('should replace existing interval with same name', () => {
-      const fn1 = jest.fn();
-      const fn2 = jest.fn();
+      const fn1 = vi.fn();
+      const fn2 = vi.fn();
 
       pm.setInterval(fn1, 100, 'test-interval');
       pm.setInterval(fn2, 100, 'test-interval');
@@ -75,7 +74,7 @@ describe('ProcessManager', () => {
 
   describe('Timeout Management', () => {
     it('should register and track timeouts', () => {
-      const fn = jest.fn();
+      const fn = vi.fn();
       pm.setTimeout(fn, 100, 'test-timeout');
 
       const status = pm.getStatus();
@@ -84,7 +83,7 @@ describe('ProcessManager', () => {
     });
 
     it('should execute timeout function once', async () => {
-      const fn = jest.fn();
+      const fn = vi.fn();
       pm.setTimeout(fn, 50, 'test-timeout');
 
       await new Promise(resolve => setTimeout(resolve, 100));
@@ -93,7 +92,7 @@ describe('ProcessManager', () => {
     });
 
     it('should auto-remove timeout after execution', async () => {
-      const fn = jest.fn();
+      const fn = vi.fn();
       pm.setTimeout(fn, 50, 'test-timeout');
 
       await new Promise(resolve => setTimeout(resolve, 100));
@@ -103,7 +102,7 @@ describe('ProcessManager', () => {
     });
 
     it('should clear timeout by name', async () => {
-      const fn = jest.fn();
+      const fn = vi.fn();
       pm.setTimeout(fn, 100, 'test-timeout');
 
       pm.clearTimeout('test-timeout');
@@ -113,8 +112,8 @@ describe('ProcessManager', () => {
     });
 
     it('should replace existing timeout with same name', () => {
-      const fn1 = jest.fn();
-      const fn2 = jest.fn();
+      const fn1 = vi.fn();
+      const fn2 = vi.fn();
 
       pm.setTimeout(fn1, 100, 'test-timeout');
       pm.setTimeout(fn2, 100, 'test-timeout');
@@ -126,7 +125,7 @@ describe('ProcessManager', () => {
 
   describe('Cleanup Registration', () => {
     it('should register cleanup functions', () => {
-      const cleanup = jest.fn();
+      const cleanup = vi.fn();
       pm.registerCleanup(cleanup, 'test-cleanup');
 
       const status = pm.getStatus();
@@ -135,7 +134,7 @@ describe('ProcessManager', () => {
     });
 
     it('should execute cleanup functions on shutdown', async () => {
-      const cleanup = jest.fn();
+      const cleanup = vi.fn();
       pm.registerCleanup(cleanup, 'test-cleanup');
 
       await pm.shutdown();
@@ -144,9 +143,9 @@ describe('ProcessManager', () => {
     });
 
     it('should execute all cleanup functions on shutdown', async () => {
-      const cleanup1 = jest.fn();
-      const cleanup2 = jest.fn();
-      const cleanup3 = jest.fn();
+      const cleanup1 = vi.fn();
+      const cleanup2 = vi.fn();
+      const cleanup3 = vi.fn();
 
       pm.registerCleanup(cleanup1, 'cleanup-1');
       pm.registerCleanup(cleanup2, 'cleanup-2');
@@ -160,7 +159,7 @@ describe('ProcessManager', () => {
     });
 
     it('should handle async cleanup functions', async () => {
-      const cleanup = jest.fn(async () => {
+      const cleanup = vi.fn(async () => {
         await new Promise(resolve => setTimeout(resolve, 50));
       });
 
@@ -171,7 +170,7 @@ describe('ProcessManager', () => {
     });
 
     it('should timeout long-running cleanup functions', async () => {
-      const cleanup = jest.fn(async () => {
+      const cleanup = vi.fn(async () => {
         await new Promise(resolve => setTimeout(resolve, 200));
       });
 
@@ -185,7 +184,7 @@ describe('ProcessManager', () => {
     });
 
     it('should unregister cleanup functions', () => {
-      const cleanup = jest.fn();
+      const cleanup = vi.fn();
       pm.registerCleanup(cleanup, 'test-cleanup');
       pm.unregisterCleanup('test-cleanup');
 
@@ -194,8 +193,8 @@ describe('ProcessManager', () => {
     });
 
     it('should replace existing cleanup with same name', () => {
-      const cleanup1 = jest.fn();
-      const cleanup2 = jest.fn();
+      const cleanup1 = vi.fn();
+      const cleanup2 = vi.fn();
 
       pm.registerCleanup(cleanup1, 'test-cleanup');
       pm.registerCleanup(cleanup2, 'test-cleanup');
@@ -207,8 +206,8 @@ describe('ProcessManager', () => {
 
   describe('Graceful Shutdown', () => {
     it('should clear all intervals on shutdown', async () => {
-      const fn1 = jest.fn();
-      const fn2 = jest.fn();
+      const fn1 = vi.fn();
+      const fn2 = vi.fn();
 
       pm.setInterval(fn1, 50, 'interval-1');
       pm.setInterval(fn2, 50, 'interval-2');
@@ -220,8 +219,8 @@ describe('ProcessManager', () => {
     });
 
     it('should clear all timeouts on shutdown', async () => {
-      const fn1 = jest.fn();
-      const fn2 = jest.fn();
+      const fn1 = vi.fn();
+      const fn2 = vi.fn();
 
       pm.setTimeout(fn1, 100, 'timeout-1');
       pm.setTimeout(fn2, 100, 'timeout-2');
@@ -233,8 +232,8 @@ describe('ProcessManager', () => {
     });
 
     it('should run all cleanups on shutdown', async () => {
-      const cleanup1 = jest.fn();
-      const cleanup2 = jest.fn();
+      const cleanup1 = vi.fn();
+      const cleanup2 = vi.fn();
 
       pm.registerCleanup(cleanup1, 'cleanup-1');
       pm.registerCleanup(cleanup2, 'cleanup-2');
@@ -246,7 +245,7 @@ describe('ProcessManager', () => {
     });
 
     it('should prevent multiple shutdown calls', async () => {
-      const cleanup = jest.fn();
+      const cleanup = vi.fn();
       pm.registerCleanup(cleanup, 'test-cleanup');
 
       const shutdown1 = pm.shutdown();
@@ -259,8 +258,8 @@ describe('ProcessManager', () => {
     });
 
     it('should handle cleanup errors gracefully', async () => {
-      const goodCleanup = jest.fn();
-      const badCleanup = jest.fn(async () => {
+      const goodCleanup = vi.fn();
+      const badCleanup = vi.fn(async () => {
         throw new Error('Cleanup failed');
       });
 
@@ -326,10 +325,10 @@ describe('ProcessManager', () => {
 
   describe('Real-World Scenario', () => {
     it('should handle complex lifecycle', async () => {
-      const healthCheckFn = jest.fn();
-      const retryFn = jest.fn();
-      const workerCleanup = jest.fn();
-      const dbCleanup = jest.fn();
+      const healthCheckFn = vi.fn();
+      const retryFn = vi.fn();
+      const workerCleanup = vi.fn();
+      const dbCleanup = vi.fn();
 
       // Register recurring health check
       pm.setInterval(healthCheckFn, 50, 'health-check');

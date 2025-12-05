@@ -1,4 +1,3 @@
-import { describe, test, expect, beforeEach, jest } from '@jest/globals';
 import * as bodyOnly from '../../src/behaviors/body-only.js';
 import * as enforceLimit from '../../src/behaviors/enforce-limits.js';
 import * as userManaged from '../../src/behaviors/user-managed.js';
@@ -190,7 +189,7 @@ describe('Behavior Coverage Tests', () => {
     let emitSpy;
     
     beforeEach(() => {
-      emitSpy = jest.fn();
+      emitSpy = vi.fn();
       resource = {
         version: 1,
         emit: emitSpy,

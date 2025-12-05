@@ -5,14 +5,6 @@
  * per-resource overrides behave as expected.
  */
 
-import {
-  describe,
-  it,
-  expect,
-  beforeEach,
-  afterEach,
-  jest
-} from '@jest/globals';
 import { ApiPlugin } from '../../src/plugins/api/index.js';
 import { createMemoryDatabaseForTest } from '../config.js';
 
@@ -126,7 +118,7 @@ describe('API Plugin - resource configuration', () => {
   });
 
   it('applies per-resource overrides (methods, middleware, version prefix)', async () => {
-    const resourceMiddleware = jest.fn(async (c, next) => {
+    const resourceMiddleware = vi.fn(async (c, next) => {
       c.header('X-Resource-Middleware', 'hit');
       await next();
     });

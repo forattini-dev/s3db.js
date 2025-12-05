@@ -1,4 +1,3 @@
-import { describe, it, expect } from '@jest/globals';
 import rateLimitModule, { createDriverRateLimiter } from '../../../src/plugins/api/middlewares/rate-limit.js';
 
 const { RateLimitStore } = rateLimitModule;

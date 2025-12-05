@@ -1,4 +1,3 @@
-import { describe, expect, jest, test } from '@jest/globals';
 
 import { ReplicatorPlugin } from '../../../src/plugins/replicator.plugin.js';
 
@@ -84,8 +83,8 @@ describe('Data handling helpers', () => {
     const plugin = new ReplicatorPlugin({ replicators: [minimalReplicator] });
     const replicator = {
       name: 'test-replicator',
-      shouldReplicateResource: jest.fn().mockReturnValue(true),
-      replicate: jest.fn().mockResolvedValue({ success: true })
+      shouldReplicateResource: vi.fn().mockReturnValue(true),
+      replicate: vi.fn().mockResolvedValue({ success: true })
     };
     plugin.replicators = [replicator];
 
@@ -96,7 +95,7 @@ describe('Data handling helpers', () => {
 
 describe('Event listeners', () => {
   test('installs listeners for CRUD operations once per resource', () => {
-    const resource = { name: 'users', on: jest.fn(), database: {} };
+    const resource = { name: 'users', on: vi.fn(), database: {} };
     const plugin = new ReplicatorPlugin({ replicators: [minimalReplicator] });
     plugin.database = resource.database;
 
@@ -110,7 +109,7 @@ describe('Event listeners', () => {
   });
 
   test('skips listener installation for replicator log resource', () => {
-    const resource = { name: 'plg_replicator_logs', on: jest.fn(), database: {} };
+    const resource = { name: 'plg_replicator_logs', on: vi.fn(), database: {} };
     const plugin = new ReplicatorPlugin({
       logLevel: 'silent',
       replicatorLogResource: 'replicator_logs',
@@ -127,7 +126,7 @@ describe('Event listeners', () => {
     return {
       name: 'users',
       database: {},
-      on: jest.fn((event, handler) => {
+      on: vi.fn((event, handler) => {
         listeners[event] = handler;
       }),
       __listeners: listeners
@@ -138,7 +137,7 @@ describe('Event listeners', () => {
     const plugin = new ReplicatorPlugin({ logLevel: 'silent', replicators: [minimalReplicator] });
     const resource = createResourceForListeners();
     plugin.database = resource.database;
-    plugin.processReplicatorEvent = jest.fn().mockRejectedValue(new Error('Replication failed'));
+    plugin.processReplicatorEvent = vi.fn().mockRejectedValue(new Error('Replication failed'));
 
     let receivedError;
     plugin.on('plg:replicator:error', event => {
@@ -162,11 +161,11 @@ describe('Replication execution and logging', () => {
 
     const successReplicator = {
       name: 'success-replicator',
-      shouldReplicateResource: jest.fn().mockReturnValue(true),
-      replicate: jest.fn().mockResolvedValue({ success: true })
+      shouldReplicateResource: vi.fn().mockReturnValue(true),
+      replicate: vi.fn().mockResolvedValue({ success: true })
     };
     plugin.replicators = [successReplicator];
-    const emitSpy = jest.spyOn(plugin, 'emit');
+    const emitSpy = vi.spyOn(plugin, 'emit');
 
     await plugin.processReplicatorEvent('insert', 'users', '1', { id: '1' });
     expect(plugin.stats.totalReplications).toBe(1);
@@ -183,7 +182,7 @@ describe('Replication execution and logging', () => {
 
   test('logReplicator persists entries when enabled', async () => {
     const plugin = new ReplicatorPlugin({ persistReplicatorLog: true, replicators: [minimalReplicator] });
-    const insert = jest.fn().mockResolvedValue({ id: 'log-1' });
+    const insert = vi.fn().mockResolvedValue({ id: 'log-1' });
     plugin.replicatorLog = { insert };
 
     await plugin.logReplicator({ resource: 'users', operation: 'insert', recordId: '1' });
@@ -219,8 +218,8 @@ describe('Replication execution and logging', () => {
   test('installs and removes database hooks with stored reference', () => {
     const plugin = new ReplicatorPlugin({ replicators: [minimalReplicator] });
     const mockDatabase = {
-      addHook: jest.fn(),
-      removeHook: jest.fn(),
+      addHook: vi.fn(),
+      removeHook: vi.fn(),
       resources: {}
     };
     plugin.database = mockDatabase;
@@ -238,7 +237,7 @@ describe('Replication execution and logging', () => {
   test('getReplicatorLogs queries log resource with pagination', async () => {
     const plugin = new ReplicatorPlugin({ replicators: [minimalReplicator] });
     const records = [{ id: '1', resource: 'users' }];
-    plugin.replicatorLog = { query: jest.fn().mockResolvedValue(records) };
+    plugin.replicatorLog = { query: vi.fn().mockResolvedValue(records) };
 
     const logs = await plugin.getReplicatorLogs({ resourceName: 'users', limit: 50, offset: 0 });
     expect(plugin.replicatorLog.query).toHaveBeenCalledWith({ resourceName: 'users' }, { limit: 50, offset: 0 });
@@ -248,9 +247,9 @@ describe('Replication execution and logging', () => {
   test('retryFailedReplicators processes and updates log entries', async () => {
     const plugin = new ReplicatorPlugin({ replicators: [minimalReplicator] });
     const failed = [{ operation: 'insert', resourceName: 'users', recordId: '1', data: { id: '1' }, id: 'log-1', retryCount: 0 }];
-    plugin.replicatorLog = { query: jest.fn().mockResolvedValue(failed) };
-    plugin.processReplicatorEvent = jest.fn().mockResolvedValue([{ status: 'fulfilled' }]);
-    plugin.updateReplicatorLog = jest.fn();
+    plugin.replicatorLog = { query: vi.fn().mockResolvedValue(failed) };
+    plugin.processReplicatorEvent = vi.fn().mockResolvedValue([{ status: 'fulfilled' }]);
+    plugin.updateReplicatorLog = vi.fn();
 
     await plugin.retryFailedReplicators();
     expect(plugin.processReplicatorEvent).toHaveBeenCalledWith('insert', 'users', '1', { id: '1' }, null);

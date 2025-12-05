@@ -1,4 +1,3 @@
-import { describe, expect, test, beforeEach, afterEach } from '@jest/globals';
 import { createDatabaseForTest } from '#tests/config.js';
 import { MemoryClient } from '../../src/clients/memory-client.class.js';
 

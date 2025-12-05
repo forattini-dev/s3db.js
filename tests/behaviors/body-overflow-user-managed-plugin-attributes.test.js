@@ -5,7 +5,6 @@
  * and that _pluginMap is properly stored and retrieved
  */
 
-import { describe, it, expect, beforeEach, afterEach } from '@jest/globals';
 import { createDatabaseForTest } from '../config.js';
 import { MemoryClient } from '../../src/clients/memory-client.class.js';
 

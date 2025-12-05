@@ -4,7 +4,6 @@
  * o cache invalida corretamente após consolidações.
  */
 
-import { afterAll, beforeAll, describe, expect, it } from '@jest/globals';
 
 import { CachePlugin } from '../../src/plugins/cache.plugin.js';
 import { EventualConsistencyPlugin } from '../../src/plugins/eventual-consistency/index.js';

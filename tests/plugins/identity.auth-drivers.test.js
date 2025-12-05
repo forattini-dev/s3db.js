@@ -1,4 +1,3 @@
-import { describe, test, expect, jest } from '@jest/globals';
 import { PasswordAuthDriver, ClientCredentialsAuthDriver } from '../../src/plugins/identity/drivers/index.js';
 
 describe('Identity Auth Drivers', () => {
@@ -6,10 +5,10 @@ describe('Identity Auth Drivers', () => {
     const createContext = (overrides = {}) => {
       const users = overrides.users ?? [{ id: 'u1', email: 'user@example.com', password: 'hashed', role: 'admin' }];
       const usersResource = {
-        query: jest.fn().mockResolvedValue(users)
+        query: vi.fn().mockResolvedValue(users)
       };
       const passwordHelper = {
-        verify: jest.fn().mockResolvedValue(true)
+        verify: vi.fn().mockResolvedValue(true)
       };
 
       return {
@@ -25,7 +24,7 @@ describe('Identity Auth Drivers', () => {
     test('throws during initialize when users resource missing', async () => {
       const driver = new PasswordAuthDriver();
 
-      await expect(driver.initialize({ resources: {}, helpers: { password: { verify: jest.fn() } } }))
+      await expect(driver.initialize({ resources: {}, helpers: { password: { verify: vi.fn() } } }))
         .rejects.toThrow('PasswordAuthDriver requires users resource');
     });
 
@@ -56,10 +55,10 @@ describe('Identity Auth Drivers', () => {
 
     test('returns invalid_credentials when password does not match', async () => {
       const usersResource = {
-        query: jest.fn().mockResolvedValue([{ id: 'u1', email: 'user@example.com', password: 'hashed' }])
+        query: vi.fn().mockResolvedValue([{ id: 'u1', email: 'user@example.com', password: 'hashed' }])
       };
       const passwordHelper = {
-        verify: jest.fn().mockResolvedValue(false)
+        verify: vi.fn().mockResolvedValue(false)
       };
 
       const driver = new PasswordAuthDriver();
@@ -104,10 +103,10 @@ describe('Identity Auth Drivers', () => {
       active: true
     }) => {
       const clientsResource = {
-        query: jest.fn().mockResolvedValue([clientRecord])
+        query: vi.fn().mockResolvedValue([clientRecord])
       };
       const passwordHelper = {
-        verify: jest.fn().mockResolvedValue(true)
+        verify: vi.fn().mockResolvedValue(true)
       };
 
       return {

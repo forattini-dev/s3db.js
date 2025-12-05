@@ -1,4 +1,3 @@
-import { describe, expect, jest, test } from '@jest/globals';
 
 import { GeoPlugin } from '../../../src/plugins/geo.plugin.js';
 import { setupGeoSuite } from './helpers.js';
@@ -64,7 +63,7 @@ describe('Geo Plugin - findInBounds()', () => {
 
     await new Promise(resolve => setTimeout(resolve, 500));
 
-    const logSpy = jest.spyOn(console, 'log').mockImplementation();
+    const logSpy = vi.spyOn(console, 'log').mockImplementation();
 
     const results = await resource.findInBounds(BOUNDS);
 
@@ -178,7 +177,7 @@ describe('Geo Plugin - findInBounds()', () => {
     const resource = ctx.db.resources.stores;
     await resource.insert({ name: 'Store 1', latitude: -23.5505, longitude: -46.6333 });
 
-    const logSpy = jest.spyOn(console, 'log').mockImplementation();
+    const logSpy = vi.spyOn(console, 'log').mockImplementation();
 
     await resource.findInBounds(BOUNDS);
 

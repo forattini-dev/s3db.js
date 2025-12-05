@@ -6,13 +6,6 @@
  * Also verifies that docs.csp overrides route-level CSP when provided.
  */
 
-import {
-  describe,
-  it,
-  expect,
-  beforeEach,
-  afterEach
-} from '@jest/globals';
 import http from 'http';
 import { ApiPlugin } from '../../../src/plugins/api/index.js';
 import { createMemoryDatabaseForTest } from '../../config.js';

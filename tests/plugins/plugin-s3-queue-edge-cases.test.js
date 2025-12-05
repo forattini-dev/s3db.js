@@ -1,4 +1,3 @@
-import { jest } from '@jest/globals';
 import { S3QueuePlugin } from '#src/plugins/s3-queue.plugin.js';
 import { createDatabaseForTest } from '#tests/config.js';
 import { MemoryClient } from '../../src/clients/memory-client.class.js';
@@ -38,7 +37,7 @@ describe('S3QueuePlugin - Edge Cases', () => {
         autoStart: false
       });
 
-      const logSpy = jest.spyOn(plugin.logger, 'debug').mockImplementation();
+      const logSpy = vi.spyOn(plugin.logger, 'debug').mockImplementation();
 
       await plugin.install(database);
 
@@ -70,7 +69,7 @@ describe('S3QueuePlugin - Edge Cases', () => {
       await plugin.install(database);
       plugin.logger.level = 'debug'; // Force debug level for test
 
-      const logSpy = jest.spyOn(plugin.logger, 'debug').mockImplementation();
+      const logSpy = vi.spyOn(plugin.logger, 'debug').mockImplementation();
 
       await plugin.startProcessing();
       await new Promise(resolve => setTimeout(resolve, 100));
@@ -102,7 +101,7 @@ describe('S3QueuePlugin - Edge Cases', () => {
       await plugin.install(database);
       plugin.logger.level = 'debug'; // Force debug level for test
 
-      const logSpy = jest.spyOn(plugin.logger, 'debug').mockImplementation();
+      const logSpy = vi.spyOn(plugin.logger, 'debug').mockImplementation();
 
       await plugin.startProcessing();
 

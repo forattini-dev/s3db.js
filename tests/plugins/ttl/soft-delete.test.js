@@ -1,4 +1,3 @@
-import { afterAll, beforeAll, describe, expect, test } from '@jest/globals';
 
 import { createDatabaseForTest, sleep } from '../../config.js';
 import { TTLPlugin } from '../../../src/plugins/ttl.plugin.js';

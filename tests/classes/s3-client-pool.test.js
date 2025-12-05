@@ -1,4 +1,3 @@
-import { describe, test, expect } from '@jest/globals'
 import { S3Client } from '#src/clients/s3-client.class.js'
 
 describe('TasksPool in S3Client', () => {
@@ -113,7 +112,7 @@ describe('TasksPool in S3Client', () => {
     expect(client.taskExecutor.concurrency).toBe(50)
   })
 
-  test('should forward pool events to client', (done) => {
+  test('should forward pool events to client', async () => {
     client = new S3Client({
       connectionString: 'memory://test-events/db',
       taskExecutor: {
@@ -124,23 +123,27 @@ describe('TasksPool in S3Client', () => {
 
     const events = []
 
-    client.on('pool:taskStarted', (task) => {
-      events.push({ type: 'start', task: task.id })
-    })
+    const completedPromise = new Promise((resolve) => {
+      client.on('pool:taskStarted', (task) => {
+        events.push({ type: 'start', task: task.id })
+      })
 
-    client.on('pool:taskCompleted', (task, result) => {
-      events.push({ type: 'complete', task: task.id })
+      client.on('pool:taskCompleted', (task, result) => {
+        events.push({ type: 'complete', task: task.id })
 
-      // Check that both events were emitted
-      expect(events.some(e => e.type === 'start')).toBe(true)
-      expect(events.some(e => e.type === 'complete')).toBe(true)
-      done()
+        // Check that both events were emitted
+        expect(events.some(e => e.type === 'start')).toBe(true)
+        expect(events.some(e => e.type === 'complete')).toBe(true)
+        resolve()
+      })
     })
 
     // Enqueue a simple operation
     client.taskExecutor.enqueue(async () => {
       return 'test result'
     })
+
+    await completedPromise;
   })
 
   test('should configure retry and timeout options', () => {

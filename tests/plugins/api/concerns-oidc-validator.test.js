@@ -3,7 +3,6 @@
  * @group api
  */
 
-import { describe, test, expect } from '@jest/globals';
 import {
   validateIdToken,
   validateAccessToken,

@@ -1,4 +1,3 @@
-import { describe, test, expect, beforeEach, afterEach, jest } from '@jest/globals'
 import { PerformanceMonitor } from '../../src/concerns/performance-monitor.js'
 
 describe('PerformanceMonitor', () => {
@@ -9,14 +8,14 @@ describe('PerformanceMonitor', () => {
     // Mock database with client methods
     mockDatabase = {
       client: {
-        getQueueStats: jest.fn(() => ({
+        getQueueStats: vi.fn(() => ({
           queueSize: 10,
           activeCount: 5,
           processedCount: 100,
           errorCount: 2,
           concurrency: 10
         })),
-        getAggregateMetrics: jest.fn(() => ({
+        getAggregateMetrics: vi.fn(() => ({
           count: 100,
           avgExecution: 50,
           p95Execution: 95,
@@ -70,7 +69,7 @@ describe('PerformanceMonitor', () => {
     })
 
     test('should call takeSnapshot periodically', async () => {
-      const takeSnapshotSpy = jest.spyOn(monitor, 'takeSnapshot')
+      const takeSnapshotSpy = vi.spyOn(monitor, 'takeSnapshot')
 
       monitor.start(50)
       await sleep(250)
@@ -184,7 +183,7 @@ describe('PerformanceMonitor', () => {
     test('should handle missing getAggregateMetrics', () => {
       const dbWithoutAggregateMetrics = {
         client: {
-          getQueueStats: jest.fn(() => ({ queueSize: 5 }))
+          getQueueStats: vi.fn(() => ({ queueSize: 5 }))
         }
       }
       const monitorWithoutAggregateMetrics = new PerformanceMonitor(dbWithoutAggregateMetrics)
@@ -263,7 +262,7 @@ describe('PerformanceMonitor', () => {
 
   describe('Console Logging', () => {
     test('should log snapshot summary', () => {
-      const consoleSpy = jest.spyOn(console, 'log').mockImplementation()
+      const consoleSpy = vi.spyOn(console, 'log').mockImplementation()
 
       monitor.takeSnapshot()
 
@@ -280,7 +279,7 @@ describe('PerformanceMonitor', () => {
       const dbWithoutQueueStats = { client: {} }
       const monitorWithoutQueueStats = new PerformanceMonitor(dbWithoutQueueStats)
 
-      const consoleSpy = jest.spyOn(console, 'log').mockImplementation()
+      const consoleSpy = vi.spyOn(console, 'log').mockImplementation()
 
       monitorWithoutQueueStats.takeSnapshot()
 
@@ -291,7 +290,7 @@ describe('PerformanceMonitor', () => {
     })
 
     test('should format memory in MB', () => {
-      const consoleSpy = jest.spyOn(console, 'log').mockImplementation()
+      const consoleSpy = vi.spyOn(console, 'log').mockImplementation()
 
       monitor.takeSnapshot()
 
@@ -302,7 +301,7 @@ describe('PerformanceMonitor', () => {
     })
 
     test('should format latencies with toFixed(0)', () => {
-      const consoleSpy = jest.spyOn(console, 'log').mockImplementation()
+      const consoleSpy = vi.spyOn(console, 'log').mockImplementation()
 
       monitor.takeSnapshot()
 
@@ -414,7 +413,7 @@ describe('PerformanceMonitor', () => {
     test('should handle null performance', () => {
       const dbWithoutAggregateMetrics = {
         client: {
-          getQueueStats: jest.fn(() => ({ queueSize: 5 }))
+          getQueueStats: vi.fn(() => ({ queueSize: 5 }))
         }
       }
       const monitorWithoutAggregateMetrics = new PerformanceMonitor(dbWithoutAggregateMetrics)
@@ -490,7 +489,7 @@ describe('PerformanceMonitor', () => {
     test('should handle database with partial client methods', () => {
       const partialDb = {
         client: {
-          getQueueStats: jest.fn(() => ({ queueSize: 5 }))
+          getQueueStats: vi.fn(() => ({ queueSize: 5 }))
           // Missing getAggregateMetrics
         }
       }

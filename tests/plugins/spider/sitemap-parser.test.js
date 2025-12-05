@@ -1,4 +1,3 @@
-import { describe, expect, test, beforeEach } from '@jest/globals'
 import { SitemapParser } from '../../../src/plugins/spider/sitemap-parser.js'
 import { gzipSync } from 'zlib'
 

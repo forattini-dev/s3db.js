@@ -1,10 +1,8 @@
-import { describe, expect, test, beforeEach, afterEach, jest } from '@jest/globals';
 import { createDatabaseForTest } from '../config.js';
 import { BackupPlugin } from '../../src/plugins/backup.plugin.js';
 import { spawn } from 'child_process';
 import path from 'path';
 
-jest.setTimeout(120000);
 
 describe('CLI Backup & Restore Commands', () => {
   let database;

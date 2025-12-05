@@ -1,4 +1,3 @@
-import { describe, test, expect, beforeAll, afterAll } from '@jest/globals';
 import { createDatabaseForTest } from '../config.js';
 import { GeoPlugin } from '../../src/plugins/geo.plugin.js';
 

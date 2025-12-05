@@ -1,4 +1,3 @@
-import { describe, beforeEach, afterEach, test, expect } from '@jest/globals';
 import { S3QueuePlugin } from '../../../src/plugins/s3-queue.plugin.js';
 import { createDatabaseForTest } from '../../config.js';
 

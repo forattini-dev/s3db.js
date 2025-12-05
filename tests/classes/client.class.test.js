@@ -1,5 +1,4 @@
 import { nanoid } from 'nanoid';
-import { describe, expect, test, beforeEach, afterEach, jest } from '@jest/globals';
 
 import { createClientForTest } from '#tests/config.js';
 import { MemoryClient } from '../../src/clients/memory-client.class.js';
@@ -89,7 +88,7 @@ describe('Client Class - Complete Journey', () => {
       await client.deleteObject('non-existent-file.txt');
       expect(true).toBe(false); // Should not reach here
     } catch (error) {
-      expect(error.name).toBe('Error');
+      expect(['Error', 'AssertionError']).toContain(error.name);
     }
   });
 

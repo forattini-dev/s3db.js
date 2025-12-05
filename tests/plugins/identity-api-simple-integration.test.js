@@ -1,10 +1,9 @@
-import { describe, it, expect, beforeAll, afterAll, jest } from '@jest/globals';
 import { Database } from '../../src/database.class.js';
 import { MemoryClient } from '../../src/clients/memory-client.class.js';
 import { IdentityPlugin } from '../../src/plugins/identity/index.js';
 
 // Set a longer timeout for this complex integration test
-jest.setTimeout(300000);
+/* TODO: Use vi.setConfig({ testTimeout: 300000 }) or test options */ vi.setConfig({ testTimeout: 300000 });
 
 describe('Identity Plugin Integration Features', () => {
   let db;
@@ -132,8 +131,8 @@ describe('Identity Plugin Integration Features', () => {
         }
       };
       const res = {
-        status: jest.fn().mockReturnThis(),
-        json: jest.fn((data) => data)
+        status: vi.fn().mockReturnThis(),
+        json: vi.fn((data) => data)
       };
 
       await identityPlugin.oauth2Server.tokenHandler(req, res);
@@ -208,8 +207,8 @@ describe('Identity Plugin Integration Features', () => {
         }
       };
       const authRes = {
-        status: jest.fn().mockReturnThis(),
-        redirect: jest.fn((url) => url)
+        status: vi.fn().mockReturnThis(),
+        redirect: vi.fn((url) => url)
       };
 
       await identityPlugin.oauth2Server.authorizePostHandler(authReq, authRes);
@@ -227,8 +226,8 @@ describe('Identity Plugin Integration Features', () => {
         }
       };
       const tokenRes = {
-        status: jest.fn().mockReturnThis(),
-        json: jest.fn((data) => data)
+        status: vi.fn().mockReturnThis(),
+        json: vi.fn((data) => data)
       };
 
       await identityPlugin.oauth2Server.tokenHandler(tokenReq, tokenRes);

@@ -13,7 +13,6 @@
  * 6. Roundtrip integrity (no data loss)
  */
 
-import { describe, it, expect, beforeAll, afterAll } from '@jest/globals';
 import { createDatabaseForTest } from '#tests/config.js';
 
 describe('ALL Optimized Types - Exhaustive Integration Tests', () => {

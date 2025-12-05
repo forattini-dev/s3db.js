@@ -1,4 +1,3 @@
-import { afterEach, beforeEach, describe, expect, test } from '@jest/globals';
 import { join } from 'path';
 
 import { TfStatePlugin } from '../../../src/plugins/tfstate/index.js';

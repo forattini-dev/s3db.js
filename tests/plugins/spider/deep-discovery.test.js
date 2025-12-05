@@ -1,4 +1,3 @@
-import { describe, test, expect, beforeEach } from '@jest/globals'
 import { DeepDiscovery } from '../../../src/plugins/spider/deep-discovery.js'
 
 describe('DeepDiscovery', () => {

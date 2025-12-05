@@ -1,4 +1,3 @@
-import { afterEach, beforeEach, describe, expect, it, jest } from '@jest/globals';
 
 import { createDatabaseForTest } from '../../config.js';
 import {
@@ -70,8 +69,8 @@ describe('SchedulerPlugin - Job Execution', () => {
     });
 
     it('should emit job_start and job_complete events', async () => {
-      const startSpy = jest.fn();
-      const completeSpy = jest.fn();
+      const startSpy = vi.fn();
+      const completeSpy = vi.fn();
 
       plugin.on('plg:scheduler:job-start', startSpy);
       plugin.on('plg:scheduler:job-complete', completeSpy);

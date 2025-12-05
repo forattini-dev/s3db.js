@@ -3,7 +3,6 @@
  * Tests for Path-based Authentication
  */
 
-import { describe, it, expect, beforeAll, afterAll } from '@jest/globals';
 import { Database } from '../../src/database.class.js';
 import { ApiPlugin } from '../../src/plugins/api/index.js';
 import { matchPath, findBestMatch, validatePathAuth } from '../../src/plugins/api/utils/path-matcher.js';

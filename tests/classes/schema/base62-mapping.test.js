@@ -1,4 +1,3 @@
-import { describe, expect, test } from '@jest/globals';
 
 import Schema from '#src/schema.class.js';
 import { encode as toBase62, decode as fromBase62 } from '#src/concerns/base62.js';

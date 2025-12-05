@@ -6,7 +6,6 @@
  * - OpenAPI schema generation
  */
 
-import { describe, it, expect, beforeEach, afterEach } from '@jest/globals';
 import { createDatabaseForTest } from '../config.js';
 import { generateTypes } from '#src/concerns/typescript-generator.js';
 import { generateOpenAPISpec } from '#src/plugins/api/utils/openapi-generator.js';

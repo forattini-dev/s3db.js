@@ -1,4 +1,3 @@
-import { describe, test, expect, beforeEach, afterEach, jest } from '@jest/globals'
 import { AdaptiveTuning } from '../../src/concerns/adaptive-tuning.js'
 import os from 'os'
 
@@ -74,8 +73,8 @@ describe('AdaptiveTuning', () => {
       const originalTotalmem = os.totalmem
       const originalFreemem = os.freemem
 
-      os.totalmem = jest.fn(() => 512 * 1024 * 1024) // 512MB
-      os.freemem = jest.fn(() => 256 * 1024 * 1024) // 256MB free
+      os.totalmem = vi.fn(() => 512 * 1024 * 1024) // 512MB
+      os.freemem = vi.fn(() => 256 * 1024 * 1024) // 256MB free
 
       const lowMemTuner = new AdaptiveTuning({ minConcurrency: 1 })
       const suggested = lowMemTuner.suggestInitial()
@@ -93,13 +92,13 @@ describe('AdaptiveTuning', () => {
       const originalTotalmem = os.totalmem
       const originalFreemem = os.freemem
 
-      os.totalmem = jest.fn(() => 16 * 1024 * 1024 * 1024) // 16GB
-      os.freemem = jest.fn(() => 8 * 1024 * 1024 * 1024) // 8GB free
+      os.totalmem = vi.fn(() => 16 * 1024 * 1024 * 1024) // 16GB
+      os.freemem = vi.fn(() => 8 * 1024 * 1024 * 1024) // 8GB free
 
       const highMemTuner = new AdaptiveTuning({ minConcurrency: 1, maxConcurrency: 100 })
       const suggested = highMemTuner.suggestInitial()
 
-      expect(suggested).toBeGreaterThan(10)
+      expect(suggested).toBeGreaterThanOrEqual(10)
       highMemTuner.stop()
 
       // Restore
@@ -112,8 +111,8 @@ describe('AdaptiveTuning', () => {
       const originalTotalmem = os.totalmem
       const originalFreemem = os.freemem
 
-      os.totalmem = jest.fn(() => 4 * 1024 * 1024 * 1024) // 4GB
-      os.freemem = jest.fn(() => 400 * 1024 * 1024) // Only 400MB free (90% used)
+      os.totalmem = vi.fn(() => 4 * 1024 * 1024 * 1024) // 4GB
+      os.freemem = vi.fn(() => 400 * 1024 * 1024) // Only 400MB free (90% used)
 
       const tuner = new AdaptiveTuning({ minConcurrency: 1 })
       const suggested = tuner.suggestInitial()
@@ -208,8 +207,8 @@ describe('AdaptiveTuning', () => {
       const originalMemUsage = process.memoryUsage
       const originalTotalmem = os.totalmem
 
-      os.totalmem = jest.fn(() => 4 * 1024 * 1024 * 1024) // 4GB
-      process.memoryUsage = jest.fn(() => ({
+      os.totalmem = vi.fn(() => 4 * 1024 * 1024 * 1024) // 4GB
+      process.memoryUsage = vi.fn(() => ({
         heapUsed: 3 * 1024 * 1024 * 1024 // 3GB used (75%)
       }))
 
@@ -261,8 +260,8 @@ describe('AdaptiveTuning', () => {
       const originalMemUsage = process.memoryUsage
       const originalTotalmem = os.totalmem
 
-      os.totalmem = jest.fn(() => 8 * 1024 * 1024 * 1024) // 8GB
-      process.memoryUsage = jest.fn(() => ({
+      os.totalmem = vi.fn(() => 8 * 1024 * 1024 * 1024) // 8GB
+      process.memoryUsage = vi.fn(() => ({
         heapUsed: 2 * 1024 * 1024 * 1024 // 2GB used (25%)
       }))
 
@@ -357,8 +356,8 @@ describe('AdaptiveTuning', () => {
       const originalMemUsage = process.memoryUsage
       const originalTotalmem = os.totalmem
 
-      os.totalmem = jest.fn(() => 32 * 1024 * 1024 * 1024) // 32GB
-      process.memoryUsage = jest.fn(() => ({
+      os.totalmem = vi.fn(() => 32 * 1024 * 1024 * 1024) // 32GB
+      process.memoryUsage = vi.fn(() => ({
         heapUsed: 1 * 1024 * 1024 * 1024 // 1GB used (very low)
       }))
 

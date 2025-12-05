@@ -1,4 +1,3 @@
-import { describe, expect, test } from '@jest/globals';
 
 import { guardMiddleware } from '../../../src/plugins/api/utils/guards.js';
 

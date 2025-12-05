@@ -1,4 +1,3 @@
-import { describe, beforeAll, afterAll, it, expect } from '@jest/globals';
 import Database from '../../src/database.class.js';
 import { MemoryClient } from '../../src/clients/memory-client.class.js';
 import { IdentityPlugin } from '../../src/plugins/identity/index.js';

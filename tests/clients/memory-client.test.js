@@ -4,7 +4,6 @@
  * Tests all functionality of the in-memory S3 client emulator
  */
 
-import { describe, it, expect, beforeEach, afterEach, jest } from '@jest/globals';
 import path from 'path';
 import { createMemoryDatabaseForTest, createTemporaryPathForTest } from '../config.js';
 import { MemoryClient } from '#src/clients/memory-client.class.js';
@@ -1455,7 +1454,7 @@ describe('MemoryClient - Direct API Tests', () => {
           behavior: { storage: 'metadata' },
           timestamps: false
         },
-        get: jest.fn().mockResolvedValue({ id: 'p1', name: 'Product 1', description: 'from resource' })
+        get: vi.fn().mockResolvedValue({ id: 'p1', name: 'Product 1', description: 'from resource' })
       };
 
       const result = await client.exportBackup(tmpDir, {
@@ -1674,7 +1673,7 @@ describe('MemoryClient - Direct API Tests', () => {
       ].join('\n') + '\n';
       await fs.writeFile(`${tmpDir}/items.jsonl`, itemsJsonl, 'utf-8');
 
-      const createResource = jest.fn().mockResolvedValue(undefined);
+      const createResource = vi.fn().mockResolvedValue(undefined);
       const importClient = new MemoryClient();
 
       await importClient.importBackup(tmpDir, {

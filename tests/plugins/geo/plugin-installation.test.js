@@ -1,4 +1,3 @@
-import { describe, expect, jest, test } from '@jest/globals';
 
 import { GeoPlugin } from '../../../src/plugins/geo.plugin.js';
 import { setupGeoSuite } from './helpers.js';
@@ -35,7 +34,7 @@ describe('Geo Plugin - Installation', () => {
       }
     });
 
-    const logSpy = jest.spyOn(plugin.logger, 'debug').mockImplementation();
+    const logSpy = vi.spyOn(plugin.logger, 'debug').mockImplementation();
 
     await ctx.db.usePlugin(plugin);
 

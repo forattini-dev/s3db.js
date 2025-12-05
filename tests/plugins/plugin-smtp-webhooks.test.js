@@ -1,4 +1,3 @@
-import { describe, it, expect, beforeEach } from '@jest/globals';
 import { WebhookReceiver } from '../../src/plugins/smtp/webhook-receiver.js';
 import { SMTPError } from '../../src/plugins/smtp/errors.js';
 

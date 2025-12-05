@@ -4,7 +4,6 @@
  * Ensures that plugin attributes are NOT replicated to external databases
  */
 
-import { describe, it, expect } from '@jest/globals';
 import {
   generatePostgresCreateTable,
   generateMySQLCreateTable,

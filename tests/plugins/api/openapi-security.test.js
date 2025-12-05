@@ -1,4 +1,3 @@
-import { describe, it, expect } from '@jest/globals';
 import { generateOpenAPISpec } from '../../../src/plugins/api/utils/openapi-generator.js';
 
 const buildDatabase = () => ({

@@ -1,4 +1,3 @@
-import { describe, expect, test } from '@jest/globals'
 import { URLPatternMatcher } from '../../../src/plugins/spider/url-pattern-matcher.js'
 
 describe('URLPatternMatcher', () => {

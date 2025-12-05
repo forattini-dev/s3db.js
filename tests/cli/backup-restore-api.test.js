@@ -1,4 +1,3 @@
-import { describe, expect, test, beforeEach, afterEach } from '@jest/globals';
 import { createDatabaseForTest, createTemporaryPathForTest } from '../config.js';
 import { BackupPlugin } from '../../src/plugins/backup.plugin.js';
 import { MemoryClient } from '../../src/clients/memory-client.class.js';

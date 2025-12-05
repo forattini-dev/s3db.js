@@ -1,4 +1,3 @@
-import { describe, test, expect } from '@jest/globals';
 import WebhookReplicator from '../../src/plugins/replicators/webhook-replicator.class.js';
 
 describe('WebhookReplicator - Configuration and Validation Tests', () => {

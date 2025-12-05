@@ -1,4 +1,3 @@
-import { afterEach, beforeEach, describe, expect, it, jest, test } from '@jest/globals';
 
 import { createDatabaseForTest } from '../../config.js';
 import { SchedulerPlugin } from '../../../src/plugins/scheduler.plugin.js';
@@ -141,7 +140,7 @@ describe('SchedulerPlugin - Validation & Setup', () => {
     });
 
     it('should emit initialized event', async () => {
-      const initSpy = jest.fn();
+      const initSpy = vi.fn();
 
       const newPlugin = new SchedulerPlugin({
       logLevel: 'silent',jobs: {

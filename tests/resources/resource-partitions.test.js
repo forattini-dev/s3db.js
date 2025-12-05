@@ -1,6 +1,5 @@
-import { describe, expect, test, beforeEach, jest } from '@jest/globals';
-jest.setTimeout(15000);
 import { createDatabaseForTest } from '#tests/config.js';
+
 
 describe('Resource Partitions - Real Integration Tests', () => {
   let database;

@@ -1,4 +1,3 @@
-import { describe, expect, test } from '@jest/globals';
 
 import { CachePlugin } from '../../../../src/plugins/cache.plugin.js';
 import { MemoryCache } from '../../../../src/plugins/cache/index.js';

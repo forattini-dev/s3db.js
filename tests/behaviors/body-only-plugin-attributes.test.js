@@ -5,7 +5,6 @@
  * for backwards compatibility when plugins are added/removed.
  */
 
-import { describe, it, expect, beforeEach, afterEach } from '@jest/globals';
 import { createDatabaseForTest } from '../config.js';
 
 describe('Body-Only Behavior - Plugin Attributes', () => {

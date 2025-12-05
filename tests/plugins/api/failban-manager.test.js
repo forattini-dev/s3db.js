@@ -1,4 +1,3 @@
-import { describe, it, expect, beforeAll, afterAll } from '@jest/globals';
 import { createDatabaseForTest } from '../../config.js';
 import { FailbanManager } from '../../../src/concerns/failban-manager.js';
 
