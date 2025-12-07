@@ -5,16 +5,28 @@
   - [Quick Start](/#-quick-start)
   - [Installation](/#-installation)
 
-- **Core Concepts**
-  - [Resources](resources.md)
-  - [Schema & Validation](schema.md)
-  - [Events](events.md)
-  - [Logging](logging.md)
+- **Core**
+  - [Overview](core/README.md)
+  - [Database](core/database.md)
+  - [Resource](core/resource.md)
+  - [Schema & Validation](core/schema.md)
+  - [Behaviors](core/behaviors.md)
+  - [Events](core/events.md)
+  - [Partitions](core/partitions.md)
+  - [Encryption](core/encryption.md)
+  - [Streaming](core/streaming.md)
+  - **Internals**
+    - [Overview](core/internals/README.md)
+    - [Distributed Lock](core/internals/distributed-lock.md)
+    - [Distributed Sequence](core/internals/distributed-sequence.md)
+    - [JSON Recovery](core/internals/json-recovery.md)
+    - [Global Coordinator](core/internals/global-coordinator.md)
 
 - **Clients**
-  - [S3 Client](client.md)
-  - [Memory Client](memory-client.md)
-  - [Filesystem Client](filesystem-client.md)
+  - [Overview](clients/README.md)
+  - [S3 Client](clients/s3-client.md)
+  - [Memory Client](clients/memory-client.md)
+  - [Filesystem Client](clients/filesystem-client.md)
 
 - **Plugins**
   - [Overview](plugins/README.md)
@@ -22,53 +34,68 @@
     - [API](plugins/api/README.md)
     - [Identity (OIDC)](plugins/identity/README.md)
   - **Performance**
-    - [Cache](plugins/cache.md)
-    - [Eventual Consistency](plugins/eventual-consistency.md)
+    - [Cache](plugins/cache/README.md)
+    - [Eventual Consistency](plugins/eventual-consistency/README.md)
     - [TTL](plugins/ttl/README.md)
   - **Data & Replication**
     - [Replicator](plugins/replicator/README.md)
-    - [Importer](plugins/importer.md)
-    - [Backup](plugins/backup.md)
-    - [Audit](plugins/audit.md)
+    - [Importer](plugins/importer/README.md)
+    - [Backup](plugins/backup/README.md)
+    - [Audit](plugins/audit/README.md)
   - **Search & ML**
     - [Vector](plugins/vector/README.md)
-    - [Fulltext Search](plugins/fulltext.md)
+    - [Fulltext Search](plugins/fulltext/README.md)
     - [ML Plugin](plugins/ml-plugin/README.md)
-    - [Geo](plugins/geo.md)
+    - [Geo](plugins/geo/README.md)
+    - [Graphs](plugins/graphs/README.md)
   - **Queues & Scheduling**
     - [S3 Queue](plugins/s3-queue/README.md)
     - [Scheduler](plugins/scheduler/README.md)
-    - [Queue Consumer](plugins/queue-consumer.md)
+    - [Queue Consumer](plugins/queue-consumer/README.md)
     - [State Machine](plugins/state-machine/README.md)
   - **Web Scraping**
     - [Puppeteer](plugins/puppeteer/README.md)
-    - [Spider Suite](plugins/spider.md)
+    - [Spider](plugins/spider/README.md)
     - [Cookie Farm](plugins/cookie-farm/README.md)
   - **DevOps**
-    - [Cloud Inventory](plugins/cloud-inventory.md)
+    - [Cloud Inventory](plugins/cloud-inventory/README.md)
     - [Kubernetes Inventory](plugins/kubernetes-inventory/README.md)
-    - [TFState](plugins/tfstate.md)
+    - [TFState](plugins/tfstate/README.md)
     - [Recon](plugins/recon/README.md)
-    - [Costs](plugins/costs.md)
+    - [Costs](plugins/costs/README.md)
   - **Other**
-    - [Coordinator](plugins/coordinator.md)
-    - [Relation](plugins/relation.md)
-    - [SMTP](plugins/smtp.md)
-    - [Metrics](plugins/metrics.md)
-    - [Tournament](plugins/tournament.md)
+    - [Coordinator](plugins/coordinator/README.md)
+    - [Relation](plugins/relation/README.md)
+    - [SMTP](plugins/smtp/README.md)
+    - [Metrics](plugins/metrics/README.md)
+    - [Tournament](plugins/tournament/README.md)
+    - [Trees](plugins/trees/README.md)
 
-- **Advanced**
-  - [MCP Server](mcp.md)
-  - [Testing Guide](testing.md)
-  - [Fastest Validator](fastest-validator.md)
-  - [Logger Best Practices](logger-best-practices.md)
+- **Guides**
+  - [Overview](guides/README.md)
+  - [Getting Started](guides/getting-started.md)
+  - [Performance Tuning](guides/performance-tuning.md)
+  - [Testing Strategies](guides/testing-strategies.md)
+  - [Security Best Practices](guides/security-best-practices.md)
+  - [Multi-Tenancy](guides/multi-tenancy.md)
 
 - **Reference**
-  - [Examples Overview](examples/README.md)
-  - [Example Use Cases](examples/use-cases.md)
-  - [Example Catalog](examples/catalog.md)
+  - [Overview](reference/README.md)
+  - [CLI](reference/cli.md)
+  - [MCP Server](reference/mcp.md)
+  - [Connection Strings](reference/connection-strings.md)
+  - [Errors](reference/errors.md)
+
+- **Examples**
+  - [Overview](examples/README.md)
+  - [Use Cases](examples/use-cases.md)
+  - [Catalog](examples/catalog.md)
+
+- **More**
   - [Benchmarks](benchmarks/)
   - [AWS Integration](aws/)
+  - [Fastest Validator](fastest-validator.md)
+  - [Logger Best Practices](logger-best-practices.md)
 
 - **Links**
   - [![npm](https://img.shields.io/badge/npm-s3db.js-red)](https://www.npmjs.com/package/s3db.js)
