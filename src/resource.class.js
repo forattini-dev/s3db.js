@@ -6,6 +6,17 @@ import { chunk, cloneDeep, merge, isEmpty, isObject } from "lodash-es";
 
 import Schema from "./schema.class.js";
 import { ValidatorManager } from "./validator.class.js";
+import { ResourceValidator } from "./core/resource-validator.class.js";
+import { ResourceIdGenerator } from "./core/resource-id-generator.class.js";
+import { ResourceEvents } from "./core/resource-events.class.js";
+import { ResourceHooks } from "./core/resource-hooks.class.js";
+import { ResourceGuards } from "./core/resource-guards.class.js";
+import { ResourceMiddleware } from "./core/resource-middleware.class.js";
+import { ResourcePartitions } from "./core/resource-partitions.class.js";
+import { ResourceQuery } from "./core/resource-query.class.js";
+import { ResourceContent } from "./core/resource-content.class.js";
+import { ResourceStreams } from "./core/resource-streams.class.js";
+import { ResourcePersistence } from "./core/resource-persistence.class.js";
 import { streamToString } from "./stream/index.js";
 import tryFn, { tryFnSync } from "./concerns/try-fn.js";
 import { ResourceReader, ResourceWriter } from "./stream/index.js"
@@ -15,6 +26,7 @@ import { createIncrementalIdGenerator, parseIncrementalConfig } from "./concerns
 import { calculateTotalSize, calculateEffectiveLimit } from "./concerns/calculator.js";
 import { mapAwsError, InvalidResourceItem, ResourceError, PartitionError, ValidationError } from "./errors.js";
 import { createLogger } from "./concerns/logger.js";
+import { validateResourceConfig } from "./core/resource-config-validator.js";
 
 
 export class Resource extends AsyncEventEmitter {
@@ -107,10 +119,10 @@ export class Resource extends AsyncEventEmitter {
     if (!validation.isValid) {
       const errorDetails = validation.errors.map(err => `  • ${err}`).join('\n');
       throw new ResourceError(
-        `Invalid Resource ${config.name || '[unnamed]'} configuration:\n${errorDetails}`, 
-        { 
-          resourceName: config.name, 
-          validation: validation.errors, 
+        `Invalid Resource ${config.name || '[unnamed]'} configuration:\n${errorDetails}`,
+        {
+          resourceName: config.name,
+          validation: validation.errors,
         }
       );
     }
@@ -126,6 +138,7 @@ export class Resource extends AsyncEventEmitter {
       bcryptRounds = 10,
       observers = [],
       cache = false,
+      autoEncrypt = true,
       autoDecrypt = true,
       timestamps = false,
       partitions = {},
@@ -166,30 +179,38 @@ export class Resource extends AsyncEventEmitter {
     }
 
     this.behavior = behavior;
+    // LEGACY: observers is a pub/sub pattern used in batch operations (insertMany, deleteMany, getMany)
+    // Modules access via this.resource.observers when needed. Not extracted - only 6 usages.
     this.observers = observers;
     this.passphrase = passphrase ?? 'secret';
     this.bcryptRounds = bcryptRounds;
     this.versioningEnabled = versioningEnabled;
     this.strictValidation = strictValidation;
-    
+
     // Configure async events mode
     this.setAsyncMode(asyncEvents);
+    // Store the asyncEvents setting for config access
+    this.asyncEvents = this._asyncMode;
 
-    // Configure ID generator
-    this.idGenerator = this.configureIdGenerator(customIdGenerator, idSize);
-    
+    // Configure ID generator module
+    this._idGenerator = new ResourceIdGenerator(this, {
+      idGenerator: customIdGenerator,
+      idSize
+    });
+    // Backwards compatible: expose generator function directly
+    this.idGenerator = this._idGenerator.getGenerator();
+
     // Store ID configuration for persistence
-    // If customIdGenerator is a number, use it as idSize
-    // Otherwise, use the provided idSize or default to 22
-    if (typeof customIdGenerator === 'number' && customIdGenerator > 0) {
-      this.idSize = customIdGenerator;
-    } else if (typeof idSize === 'number' && idSize > 0) {
-      this.idSize = idSize;
-    } else {
-      this.idSize = 22;
-    }
-    
-    this.idGeneratorType = this.getIdGeneratorType(customIdGenerator, this.idSize);
+    this.idSize = this._idGenerator.idSize;
+    this.idGeneratorType = this._idGenerator.getType(customIdGenerator, this.idSize);
+
+    // Backwards compatible: expose _incrementalConfig for tests/introspection
+    // Getter delegates to the module's internal state
+    Object.defineProperty(this, '_incrementalConfig', {
+      get: () => this._idGenerator._incrementalConfig,
+      enumerable: false,
+      configurable: false
+    });
 
     // Store configuration - all at root level
     this.config = {
@@ -198,14 +219,36 @@ export class Resource extends AsyncEventEmitter {
       paranoid,
       timestamps,
       partitions,
+      autoEncrypt,
       autoDecrypt,
       allNestedObjectsOptional,
-      asyncEvents,
+      asyncEvents: this.asyncEvents,
       asyncPartitions,
       strictPartitions,
       createdBy,
     };
 
+    // Initialize Validator
+    this.validator = new ResourceValidator({
+      attributes,
+      strictValidation,
+      allNestedObjectsOptional
+    });
+
+    // Initialize Schema (for mapping/unmapping)
+    // TODO: In future phases, Schema should not handle validation at all
+    this.schema = new Schema({
+      name,
+      attributes,
+      passphrase,
+      bcryptRounds,
+      version,
+      options: {
+        allNestedObjectsOptional,
+        autoEncrypt,
+        autoDecrypt
+      }
+    });
     // Store raw schema definition (accessible as resource.$schema)
     // This is the LITERAL object passed to createResource()
     // Useful for plugins, documentation, and introspection
@@ -221,91 +264,74 @@ export class Resource extends AsyncEventEmitter {
     // Freeze after adding timestamps to prevent mutations
     Object.freeze(this.$schema);
 
-    // Initialize hooks system - expanded to cover ALL methods
-    this.hooks = {
-      // Insert hooks
-      beforeInsert: [],
-      afterInsert: [],
-
-      // Update hooks
-      beforeUpdate: [],
-      afterUpdate: [],
-
-      // Delete hooks
-      beforeDelete: [],
-      afterDelete: [],
-
-      // Get hooks
-      beforeGet: [],
-      afterGet: [],
-
-      // List hooks
-      beforeList: [],
-      afterList: [],
-
-      // Query hooks
-      beforeQuery: [],
-      afterQuery: [],
-
-      // Patch hooks
-      beforePatch: [],
-      afterPatch: [],
-
-      // Replace hooks
-      beforeReplace: [],
-      afterReplace: [],
-
-      // Exists hooks
-      beforeExists: [],
-      afterExists: [],
-
-      // Count hooks
-      beforeCount: [],
-      afterCount: [],
-
-      // GetMany hooks
-      beforeGetMany: [],
-      afterGetMany: [],
-
-      // DeleteMany hooks
-      beforeDeleteMany: [],
-      afterDeleteMany: []
-    };
+    // --- HOOKS SYSTEM ---
+    // Initialize hooks module (empty initially, internal hooks added by applyConfiguration)
+    this._hooksModule = new ResourceHooks(this, {});
+    // Backwards compatible: expose hooks object directly
+    this.hooks = this._hooksModule.getHooks();
 
     // Store attributes
     this.attributes = attributes || {};
 
+    // --- PARTITIONS SYSTEM ---
+    // Initialize partitions module BEFORE applyConfiguration (setupPartitionHooks needs it)
+    this._partitions = new ResourcePartitions(this, { strictValidation });
+
     // Store map before applying configuration
     this.map = config.map;
 
-    // Apply configuration settings (timestamps, partitions, hooks)
+    // Apply configuration settings (timestamps, partitions)
+    // This adds internal hooks (partition hooks) BEFORE user hooks
     this.applyConfiguration({ map: this.map });
 
     // Merge user-provided hooks (added last, after internal hooks)
     if (hooks) {
       for (const [event, hooksArr] of Object.entries(hooks)) {
-        if (Array.isArray(hooksArr) && this.hooks[event]) {
+        if (Array.isArray(hooksArr)) {
           for (const fn of hooksArr) {
-            const bound = this._bindHook(fn);
-            if (bound) {
-              this.hooks[event].push(bound);
-            }
-            // If not a function, ignore silently
+            this._hooksModule.addHook(event, fn);
           }
         }
       }
     }
 
-    this.eventsDisabled = config.disableEvents === true || config.disableResourceEvents === true;
-    this._pendingEventListeners = (!this.eventsDisabled && events && Object.keys(events).length > 0) ? events : null;
-    this._eventsWired = this.eventsDisabled || !this._pendingEventListeners;
+    // --- EVENTS SYSTEM ---
+    // Initialize events module (handles standardization and lazy wiring)
+    // NOTE: Named _eventsModule to avoid collision with EventEmitter's internal _events property
+    this._eventsModule = new ResourceEvents(this, {
+      disableEvents: config.disableEvents,
+      disableResourceEvents: config.disableResourceEvents,
+      events
+    });
+    // Backwards compatible: expose eventsDisabled flag
+    this.eventsDisabled = this._eventsModule.isDisabled();
 
     // --- GUARDS SYSTEM ---
-    // Normalize and store guards (framework-agnostic authorization)
-    this.guard = this._normalizeGuard(guard);
+    // Initialize guards module (framework-agnostic authorization)
+    this._guards = new ResourceGuards(this, { guard });
+    // Backwards compatible: expose guard config directly
+    this.guard = this._guards.getGuard();
 
     // --- MIDDLEWARE SYSTEM ---
-    this._initMiddleware();
+    // Initialize middleware module
+    this._middleware = new ResourceMiddleware(this);
+    this._middleware.init();
+
+    // --- QUERY SYSTEM ---
+    // Initialize query module (handles list, count, page, query operations)
+    this._query = new ResourceQuery(this);
+
+    // --- CONTENT SYSTEM ---
+    // Initialize content module (handles binary content operations)
+    this._content = new ResourceContent(this);
+
+    // --- STREAMS SYSTEM ---
+    // Initialize streams module (handles readable/writable streams)
+    this._streams = new ResourceStreams(this);
+
+    // --- PERSISTENCE SYSTEM ---
+    // Initialize persistence module (handles CRUD operations)
+    this._persistence = new ResourcePersistence(this);
 
     // --- INCREMENTAL ID GENERATOR ---
     // Initialize if incremental config was provided
@@ -314,93 +340,48 @@ export class Resource extends AsyncEventEmitter {
 
   /**
    * Configure ID generator based on provided options
+   * @deprecated Use ResourceIdGenerator module instead. This method is kept for backwards compatibility.
    * @param {Function|number|string|Object} customIdGenerator - Custom ID generator function, size, or config
-   *   Supports:
-   *   - Function: Custom generator function
-   *   - Number: ID size (e.g., 32 for 32-char IDs)
-   *   - 'incremental': Auto-incrementing IDs starting from 1
-   *   - 'incremental:1000': Auto-incrementing IDs starting from 1000
-   *   - 'incremental:fast': Fast mode with batch reservation
-   *   - 'incremental:ORD-0001': Prefixed sequential IDs
-   *   - { type: 'incremental', start: 1000, mode: 'fast', batchSize: 500 }
    * @param {number} idSize - Size for auto-generated IDs
    * @returns {Function} Configured ID generator function (may be async for incremental)
    * @private
    */
   configureIdGenerator(customIdGenerator, idSize) {
-    // If a custom function is provided, wrap it to ensure string output
-    if (typeof customIdGenerator === 'function') {
-      return () => String(customIdGenerator());
-    }
-
-    // Check for incremental type (string or object)
-    const isIncrementalString = typeof customIdGenerator === 'string' &&
-      (customIdGenerator === 'incremental' || customIdGenerator.startsWith('incremental:'));
-    const isIncrementalObject = typeof customIdGenerator === 'object' &&
-      customIdGenerator !== null &&
-      customIdGenerator.type === 'incremental';
-
-    if (isIncrementalString || isIncrementalObject) {
-      // Store config for later initialization (client may not be available yet)
-      this._incrementalConfig = customIdGenerator;
-      // Return placeholder that will be replaced in _initIncrementalIdGenerator
-      return null;
-    }
-
-    // If customIdGenerator is a number (size), create a generator with that size
-    if (typeof customIdGenerator === 'number' && customIdGenerator > 0) {
-      return createCustomGenerator(getUrlAlphabet(), customIdGenerator);
-    }
-    // If idSize is provided, create a generator with that size
-    if (typeof idSize === 'number' && idSize > 0 && idSize !== 22) {
-      return createCustomGenerator(getUrlAlphabet(), idSize);
-    }
-    // Default to the standard idGenerator (22 chars)
-    return defaultIdGenerator;
+    // Delegate to module - this method is deprecated
+    const tempGenerator = new ResourceIdGenerator(this, { idGenerator: customIdGenerator, idSize });
+    return tempGenerator.getGenerator();
   }
 
   /**
    * Initialize incremental ID generator (called after client is available)
+   * Delegates to ResourceIdGenerator module.
    * @private
    */
   _initIncrementalIdGenerator() {
-    if (!this._incrementalConfig || this.idGenerator !== null) {
-      return;
-    }
-
-    this.idGenerator = createIncrementalIdGenerator({
-      client: this.client,
-      resourceName: this.name,
-      config: this._incrementalConfig,
-      logger: this.logger
-    });
-
-    // Mark as async generator
-    this._asyncIdGenerator = true;
+    this._idGenerator.initIncremental();
+    // Update the backwards-compatible reference
+    this.idGenerator = this._idGenerator.getGenerator();
   }
 
   /**
    * Check if ID generator is async (incremental mode)
+   * Delegates to ResourceIdGenerator module.
    * @returns {boolean}
    */
   hasAsyncIdGenerator() {
-    return this._asyncIdGenerator === true;
+    return this._idGenerator.isAsync();
   }
 
   /**
    * Get a serializable representation of the ID generator type
+   * Delegates to ResourceIdGenerator module.
    * @param {Function|number} customIdGenerator - Custom ID generator function or size
    * @param {number} idSize - Size for auto-generated IDs
    * @returns {string|number} Serializable ID generator type
    * @private
    */
   getIdGeneratorType(customIdGenerator, idSize) {
-    // If a custom function is provided
-    if (typeof customIdGenerator === 'function') {
-      return 'custom_function';
-    }
-    // For number generators or default size, return the actual idSize
-    return idSize;
+    return this._idGenerator.getType(customIdGenerator, idSize);
   }
 
   export() {
@@ -477,19 +458,32 @@ export class Resource extends AsyncEventEmitter {
       bcryptRounds: this.bcryptRounds,
       version: this.version,
       options: {
+        autoEncrypt: this.config.autoEncrypt,
         autoDecrypt: this.config.autoDecrypt,
         allNestedObjectsOptional: this.config.allNestedObjectsOptional
       },
       map: map || this.map
     });
 
+    // Update validator schema
+    if (this.validator) {
+      this.validator.updateSchema(this.attributes);
+    }
+
     // Validate partitions against current attributes
     this.validatePartitions();
   }
 
+  // ============================================================================
+  // CROSS-CUTTING CONCERNS (Stay in Resource facade - affect multiple modules)
+  // These methods modify Schema, Validator, and Hooks simultaneously.
+  // They cannot be extracted to a single module without creating circular dependencies.
+  // ============================================================================
+
   /**
    * Update resource attributes and rebuild schema
    * @param {Object} newAttributes - New attributes definition
+   * @remarks CROSS-CUTTING: Modifies this.attributes, this.schema, triggers applyConfiguration()
    */
   updateAttributes(newAttributes) {
     // Store old attributes for comparison
@@ -512,6 +506,7 @@ export class Resource extends AsyncEventEmitter {
    * @param {Object|string} definition - Attribute definition
    * @param {string} pluginName - Name of plugin adding the attribute
    * @returns {void}
+   * @remarks CROSS-CUTTING: Modifies this.schema.attributes, this.attributes, recompiles validator, regenerates hooks
    *
    * @example
    * // VectorPlugin adding tracking field
@@ -608,6 +603,7 @@ export class Resource extends AsyncEventEmitter {
    * @param {string} name - Attribute name to remove
    * @param {string} [pluginName] - Optional plugin name for safety check
    * @returns {boolean} True if attribute was removed, false if not found
+   * @remarks CROSS-CUTTING: Modifies this.schema.attributes, this.attributes, recompiles validator
    *
    * @example
    * resource.removePluginAttribute('_hasEmbedding', 'VectorPlugin');
@@ -663,86 +659,40 @@ export class Resource extends AsyncEventEmitter {
 
   /**
    * Add a hook function for a specific event
+   * Delegates to ResourceHooks module.
    * @param {string} event - Hook event (beforeInsert, afterInsert, etc.)
    * @param {Function} fn - Hook function
    */
   addHook(event, fn) {
-    if (this.hooks[event]) {
-      const bound = this._bindHook(fn);
-      if (bound) {
-        this.hooks[event].push(bound);
-      }
-    }
+    this._hooksModule.addHook(event, fn);
   }
 
   /**
    * Execute hooks for a specific event
+   * Delegates to ResourceHooks module.
    * @param {string} event - Hook event
    * @param {*} data - Data to pass to hooks
-   * @returns {*} Modified data
+   * @returns {Promise<*>} Modified data
    */
   async executeHooks(event, data) {
-    if (!this.hooks[event]) return data;
-
-    let result = data;
-    for (const hook of this.hooks[event]) {
-      result = await hook(result);
-    }
-
-    return result;
-  }
-
-  _bindHook(fn) {
-    if (typeof fn !== 'function') {
-      return null;
-    }
-
-    const original = fn.__s3db_original || fn;
-    const bound = original.bind(this);
-
-    try {
-      Object.defineProperty(bound, '__s3db_original', {
-        value: original,
-        enumerable: false,
-        configurable: true,
-      });
-    } catch (_) {
-      bound.__s3db_original = original;
-    }
-
-    return bound;
+    return this._hooksModule.executeHooks(event, data);
   }
 
   /**
-   * Setup automatic partition hooks
+   * Bind a hook function to this resource context.
+   * Delegates to ResourceHooks module.
+   * @private
+   */
+  _bindHook(fn) {
+    return this._hooksModule._bindHook(fn);
+  }
+
+  /**
+   * Setup automatic partition hooks.
+   * Delegates to ResourcePartitions module.
    */
   setupPartitionHooks() {
-    if (!this.config.partitions) {
-      return;
-    }
-
-    const partitions = this.config.partitions;
-    if (Object.keys(partitions).length === 0) {
-      return;
-    }
-
-    // Add afterInsert hook to create partition references
-    if (!this.hooks.afterInsert) {
-      this.hooks.afterInsert = [];
-    }
-    this.hooks.afterInsert.push(async (data) => {
-      await this.createPartitionReferences(data);
-      return data;
-    });
-
-    // Add afterDelete hook to clean up partition references
-    if (!this.hooks.afterDelete) {
-      this.hooks.afterDelete = [];
-    }
-    this.hooks.afterDelete.push(async (data) => {
-      await this.deletePartitionReferences(data);
-      return data;
-    });
+    this._partitions.setupHooks(this._hooksModule);
   }
 
   /**
@@ -773,243 +723,58 @@ export class Resource extends AsyncEventEmitter {
    * }
    */
   async validate(data, options = {}) {
-    const {
-      throwOnError = false,
-      includeId = false,
-      mutateOriginal = false
-    } = options;
-
-    // Clone data to avoid mutation (unless mutateOriginal is true)
-    const dataToValidate = mutateOriginal ? data : cloneDeep(data);
-
-    // If includeId is false, remove id from validation
-    if (!includeId && dataToValidate.id) {
-      delete dataToValidate.id;
-    }
-
-    // PERFORMANCE: Removed unnecessary 'original' clone - callers already have the original data
-    const result = {
-      isValid: false,
-      errors: [],
-      data: dataToValidate
-    };
-
-    try {
-      const check = await this.schema.validate(dataToValidate, { mutateOriginal });
-
-      if (check === true) {
-        result.isValid = true;
-      } else {
-        result.errors = Array.isArray(check) ? check : [check];
-        result.isValid = false;
-
-        if (throwOnError) {
-          const error = new Error('Validation failed');
-          error.validationErrors = result.errors;
-          error.invalidData = data;
-          throw error;
-        }
-      }
-    } catch (err) {
-      // If schema.validate threw, and we're not in throwOnError mode, catch and return result
-      if (!throwOnError) {
-        result.errors = [{ message: err.message, error: err }];
-        result.isValid = false;
-      } else {
-        throw err;
-      }
-    }
-
-    return result;
+    return this.validator.validate(data, options);
   }
 
   /**
-   * Validate that all partition fields exist in current resource attributes
-   * @throws {Error} If partition fields don't exist in current schema (only when strictValidation is true)
+   * Validate that all partition fields exist in current resource attributes.
+   * Delegates to ResourcePartitions module.
+   * @throws {PartitionError} If partition fields don't exist in current schema (only when strictValidation is true)
    */
   validatePartitions() {
-    // Skip validation if strictValidation is disabled
-    if (!this.strictValidation) {
-      return;
-    }
-
-    if (!this.config.partitions) {
-      return; // No partitions to validate
-    }
-
-    const partitions = this.config.partitions;
-    if (Object.keys(partitions).length === 0) {
-      return; // No partitions to validate
-    }
-
-    const currentAttributes = Object.keys(this.attributes || {});
-
-    for (const [partitionName, partitionDef] of Object.entries(partitions)) {
-      if (!partitionDef.fields) {
-        continue; // Skip invalid partition definitions
-      }
-
-      for (const fieldName of Object.keys(partitionDef.fields)) {
-        if (!this.fieldExistsInAttributes(fieldName)) {
-          throw new PartitionError(`Partition '${partitionName}' uses field '${fieldName}' which does not exist in resource attributes. Available fields: ${currentAttributes.join(', ')}.`, { resourceName: this.name, partitionName, fieldName, availableFields: currentAttributes, operation: 'validatePartitions' });
-        }
-      }
-    }
+    this._partitions.validate();
   }
 
   /**
-   * Check if a field (including nested fields) exists in the current attributes
+   * Check if a field (including nested fields) exists in the current attributes.
+   * Delegates to ResourcePartitions module.
    * @param {string} fieldName - Field name (can be nested like 'utm.source')
    * @returns {boolean} True if field exists
    */
   fieldExistsInAttributes(fieldName) {
-    // Allow system metadata fields (those starting with _)
-    if (fieldName.startsWith('_')) {
-      return true;
-    }
-
-    // Handle simple field names (no dots)
-    if (!fieldName.includes('.')) {
-      return Object.keys(this.attributes || {}).includes(fieldName);
-    }
-
-    // Handle nested field names using dot notation
-    const keys = fieldName.split('.');
-    let currentLevel = this.attributes || {};
-
-    for (const key of keys) {
-      if (!currentLevel || typeof currentLevel !== 'object' || !(key in currentLevel)) {
-        return false;
-      }
-      currentLevel = currentLevel[key];
-    }
-
-    return true;
+    return this._partitions.fieldExistsInAttributes(fieldName);
   }
 
   /**
-   * Find orphaned partitions (partitions that reference non-existent fields)
+   * Find orphaned partitions (partitions that reference non-existent fields).
+   * Delegates to ResourcePartitions module.
    * @returns {Object} Object with orphaned partition names as keys and details as values
-   * @example
-   * const orphaned = resource.findOrphanedPartitions();
-   * // Returns: { byRegion: { missingFields: ['region'], definition: {...} } }
    */
   findOrphanedPartitions() {
-    const orphaned = {};
-
-    if (!this.config.partitions) {
-      return orphaned;
-    }
-
-    for (const [partitionName, partitionDef] of Object.entries(this.config.partitions)) {
-      if (!partitionDef.fields) {
-        continue;
-      }
-
-      const missingFields = [];
-      for (const fieldName of Object.keys(partitionDef.fields)) {
-        if (!this.fieldExistsInAttributes(fieldName)) {
-          missingFields.push(fieldName);
-        }
-      }
-
-      if (missingFields.length > 0) {
-        orphaned[partitionName] = {
-          missingFields,
-          definition: partitionDef,
-          allFields: Object.keys(partitionDef.fields)
-        };
-      }
-    }
-
-    return orphaned;
+    return this._partitions.findOrphaned();
   }
 
   /**
-   * Remove orphaned partitions (partitions that reference non-existent fields)
+   * Remove orphaned partitions (partitions that reference non-existent fields).
+   * Delegates to ResourcePartitions module.
    * WARNING: This will modify the resource configuration and should be followed by uploadMetadataFile()
    * @param {Object} options - Options
    * @param {boolean} options.dryRun - If true, only returns what would be removed without modifying (default: false)
    * @returns {Object} Object with removed partition names and details
-   * @example
-   * // Dry run to see what would be removed
-   * const toRemove = resource.removeOrphanedPartitions({ dryRun: true });
-   * console.log('Would remove:', toRemove);
-   *
-   * // Actually remove orphaned partitions
-   * const removed = resource.removeOrphanedPartitions();
-   * await database.uploadMetadataFile(); // Save changes to S3
    */
   removeOrphanedPartitions({ dryRun = false } = {}) {
-    const orphaned = this.findOrphanedPartitions();
-
-    if (Object.keys(orphaned).length === 0) {
-      return {};
-    }
-
-    if (dryRun) {
-      return orphaned;
-    }
-
-    // Remove orphaned partitions from config
-    for (const partitionName of Object.keys(orphaned)) {
-      delete this.config.partitions[partitionName];
-    }
-
-    // Emit event for tracking
-    this.emit('orphanedPartitionsRemoved', {
-      resourceName: this.name,
-      removed: Object.keys(orphaned),
-      details: orphaned
-    });
-
-    return orphaned;
+    return this._partitions.removeOrphaned({ dryRun });
   }
 
   /**
-   * Apply a single partition rule to a field value
+   * Apply a single partition rule to a field value.
+   * Delegates to ResourcePartitions module.
    * @param {*} value - The field value
    * @param {string} rule - The partition rule
    * @returns {*} Transformed value
    */
   applyPartitionRule(value, rule) {
-    if (value === undefined || value === null) {
-      return value;
-    }
-
-    let transformedValue = value;
-
-    // Apply maxlength rule manually
-    if (typeof rule === 'string' && rule.includes('maxlength:')) {
-      const maxLengthMatch = rule.match(/maxlength:(\d+)/);
-      if (maxLengthMatch) {
-        const maxLength = parseInt(maxLengthMatch[1]);
-        if (typeof transformedValue === 'string' && transformedValue.length > maxLength) {
-          transformedValue = transformedValue.substring(0, maxLength);
-        }
-      }
-    }
-
-    // Format date values
-    if (rule.includes('date')) {
-      if (transformedValue instanceof Date) {
-        transformedValue = transformedValue.toISOString().split('T')[0]; // YYYY-MM-DD format
-      } else if (typeof transformedValue === 'string') {
-        // Handle ISO8601 timestamp strings (e.g., from timestamps)
-        if (transformedValue.includes('T') && transformedValue.includes('Z')) {
-          transformedValue = transformedValue.split('T')[0]; // Extract date part from ISO8601
-        } else {
-          // Try to parse as date
-          const date = new Date(transformedValue);
-          if (!isNaN(date.getTime())) {
-            transformedValue = date.toISOString().split('T')[0];
-          }
-          // If parsing fails, keep original value
-        }
-      }
-    }
-
-    return transformedValue;
+    return this._partitions.applyRule(value, rule);
   }
 
   /**
@@ -1024,87 +789,27 @@ export class Resource extends AsyncEventEmitter {
   }
 
   /**
-   * Generate partition key for a resource in a specific partition
+   * Generate partition key for a resource in a specific partition.
+   * Delegates to ResourcePartitions module.
    * @param {Object} params - Partition key parameters
    * @param {string} params.partitionName - Name of the partition
    * @param {string} params.id - Resource ID
    * @param {Object} params.data - Resource data for partition value extraction
    * @returns {string|null} The partition key path or null if required fields are missing
-   * @example
-   * const partitionKey = resource.getPartitionKey({
-   *   partitionName: 'byUtmSource',
-   *   id: 'user-123',
-   *   data: { utm: { source: 'google' } }
-   * });
-   * // Returns: 'resource=users/partition=byUtmSource/utm.source=google/id=user-123'
-   * 
-   * // Returns null if required field is missing
-   * const nullKey = resource.getPartitionKey({
-   *   partitionName: 'byUtmSource',
-   *   id: 'user-123',
-   *   data: { name: 'John' } // Missing utm.source
-   * });
-   * // Returns: null
    */
   getPartitionKey({ partitionName, id, data }) {
-    if (!this.config.partitions || !this.config.partitions[partitionName]) {
-      throw new PartitionError(`Partition '${partitionName}' not found`, { resourceName: this.name, partitionName, operation: 'getPartitionKey' });
-    }
-
-    const partition = this.config.partitions[partitionName];
-    const partitionSegments = [];
-
-    // Process each field in the partition (sorted by field name for consistency)
-    const sortedFields = Object.entries(partition.fields).sort(([a], [b]) => a.localeCompare(b));
-    for (const [fieldName, rule] of sortedFields) {
-      // Handle nested fields using dot notation (e.g., "utm.source", "address.city")
-      const fieldValue = this.getNestedFieldValue(data, fieldName);
-      const transformedValue = this.applyPartitionRule(fieldValue, rule);
-
-      if (transformedValue === undefined || transformedValue === null) {
-        return null; // Skip if any required field is missing
-      }
-
-      partitionSegments.push(`${fieldName}=${transformedValue}`);
-    }
-
-    if (partitionSegments.length === 0) {
-      return null;
-    }
-
-    // Ensure id is never undefined
-    const finalId = id || data?.id;
-    if (!finalId) {
-      return null; // Cannot create partition key without id
-    }
-
-    return join(`resource=${this.name}`, `partition=${partitionName}`, ...partitionSegments, `id=${finalId}`);
+    return this._partitions.getKey({ partitionName, id, data });
   }
 
   /**
-   * Get nested field value from data object using dot notation
+   * Get nested field value from data object using dot notation.
+   * Delegates to ResourcePartitions module.
    * @param {Object} data - Data object
    * @param {string} fieldPath - Field path (e.g., "utm.source", "address.city")
    * @returns {*} Field value
    */
   getNestedFieldValue(data, fieldPath) {
-    // Handle simple field names (no dots)
-    if (!fieldPath.includes('.')) {
-      return data[fieldPath];
-    }
-
-    // Handle nested field names using dot notation
-    const keys = fieldPath.split('.');
-    let currentLevel = data;
-
-    for (const key of keys) {
-      if (!currentLevel || typeof currentLevel !== 'object' || !(key in currentLevel)) {
-        return undefined;
-      }
-      currentLevel = currentLevel[key];
-    }
-
-    return currentLevel;
+    return this._partitions.getNestedFieldValue(data, fieldPath);
   }
 
   /**
@@ -1121,61 +826,28 @@ export class Resource extends AsyncEventEmitter {
   }
 
   /**
-   * Emit standardized events with optional ID-specific variant
-   *
+   * Emit a standardized event with optional ID-specific event.
+   * Delegates to ResourceEvents module.
    * @private
    * @param {string} event - Event name
    * @param {Object} payload - Event payload
    * @param {string} [id] - Optional ID for ID-specific events
    */
   _emitStandardized(event, payload, id = null) {
-    if (this.eventsDisabled) {
-      return;
-    }
-
-    this._ensureEventsWired();
-
-    // Emit standardized event
-    super.emit(event, payload);
-
-    // Emit ID-specific event if ID provided
-    if (id) {
-      super.emit(`${event}:${id}`, payload);
-    }
+    this._eventsModule.emitStandardized(event, payload, id);
   }
 
+  /**
+   * Ensure event listeners from config are wired up.
+   * Delegates to ResourceEvents module.
+   * @private
+   */
   _ensureEventsWired() {
-    if (this.eventsDisabled || this._eventsWired) {
-      return;
-    }
-
-    if (!this._pendingEventListeners) {
-      this._eventsWired = true;
-      return;
-    }
-
-    for (const [eventName, listeners] of Object.entries(this._pendingEventListeners)) {
-      if (Array.isArray(listeners)) {
-        for (const listener of listeners) {
-          if (typeof listener === 'function') {
-            super.on(eventName, listener.bind(this));
-          }
-        }
-      } else if (typeof listeners === 'function') {
-        super.on(eventName, listeners.bind(this));
-      }
-    }
-
-    this._pendingEventListeners = null;
-    this._eventsWired = true;
+    this._eventsModule.ensureWired();
   }
 
   on(eventName, listener) {
-    if (this.eventsDisabled) {
-      return this;
-    }
-    this._ensureEventsWired();
-    return super.on(eventName, listener);
+    return this._eventsModule.on(eventName, listener);
   }
 
   addListener(eventName, listener) {
@@ -1183,676 +855,74 @@ export class Resource extends AsyncEventEmitter {
   }
 
   once(eventName, listener) {
-    if (this.eventsDisabled) {
-      return this;
-    }
-    this._ensureEventsWired();
-    return super.once(eventName, listener);
+    return this._eventsModule.once(eventName, listener);
   }
 
   emit(eventName, ...args) {
-    if (this.eventsDisabled) {
-      return false;
-    }
-    this._ensureEventsWired();
-    return super.emit(eventName, ...args);
+    return this._eventsModule.emit(eventName, ...args);
   }
 
   /**
-   * Insert a new resource object
+   * Insert a new resource object.
+   * Delegates to ResourcePersistence module.
    * @param {Object} attributes - Resource attributes
    * @param {string} [attributes.id] - Custom ID (optional, auto-generated if not provided)
    * @returns {Promise<Object>} The created resource object with all attributes
-   * @example
-   * // Insert with auto-generated ID
-   * const user = await resource.insert({
-   *   name: 'John Doe',
-   *   email: 'john@example.com',
-   *   age: 30
-   * });
-      * 
-   * // Insert with custom ID
-   * const user = await resource.insert({
-   *   id: 'user-123',
-   *   name: 'John Doe',
-   *   email: 'john@example.com'
-   * });
    */
   async insert({ id, ...attributes }) {
-    // 🪵 Trace-level logging for detailed debugging
-    this.logger.trace({ id, attributeKeys: Object.keys(attributes) }, 'insert called');
-
-    const providedId = id !== undefined && id !== null && String(id).trim() !== '';
-    if (this.config.timestamps) {
-      attributes.createdAt = new Date().toISOString();
-      attributes.updatedAt = new Date().toISOString();
-    }
-
-    // Aplica defaults antes de tudo
-    const attributesWithDefaults = this.applyDefaults(attributes);
-    // Reconstruct the complete data for validation
-    // Only include id if it's defined (not undefined)
-    const completeData = id !== undefined
-      ? { id, ...attributesWithDefaults }
-      : { ...attributesWithDefaults };
-
-    // Execute beforeInsert hooks
-    const preProcessedData = await this.executeHooks('beforeInsert', completeData);
-
-    // Capture extra properties added by beforeInsert
-    const extraProps = Object.keys(preProcessedData).filter(
-      k => !(k in completeData) || preProcessedData[k] !== completeData[k]
-    );
-    const extraData = {};
-    for (const k of extraProps) extraData[k] = preProcessedData[k];
-
-    const shouldValidateId = preProcessedData.id !== undefined && preProcessedData.id !== null;
-    const {
-      errors,
-      isValid,
-      data: validated,
-    } = await this.validate(preProcessedData, { includeId: shouldValidateId });
-
-    if (!isValid) {
-      const errorMsg = (errors && errors.length && errors[0].message) ? errors[0].message : 'Insert failed';
-      throw new InvalidResourceItem({
-        bucket: this.client.config.bucket,
-        resourceName: this.name,
-        attributes: preProcessedData,
-        validation: errors,
-        message: errorMsg
-      })
-    }
-
-    // Extract id and attributes from validated data
-    const { id: validatedId, ...validatedAttributes } = validated;
-    // Reinjetar propriedades extras do beforeInsert
-    Object.assign(validatedAttributes, extraData);
-    
-    // Generate ID with fallback for empty generators
-    // Supports both sync and async ID generators (incremental mode is async)
-    let finalId = validatedId || preProcessedData.id || id;
-    if (!finalId) {
-      // Use Promise.resolve to handle both sync and async generators
-      finalId = await Promise.resolve(this.idGenerator());
-      // Fallback to default generator if custom generator returns empty
-      if (!finalId || String(finalId).trim() === '') {
-        const { idGenerator } = await import('#src/concerns/id.js');
-        finalId = idGenerator();
-      }
-    }
-
-    const mappedData = await this.schema.mapper(validatedAttributes);
-    mappedData._v = String(this.version);
-
-    // Apply behavior strategy
-    const behaviorImpl = getBehavior(this.behavior);
-    const { mappedData: processedMetadata, body } = await behaviorImpl.handleInsert({
-      resource: this,
-      data: validatedAttributes,
-      mappedData,
-      originalData: completeData
-    });
-
-    // Add version metadata (required for all objects)
-    const finalMetadata = processedMetadata;
-
-    if (!finalId || String(finalId).trim() === '') {
-      throw new InvalidResourceItem({
-        bucket: this.client.config.bucket,
-        resourceName: this.name,
-        attributes: preProcessedData,
-        validation: [{ message: 'Generated ID is invalid', field: 'id' }],
-        message: 'Generated ID is invalid'
-      });
-    }
-
-    const shouldCheckExists = providedId || shouldValidateId || validatedId !== undefined;
-    if (shouldCheckExists) {
-      const alreadyExists = await this.exists(finalId);
-      if (alreadyExists) {
-        throw new InvalidResourceItem({
-          bucket: this.client.config.bucket,
-          resourceName: this.name,
-          attributes: preProcessedData,
-          validation: [{ message: `Resource with id '${finalId}' already exists`, field: 'id' }],
-          message: `Resource with id '${finalId}' already exists`
-        });
-      }
-    }
-
-    const key = this.getResourceKey(finalId);
-    // Determine content type based on body content
-    let contentType = undefined;
-    if (body && body !== "") {
-      const [okParse, errParse] = await tryFn(() => Promise.resolve(JSON.parse(body)));
-      if (okParse) contentType = 'application/json';
-    }
-    // LOG: body e contentType antes do putObject
-    // Only throw if behavior is 'body-only' and body is empty
-    if (this.behavior === 'body-only' && (!body || body === "")) {
-      throw new ResourceError('Body required for body-only behavior', {
-        resourceName: this.name,
-        operation: 'insert',
-        id: finalId,
-        statusCode: 400,
-        retriable: false,
-        suggestion: 'Include a request body when using behavior "body-only" or switch to "body-overflow".'
-      });
-    }
-    // For other behaviors, allow empty body (all data in metadata)
-
-    const [okPut, errPut, putResult] = await tryFn(() => this.client.putObject({
-      key,
-      body,
-      contentType,
-      metadata: finalMetadata,
-    }));
-    if (!okPut) {
-      const msg = errPut && errPut.message ? errPut.message : '';
-      if (msg.includes('metadata headers exceed') || msg.includes('Insert failed')) {
-        const totalSize = calculateTotalSize(finalMetadata);
-        const effectiveLimit = calculateEffectiveLimit({
-          s3Limit: 2047,
-          systemConfig: {
-            version: this.version,
-            timestamps: this.config.timestamps,
-            id: finalId
-          }
-        });
-        const excess = totalSize - effectiveLimit;
-        errPut.totalSize = totalSize;
-        errPut.limit = 2047;
-        errPut.effectiveLimit = effectiveLimit;
-        errPut.excess = excess;
-        throw new ResourceError('metadata headers exceed', { resourceName: this.name, operation: 'insert', id: finalId, totalSize, effectiveLimit, excess, suggestion: 'Reduce metadata size or number of fields.' });
-      }
-      throw errPut;
-    }
-
-    // Get the inserted object
-    const insertedObject = await this.get(finalId);
-
-    // Handle partition indexing based on strictPartitions and asyncPartitions config
-    if (this.config.partitions && Object.keys(this.config.partitions).length > 0) {
-      if (this.config.strictPartitions) {
-        // Strict mode: await partition operations synchronously and throw on error
-        await this.createPartitionReferences(insertedObject);
-      } else if (this.config.asyncPartitions) {
-        // Async mode: create partition indexes in background
-        setImmediate(() => {
-          this.createPartitionReferences(insertedObject).catch(err => {
-            this.emit('partitionIndexError', {
-              operation: 'insert',
-              id: finalId,
-              error: err,
-              message: err.message
-            });
-          });
-        });
-      } else {
-        // Sync mode (default): await partition operations synchronously but emit error instead of throwing
-        const [ok, err] = await tryFn(() => this.createPartitionReferences(insertedObject));
-        if (!ok) {
-          this.emit('partitionIndexError', {
-            operation: 'insert',
-            id: finalId,
-            error: err,
-            message: err.message
-          });
-        }
-      }
-
-      // Execute other afterInsert hooks synchronously (excluding partition hook)
-      const nonPartitionHooks = this.hooks.afterInsert.filter(hook =>
-        !hook.toString().includes('createPartitionReferences')
-      );
-      let finalResult = insertedObject;
-      for (const hook of nonPartitionHooks) {
-        finalResult = await hook(finalResult);
-      }
-
-      // Emit insert event with standardized naming
-      this._emitStandardized('inserted', finalResult, finalResult?.id || insertedObject?.id);
-      return finalResult;
-    } else {
-      // Sync mode: execute all hooks including partition creation
-      const finalResult = await this.executeHooks('afterInsert', insertedObject);
-
-      // Emit insert event with standardized naming
-      this._emitStandardized('inserted', finalResult, finalResult?.id || insertedObject?.id);
-      return finalResult;
-    }
+    return this._persistence.insert({ id, ...attributes });
   }
 
   /**
-   * Retrieve a resource object by ID
+   * Retrieve a resource object by ID.
+   * Delegates to ResourcePersistence module.
    * @param {string} id - Resource ID
    * @returns {Promise<Object>} The resource object with all attributes and metadata
-   * @example
-   * const user = await resource.get('user-123');
    */
   async get(id) {
-    if (isObject(id)) {
-      throw new ValidationError('Resource id must be a string', {
-        field: 'id',
-        statusCode: 400,
-        retriable: false,
-        suggestion: 'Pass the resource id as a string value (e.g. "user-123").'
-      });
-    }
-    if (isEmpty(id)) {
-      throw new ValidationError('Resource id cannot be empty', {
-        field: 'id',
-        statusCode: 400,
-        retriable: false,
-        suggestion: 'Provide a non-empty id when calling resource methods.'
-      });
-    }
-
-    // Execute beforeGet hooks
-    await this.executeHooks('beforeGet', { id });
-
-    const key = this.getResourceKey(id);
-    const [ok, err, request] = await tryFn(() => this.client.getObject(key));
-
-    if (!ok) {
-      throw mapAwsError(err, {
-        bucket: this.client.config.bucket,
-        key,
-        resourceName: this.name,
-        operation: 'get',
-        id
-      });
-    }
-    // NOTE: ContentLength === 0 is valid for objects with data in metadata only
-    // (removed validation that threw NoSuchKey for empty body objects)
-
-    // Get the correct schema version for unmapping (from _v metadata)
-    const objectVersionRaw = request.Metadata?._v || this.version;
-    const objectVersion = typeof objectVersionRaw === 'string' && objectVersionRaw.startsWith('v') ? objectVersionRaw.slice(1) : objectVersionRaw;
-    const schema = await this.getSchemaForVersion(objectVersion);
-
-    let metadata = await schema.unmapper(request.Metadata);
-
-    // Apply behavior strategy for reading (important for body-overflow)
-    const behaviorImpl = getBehavior(this.behavior);
-    let body = "";
-
-    // Get body content if needed (for body-overflow behavior)
-    if (request.ContentLength > 0) {
-      const [okBody, errBody, fullObject] = await tryFn(() => this.client.getObject(key));
-      if (okBody) {
-        body = await streamToString(fullObject.Body);
-      } else {
-        // Body read failed, continue with metadata only
-        body = "";
-      }
-    }
-
-    const { metadata: processedMetadata } = await behaviorImpl.handleGet({
-      resource: this,
-      metadata,
-      body
-    });
-
-    // Use composeFullObjectFromWrite to ensure proper field preservation
-    let data = await this.composeFullObjectFromWrite({
-      id,
-      metadata: processedMetadata,
-      body,
-      behavior: this.behavior
-    });
-
-    data._contentLength = request.ContentLength;
-    data._lastModified = request.LastModified;
-    data._hasContent = request.ContentLength > 0;
-    data._mimeType = request.ContentType || null;
-    data._etag = request.ETag;
-    data._v = objectVersion;
-
-    // Add version info to returned data
-
-    if (request.VersionId) data._versionId = request.VersionId;
-    if (request.Expiration) data._expiresAt = request.Expiration;
-
-    data._definitionHash = this.getDefinitionHash();
-
-    // Apply version mapping if object is from a different version
-    if (objectVersion !== this.version) {
-      data = await this.applyVersionMapping(data, objectVersion, this.version);
-    }
-
-    // Execute afterGet hooks
-    data = await this.executeHooks('afterGet', data);
-
-    this._emitStandardized("fetched", data, data.id);
-    const value = data;
-    return value;
+    return this._persistence.get(id);
   }
 
   /**
-   * Retrieve a resource object by ID, or return null if not found
+   * Retrieve a resource object by ID, or return null if not found.
+   * Delegates to ResourcePersistence module.
    * @param {string} id - Resource ID
    * @returns {Promise<Object|null>} The resource object or null if not found
-   * @example
-   * const user = await resource.getOrNull('user-123');
-   * if (user) {
-   *   console.log('Found user:', user.name);
-   * } else {
-   *   console.log('User not found');
-   * }
    */
   async getOrNull(id) {
-    const [ok, err, data] = await tryFn(() => this.get(id));
-
-    // Check if error is NoSuchKey (resource doesn't exist)
-    if (!ok && err && (err.name === 'NoSuchKey' || err.message?.includes('NoSuchKey'))) {
-      return null;
-    }
-
-    // Re-throw other errors (permission denied, network issues, etc.)
-    if (!ok) {
-      throw err;
-    }
-
-    return data;
+    return this._persistence.getOrNull(id);
   }
 
   /**
-   * Retrieve a resource object by ID, or throw ResourceNotFoundError if not found
+   * Retrieve a resource object by ID, or throw ResourceNotFoundError if not found.
+   * Delegates to ResourcePersistence module.
    * @param {string} id - Resource ID
    * @returns {Promise<Object>} The resource object
    * @throws {ResourceError} If resource does not exist
-   * @example
-   * // Throws error if user doesn't exist (no need for null check)
-   * const user = await resource.getOrThrow('user-123');
-   * console.log('User name:', user.name); // Safe to access
    */
   async getOrThrow(id) {
-    const [ok, err, data] = await tryFn(() => this.get(id));
-
-    // Check if error is NoSuchKey (resource doesn't exist)
-    if (!ok && err && (err.name === 'NoSuchKey' || err.message?.includes('NoSuchKey'))) {
-      throw new ResourceError(`Resource '${this.name}' with id '${id}' not found`, {
-        resourceName: this.name,
-        operation: 'getOrThrow',
-        id,
-        code: 'RESOURCE_NOT_FOUND'
-      });
-    }
-
-    // Re-throw other errors (permission denied, network issues, etc.)
-    if (!ok) {
-      throw err;
-    }
-
-    return data;
+    return this._persistence.getOrThrow(id);
   }
 
   /**
-   * Check if a resource exists by ID
+   * Check if a resource exists by ID.
+   * Delegates to ResourcePersistence module.
+   * @param {string} id - Resource ID
    * @returns {Promise<boolean>} True if resource exists, false otherwise
    */
   async exists(id) {
-    // Execute beforeExists hooks
-    await this.executeHooks('beforeExists', { id });
-
-    const key = this.getResourceKey(id);
-    const [ok, err] = await tryFn(() => this.client.headObject(key));
-
-    // Execute afterExists hooks
-    await this.executeHooks('afterExists', { id, exists: ok });
-
-    return ok;
+    return this._persistence.exists(id);
   }
 
   /**
-   * Update an existing resource object
+   * Update an existing resource object.
+   * Delegates to ResourcePersistence module.
    * @param {string} id - Resource ID
    * @param {Object} attributes - Attributes to update (partial update supported)
    * @returns {Promise<Object>} The updated resource object with all attributes
-   * @example
-   * // Update specific fields
-   * const updatedUser = await resource.update('user-123', {
-   *   name: 'John Updated',
-   *   age: 31
-   * });
-   * 
-   * // Update with timestamps (if enabled)
-   * const updatedUser = await resource.update('user-123', {
-   *   email: 'newemail@example.com'
-   * });
-      */
+   */
   async update(id, attributes) {
-    if (isEmpty(id)) {
-      throw new ValidationError('Resource id cannot be empty', {
-        field: 'id',
-        statusCode: 400,
-        retriable: false,
-        suggestion: 'Provide the target id when calling update().'
-      });
-    }
-    // Garante que o recurso existe antes de atualizar
-    const exists = await this.exists(id);
-    if (!exists) {
-      throw new ResourceError(`Resource with id '${id}' does not exist`, {
-        resourceName: this.name,
-        id,
-        statusCode: 404,
-        retriable: false,
-        suggestion: 'Ensure the record exists or create it before attempting an update.'
-      });
-    }
-    const originalData = await this.get(id);
-    // PERFORMANCE: Shallow clone (structural sharing) instead of cloneDeep for 10-50x speedup
-    // Only modified fields are cloned, unmodified fields share references (immutable)
-    let mergedData = { ...originalData };
-    for (const [key, value] of Object.entries(attributes)) {
-      if (key.includes('.')) {
-        // Dot notation: rebuild path with copy-on-write
-        const parts = key.split('.');
-        let ref = mergedData;
-
-        // Clone path up to parent
-        for (let i = 0; i < parts.length - 1; i++) {
-          const part = parts[i];
-          if (typeof ref[part] !== 'object' || ref[part] === null) {
-            ref[part] = {};
-          } else if (i === 0) {
-            // First level: clone to avoid mutating original
-            ref[part] = { ...ref[part] };
-          }
-          ref = ref[part];
-        }
-
-        // Set final value (shallow clone if object/array)
-        const finalKey = parts[parts.length - 1];
-        ref[finalKey] = (typeof value === 'object' && value !== null) ?
-          (Array.isArray(value) ? [...value] : { ...value }) : value;
-      } else if (typeof value === 'object' && value !== null && !Array.isArray(value)) {
-        // Object merge: shallow merge instead of deep merge
-        mergedData[key] = { ...(mergedData[key] || {}), ...value };
-      } else {
-        // Primitive or array: direct assign (shallow clone arrays)
-        mergedData[key] = (Array.isArray(value)) ? [...value] : value;
-      }
-    }
-    // Debug: print mergedData and attributes
-    if (this.config.timestamps) {
-      const now = new Date().toISOString();
-      mergedData.updatedAt = now;
-      if (!mergedData.metadata) mergedData.metadata = {};
-      else mergedData.metadata = { ...mergedData.metadata }; // Clone metadata before mutating
-      mergedData.metadata.updatedAt = now;
-    }
-    // PERFORMANCE: Hooks can mutate data directly - no need for defensive clone
-    const preProcessedData = await this.executeHooks('beforeUpdate', mergedData);
-    const completeData = { ...originalData, ...preProcessedData, id };
-    // PERFORMANCE: Let validate() handle cloning internally (removed duplicate cloneDeep)
-    const { isValid, errors, data } = await this.validate(completeData, { includeId: true });
-    if (!isValid) {
-      throw new InvalidResourceItem({
-        bucket: this.client.config.bucket,
-        resourceName: this.name,
-        attributes: preProcessedData,
-        validation: errors,
-        message: 'validation: ' + ((errors && errors.length) ? JSON.stringify(errors) : 'unknown')
-      });
-    }
-    const mappedDataDebug = await this.schema.mapper(data);
-    const earlyBehaviorImpl = getBehavior(this.behavior);
-    const tempMappedData = await this.schema.mapper({ ...originalData, ...preProcessedData });
-    tempMappedData._v = String(this.version);
-    await earlyBehaviorImpl.handleUpdate({
-      resource: this,
-      id,
-      data: { ...originalData, ...preProcessedData },
-      mappedData: tempMappedData,
-      originalData: { ...attributes, id }
-    });
-    const { id: validatedId, ...validatedAttributes } = data;
-    const oldData = { ...originalData, id };
-    const newData = { ...validatedAttributes, id };
-    await this.handlePartitionReferenceUpdates(oldData, newData);
-    const mappedData = await this.schema.mapper(validatedAttributes);
-    mappedData._v = String(this.version);
-    const behaviorImpl = getBehavior(this.behavior);
-    const { mappedData: processedMetadata, body } = await behaviorImpl.handleUpdate({
-      resource: this,
-      id,
-      data: validatedAttributes,
-      mappedData,
-      originalData: { ...attributes, id }
-    });
-    const finalMetadata = processedMetadata;
-    const key = this.getResourceKey(id);
-    // eslint-disable-next-line no-console
-    let existingContentType = undefined;
-    let finalBody = body;
-    if (body === "" && this.behavior !== 'body-overflow') {
-      // eslint-disable-next-line no-console
-      const [ok, err, existingObject] = await tryFn(() => this.client.getObject(key));
-      // eslint-disable-next-line no-console
-      if (ok && existingObject.ContentLength > 0) {
-        const existingBodyBuffer = Buffer.from(await existingObject.Body.transformToByteArray());
-        const existingBodyString = existingBodyBuffer.toString();
-        const [okParse, errParse] = await tryFn(() => Promise.resolve(JSON.parse(existingBodyString)));
-        if (!okParse) {
-          finalBody = existingBodyBuffer;
-          existingContentType = existingObject.ContentType;
-        }
-      }
-    }
-    let finalContentType = existingContentType;
-    if (finalBody && finalBody !== "" && !finalContentType) {
-      const [okParse, errParse] = await tryFn(() => Promise.resolve(JSON.parse(finalBody)));
-      if (okParse) finalContentType = 'application/json';
-    }
-    if (this.versioningEnabled && originalData._v !== this.version) {
-      await this.createHistoricalVersion(id, originalData);
-    }
-    const [ok, err] = await tryFn(() => this.client.putObject({
-      key,
-      body: finalBody,
-      contentType: finalContentType,
-      metadata: finalMetadata,
-    }));
-    if (!ok && err && err.message && err.message.includes('metadata headers exceed')) {
-      const totalSize = calculateTotalSize(finalMetadata);
-      const effectiveLimit = calculateEffectiveLimit({
-        s3Limit: 2047,
-        systemConfig: {
-          version: this.version,
-          timestamps: this.config.timestamps,
-          id: id
-        }
-      });
-      const excess = totalSize - effectiveLimit;
-      err.totalSize = totalSize;
-      err.limit = 2047;
-      err.effectiveLimit = effectiveLimit;
-      err.excess = excess;
-      this.emit('exceedsLimit', {
-        operation: 'update',
-        totalSize,
-        limit: 2047,
-        effectiveLimit,
-        excess,
-        data: validatedAttributes
-      });
-      throw new ResourceError('metadata headers exceed', { resourceName: this.name, operation: 'update', id, totalSize, effectiveLimit, excess, suggestion: 'Reduce metadata size or number of fields.' });
-    } else if (!ok) {
-      throw mapAwsError(err, {
-        bucket: this.client.config.bucket,
-        key,
-        resourceName: this.name,
-        operation: 'update',
-        id
-      });
-    }
-    const updatedData = await this.composeFullObjectFromWrite({
-      id,
-      metadata: finalMetadata,
-      body: finalBody,
-      behavior: this.behavior
-    });
-    
-    // Handle partition updates based on strictPartitions and asyncPartitions config
-    if (this.config.partitions && Object.keys(this.config.partitions).length > 0) {
-      if (this.config.strictPartitions) {
-        // Strict mode: await partition operations synchronously and throw on error
-        await this.handlePartitionReferenceUpdates(originalData, updatedData);
-      } else if (this.config.asyncPartitions) {
-        // Async mode: update partition indexes in background
-        setImmediate(() => {
-          this.handlePartitionReferenceUpdates(originalData, updatedData).catch(err => {
-            this.emit('partitionIndexError', {
-              operation: 'update',
-              id,
-              error: err,
-              message: err.message
-            });
-          });
-        });
-      } else {
-        // Sync mode (default): await partition operations synchronously but emit error instead of throwing
-        const [ok, err] = await tryFn(() => this.handlePartitionReferenceUpdates(originalData, updatedData));
-        if (!ok) {
-          this.emit('partitionIndexError', {
-            operation: 'update',
-            id,
-            error: err,
-            message: err.message
-          });
-        }
-      }
-
-      // Execute other afterUpdate hooks synchronously (excluding partition hook)
-      const nonPartitionHooks = this.hooks.afterUpdate.filter(hook =>
-        !hook.toString().includes('handlePartitionReferenceUpdates')
-      );
-      let finalResult = updatedData;
-      for (const hook of nonPartitionHooks) {
-        finalResult = await hook(finalResult);
-      }
-
-      this._emitStandardized('updated', {
-        ...updatedData,
-        $before: { ...originalData },
-        $after: { ...finalResult }
-      }, updatedData.id);
-      return finalResult;
-    } else {
-      // Sync mode: execute all hooks including partition updates
-      const finalResult = await this.executeHooks('afterUpdate', updatedData);
-      this._emitStandardized('updated', {
-        ...updatedData,
-        $before: { ...originalData },
-        $after: { ...finalResult }
-      }, updatedData.id);
-      return finalResult;
-    }
+    return this._persistence.update(id, attributes);
   }
 
   /**
@@ -1884,139 +954,16 @@ export class Resource extends AsyncEventEmitter {
    * });
    */
   async patch(id, fields, options = {}) {
-    if (isEmpty(id)) {
-      throw new ValidationError('Resource id cannot be empty', {
-        field: 'id',
-        statusCode: 400,
-        retriable: false,
-        suggestion: 'Provide the target id when calling patch().'
-      });
-    }
-
-    if (!fields || typeof fields !== 'object') {
-      throw new ValidationError('fields must be a non-empty object', {
-        field: 'fields',
-        statusCode: 400,
-        retriable: false,
-        suggestion: 'Pass a plain object with the fields to update (e.g. { status: "active" }).'
-      });
-    }
-
-    // Execute beforePatch hooks
-    await this.executeHooks('beforePatch', { id, fields, options });
-
-    const behavior = this.behavior;
-
-    // Check if fields contain dot notation (nested fields)
-    const hasNestedFields = Object.keys(fields).some(key => key.includes('.'));
-
-    let result;
-
-    // ✅ Optimization: HEAD + COPY for metadata-only behaviors WITHOUT nested fields
-    if ((behavior === 'enforce-limits' || behavior === 'truncate-data') && !hasNestedFields) {
-      result = await this._patchViaCopyObject(id, fields, options);
-    } else {
-      // ⚠️ Fallback: GET + merge + PUT for:
-      // - Behaviors with body storage
-      // - Nested field updates (need full object merge)
-      result = await this.update(id, fields, options);
-    }
-
-    // Execute afterPatch hooks
-    const finalResult = await this.executeHooks('afterPatch', result);
-
-    return finalResult;
+    return this._persistence.patch(id, fields, options);
   }
 
   /**
    * Internal helper: Optimized patch using HeadObject + CopyObject
-   * Only works for metadata-only behaviors (enforce-limits, truncate-data)
-   * Only for simple field updates (no nested fields with dot notation)
+   * Delegates to ResourcePersistence module.
    * @private
    */
   async _patchViaCopyObject(id, fields, options = {}) {
-    const { partition, partitionValues } = options;
-
-    // Build S3 key
-    const key = this.getResourceKey(id);
-
-    // Step 1: HEAD to get current metadata (optimization: no body transfer)
-    const headResponse = await this.client.headObject(key);
-    const currentMetadata = headResponse.Metadata || {};
-
-    // Step 2: Decode metadata to user format
-    let currentData = await this.schema.unmapper(currentMetadata);
-
-    // Ensure ID is present
-    if (!currentData.id) {
-      currentData.id = id;
-    }
-
-    // Step 3: Merge with new fields (simple merge, no nested fields)
-    // PERFORMANCE: Shallow clone (structural sharing) instead of cloneDeep for 10-50x speedup
-    let mergedData = { ...currentData };
-
-    for (const [key, value] of Object.entries(fields)) {
-      if (typeof value === 'object' && value !== null && !Array.isArray(value)) {
-        // Merge objects: shallow merge instead of deep merge
-        mergedData[key] = { ...(mergedData[key] || {}), ...value };
-      } else {
-        // Primitive or array: direct assign (shallow clone arrays)
-        mergedData[key] = (Array.isArray(value)) ? [...value] : value;
-      }
-    }
-
-    // Step 4: Update timestamps
-    if (this.config.timestamps) {
-      mergedData.updatedAt = new Date().toISOString();
-    }
-
-    // Step 5: Validate merged data
-    const validationResult = await this.schema.validate(mergedData);
-    if (validationResult !== true) {
-      throw new ValidationError('Validation failed during patch', validationResult);
-    }
-
-    // Step 6: Map/encode data to storage format
-    const newMetadata = await this.schema.mapper(mergedData);
-
-    // Add version metadata
-    newMetadata._v = String(this.version);
-
-    // Step 8: CopyObject with new metadata (atomic operation)
-    await this.client.copyObject({
-      from: key,
-      to: key,
-      metadataDirective: 'REPLACE',
-      metadata: newMetadata
-    });
-
-    // Step 9: Update partitions if needed
-    if (this.config.partitions && Object.keys(this.config.partitions).length > 0) {
-      const oldData = { ...currentData, id };
-      const newData = { ...mergedData, id };
-
-      if (this.config.strictPartitions) {
-        // Strict mode: await partition operations synchronously and throw on error
-        await this.handlePartitionReferenceUpdates(oldData, newData);
-      } else if (this.config.asyncPartitions) {
-        // Async mode: update in background
-        setImmediate(() => {
-          this.handlePartitionReferenceUpdates(oldData, newData).catch(err => {
-            this.emit('partitionIndexError', {
-              operation: 'patch',
-              id,
-              error: err
-            });
-          });
-        });
-      } else {
-        // Sync mode: wait for completion
-        await this.handlePartitionReferenceUpdates(oldData, newData);
-      }
-    }
-
-    return mergedData;
+    return this._persistence._patchViaCopyObject(id, fields, options);
   }
 
   /**
@@ -2053,165 +1000,7 @@ export class Resource extends AsyncEventEmitter {
    * });
    */
   async replace(id, fullData, options = {}) {
-    if (isEmpty(id)) {
-      throw new ValidationError('Resource id cannot be empty', {
-        field: 'id',
-        statusCode: 400,
-        retriable: false,
-        suggestion: 'Provide the target id when calling replace().'
-      });
-    }
-
-    if (!fullData || typeof fullData !== 'object') {
-      throw new ValidationError('fullData must be a non-empty object', {
-        field: 'fullData',
-        statusCode: 400,
-        retriable: false,
-        suggestion: 'Pass a plain object containing the full resource payload to replace().'
-      });
-    }
-
-    // Execute beforeReplace hooks
-    await this.executeHooks('beforeReplace', { id, fullData, options });
-
-    const { partition, partitionValues } = options;
-
-    // PERFORMANCE: Shallow clone instead of cloneDeep for 10x speed
-    // applyDefaults() will mutate the clone, but original fullData remains intact
-    const dataClone = { ...fullData };
-
-    // Apply defaults before timestamps
-    const attributesWithDefaults = this.applyDefaults(dataClone);
-
-    // Add timestamps
-    if (this.config.timestamps) {
-      // Preserve createdAt if provided, otherwise set to now
-      if (!attributesWithDefaults.createdAt) {
-        attributesWithDefaults.createdAt = new Date().toISOString();
-      }
-      attributesWithDefaults.updatedAt = new Date().toISOString();
-    }
-
-    // Ensure ID is set
-    const completeData = { id, ...attributesWithDefaults };
-
-    // Validate data
-    const {
-      errors,
-      isValid,
-      data: validated,
-    } = await this.validate(completeData, { includeId: true });
-
-    if (!isValid) {
-      const errorMsg = (errors && errors.length && errors[0].message) ? errors[0].message : 'Replace failed';
-      throw new InvalidResourceItem({
-        bucket: this.client.config.bucket,
-        resourceName: this.name,
-        attributes: completeData,
-        validation: errors,
-        message: errorMsg
-      });
-    }
-
-    // Extract id and attributes from validated data
-    const { id: validatedId, ...validatedAttributes } = validated;
-
-    // Map/encode data to storage format
-    const mappedMetadata = await this.schema.mapper(validatedAttributes);
-
-    // Add version metadata
-    mappedMetadata._v = String(this.version);
-
-    // Use behavior to store data (like insert, not update)
-    const behaviorImpl = getBehavior(this.behavior);
-    const { mappedData: finalMetadata, body } = await behaviorImpl.handleInsert({
-      resource: this,
-      data: validatedAttributes,
-      mappedData: mappedMetadata,
-      originalData: completeData
-    });
-
-    // Build S3 key
-    const key = this.getResourceKey(id);
-
-    // Determine content type based on body content
-    let contentType = undefined;
-    if (body && body !== "") {
-      const [okParse] = await tryFn(() => Promise.resolve(JSON.parse(body)));
-      if (okParse) contentType = 'application/json';
-    }
-
-    // Only throw if behavior is 'body-only' and body is empty
-    if (this.behavior === 'body-only' && (!body || body === "")) {
-      throw new ResourceError('Body required for body-only behavior', {
-        resourceName: this.name,
-        operation: 'replace',
-        id,
-        statusCode: 400,
-        retriable: false,
-        suggestion: 'Include a request body when using behavior "body-only" or switch to "body-overflow".'
-      });
-    }
-
-    // Store to S3 (overwrites if exists, creates if not - true replace/upsert)
-    const [okPut, errPut] = await tryFn(() => this.client.putObject({
-      key,
-      body,
-      contentType,
-      metadata: finalMetadata,
-    }));
-
-    if (!okPut) {
-      const msg = errPut && errPut.message ? errPut.message : '';
-      if (msg.includes('metadata headers exceed') || msg.includes('Replace failed')) {
-        const totalSize = calculateTotalSize(finalMetadata);
-        const effectiveLimit = calculateEffectiveLimit({
-          s3Limit: 2047,
-          systemConfig: {
-            version: this.version,
-            timestamps: this.config.timestamps,
-            id
-          }
-        });
-        const excess = totalSize - effectiveLimit;
-        errPut.totalSize = totalSize;
-        errPut.limit = 2047;
-        errPut.effectiveLimit = effectiveLimit;
-        errPut.excess = excess;
-        throw new ResourceError('metadata headers exceed', { resourceName: this.name, operation: 'replace', id, totalSize, effectiveLimit, excess, suggestion: 'Reduce metadata size or number of fields.' });
-      }
-      throw errPut;
-    }
-
-    // Build the final object to return
-    const replacedObject = { id, ...validatedAttributes };
-
-    // Update partitions if needed
-    if (this.config.partitions && Object.keys(this.config.partitions).length > 0) {
-      if (this.config.strictPartitions) {
-        // Strict mode: await partition operations synchronously and throw on error
-        await this.handlePartitionReferenceUpdates({}, replacedObject);
-      } else if (this.config.asyncPartitions) {
-        // Async mode: update partition indexes in background
-        setImmediate(() => {
-          this.handlePartitionReferenceUpdates({}, replacedObject).catch(err => {
-            this.emit('partitionIndexError', {
-              operation: 'replace',
-              id,
-              error: err
-            });
-          });
-        });
-      } else {
-        // Sync mode: update partition indexes immediately
-        await this.handlePartitionReferenceUpdates({}, replacedObject);
-      }
-    }
-
-    // Execute afterReplace hooks
-    const finalResult = await this.executeHooks('afterReplace', replacedObject);
-
-    return finalResult;
+    return this._persistence.replace(id, fullData, options);
   }
 
   /**
@@ -2228,577 +1017,89 @@ export class Resource extends AsyncEventEmitter {
    * }
    */
   async updateConditional(id, attributes, options = {}) {
-    if (isEmpty(id)) {
-      throw new ValidationError('Resource id cannot be empty', {
-        field: 'id',
-        statusCode: 400,
-        retriable: false,
-        suggestion: 'Provide the target id when calling updateConditional().'
-      });
-    }
-
-    const { ifMatch } = options;
-    if (!ifMatch) {
-      throw new ValidationError('updateConditional requires ifMatch option with ETag value', {
-        field: 'ifMatch',
-        statusCode: 428,
-        retriable: false,
-        suggestion: 'Pass the current object ETag in options.ifMatch to enable conditional updates.'
-      });
-    }
-
-    // Check if resource exists
-    const exists = await this.exists(id);
-    if (!exists) {
-      return {
-        success: false,
-        error: `Resource with id '${id}' does not exist`
-      };
-    }
-
-    // Get original data
-    const originalData = await this.get(id);
-    // PERFORMANCE: Shallow clone (structural sharing) instead of cloneDeep for 10-50x speedup
-    // Only modified fields are cloned, unmodified fields share references (immutable)
-    let mergedData = { ...originalData };
-
-    // Merge attributes (same logic as update)
-    for (const [key, value] of Object.entries(attributes)) {
-      if (key.includes('.')) {
-        // Dot notation: rebuild path with copy-on-write
-        const parts = key.split('.');
-        let ref = mergedData;
-
-        // Clone path up to parent
-        for (let i = 0; i < parts.length - 1; i++) {
-          const part = parts[i];
-          if (typeof ref[part] !== 'object' || ref[part] === null) {
-            ref[part] = {};
-          } else if (i === 0) {
-            // First level: clone to avoid mutating original
-            ref[part] = { ...ref[part] };
-          }
-          ref = ref[part];
-        }
-
-        // Set final value (shallow clone if object/array)
-        const finalKey = parts[parts.length - 1];
-        ref[finalKey] = (typeof value === 'object' && value !== null) ?
-          (Array.isArray(value) ? [...value] : { ...value }) : value;
-      } else if (typeof value === 'object' && value !== null && !Array.isArray(value)) {
-        // Object merge: shallow merge instead of deep merge
-        mergedData[key] = { ...(mergedData[key] || {}), ...value };
-      } else {
-        // Primitive or array: direct assign (shallow clone arrays)
-        mergedData[key] = (Array.isArray(value)) ? [...value] : value;
-      }
-    }
-
-    // Update timestamps if enabled
-    if (this.config.timestamps) {
-      const now = new Date().toISOString();
-      mergedData.updatedAt = now;
-      if (!mergedData.metadata) mergedData.metadata = {};
-      else mergedData.metadata = { ...mergedData.metadata }; // Clone metadata before mutating
-      mergedData.metadata.updatedAt = now;
-    }
-
-    // Execute beforeUpdate hooks
-    // PERFORMANCE: Hooks can mutate data directly - no need for defensive clone
-    const preProcessedData = await this.executeHooks('beforeUpdate', mergedData);
-    const completeData = { ...originalData, ...preProcessedData, id };
-
-    // Validate
-    // PERFORMANCE: Let validate() handle cloning internally (removed duplicate cloneDeep)
-    const { isValid, errors, data } = await this.validate(completeData, { includeId: true });
-    if (!isValid) {
-      return {
-        success: false,
-        error: 'Validation failed: ' + ((errors && errors.length) ? JSON.stringify(errors) : 'unknown'),
-        validationErrors: errors
-      };
-    }
-
-    // Prepare data for storage
-    const { id: validatedId, ...validatedAttributes } = data;
-    const mappedData = await this.schema.mapper(validatedAttributes);
-    mappedData._v = String(this.version);
-
-    const behaviorImpl = getBehavior(this.behavior);
-    const { mappedData: processedMetadata, body } = await behaviorImpl.handleUpdate({
-      resource: this,
-      id,
-      data: validatedAttributes,
-      mappedData,
-      originalData: { ...attributes, id }
-    });
-
-    const key = this.getResourceKey(id);
-    let existingContentType = undefined;
-    let finalBody = body;
-
-    if (body === "" && this.behavior !== 'body-overflow') {
-      const [ok, err, existingObject] = await tryFn(() => this.client.getObject(key));
-      if (ok && existingObject.ContentLength > 0) {
-        const existingBodyBuffer = Buffer.from(await existingObject.Body.transformToByteArray());
-        const existingBodyString = existingBodyBuffer.toString();
-        const [okParse, errParse] = await tryFn(() => Promise.resolve(JSON.parse(existingBodyString)));
-        if (!okParse) {
-          finalBody = existingBodyBuffer;
-          existingContentType = existingObject.ContentType;
-        }
-      }
-    }
-
-    let finalContentType = existingContentType;
-    if (finalBody && finalBody !== "" && !finalContentType) {
-      const [okParse, errParse] = await tryFn(() => Promise.resolve(JSON.parse(finalBody)));
-      if (okParse) finalContentType = 'application/json';
-    }
-
-    // Attempt conditional write with IfMatch
-    const [ok, err, response] = await tryFn(() => this.client.putObject({
-      key,
-      body: finalBody,
-      contentType: finalContentType,
-      metadata: processedMetadata,
-      ifMatch  // ← Conditional write with ETag
-    }));
-
-    if (!ok) {
-      // Check if it's a PreconditionFailed error (412)
-      if (err.name === 'PreconditionFailed' || err.$metadata?.httpStatusCode === 412) {
-        return {
-          success: false,
-          error: 'ETag mismatch - object was modified by another process'
-        };
-      }
-
-      // Other errors
-      return {
-        success: false,
-        error: err.message || 'Update failed'
-      };
-    }
-
-    // Success - compose updated data
-    const updatedData = await this.composeFullObjectFromWrite({
-      id,
-      metadata: processedMetadata,
-      body: finalBody,
-      behavior: this.behavior
-    });
-
-    // Handle partition updates based on strictPartitions and asyncPartitions config
-    const oldData = { ...originalData, id };
-    const newData = { ...validatedAttributes, id };
-
-    if (this.config.partitions && Object.keys(this.config.partitions).length > 0) {
-      if (this.config.strictPartitions) {
-        // Strict mode: await partition operations synchronously and throw on error
-        await this.handlePartitionReferenceUpdates(oldData, newData);
-      } else if (this.config.asyncPartitions) {
-        // Async mode
-        setImmediate(() => {
-          this.handlePartitionReferenceUpdates(oldData, newData).catch(err => {
-            this.emit('partitionIndexError', {
-              operation: 'updateConditional',
-              id,
-              error: err,
-              message: err.message
-            });
-          });
-        });
-      } else {
-        // Sync mode (default): await partition operations synchronously but emit error instead of throwing
-        const [ok, err] = await tryFn(() => this.handlePartitionReferenceUpdates(oldData, newData));
-        if (!ok) {
-          this.emit('partitionIndexError', {
-            operation: 'updateConditional',
-            id,
-            error: err,
-            message: err.message
-          });
-        }
-      }
-
-      // Execute non-partition hooks
-      const nonPartitionHooks = this.hooks.afterUpdate.filter(hook =>
-        !hook.toString().includes('handlePartitionReferenceUpdates')
-      );
-      let finalResult = updatedData;
-      for (const hook of nonPartitionHooks) {
-        finalResult = await hook(finalResult);
-      }
-
-      this._emitStandardized('updated', {
-        ...updatedData,
-        $before: { ...originalData },
-        $after: { ...finalResult }
-      }, updatedData.id);
-
-      return {
-        success: true,
-        data: finalResult,
-        etag: response.ETag
-      };
-    } else {
-      // Sync mode
-      await this.handlePartitionReferenceUpdates(oldData, newData);
-      const finalResult = await this.executeHooks('afterUpdate', updatedData);
-
-      this._emitStandardized('updated', {
-        ...updatedData,
-        $before: { ...originalData },
-        $after: { ...finalResult }
-      }, updatedData.id);
-
-      return {
-        success: true,
-        data: finalResult,
-        etag: response.ETag
-      };
-    }
+    return this._persistence.updateConditional(id, attributes, options);
   }
 
   /**
-   * Delete a resource object by ID
+   * Delete a resource object by ID.
+   * Delegates to ResourcePersistence module.
    * @param {string} id - Resource ID
    * @returns {Promise<Object>} S3 delete response
-   * @example
-   * await resource.delete('user-123');
    */
   async delete(id) {
-    if (isEmpty(id)) {
-      throw new ValidationError('Resource id cannot be empty', {
-        field: 'id',
-        statusCode: 400,
-        retriable: false,
-        suggestion: 'Provide the target id when calling delete().'
-      });
-    }
-    
-    let objectData;
-    let deleteError = null;
-    
-    // Try to get the object data first
-    const [ok, err, data] = await tryFn(() => this.get(id));
-    if (ok) {
-      objectData = data;
-    } else {
-      objectData = { id };
-      deleteError = err; // Store the error for later
-    }
-    
-    await this.executeHooks('beforeDelete', objectData);
-    const key = this.getResourceKey(id);
-    const [ok2, err2, response] = await tryFn(() => this.client.deleteObject(key));
-
-    // Handle partition cleanup based on strictPartitions and asyncPartitions config
-    if (this.config.partitions && Object.keys(this.config.partitions).length > 0 && objectData) {
-      if (this.config.strictPartitions) {
-        // Strict mode: await partition operations synchronously and throw on error
-        await this.deletePartitionReferences(objectData);
-      } else if (this.config.asyncPartitions) {
-        // Async mode: delete partition indexes in background
-        setImmediate(() => {
-          this.deletePartitionReferences(objectData).catch(err => {
-            this.emit('partitionIndexError', {
-              operation: 'delete',
-              id,
-              error: err,
-              message: err.message
-            });
-          });
-        });
-      } else {
-        // Sync mode (default): await partition operations synchronously but emit error instead of throwing
-        const [ok, err] = await tryFn(() => this.deletePartitionReferences(objectData));
-        if (!ok) {
-          this.emit('partitionIndexError', {
-            operation: 'delete',
-            id,
-            error: err,
-            message: err.message
-          });
-        }
-      }
-
-      // Execute other afterDelete hooks synchronously (excluding partition hook)
-      const nonPartitionHooks = this.hooks.afterDelete.filter(hook =>
-        !hook.toString().includes('deletePartitionReferences')
-      );
-      let afterDeleteData = objectData;
-      for (const hook of nonPartitionHooks) {
-        afterDeleteData = await hook(afterDeleteData);
-      }
-    } else {
-      // Sync mode: execute all hooks including partition deletion
-      const afterDeleteData = await this.executeHooks('afterDelete', objectData);
-    }
-
-    // Always emit delete event after hooks execute, for audit purposes (even if delete fails)
-    this._emitStandardized("deleted", {
-      ...objectData,
-      $before: { ...objectData },
-      $after: null
-    }, id);
-
-    // If we had an error getting the object, throw it now (after emitting event and hooks)
-    if (deleteError) {
-      throw mapAwsError(deleteError, {
-        bucket: this.client.config.bucket,
-        key,
-        resourceName: this.name,
-        operation: 'delete',
-        id
-      });
-    }
-
-    if (!ok2) throw mapAwsError(err2, {
-      key,
-      resourceName: this.name,
-      operation: 'delete',
-      id
-    });
-
-    return response;
+    return this._persistence.delete(id);
   }
 
   /**
-   * Insert or update a resource object (upsert operation)
+   * Insert or update a resource object (upsert operation).
+   * Delegates to ResourcePersistence module.
    * @param {Object} params - Upsert parameters
    * @param {string} params.id - Resource ID (required for upsert)
-   * @param {...Object} params - Resource attributes (any additional properties)
    * @returns {Promise<Object>} The inserted or updated resource object
-   * @example
-   * // Will insert if doesn't exist, update if exists
-   * const user = await resource.upsert({
-   *   id: 'user-123',
-   *   name: 'John Doe',
-   *   email: 'john@example.com'
-   * });
    */
   async upsert({ id, ...attributes }) {
-    const exists = await this.exists(id);
-
-    if (exists) {
-      return this.update(id, attributes);
-    }
-
-    return this.insert({ id, ...attributes });
+    return this._persistence.upsert({ id, ...attributes });
   }
 
   /**
-   * Count resources with optional partition filtering
+   * Count resources with optional partition filtering.
+   * Delegates to ResourceQuery module.
    * @param {Object} [params] - Count parameters
    * @param {string} [params.partition] - Partition name to count in
    * @param {Object} [params.partitionValues] - Partition field values to filter by
    * @returns {Promise<number>} Total count of matching resources
-   * @example
-   * // Count all resources
-   * const total = await resource.count();
-   * 
-   * // Count in specific partition
-   * const googleUsers = await resource.count({
-   *   partition: 'byUtmSource',
-   *   partitionValues: { 'utm.source': 'google' }
-   * });
-   * 
-   * // Count in multi-field partition
-   * const usElectronics = await resource.count({
-   *   partition: 'byCategoryRegion',
-   *   partitionValues: { category: 'electronics', region: 'US' }
-   * });
    */
   async count({ partition = null, partitionValues = {} } = {}) {
-    // Execute beforeCount hooks
-    await this.executeHooks('beforeCount', { partition, partitionValues });
-
-    let prefix;
-
-    if (partition && Object.keys(partitionValues).length > 0) {
-      // Count in specific partition
-      const partitionDef = this.config.partitions[partition];
-      if (!partitionDef) {
-        throw new PartitionError(`Partition '${partition}' not found`, { resourceName: this.name, partitionName: partition, operation: 'count' });
-      }
-
-      // Build partition segments (sorted by field name for consistency)
-      const partitionSegments = [];
-      const sortedFields = Object.entries(partitionDef.fields).sort(([a], [b]) => a.localeCompare(b));
-      for (const [fieldName, rule] of sortedFields) {
-        const value = partitionValues[fieldName];
-        if (value !== undefined && value !== null) {
-          const transformedValue = this.applyPartitionRule(value, rule);
-          partitionSegments.push(`${fieldName}=${transformedValue}`);
-        }
-      }
-
-      if (partitionSegments.length > 0) {
-        prefix = `resource=${this.name}/partition=${partition}/${partitionSegments.join('/')}`;
-      } else {
-        prefix = `resource=${this.name}/partition=${partition}`;
-      }
-    } else {
-      // Count all in main resource (new format)
-      prefix = `resource=${this.name}/data`;
-    }
-
-    const count = await this.client.count({ prefix });
-
-    // Execute afterCount hooks
-    await this.executeHooks('afterCount', { count, partition, partitionValues });
-
-    this._emitStandardized("count", count);
-    return count;
+    return this._query.count({ partition, partitionValues });
   }
 
   /**
-   * Insert multiple resources in parallel
+   * Insert multiple resources in parallel.
+   * Delegates to ResourcePersistence module.
    * @param {Object[]} objects - Array of resource objects to insert
    * @returns {Promise<Object[]>} Array of inserted resource objects
-   * @example
-   * const users = [
-   *   { name: 'John', email: 'john@example.com' },
-   *   { name: 'Jane', email: 'jane@example.com' },
-   *   { name: 'Bob', email: 'bob@example.com' }
-   * ];
-   * const insertedUsers = await resource.insertMany(users);
-      */
+   */
   async insertMany(objects) {
-    // Create batch of operations - OperationsPool in client controls concurrency
-    const operations = objects.map((attributes) => async () => {
-      return await this.insert(attributes);
-    });
-
-    const { results, errors } = await this._executeBatchHelper(operations, {
-      onItemError: (error, index) => {
-        this.emit("error", error, objects[index]);
-        this.observers.map((x) => x.emit("error", this.name, error, objects[index]));
-      }
-    });
-
-    this._emitStandardized("inserted-many", objects.length);
-    return results.filter(r => r !== null);
+    return this._persistence.insertMany(objects);
   }
 
   /**
-   * Execute batch helper - uses client's _executeBatch if available, otherwise Promise.allSettled
+   * Execute batch helper - uses client's _executeBatch if available.
+   * Delegates to ResourcePersistence module.
    * @private
    */
   async _executeBatchHelper(operations, options = {}) {
-    // Use client's _executeBatch if available (S3Client with OperationsPool)
-    if (this.client._executeBatch) {
-      return await this.client._executeBatch(operations, options);
-    }
-
-    // Fallback: use Promise.allSettled for clients without pool
-    const settled = await Promise.allSettled(operations.map(op => op()));
-    const results = settled.map((s, index) => {
-      if (s.status === 'fulfilled') return s.value;
-      if (options.onItemError) options.onItemError(s.reason, index);
-      return null;
-    });
-    const errors = settled
-      .map((s, index) => s.status === 'rejected' ? { error: s.reason, index } : null)
-      .filter(Boolean);
-
-    return { results, errors };
+    return this._persistence._executeBatchHelper(operations, options);
   }
 
   /**
-   * Delete multiple resources by their IDs in parallel
+   * Delete multiple resources by their IDs in parallel.
+   * Delegates to ResourcePersistence module.
    * @param {string[]} ids - Array of resource IDs to delete
-   * @returns {Promise<Object[]>} Array of S3 delete responses
-   * @example
-   * const deletedIds = ['user-1', 'user-2', 'user-3'];
-   * const results = await resource.deleteMany(deletedIds);
-      */
+   * @returns {Promise<Object>} Results summary
+   */
   async deleteMany(ids) {
-    // Execute beforeDeleteMany hooks
-    await this.executeHooks('beforeDeleteMany', { ids });
-
-    const packages = chunk(
-      ids.map((id) => this.getResourceKey(id)),
-      1000
-    );
-
-    // Debug log: print all keys to be deleted
-    const allKeys = ids.map((id) => this.getResourceKey(id));
-
-    // Create batch of operations - OperationsPool in client controls concurrency
-    const operations = packages.map((keys) => async () => {
-      const response = await this.client.deleteObjects(keys);
-
-      keys.forEach((key) => {
-        // Extract ID from key path
-        const parts = key.split('/');
-        const idPart = parts.find(part => part.startsWith('id='));
-        const id = idPart ? idPart.replace('id=', '') : null;
-        if (id) {
-          this.emit("deleted", id);
-          this.observers.map((x) => x.emit("deleted", this.name, id));
-        }
-      });
-
-      return response;
-    });
-
-    const { results, errors } = await this._executeBatchHelper(operations, {
-      onItemError: (error, index) => {
-        this.emit("error", error, packages[index]);
-        this.observers.map((x) => x.emit("error", this.name, error, packages[index]));
-      }
-    });
-
-    // Execute afterDeleteMany hooks
-    await this.executeHooks('afterDeleteMany', { ids, results });
-
-    this._emitStandardized("deleted-many", ids.length);
-    return results;
-  }
-
-  async deleteAll() {
-    // Security check: only allow if paranoid mode is disabled
-    if (this.config.paranoid !== false) {
-      throw new ResourceError('deleteAll() is a dangerous operation and requires paranoid: false option.', { resourceName: this.name, operation: 'deleteAll', paranoid: this.config.paranoid, suggestion: 'Set paranoid: false to allow deleteAll.' });
-    }
-
-    // Use deleteAll to efficiently delete all objects (new format)
-    const prefix = `resource=${this.name}/data`;
-    const deletedCount = await this.client.deleteAll({ prefix });
-
-    this._emitStandardized("deleted-all", {
-      version: this.version,
-      prefix,
-      deletedCount
-    });
-
-    return { deletedCount, version: this.version };
+    return this._persistence.deleteMany(ids);
   }
 
   /**
-   * Delete all data for this resource across ALL versions
-   * @returns {Promise<Object>} Deletion report
+   * Delete all data for this resource (current version only).
+   * Delegates to ResourcePersistence module.
+   * Requires paranoid: false configuration.
+   * @returns {Promise<Object>} Deletion report with deletedCount
+   */
+  async deleteAll() {
+    return this._persistence.deleteAll();
+  }
+
+  /**
+   * Delete all data for this resource across ALL versions.
+   * Delegates to ResourcePersistence module.
+   * Requires paranoid: false configuration.
+   * @returns {Promise<Object>} Deletion report with deletedCount
    */
   async deleteAllData() {
-    // Security check: only allow if paranoid mode is disabled
-    if (this.config.paranoid !== false) {
-      throw new ResourceError('deleteAllData() is a dangerous operation and requires paranoid: false option.', { resourceName: this.name, operation: 'deleteAllData', paranoid: this.config.paranoid, suggestion: 'Set paranoid: false to allow deleteAllData.' });
-    }
-
-    // Use deleteAll to efficiently delete everything for this resource
-    const prefix = `resource=${this.name}`;
-    const deletedCount = await this.client.deleteAll({ prefix });
-
-    this._emitStandardized("deleted-all-data", {
-      resource: this.name,
-      prefix,
-      deletedCount
-    });
-
-    return { deletedCount, resource: this.name };
+    return this._persistence.deleteAllData();
   }
 
   /**
@@ -2830,48 +1131,7 @@ export class Resource extends AsyncEventEmitter {
    * });
    */
   async listIds({ partition = null, partitionValues = {}, limit, offset = 0 } = {}) {
-    let prefix;
-    if (partition && Object.keys(partitionValues).length > 0) {
-      // List from specific partition
-      if (!this.config.partitions || !this.config.partitions[partition]) {
-        throw new PartitionError(`Partition '${partition}' not found`, { resourceName: this.name, partitionName: partition, operation: 'listIds' });
-      }
-      const partitionDef = this.config.partitions[partition];
-      // Build partition segments (sorted by field name for consistency)
-      const partitionSegments = [];
-      const sortedFields = Object.entries(partitionDef.fields).sort(([a], [b]) => a.localeCompare(b));
-      for (const [fieldName, rule] of sortedFields) {
-        const value = partitionValues[fieldName];
-        if (value !== undefined && value !== null) {
-          const transformedValue = this.applyPartitionRule(value, rule);
-          partitionSegments.push(`${fieldName}=${transformedValue}`);
-        }
-      }
-      if (partitionSegments.length > 0) {
-        prefix = `resource=${this.name}/partition=${partition}/${partitionSegments.join('/')}`;
-      } else {
-        prefix = `resource=${this.name}/partition=${partition}`;
-      }
-    } else {
-      // List from main resource (without version in path)
-      prefix = `resource=${this.name}/data`;
-    }
-    // Use getKeysPage for real pagination support
-    const keys = await this.client.getKeysPage({
-      prefix,
-      offset: offset,
-      amount: limit || 1000, // Default to 1000 if no limit specified
-    });
-    const ids = keys.map((key) => {
-      // Extract ID from different path patterns:
-      // /resource={name}/v={version}/id={id}
-      // /resource={name}/partition={name}/{field}={value}/id={id}
-      const parts = key.split('/');
-      const idPart = parts.find(part => part.startsWith('id='));
-      return idPart ? idPart.replace('id=', '') : null;
-    }).filter(Boolean);
-    this._emitStandardized("listed-ids", ids.length);
-    return ids;
+    return this._query.listIds({ partition, partitionValues, limit, offset });
   }
 
   /**
@@ -2896,199 +1156,71 @@ export class Resource extends AsyncEventEmitter {
    * });
    */
   async list({ partition = null, partitionValues = {}, limit, offset = 0 } = {}) {
-    // Execute beforeList hooks
-    await this.executeHooks('beforeList', { partition, partitionValues, limit, offset });
-
-    const [ok, err, result] = await tryFn(async () => {
-      if (!partition) {
-        return this.listMain({ limit, offset });
-      }
-      return this.listPartition({ partition, partitionValues, limit, offset });
-    });
-
-    if (!ok) {
-      return this.handleListError(err, { partition, partitionValues });
-    }
-
-    // Execute afterList hooks
-    return this.executeHooks('afterList', result);
+    return this._query.list({ partition, partitionValues, limit, offset });
   }
 
   async listMain({ limit, offset = 0 }) {
-    const [ok, err, ids] = await tryFn(() => this.listIds({ limit, offset }));
-    if (!ok) throw err;
-    const results = await this.processListResults(ids, 'main');
-    this._emitStandardized("list", { count: results.length, errors: 0 });
-    return results;
+    return this._query.listMain({ limit, offset });
   }
 
   async listPartition({ partition, partitionValues, limit, offset = 0 }) {
-    if (!this.config.partitions?.[partition]) {
-      this._emitStandardized("list", { partition, partitionValues, count: 0, errors: 0 });
-      return [];
-    }
-
-    const partitionDef = this.config.partitions[partition];
-    const prefix = this.buildPartitionPrefix(partition, partitionDef, partitionValues);
-
-    const [ok, err, keys] = await tryFn(() => this.client.getKeysPage({
-      prefix,
-      offset,
-      amount: limit || 1000
-    }));
-
-    if (!ok) throw err;
-
-    const filteredIds = this.extractIdsFromKeys(keys);
-    const results = await this.processPartitionResults(filteredIds, partition, partitionDef, keys);
-
-    this._emitStandardized("list", { partition, partitionValues, count: results.length, errors: 0 });
-    return results;
+    return this._query.listPartition({ partition, partitionValues, limit, offset });
   }
 
   /**
-   * Build partition prefix from partition definition and values
+   * Build partition prefix from partition definition and values.
+   * Delegates to ResourcePartitions module.
    */
   buildPartitionPrefix(partition, partitionDef, partitionValues) {
-    const partitionSegments = [];
-    const sortedFields = Object.entries(partitionDef.fields).sort(([a], [b]) => a.localeCompare(b));
-
-    for (const [fieldName, rule] of sortedFields) {
-      const value = partitionValues[fieldName];
-      if (value !== undefined && value !== null) {
-        const transformedValue = this.applyPartitionRule(value, rule);
-        partitionSegments.push(`${fieldName}=${transformedValue}`);
-      }
-    }
-
-    if (partitionSegments.length > 0) {
-      return `resource=${this.name}/partition=${partition}/${partitionSegments.join('/')}`;
-    }
-
-    return `resource=${this.name}/partition=${partition}`;
+    return this._partitions.buildPrefix(partition, partitionDef, partitionValues);
   }
 
   /**
-   * Extract IDs from S3 keys
+   * Extract IDs from S3 keys.
+   * Delegates to ResourceQuery module.
    */
   extractIdsFromKeys(keys) {
-    return keys
-      .map(key => {
-        const parts = key.split('/');
-        const idPart = parts.find(part => part.startsWith('id='));
-        return idPart ? idPart.replace('id=', '') : null;
-      })
-      .filter(Boolean);
+    return this._query.extractIdsFromKeys(keys);
   }
 
   /**
-   * Process list results with error handling
+   * Process list results with error handling.
+   * Delegates to ResourceQuery module.
    */
   async processListResults(ids, context = 'main') {
-    // Create batch of operations - OperationsPool in client controls concurrency
-    const operations = ids.map((id) => async () => {
-      const [ok, err, result] = await tryFn(() => this.get(id));
-      if (ok) {
-        return result;
-      }
-      return this.handleResourceError(err, id, context);
-    });
-
-    const { results, errors } = await this._executeBatchHelper(operations, {
-      onItemError: (error, index) => {
-        this.emit("error", error, ids[index]);
-        this.observers.map((x) => x.emit("error", this.name, error, ids[index]));
-      }
-    });
-
-    this._emitStandardized("list", { count: results.length, errors: 0 });
-    return results.filter(r => r !== null);
+    return this._query.processListResults(ids, context);
   }
 
   /**
-   * Process partition results with error handling
+   * Process partition results with error handling.
+   * Delegates to ResourceQuery module.
    */
   async processPartitionResults(ids, partition, partitionDef, keys) {
-    const sortedFields = Object.entries(partitionDef.fields).sort(([a], [b]) => a.localeCompare(b));
-
-    // Create batch of operations - OperationsPool in client controls concurrency
-    const operations = ids.map((id) => async () => {
-      const [ok, err, result] = await tryFn(async () => {
-        const actualPartitionValues = this.extractPartitionValuesFromKey(id, keys, sortedFields);
-        
-        // Optimization: skip getFromPartition (which does a redundant HEAD check)
-        // We already know the partition key exists because it came from listPartition/getKeysPage
-        const data = await this.get(id);
-        
-        // Add partition metadata manually
-        data._partition = partition;
-        data._partitionValues = actualPartitionValues;
-        
-        return data;
-      });
-      if (ok) return result;
-      return this.handleResourceError(err, id, 'partition');
-    });
-
-    const { results, errors } = await this._executeBatchHelper(operations, {
-      onItemError: (error, index) => {
-        this.emit("error", error, ids[index]);
-        this.observers.map((x) => x.emit("error", this.name, error, ids[index]));
-      }
-    });
-
-    return results.filter(item => item !== null);
+    return this._query.processPartitionResults(ids, partition, partitionDef, keys);
   }
 
   /**
-   * Extract partition values from S3 key for specific ID
+   * Extract partition values from S3 key for specific ID.
+   * Delegates to ResourcePartitions module.
    */
   extractPartitionValuesFromKey(id, keys, sortedFields) {
-    const keyForId = keys.find(key => key.includes(`id=${id}`));
-    if (!keyForId) {
-      throw new PartitionError(`Partition key not found for ID ${id}`, { resourceName: this.name, id, operation: 'extractPartitionValuesFromKey' });
-    }
-
-    const keyParts = keyForId.split('/');
-    const actualPartitionValues = {};
-
-    for (const [fieldName] of sortedFields) {
-      const fieldPart = keyParts.find(part => part.startsWith(`${fieldName}=`));
-      if (fieldPart) {
-        const value = fieldPart.replace(`${fieldName}=`, '');
-        actualPartitionValues[fieldName] = value;
-      }
-    }
-
-    return actualPartitionValues;
+    return this._partitions.extractValuesFromKey(id, keys, sortedFields);
   }
 
   /**
-   * Handle resource-specific errors
+   * Handle resource-specific errors.
+   * Delegates to ResourceQuery module.
    */
   handleResourceError(error, id, context) {
-    if (error.message.includes('Cipher job failed') || error.message.includes('OperationError')) {
-      return {
-        id,
-        _decryptionFailed: true,
-        _error: error.message,
-        ...(context === 'partition' && { _partition: context })
-      };
-    }
-    throw error;
+    return this._query.handleResourceError(error, id, context);
   }
 
   /**
-   * Handle list method errors
+   * Handle list method errors.
+   * Delegates to ResourceQuery module.
    */
   handleListError(error, { partition, partitionValues }) {
-    if (error.message.includes("Partition '") && error.message.includes("' not found")) {
-      this._emitStandardized("list", { partition, partitionValues, count: 0, errors: 1 });
-      return [];
-    }
-
-    this._emitStandardized("list", { partition, partitionValues, count: 0, errors: 1 });
-    return [];
+    return this._query.handleListError(error, { partition, partitionValues });
   }
 
   /**
@@ -3097,42 +1229,9 @@ export class Resource extends AsyncEventEmitter {
    * @returns {Promise<Object[]>} Array of resource objects
    * @example
    * const users = await resource.getMany(['user-1', 'user-2', 'user-3']);
-      */
+   */
   async getMany(ids) {
-    // Execute beforeGetMany hooks
-    await this.executeHooks('beforeGetMany', { ids });
-
-    // Create batch of operations - OperationsPool in client controls concurrency
-    const operations = ids.map((id) => async () => {
-      const [ok, err, data] = await tryFn(() => this.get(id));
-      if (ok) return data;
-      if (err.message.includes('Cipher job failed') || err.message.includes('OperationError')) {
-        return {
-          id,
-          _decryptionFailed: true,
-          _error: err.message
-        };
-      }
-      throw err;
-    });
-
-    const { results, errors } = await this._executeBatchHelper(operations, {
-      onItemError: (error, index) => {
-        this.emit("error", error, ids[index]);
-        this.observers.map((x) => x.emit("error", this.name, error, ids[index]));
-        return {
-          id: ids[index],
-          _error: error.message,
-          _decryptionFailed: error.message.includes('Cipher job failed') || error.message.includes('OperationError')
-        };
-      }
-    });
-
-    // Execute afterGetMany hooks
-    const finalResults = await this.executeHooks('afterGetMany', results.filter(r => r !== null));
-
-    this._emitStandardized("fetched-many", ids.length);
-    return finalResults;
+    return this._query.getMany(ids);
   }
 
   /**
@@ -3140,20 +1239,9 @@ export class Resource extends AsyncEventEmitter {
    * @returns {Promise<Object[]>} Array of all resource objects
    * @example
    * const allUsers = await resource.getAll();
-      */
+   */
   async getAll() {
-    const [ok, err, ids] = await tryFn(() => this.listIds());
-    if (!ok) throw err;
-    const results = [];
-    for (const id of ids) {
-      const [ok2, err2, item] = await tryFn(() => this.get(id));
-      if (ok2) {
-        results.push(item);
-      } else {
-        // Log error but continue
-      }
-    }
-    return results;
+    return this._query.getAll();
   }
 
   /**
@@ -3163,12 +1251,12 @@ export class Resource extends AsyncEventEmitter {
    * @param {number} [params.size=100] - Page size
    * @param {string} [params.partition] - Partition name to page from
    * @param {Object} [params.partitionValues] - Partition field values to filter by
-   * @param {boolean} [params.skipCount=false] - Skip total count for performance (useful for large collections)
+   * @param {boolean} [params.skipCount=false] - Skip total count for performance
    * @returns {Promise<Object>} Page result with items and pagination info
    * @example
    * // Get first page of all resources
    * const page = await resource.page({ offset: 0, size: 10 });
-         * 
+   *
    * // Get page from specific partition
    * const googlePage = await resource.page({
    *   partition: 'byUtmSource',
@@ -3176,84 +1264,39 @@ export class Resource extends AsyncEventEmitter {
    *   offset: 0,
    *   size: 5
    * });
-   * 
+   *
    * // Skip count for performance in large collections
-   * const fastPage = await resource.page({ 
-   *   offset: 0, 
-   *   size: 100, 
-   *   skipCount: true 
+   * const fastPage = await resource.page({
+   *   offset: 0,
+   *   size: 100,
+   *   skipCount: true
    * });
-      */
+   */
   async page({ offset = 0, size = 100, partition = null, partitionValues = {}, skipCount = false } = {}) {
-    const [ok, err, result] = await tryFn(async () => {
-      // Get total count only if not skipped (for performance)
-      let totalItems = null;
-      let totalPages = null;
-      if (!skipCount) {
-        const [okCount, , count] = await tryFn(() => this.count({ partition, partitionValues }));
-        if (okCount) {
-          totalItems = count;
-          totalPages = Math.ceil(totalItems / size);
-        }
-      }
-
-      const page = Math.floor(offset / size);
-      let items = [];
-      if (size > 0) {
-        const [okList, , listResult] = await tryFn(() => this.list({ partition, partitionValues, limit: size, offset }));
-        items = okList ? listResult : [];
-      }
-
-      const result = {
-        items,
-        totalItems,
-        page,
-        pageSize: size,
-        totalPages,
-        hasMore: items.length === size && (offset + size) < (totalItems || Infinity),
-        _debug: {
-          requestedSize: size,
-          requestedOffset: offset,
-          actualItemsReturned: items.length,
-          skipCount,
-          hasTotalItems: totalItems !== null
-        }
-      };
-      this._emitStandardized("paginated", result);
-      return result;
-    });
-
-    if (ok) return result;
-    // Final fallback - return a safe result even if everything fails
-    return {
-      items: [],
-      totalItems: null,
-      page: Math.floor(offset / size),
-      pageSize: size,
-      totalPages: null,
-      _debug: {
-        requestedSize: size,
-        requestedOffset: offset,
-        actualItemsReturned: 0,
-        skipCount: skipCount,
-        hasTotalItems: false,
-        error: err.message
-      }
-    };
-  }
-
-  readable() {
-    const stream = new ResourceReader({ resource: this });
-    return stream.build()
-  }
-
-  writable() {
-    const stream = new ResourceWriter({ resource: this });
-    return stream.build()
+    return this._query.page({ offset, size, partition, partitionValues, skipCount });
   }
 
   /**
-   * Set binary content for a resource
+   * Create a readable stream for iterating over resources.
+   * Delegates to ResourceStreams module.
+   * @returns {Object} Readable stream builder
+   */
+  readable() {
+    return this._streams.readable();
+  }
+
+  /**
+   * Create a writable stream for bulk inserting resources.
+   * Delegates to ResourceStreams module.
+   * @returns {Object} Writable stream builder
+   */
+  writable() {
+    return this._streams.writable();
+  }
+
+  /**
+   * Set binary content for a resource.
+   * Delegates to ResourceContent module.
    * @param {Object} params - Content parameters
    * @param {string} params.id - Resource ID
    * @param {Buffer|string} params.buffer - Content buffer or string
@@ -3267,7 +1310,7 @@ export class Resource extends AsyncEventEmitter {
    *   buffer: imageBuffer,
    *   contentType: 'image/jpeg'
    * });
-   * 
+   *
    * // Set text content
    * await resource.setContent({
    *   id: 'document-456',
@@ -3276,91 +1319,43 @@ export class Resource extends AsyncEventEmitter {
    * });
    */
   async setContent({ id, buffer, contentType = 'application/octet-stream' }) {
-    const [ok, err, currentData] = await tryFn(() => this.get(id));
-    if (!ok || !currentData) {
-      throw new ResourceError(`Resource with id '${id}' not found`, { resourceName: this.name, id, operation: 'setContent' });
-    }
-    const updatedData = {
-      ...currentData,
-      _hasContent: true,
-      _contentLength: buffer.length,
-      _mimeType: contentType
-    };
-    const mappedMetadata = await this.schema.mapper(updatedData);
-    const [ok2, err2] = await tryFn(() => this.client.putObject({
-      key: this.getResourceKey(id),
-      metadata: mappedMetadata,
-      body: buffer,
-      contentType
-    }));
-    if (!ok2) throw err2;
-    this._emitStandardized("content-set", { id, contentType, contentLength: buffer.length }, id);
-    return updatedData;
+    return this._content.setContent({ id, buffer, contentType });
   }
 
   /**
-   * Retrieve binary content associated with a resource
+   * Retrieve binary content associated with a resource.
+   * Delegates to ResourceContent module.
    * @param {string} id - Resource ID
    * @returns {Promise<Object>} Object with buffer and contentType
    * @example
    * const content = await resource.content('user-123');
    * if (content.buffer) {
-         *   // Save to file
+   *   // Save to file
    *   fs.writeFileSync('output.jpg', content.buffer);
-   * } else {
-      * }
+   * }
    */
   async content(id) {
-    const key = this.getResourceKey(id);
-    const [ok, err, response] = await tryFn(() => this.client.getObject(key));
-    if (!ok) {
-      // Check multiple ways the error might indicate "not found"
-      if (err.name === "NoSuchKey" || err.code === "NoSuchKey" || err.Code === "NoSuchKey" || err.statusCode === 404) {
-        return {
-          buffer: null,
-          contentType: null
-        };
-      }
-      throw err;
-    }
-    const buffer = Buffer.from(await response.Body.transformToByteArray());
-    const contentType = response.ContentType || null;
-    this._emitStandardized("content-fetched", { id, contentLength: buffer.length, contentType }, id);
-    return {
-      buffer,
-      contentType
-    };
+    return this._content.content(id);
   }
 
   /**
-   * Check if binary content exists for a resource
+   * Check if binary content exists for a resource.
+   * Delegates to ResourceContent module.
    * @param {string} id - Resource ID
-   * @returns {boolean}
+   * @returns {Promise<boolean>} True if content exists
    */
   async hasContent(id) {
-    const key = this.getResourceKey(id);
-    const [ok, err, response] = await tryFn(() => this.client.headObject(key));
-    if (!ok) return false;
-    return response.ContentLength > 0;
+    return this._content.hasContent(id);
   }
 
   /**
-   * Delete binary content but preserve metadata
+   * Delete binary content but preserve metadata.
+   * Delegates to ResourceContent module.
    * @param {string} id - Resource ID
+   * @returns {Promise<Object>} Response from client
    */
   async deleteContent(id) {
-    const key = this.getResourceKey(id);
-    const [ok, err, existingObject] = await tryFn(() => this.client.headObject(key));
-    if (!ok) throw err;
-    const existingMetadata = existingObject.Metadata || {};
-    const [ok2, err2, response] = await tryFn(() => this.client.putObject({
-      key,
-      body: "",
-      metadata: existingMetadata,
-    }));
-    if (!ok2) throw err2;
-    this._emitStandardized("content-deleted", id, id);
-    return response;
+    return this._content.deleteContent(id);
   }
 
   /**
@@ -3400,70 +1395,21 @@ export class Resource extends AsyncEventEmitter {
   }
 
   /**
-   * Create partition references after insert
+   * Create partition references after insert.
+   * Delegates to ResourcePartitions module.
    * @param {Object} data - Inserted object data
    */
   async createPartitionReferences(data) {
-    const partitions = this.config.partitions;
-    if (!partitions || Object.keys(partitions).length === 0) {
-      return;
-    }
-
-    // Create all partition references in parallel
-    const promises = Object.entries(partitions).map(async ([partitionName, partition]) => {
-      const partitionKey = this.getPartitionKey({ partitionName, id: data.id, data });
-      if (partitionKey) {
-        // Save only version as metadata, never object attributes
-        const partitionMetadata = {
-          _v: String(this.version)
-        };
-        return this.client.putObject({
-          key: partitionKey,
-          metadata: partitionMetadata,
-          body: '',
-          contentType: undefined,
-        });
-      }
-      return null;
-    });
-
-    // Wait for all partition references to be created
-    const results = await Promise.allSettled(promises);
-    
-    // Check for any failures
-    const failures = results.filter(r => r.status === 'rejected');
-    if (failures.length > 0) {
-      // Emit warning but don't throw - partitions are secondary indexes
-      this.emit('partitionIndexWarning', {
-        operation: 'create',
-        id: data.id,
-        failures: failures.map(f => f.reason)
-      });
-    }
+    return this._partitions.createReferences(data);
   }
 
   /**
-   * Delete partition references after delete
+   * Delete partition references after delete.
+   * Delegates to ResourcePartitions module.
    * @param {Object} data - Deleted object data
    */
   async deletePartitionReferences(data) {
-    const partitions = this.config.partitions;
-    if (!partitions || Object.keys(partitions).length === 0) {
-      return;
-    }
-    const keysToDelete = [];
-    for (const [partitionName, partition] of Object.entries(partitions)) {
-      const partitionKey = this.getPartitionKey({ partitionName, id: data.id, data });
-      if (partitionKey) {
-        keysToDelete.push(partitionKey);
-      }
-    }
-    if (keysToDelete.length > 0) {
-      const [ok, err] = await tryFn(() => this.client.deleteObjects(keysToDelete));
-      if (!ok) {
-        // console.warn('Some partition objects could not be deleted:', err.message);
-      }
-    }
+    return this._partitions.deleteReferences(data);
   }
 
   /**
@@ -3505,272 +1451,51 @@ export class Resource extends AsyncEventEmitter {
    * );
    */
   async query(filter = {}, { limit = 100, offset = 0, partition = null, partitionValues = {} } = {}) {
-    // Execute beforeQuery hooks
-    await this.executeHooks('beforeQuery', { filter, limit, offset, partition, partitionValues });
-
-    if (Object.keys(filter).length === 0) {
-      // No filter, just return paginated results
-      return await this.list({ partition, partitionValues, limit, offset });
-    }
-
-    const results = [];
-    let currentOffset = offset;
-    const batchSize = Math.min(limit, 50); // Process in smaller batches
-
-    while (results.length < limit) {
-      // Get a batch of objects
-      const batch = await this.list({
-        partition,
-        partitionValues,
-        limit: batchSize,
-        offset: currentOffset
-      });
-
-      if (batch.length === 0) {
-        break; // No more data
-      }
-
-      // Filter the batch
-      const filteredBatch = batch.filter(doc => {
-        return Object.entries(filter).every(([key, value]) => {
-          return doc[key] === value;
-        });
-      });
-
-      // Add filtered results
-      results.push(...filteredBatch);
-      currentOffset += batchSize;
-
-      // If we got less than batchSize, we've reached the end
-      if (batch.length < batchSize) {
-        break;
-      }
-    }
-
-    // Return only up to the requested limit
-    const finalResults = results.slice(0, limit);
-
-    // Execute afterQuery hooks
-    return await this.executeHooks('afterQuery', finalResults);
+    return this._query.query(filter, { limit, offset, partition, partitionValues });
   }
 
   /**
-   * Handle partition reference updates with change detection
+   * Handle partition reference updates with change detection.
+   * Delegates to ResourcePartitions module.
    * @param {Object} oldData - Original object data before update
    * @param {Object} newData - Updated object data
    */
   async handlePartitionReferenceUpdates(oldData, newData) {
-    const partitions = this.config.partitions;
-    if (!partitions || Object.keys(partitions).length === 0) {
-      return;
-    }
-    
-    // Update all partitions in parallel
-    const updatePromises = Object.entries(partitions).map(async ([partitionName, partition]) => {
-      const [ok, err] = await tryFn(() => this.handlePartitionReferenceUpdate(partitionName, partition, oldData, newData));
-      if (!ok) {
-        // console.warn(`Failed to update partition references for ${partitionName}:`, err.message);
-        return { partitionName, error: err };
-      }
-      return { partitionName, success: true };
-    });
-    
-    await Promise.allSettled(updatePromises);
-    
-    // Aggressive cleanup: remove stale partition keys in parallel
-    const id = newData.id || oldData.id;
-    const cleanupPromises = Object.entries(partitions).map(async ([partitionName, partition]) => {
-      const prefix = `resource=${this.name}/partition=${partitionName}`;
-      const [okKeys, errKeys, keys] = await tryFn(() => this.client.getAllKeys({ prefix }));
-      if (!okKeys) {
-        // console.warn(`Aggressive cleanup: could not list keys for partition ${partitionName}:`, errKeys.message);
-        return;
-      }
-      
-      const validKey = this.getPartitionKey({ partitionName, id, data: newData });
-      const staleKeys = keys.filter(key => key.endsWith(`/id=${id}`) && key !== validKey);
-      
-      if (staleKeys.length > 0) {
-        const [okDel, errDel] = await tryFn(() => this.client.deleteObjects(staleKeys));
-        if (!okDel) {
-          // console.warn(`Aggressive cleanup: could not delete stale partition keys:`, errDel.message);
-        }
-      }
-    });
-    
-    await Promise.allSettled(cleanupPromises);
+    return this._partitions.handleReferenceUpdates(oldData, newData);
   }
 
   /**
-   * Handle partition reference update for a specific partition
+   * Handle partition reference update for a specific partition.
+   * Delegates to ResourcePartitions module.
    * @param {string} partitionName - Name of the partition
    * @param {Object} partition - Partition definition
    * @param {Object} oldData - Original object data before update
    * @param {Object} newData - Updated object data
    */
   async handlePartitionReferenceUpdate(partitionName, partition, oldData, newData) {
-    // Ensure we have the correct id
-    const id = newData.id || oldData.id;
-
-    // Get old and new partition keys
-    const oldPartitionKey = this.getPartitionKey({ partitionName, id, data: oldData });
-    const newPartitionKey = this.getPartitionKey({ partitionName, id, data: newData });
-
-    // If partition keys are different, we need to move the reference
-    if (oldPartitionKey !== newPartitionKey) {
-      // Delete old partition reference if it exists
-      if (oldPartitionKey) {
-        const [ok, err] = await tryFn(async () => {
-          await this.client.deleteObject(oldPartitionKey);
-        });
-        if (!ok) {
-          // Log but don't fail if old partition object doesn't exist
-          // console.warn(`Old partition object could not be deleted for ${partitionName}:`, err.message);
-        }
-      }
-
-      // Create new partition reference if new key exists
-      if (newPartitionKey) {
-        const [ok, err] = await tryFn(async () => {
-          // Save only version as metadata
-          const partitionMetadata = {
-            _v: String(this.version)
-          };
-          await this.client.putObject({
-            key: newPartitionKey,
-            metadata: partitionMetadata,
-            body: '',
-            contentType: undefined,
-          });
-        });
-        if (!ok) {
-          // Log but don't fail if new partition object creation fails
-          // console.warn(`New partition object could not be created for ${partitionName}:`, err.message);
-        }
-      }
-    } else if (newPartitionKey) {
-      // If partition keys are the same, just update the existing reference
-      const [ok, err] = await tryFn(async () => {
-        // Save only version as metadata
-        const partitionMetadata = {
-          _v: String(this.version)
-        };
-        await this.client.putObject({
-          key: newPartitionKey,
-          metadata: partitionMetadata,
-          body: '',
-          contentType: undefined,
-        });
-      });
-      if (!ok) {
-        // Log but don't fail if partition object update fails
-        // console.warn(`Partition object could not be updated for ${partitionName}:`, err.message);
-      }
-    }
+    return this._partitions.handleReferenceUpdate(partitionName, partition, oldData, newData);
   }
 
   /**
-   * Update partition objects to keep them in sync
+   * Update partition objects to keep them in sync.
+   * Delegates to ResourcePartitions module.
    * @param {Object} data - Updated object data
    */
   async updatePartitionReferences(data) {
-    const partitions = this.config.partitions;
-    if (!partitions || Object.keys(partitions).length === 0) {
-      return;
-    }
-
-    // Update each partition object
-    for (const [partitionName, partition] of Object.entries(partitions)) {
-      // Validate that the partition exists and has the required structure
-      if (!partition || !partition.fields || typeof partition.fields !== 'object') {
-        // console.warn(`Skipping invalid partition '${partitionName}' in resource '${this.name}'`);
-        continue;
-      }
-      const partitionKey = this.getPartitionKey({ partitionName, id: data.id, data });
-      if (partitionKey) {
-        // Save only version as metadata
-        const partitionMetadata = {
-          _v: String(this.version)
-        };
-        const [ok, err] = await tryFn(async () => {
-          await this.client.putObject({
-            key: partitionKey,
-            metadata: partitionMetadata,
-            body: '',
-            contentType: undefined,
-          });
-        });
-        if (!ok) {
-          // Log but don't fail if partition object doesn't exist
-          // console.warn(`Partition object could not be updated for ${partitionName}:`, err.message);
-        }
-      }
-    }
+    return this._partitions.updateReferences(data);
   }
 
   /**
-   * Get a resource object directly from a specific partition
+   * Get a resource object directly from a specific partition.
+   * Delegates to ResourcePartitions module.
    * @param {Object} params - Partition parameters
    * @param {string} params.id - Resource ID
    * @param {string} params.partitionName - Name of the partition
    * @param {Object} params.partitionValues - Values for partition fields
    * @returns {Promise<Object>} The resource object with partition metadata
-   * @example
-   * // Get user from UTM source partition
-   * const user = await resource.getFromPartition({
-   *   id: 'user-123',
-   *   partitionName: 'byUtmSource',
-   *   partitionValues: { 'utm.source': 'google' }
-   * });
-         * 
-   * // Get product from multi-field partition
-   * const product = await resource.getFromPartition({
-   *   id: 'product-456',
-   *   partitionName: 'byCategoryRegion',
-   *   partitionValues: { category: 'electronics', region: 'US' }
-   * });
    */
   async getFromPartition({ id, partitionName, partitionValues = {} }) {
-    if (!this.config.partitions || !this.config.partitions[partitionName]) {
-      throw new PartitionError(`Partition '${partitionName}' not found`, { resourceName: this.name, partitionName, operation: 'getFromPartition' });
-    }
-
-    const partition = this.config.partitions[partitionName];
-
-    // Build partition key using provided values
-    const partitionSegments = [];
-    const sortedFields = Object.entries(partition.fields).sort(([a], [b]) => a.localeCompare(b));
-    for (const [fieldName, rule] of sortedFields) {
-      const value = partitionValues[fieldName];
-      if (value !== undefined && value !== null) {
-        const transformedValue = this.applyPartitionRule(value, rule);
-        partitionSegments.push(`${fieldName}=${transformedValue}`);
-      }
-    }
-
-    if (partitionSegments.length === 0) {
-      throw new PartitionError(`No partition values provided for partition '${partitionName}'`, { resourceName: this.name, partitionName, operation: 'getFromPartition' });
-    }
-
-    const partitionKey = join(`resource=${this.name}`, `partition=${partitionName}`, ...partitionSegments, `id=${id}`);
-
-    // Verify partition reference exists
-    const [ok, err] = await tryFn(async () => {
-      await this.client.headObject(partitionKey);
-    });
-    if (!ok) {
-      throw new ResourceError(`Resource with id '${id}' not found in partition '${partitionName}'`, { resourceName: this.name, id, partitionName, operation: 'getFromPartition' });
-    }
-
-    // Get the actual data from the main resource object
-    const data = await this.get(id);
-
-    // Add partition metadata
-    data._partition = partitionName;
-    data._partitionValues = partitionValues;
-
-    this._emitStandardized("partition-fetched", data, data.id);
-    return data;
+    return this._partitions.getFromPartition({ id, partitionName, partitionValues });
   }
 
   /**
@@ -3957,7 +1682,7 @@ export class Resource extends AsyncEventEmitter {
       Object.keys(result).forEach(k => { result[k] = fixValue(result[k]); });
       return result;
     }
-    
+
     // Handle user-managed behavior when data is in body
     if (behavior === 'user-managed' && body && body.trim() !== '') {
       const [okBody, errBody, parsedBody] = await tryFn(() => Promise.resolve(JSON.parse(body)));
@@ -3981,7 +1706,7 @@ export class Resource extends AsyncEventEmitter {
         return filterInternalFields(merged);
       }
     }
-    
+
     const result = { ...unmappedMetadata, id };
     Object.keys(result).forEach(k => { result[k] = fixValue(result[k]); });
     const filtered = filterInternalFields(result);
@@ -3997,468 +1722,68 @@ export class Resource extends AsyncEventEmitter {
   // --- GUARDS SYSTEM ---
   /**
    * Normalize guard configuration
-   * @param {Object|Array|undefined} guard - Guard configuration
-   * @returns {Object|null} Normalized guard config
+   * Delegates to ResourceGuards module.
+   * @deprecated Use ResourceGuards module directly
    * @private
    */
   _normalizeGuard(guard) {
-    if (!guard) return null;
-
-    // Simple string array → applies to every operation
-    if (Array.isArray(guard)) {
-      return { '*': guard };
-    }
-
-    return guard;
+    const tempGuards = new ResourceGuards(this, { guard });
+    return tempGuards.getGuard();
   }
 
   /**
    * Execute guard for operation
+   * Delegates to ResourceGuards module.
    * @param {string} operation - Operation name (list, get, insert, update, etc)
    * @param {Object} context - Framework-agnostic context
-   * @param {Object} context.user - Decoded JWT token
-   * @param {Object} context.params - Route params
-   * @param {Object} context.body - Request body
-   * @param {Object} context.query - Query string
-   * @param {Object} context.headers - Request headers
-   * @param {Function} context.setPartition - Helper to set partition
    * @param {Object} [resource] - Resource record (for get/update/delete)
    * @returns {Promise<boolean>} True if allowed, false if denied
    */
   async executeGuard(operation, context, resource = null) {
-    if (!this.guard) return true;  // No guard = allow
-
-    // 1. Try operation-specific guard
-    let guardFn = this.guard[operation];
-
-    // 2. Fallback to wildcard
-    if (!guardFn) {
-      guardFn = this.guard['*'];
-    }
-
-    // 3. No guard = allow
-    if (!guardFn) return true;
-
-    // 4. Boolean simple
-    if (typeof guardFn === 'boolean') {
-      return guardFn;
-    }
-
-    // 5. Array of roles/scopes
-    if (Array.isArray(guardFn)) {
-      return this._checkRolesScopes(guardFn, context.user);
-    }
-
-    // 6. Custom function
-    if (typeof guardFn === 'function') {
-      try {
-        const result = await guardFn(context, resource);
-        return result === true;  // Force boolean
-      } catch (err) {
-        // 🪵 Guard error = deny access
-        this.logger.error({ operation, error: err.message, stack: err.stack }, `guard error for ${operation}`);
-        return false;
-      }
-    }
-
-    return false;  // Default: deny
+    return this._guards.execute(operation, context, resource);
   }
 
   /**
    * Check if user has required roles or scopes
-   * @param {Array<string>} requiredRolesScopes - Required roles/scopes
-   * @param {Object} user - User from JWT token
-   * @returns {boolean} True if user has any of required roles/scopes
+   * Delegates to ResourceGuards module.
    * @private
    */
   _checkRolesScopes(requiredRolesScopes, user) {
-    if (!user) return false;
-
-    // User scopes (OpenID scope claim)
-    const userScopes = user.scope?.split(' ') || [];
-
-    // User roles - support multiple formats (Keycloak, Azure AD)
-    const clientId = user.azp || process.env.CLIENT_ID || 'default';
-    const clientRoles = user.resource_access?.[clientId]?.roles || [];
-    const realmRoles = user.realm_access?.roles || [];
-    const azureRoles = user.roles || [];
-    const userRoles = [...clientRoles, ...realmRoles, ...azureRoles];
-
-    // Check if user has any of required
-    return requiredRolesScopes.some(required => {
-      return userScopes.includes(required) || userRoles.includes(required);
-    });
+    return this._guards._checkRolesScopes(requiredRolesScopes, user);
   }
 
   // --- MIDDLEWARE SYSTEM ---
-  _initMiddleware() {
-    // Map of methodName -> array of middleware functions
-    this._middlewares = new Map();
-    // Supported methods for middleware (expanded to include newly cached methods)
-    this._middlewareMethods = [
-      'get', 'list', 'listIds', 'getAll', 'count', 'page',
-      'insert', 'update', 'delete', 'deleteMany', 'exists', 'getMany',
-      'content', 'hasContent', 'query', 'getFromPartition', 'setContent', 'deleteContent', 'replace'
-    ];
-    for (const method of this._middlewareMethods) {
-      this._middlewares.set(method, []);
-      // Wrap the method if not already wrapped
-      if (!this[`_original_${method}`]) {
-        this[`_original_${method}`] = this[method].bind(this);
-        this[method] = async (...args) => {
-          const ctx = { resource: this, args, method };
-          let idx = -1;
-          const stack = this._middlewares.get(method);
-          const dispatch = async (i) => {
-            if (i <= idx) {
-              throw new ResourceError('Resource middleware next() called multiple times', {
-                resourceName: this.name,
-                operation: method,
-                statusCode: 500,
-                retriable: false,
-                suggestion: 'Ensure each middleware awaits next() at most once.'
-              });
-            }
-            idx = i;
-            if (i < stack.length) {
-              return await stack[i](ctx, () => dispatch(i + 1));
-            } else {
-              // Final handler: call the original method
-              return await this[`_original_${method}`](...ctx.args);
-            }
-          };
-          return await dispatch(0);
-        };
-      }
-    }
-  }
-
-  useMiddleware(method, fn) {
-    if (!this._middlewares) this._initMiddleware();
-    if (!this._middlewares.has(method)) throw new ResourceError(`No such method for middleware: ${method}`, { operation: 'useMiddleware', method });
-    this._middlewares.get(method).push(fn);
-  }
-
-  // Utility to apply schema default values
-  applyDefaults(data) {
-    const out = { ...data };
-    for (const [key, def] of Object.entries(this.attributes)) {
-      if (out[key] === undefined) {
-        if (typeof def === 'string' && def.includes('default:')) {
-          const match = def.match(/default:([^|]+)/);
-          if (match) {
-            let val = match[1];
-            // Convert to boolean/number if necessary
-            if (def.includes('boolean')) val = val === 'true';
-            else if (def.includes('number')) val = Number(val);
-            out[key] = val;
-          }
-        }
-      }
-    }
-    return out;
-  }
-
-  // ============================================================================
-  // STATE MACHINE METHODS
-  // ============================================================================
-
   /**
-   * State machine accessor object
-   * Provides namespaced access to state machine operations
-   * @type {Object}
-   * @property {Function} send - Trigger state transition
-   * @property {Function} get - Get current state
-   * @property {Function} canTransition - Check if transition is valid
-   * @property {Function} getValidEvents - Get valid events for current state
-   * @property {Function} initialize - Initialize entity with initial state
-   * @property {Function} history - Get transition history
-   * @example
-   * await orders.state.send('order-123', 'CONFIRM');
-   * const state = await orders.state.get('order-123');
-   * const canShip = await orders.state.canTransition('order-123', 'SHIP');
-   */
-  get state() {
-    const resource = this;
-
-    const throwIfNoStateMachine = () => {
-      if (!resource._stateMachine) {
-        throw new ResourceError(`State machine not configured for resource '${resource.name}'`, {
-          resourceName: resource.name,
-          operation: 'stateMachine',
-          statusCode: 400,
-          retriable: false,
-          suggestion: 'Install and configure the StateMachinePlugin before calling resource.state.* methods.',
-          docs: 'https://github.com/forattini-dev/s3db.js/blob/main/docs/plugins/state-machine.md'
-        });
-      }
-    };
-
-    return {
-      /**
-       * Trigger a state transition
-       * @param {string} id - Entity ID
-       * @param {string} event - Event name
-       * @param {Object} [eventData] - Event data
-       * @returns {Promise<Object>} Transition result
-       * @example
-       * await orders.state.send('order-123', 'CONFIRM', { confirmedBy: 'user-456' });
-       */
-      send: async (id, event, eventData) => {
-        throwIfNoStateMachine();
-        return resource._stateMachine.send(id, event, eventData);
-      },
-
-      /**
-       * Get current state of an entity
-       * @param {string} id - Entity ID
-       * @returns {Promise<string>} Current state
-       * @example
-       * const currentState = await orders.state.get('order-123');
-       */
-      get: async (id) => {
-        throwIfNoStateMachine();
-        return resource._stateMachine.getState(id);
-      },
-
-      /**
-       * Check if a transition is valid
-       * @param {string} id - Entity ID
-       * @param {string} event - Event name
-       * @returns {Promise<boolean>} True if transition is valid
-       * @example
-       * const canConfirm = await orders.state.canTransition('order-123', 'CONFIRM');
-       */
-      canTransition: async (id, event) => {
-        throwIfNoStateMachine();
-        return resource._stateMachine.canTransition(id, event);
-      },
-
-      /**
-       * Get all valid events for the current state
-       * @param {string} id - Entity ID
-       * @returns {Promise<Array<string>>} Array of valid event names
-       * @example
-       * const events = await orders.state.getValidEvents('order-123');
-       * // Returns: ['SHIP', 'CANCEL']
-       */
-      getValidEvents: async (id) => {
-        throwIfNoStateMachine();
-        return resource._stateMachine.getValidEvents(id);
-      },
-
-      /**
-       * Initialize entity with initial state
-       * @param {string} id - Entity ID
-       * @param {Object} [context] - Initial context data
-       * @returns {Promise<void>}
-       * @example
-       * await orders.state.initialize('order-456', { customerId: 'user-123' });
-       */
-      initialize: async (id, context) => {
-        throwIfNoStateMachine();
-        return resource._stateMachine.initializeEntity(id, context);
-      },
-
-      /**
-       * Get transition history for an entity
-       * @param {string} id - Entity ID
-       * @param {Object} [options] - Query options
-       * @param {number} [options.limit=100] - Maximum number of transitions
-       * @param {Date} [options.fromDate] - Filter from date
-       * @param {Date} [options.toDate] - Filter to date
-       * @returns {Promise<Array<Object>>} Transition history
-       * @example
-       * const history = await orders.state.history('order-123', { limit: 50 });
-       */
-      history: async (id, options) => {
-        throwIfNoStateMachine();
-        return resource._stateMachine.getTransitionHistory(id, options);
-      }
-    };
-  }
-
-  /**
-   * Internal method to attach state machine instance
-   * This is called by StateMachinePlugin during initialization
+   * Initialize middleware system
+   * Delegates to ResourceMiddleware module.
+   * @deprecated Middleware is auto-initialized in constructor
    * @private
-   * @param {Object} stateMachine - State machine instance
    */
-  _attachStateMachine(stateMachine) {
-    this._stateMachine = stateMachine;
-  }
-
-}
-
-/**
- * Validate Resource configuration object
- * @param {Object} config - Configuration object to validate
- * @returns {Object} Validation result with isValid flag and errors array
- */
-function validateResourceConfig(config) {
-  const errors = [];
-
-  // Validate required fields
-  if (!config.name) {
-    errors.push("Resource 'name' is required");
-  } else if (typeof config.name !== 'string') {
-    errors.push("Resource 'name' must be a string");
-  } else if (config.name.trim() === '') {
-    errors.push("Resource 'name' cannot be empty");
-  }
-
-  if (!config.client) {
-    errors.push("S3 'client' is required");
-  }
-
-  // Validate attributes
-  if (!config.attributes) {
-    errors.push("Resource 'attributes' are required");
-  } else if (typeof config.attributes !== 'object' || Array.isArray(config.attributes)) {
-    errors.push("Resource 'attributes' must be an object");
-  } else if (Object.keys(config.attributes).length === 0) {
-    errors.push("Resource 'attributes' cannot be empty");
-  }
-
-  // Validate optional fields with type checking
-  if (config.version !== undefined && typeof config.version !== 'string') {
-    errors.push("Resource 'version' must be a string");
-  }
-
-  if (config.behavior !== undefined && typeof config.behavior !== 'string') {
-    errors.push("Resource 'behavior' must be a string");
-  }
-
-  if (config.passphrase !== undefined && typeof config.passphrase !== 'string') {
-    errors.push("Resource 'passphrase' must be a string");
-  }
-
-  if (config.observers !== undefined && !Array.isArray(config.observers)) {
-    errors.push("Resource 'observers' must be an array");
-  }
-
-  // Validate boolean fields
-  const booleanFields = ['cache', 'autoDecrypt', 'timestamps', 'paranoid', 'allNestedObjectsOptional'];
-  for (const field of booleanFields) {
-    if (config[field] !== undefined && typeof config[field] !== 'boolean') {
-      errors.push(`Resource '${field}' must be a boolean`);
+  _initMiddleware() {
+    if (!this._middleware) {
+      this._middleware = new ResourceMiddleware(this);
     }
+    this._middleware.init();
   }
 
-  // Validate idGenerator
-  if (config.idGenerator !== undefined) {
-    const isValidFunction = typeof config.idGenerator === 'function';
-    const isValidNumber = typeof config.idGenerator === 'number';
-    const isValidIncremental = typeof config.idGenerator === 'string' &&
-      (config.idGenerator === 'incremental' || config.idGenerator.startsWith('incremental:'));
-    const isValidIncrementalObject = typeof config.idGenerator === 'object' &&
-      config.idGenerator !== null &&
-      config.idGenerator.type === 'incremental';
-
-    if (!isValidFunction && !isValidNumber && !isValidIncremental && !isValidIncrementalObject) {
-      errors.push("Resource 'idGenerator' must be a function, number (size), 'incremental' string, or incremental config object");
-    } else if (isValidNumber && config.idGenerator <= 0) {
-      errors.push("Resource 'idGenerator' size must be greater than 0");
-    }
+  /**
+   * Add middleware for a specific method
+   * Delegates to ResourceMiddleware module.
+   * @param {string} method - Method name
+   * @param {Function} fn - Middleware function (ctx, next) => Promise
+   */
+  useMiddleware(method, fn) {
+    this._middleware.use(method, fn);
   }
 
-  // Validate idSize
-  if (config.idSize !== undefined) {
-    if (typeof config.idSize !== 'number' || !Number.isInteger(config.idSize)) {
-      errors.push("Resource 'idSize' must be an integer");
-    } else if (config.idSize <= 0) {
-      errors.push("Resource 'idSize' must be greater than 0");
-    }
+  /**
+   * @deprecated Use this.validator.applyDefaults() instead. This method delegates to ResourceValidator.
+   */
+  applyDefaults(data) {
+    return this.validator.applyDefaults(data);
   }
 
-  // Validate partitions
-  if (config.partitions !== undefined) {
-    if (typeof config.partitions !== 'object' || Array.isArray(config.partitions)) {
-      errors.push("Resource 'partitions' must be an object");
-    } else {
-      for (const [partitionName, partitionDef] of Object.entries(config.partitions)) {
-        if (typeof partitionDef !== 'object' || Array.isArray(partitionDef)) {
-          errors.push(`Partition '${partitionName}' must be an object`);
-        } else if (!partitionDef.fields) {
-          errors.push(`Partition '${partitionName}' must have a 'fields' property`);
-        } else if (typeof partitionDef.fields !== 'object' || Array.isArray(partitionDef.fields)) {
-          errors.push(`Partition '${partitionName}.fields' must be an object`);
-        } else {
-          for (const [fieldName, fieldType] of Object.entries(partitionDef.fields)) {
-            if (typeof fieldType !== 'string') {
-              errors.push(`Partition '${partitionName}.fields.${fieldName}' must be a string`);
-            }
-          }
-        }
-      }
-    }
-  }
-
-  // Validate hooks
-  if (config.hooks !== undefined) {
-    if (typeof config.hooks !== 'object' || Array.isArray(config.hooks)) {
-      errors.push("Resource 'hooks' must be an object");
-    } else {
-      const validHookEvents = [
-        'beforeInsert', 'afterInsert',
-        'beforeUpdate', 'afterUpdate',
-        'beforeDelete', 'afterDelete',
-        'beforeGet', 'afterGet',
-        'beforeList', 'afterList',
-        'beforeQuery', 'afterQuery',
-        'beforeExists', 'afterExists',
-        'beforeCount', 'afterCount',
-        'beforePatch', 'afterPatch',
-        'beforeReplace', 'afterReplace',
-        'beforeGetMany', 'afterGetMany',
-        'beforeDeleteMany', 'afterDeleteMany'
-      ];
-      for (const [event, hooksArr] of Object.entries(config.hooks)) {
-        if (!validHookEvents.includes(event)) {
-          errors.push(`Invalid hook event '${event}'. Valid events: ${validHookEvents.join(', ')}`);
-        } else if (!Array.isArray(hooksArr)) {
-          errors.push(`Resource 'hooks.${event}' must be an array`);
-        } else {
-          for (let i = 0; i < hooksArr.length; i++) {
-            const hook = hooksArr[i];
-            // Only validate user-provided hooks for being functions
-            if (typeof hook !== 'function') {
-              // If the hook is a string (e.g., a placeholder or reference), skip error
-              if (typeof hook === 'string') continue;
-              // If the hook is not a function or string, skip error (system/plugin hooks)
-              continue;
-            }
-          }
-        }
-      }
-    }
-  }
-
-  // Validate events
-  if (config.events !== undefined) {
-    if (typeof config.events !== 'object' || Array.isArray(config.events)) {
-      errors.push("Resource 'events' must be an object");
-    } else {
-      for (const [eventName, listeners] of Object.entries(config.events)) {
-        if (Array.isArray(listeners)) {
-          // Multiple listeners for this event
-          for (let i = 0; i < listeners.length; i++) {
-            const listener = listeners[i];
-            if (typeof listener !== 'function') {
-              errors.push(`Resource 'events.${eventName}[${i}]' must be a function`);
-            }
-          }
-        } else if (typeof listeners !== 'function') {
-          errors.push(`Resource 'events.${eventName}' must be a function or array of functions`);
-        }
-      }
-    }
-  }
-
-  return {
-    isValid: errors.length === 0,
-    errors
-  };
+  // ============================================================================
 }
 
 // ============================================================================
@@ -4482,11 +1807,8 @@ function validateResourceConfig(config) {
  * const nextValue = await resource.getSequenceValue();
  * console.log(nextValue); // 1006 (next ID that will be assigned)
  */
-Resource.prototype.getSequenceValue = async function(fieldName = 'id') {
-  if (!this.idGenerator?._sequence) {
-    return null;
-  }
-  return this.idGenerator._sequence.getValue(fieldName);
+Resource.prototype.getSequenceValue = async function (fieldName = 'id') {
+  return this._idGenerator.getSequenceValue(fieldName);
 };
 
 /**
@@ -4504,12 +1826,8 @@ Resource.prototype.getSequenceValue = async function(fieldName = 'id') {
  * // Reset order IDs to start from 5000
  * await orders.resetSequence('id', 5000);
  */
-Resource.prototype.resetSequence = async function(fieldName, value) {
-  if (!this.idGenerator?._sequence) {
-    this.logger.warn('resetSequence called on non-incremental resource');
-    return false;
-  }
-  return this.idGenerator._sequence.reset(fieldName, value);
+Resource.prototype.resetSequence = async function (fieldName, value) {
+  return this._idGenerator.resetSequence(fieldName, value);
 };
 
 /**
@@ -4522,11 +1840,8 @@ Resource.prototype.resetSequence = async function(fieldName, value) {
  * const sequences = await orders.listSequences();
  * // [{ name: 'orders-id', value: 1006, createdAt: ..., updatedAt: ... }]
  */
-Resource.prototype.listSequences = async function() {
-  if (!this.idGenerator?._sequence) {
-    return null;
-  }
-  return this.idGenerator._sequence.list();
+Resource.prototype.listSequences = async function () {
+  return this._idGenerator.listSequences();
 };
 
 /**
@@ -4539,11 +1854,8 @@ Resource.prototype.listSequences = async function() {
  * const batch = await resource.reserveIdBatch(500);
  * // batch = { start: 1000, end: 1500, current: 1000 }
  */
-Resource.prototype.reserveIdBatch = async function(count = 100) {
-  if (!this.idGenerator?._sequence) {
-    return null;
-  }
-  return this.idGenerator._sequence.reserveBatch('id', count);
+Resource.prototype.reserveIdBatch = async function (count = 100) {
+  return this._idGenerator.reserveIdBatch(count);
 };
 
 /**
@@ -4556,11 +1868,8 @@ Resource.prototype.reserveIdBatch = async function(count = 100) {
  * const status = resource.getBatchStatus();
  * // { start: 1000, end: 1100, current: 1042, remaining: 58 }
  */
-Resource.prototype.getBatchStatus = function(fieldName = 'id') {
-  if (!this.idGenerator?._sequence) {
-    return null;
-  }
-  return this.idGenerator._sequence.getBatchStatus(fieldName);
+Resource.prototype.getBatchStatus = function (fieldName = 'id') {
+  return this._idGenerator.getBatchStatus(fieldName);
 };
 
 /**
@@ -4568,10 +1877,8 @@ Resource.prototype.getBatchStatus = function(fieldName = 'id') {
  *
  * @param {string} [fieldName='id'] - Field name
  */
-Resource.prototype.releaseBatch = function(fieldName = 'id') {
-  if (this.idGenerator?._sequence) {
-    this.idGenerator._sequence.releaseBatch(fieldName);
-  }
+Resource.prototype.releaseBatch = function (fieldName = 'id') {
+  this._idGenerator.releaseBatch(fieldName);
 };
 
 // ============================================================================
@@ -4592,7 +1899,7 @@ Resource.prototype.releaseBatch = function(fieldName = 'id') {
  * // ... use resource ...
  * resource.dispose(); // Clean up when done
  */
-Resource.prototype.dispose = function() {
+Resource.prototype.dispose = function () {
   // Release validator reference for cache eviction
   if (this.schema) {
     this.schema.dispose();
