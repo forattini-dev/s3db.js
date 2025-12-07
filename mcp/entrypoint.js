@@ -49,9 +49,74 @@ class S3dbMCPServer {
       return {
         tools: [
           // 📖 DOCUMENTATION TOOLS (for AI agents)
+          // New hybrid search tools (fuzzy + semantic)
+          {
+            name: 's3dbSearchCoreDocs',
+            description: `Search s3db.js CORE documentation using hybrid search (fuzzy + semantic).
+Core docs include: getting started, database/resource API, schema validation,
+CRUD operations, partitioning, behaviors, encoding, encryption, streaming, and CLI.
+Use this for questions about the main s3db.js functionality.`,
+            inputSchema: {
+              type: 'object',
+              properties: {
+                query: {
+                  type: 'string',
+                  description: 'Natural language search query (e.g., "how do partitions work", "create resource with validation")'
+                },
+                limit: {
+                  type: 'number',
+                  description: 'Maximum results to return (default: 5)',
+                  default: 5
+                }
+              },
+              required: ['query']
+            }
+          },
+          {
+            name: 's3dbSearchPluginDocs',
+            description: `Search s3db.js PLUGIN documentation using hybrid search (fuzzy + semantic).
+Plugin docs include: CachePlugin, AuditPlugin, ReplicatorPlugin, GeoPlugin,
+MetricsPlugin, TTLPlugin, BackupPlugin, QueuePlugin, EventualConsistencyPlugin,
+VectorPlugin, FulltextPlugin, ApiPlugin, and more.
+Use this for questions about specific plugins and their configuration.`,
+            inputSchema: {
+              type: 'object',
+              properties: {
+                query: {
+                  type: 'string',
+                  description: 'Natural language search query (e.g., "cache plugin configuration", "how to use geo plugin")'
+                },
+                limit: {
+                  type: 'number',
+                  description: 'Maximum results to return (default: 5)',
+                  default: 5
+                }
+              },
+              required: ['query']
+            }
+          },
+          {
+            name: 's3dbListCoreTopics',
+            description: 'List all available topics in s3db.js CORE documentation',
+            inputSchema: {
+              type: 'object',
+              properties: {},
+              required: []
+            }
+          },
+          {
+            name: 's3dbListPluginTopics',
+            description: 'List all available topics in s3db.js PLUGIN documentation',
+            inputSchema: {
+              type: 'object',
+              properties: {},
+              required: []
+            }
+          },
+          // Legacy tools (kept for backward compatibility)
           {
             name: 's3dbQueryDocs',
-            description: 'Search s3db.js documentation to answer questions about features, plugins, best practices, and usage. Use this tool to help AI agents understand how to use s3db.js effectively.',
+            description: '[LEGACY] Search s3db.js documentation. Use s3dbSearchCoreDocs or s3dbSearchPluginDocs for better results.',
             inputSchema: {
               type: 'object',
               properties: {
@@ -70,7 +135,7 @@ class S3dbMCPServer {
           },
           {
             name: 's3dbListTopics',
-            description: 'List all available documentation topics and their categories',
+            description: '[LEGACY] List all available documentation topics. Use s3dbListCoreTopics or s3dbListPluginTopics for better organization.',
             inputSchema: {
               type: 'object',
               properties: {},
@@ -907,7 +972,24 @@ class S3dbMCPServer {
         let result;
 
         switch (name) {
-          // Documentation tools
+          // New hybrid search documentation tools
+          case 's3dbSearchCoreDocs':
+            result = await this.handleS3dbSearchCoreDocs(args);
+            break;
+
+          case 's3dbSearchPluginDocs':
+            result = await this.handleS3dbSearchPluginDocs(args);
+            break;
+
+          case 's3dbListCoreTopics':
+            result = await this.handleS3dbListCoreTopics(args);
+            break;
+
+          case 's3dbListPluginTopics':
+            result = await this.handleS3dbListPluginTopics(args);
+            break;
+
+          // Legacy documentation tools
           case 's3dbQueryDocs':
             result = await this.handleS3dbQueryDocs(args);
             break;
@@ -1209,6 +1291,32 @@ class S3dbMCPServer {
 
   // 📖 DOCUMENTATION TOOLS HANDLERS
 
+  // New hybrid search handlers
+  async handleS3dbSearchCoreDocs(args) {
+    const { createDocsSearchHandlers } = await import('./tools/docs-search.js');
+    const handlers = createDocsSearchHandlers(this);
+    return await handlers.s3dbSearchCoreDocs(args);
+  }
+
+  async handleS3dbSearchPluginDocs(args) {
+    const { createDocsSearchHandlers } = await import('./tools/docs-search.js');
+    const handlers = createDocsSearchHandlers(this);
+    return await handlers.s3dbSearchPluginDocs(args);
+  }
+
+  async handleS3dbListCoreTopics(args) {
+    const { createDocsSearchHandlers } = await import('./tools/docs-search.js');
+    const handlers = createDocsSearchHandlers(this);
+    return await handlers.s3dbListCoreTopics(args);
+  }
+
+  async handleS3dbListPluginTopics(args) {
+    const { createDocsSearchHandlers } = await import('./tools/docs-search.js');
+    const handlers = createDocsSearchHandlers(this);
+    return await handlers.s3dbListPluginTopics(args);
+  }
+
+  // Legacy documentation handlers
   async handleS3dbQueryDocs(args) {
     const { query, maxResults = 5 } = args;
 
