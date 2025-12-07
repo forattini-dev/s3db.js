@@ -17,6 +17,13 @@ test-partition-cache/
 # Temporary directories
 tmp/
 .tmp/
-.claude.json
 openspec/specs/*
 openspec/changes/*
+
+# AI Agent directories
+.agent/
+.gemini/
+.claude.json
+
+# pnpm store
+.pnpm-store/
