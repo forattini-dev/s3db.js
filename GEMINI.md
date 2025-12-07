@@ -130,6 +130,15 @@ new ApiPlugin({
 
 ## 3. Development Workflow
 
+### Testing Strategy (Cost Optimization)
+**IMPORTANT:** The test suite is comprehensive but resource-intensive. Avoid running the full test suite unnecessarily.
+
+1.  **Develop Feature/Fix.**
+2.  **Write Specific Test:** Create or update a specific test file targeting *only* the changes.
+3.  **Run Specific Test:** Execute *only* that test file: `npx vitest run tests/path/to/test.js`
+4.  **Check Coverage:** Verify coverage for the modified files only.
+5.  **Full Suite (CI Only):** Leave full regression testing to the CI pipeline or pre-push checks.
+
 ### Getting Started
 1.  **Install dependencies:** `pnpm install`
 2.  **Build the core library:** `pnpm run build:core`
