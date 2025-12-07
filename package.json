@@ -84,15 +84,20 @@
     "dev": "rollup -c -w",
     "test": "pnpm run test:fs",
     "test:fs": "pnpm run test:fs:core && pnpm run test:fs:plugins && pnpm run test:ts",
-    "test:fs:core": "S3DB_LOG_LEVEL=warn TEST_USE_FILESYSTEM_CLIENT=true node --max-old-space-size=1024 node_modules/vitest/vitest.mjs run --exclude 'tests/plugins/**' --exclude 'tests/typescript/**' --no-file-parallelism",
-    "test:fs:plugins": "S3DB_LOG_LEVEL=warn TEST_USE_FILESYSTEM_CLIENT=true node --max-old-space-size=1024 node_modules/vitest/vitest.mjs run tests/plugins/ --no-file-parallelism",
+    "test:fs:core": "S3DB_LOG_LEVEL=warn TEST_USE_FILESYSTEM_CLIENT=true node --max-old-space-size=4096 node_modules/vitest/vitest.mjs run tests/core/",
+    "test:fs:plugins": "S3DB_LOG_LEVEL=warn TEST_USE_FILESYSTEM_CLIENT=true node --max-old-space-size=4096 node_modules/vitest/vitest.mjs run tests/plugins/",
+    "test:core": "pnpm run test:fs:core",
+    "test:plugins": "pnpm run test:fs:plugins",
+    "test:memory": "pnpm run test:memory:core && pnpm run test:memory:plugins && pnpm run test:ts",
+    "test:memory:core": "S3DB_LOG_LEVEL=warn TEST_FORCE_MEMORY_CLIENT=true node --max-old-space-size=4096 node_modules/vitest/vitest.mjs run tests/core/ --no-file-parallelism",
+    "test:memory:plugins": "S3DB_LOG_LEVEL=warn TEST_FORCE_MEMORY_CLIENT=true node --max-old-space-size=4096 node_modules/vitest/vitest.mjs run tests/plugins/ --no-file-parallelism",
     "test:s3": "pnpm run test:s3:core && pnpm run test:s3:plugins && pnpm run test:ts",
-    "test:s3:core": "S3DB_LOG_LEVEL=warn TEST_USE_FILESYSTEM_CLIENT=false BUCKET_CONNECTION_STRING='http://minioadmin:minioadmin123@localhost:9100/s3db' node --max-old-space-size=1024 node_modules/vitest/vitest.mjs run --exclude 'tests/plugins/**' --exclude 'tests/typescript/**' --no-file-parallelism",
-    "test:s3:plugins": "S3DB_LOG_LEVEL=warn TEST_USE_FILESYSTEM_CLIENT=false BUCKET_CONNECTION_STRING='http://minioadmin:minioadmin123@localhost:9100/s3db' node --max-old-space-size=1024 node_modules/vitest/vitest.mjs run tests/plugins/ --no-file-parallelism",
+    "test:s3:core": "S3DB_LOG_LEVEL=warn TEST_USE_FILESYSTEM_CLIENT=false BUCKET_CONNECTION_STRING='http://minioadmin:minioadmin123@localhost:9100/s3db' node --max-old-space-size=4096 node_modules/vitest/vitest.mjs run tests/core/",
+    "test:s3:plugins": "S3DB_LOG_LEVEL=warn TEST_USE_FILESYSTEM_CLIENT=false BUCKET_CONNECTION_STRING='http://minioadmin:minioadmin123@localhost:9100/s3db' node --max-old-space-size=4096 node_modules/vitest/vitest.mjs run tests/plugins/",
     "test:ts": "tsc --noEmit --project tests/typescript/tsconfig.json",
-    "test:coverage": "S3DB_LOG_LEVEL=warn TEST_USE_FILESYSTEM_CLIENT=true node --max-old-space-size=1024 node_modules/vitest/vitest.mjs run --coverage --no-file-parallelism && pnpm run test:ts",
-    "test:watch": "S3DB_LOG_LEVEL=warn TEST_USE_FILESYSTEM_CLIENT=true node --max-old-space-size=1024 node_modules/vitest/vitest.mjs --no-file-parallelism",
-    "test:ui": "S3DB_LOG_LEVEL=warn TEST_USE_FILESYSTEM_CLIENT=true node --max-old-space-size=1024 node_modules/vitest/vitest.mjs --ui --no-file-parallelism",
+    "test:coverage": "S3DB_LOG_LEVEL=warn TEST_USE_FILESYSTEM_CLIENT=true node --max-old-space-size=4096 node_modules/vitest/vitest.mjs run --coverage && pnpm run test:ts",
+    "test:watch": "S3DB_LOG_LEVEL=warn TEST_USE_FILESYSTEM_CLIENT=true node --max-old-space-size=4096 node_modules/vitest/vitest.mjs",
+    "test:ui": "S3DB_LOG_LEVEL=warn TEST_USE_FILESYSTEM_CLIENT=true node --max-old-space-size=4096 node_modules/vitest/vitest.mjs --ui",
     "benchmark": "node benchmark-compression.js",
     "benchmark:partitions": "node docs/benchmarks/partitions-matrix.js",
     "release:check": "./scripts/pre-release-check.sh",
@@ -105,10 +110,13 @@
     "install:dev:replicators": "pnpm add -D pg @google-cloud/bigquery google-auth-library @planetscale/database @libsql/client @aws-sdk/client-sqs amqplib",
     "install:dev:plugins": "pnpm add -D hono @hono/node-server @hono/swagger-ui jose bcrypt nodemailer @tensorflow/tfjs-node",
     "install:dev:puppeteer": "pnpm add -D puppeteer-extra puppeteer-extra-plugin-stealth user-agents ghost-cursor",
-    "install:dev:cloud": "pnpm add -D flat @aws-sdk/client-acm @aws-sdk/client-api-gateway @aws-sdk/client-apigatewayv2 @aws-sdk/client-backup @aws-sdk/client-cloudfront @aws-sdk/client-cloudtrail @aws-sdk/client-cloudwatch @aws-sdk/client-cloudwatch-logs @aws-sdk/client-cognito-identity-provider @aws-sdk/client-config-service @aws-sdk/client-dynamodb @aws-sdk/client-ec2 @aws-sdk/client-ecr @aws-sdk/client-ecs @aws-sdk/client-efs @aws-sdk/client-eks @aws-sdk/client-elasticache @aws-sdk/client-elastic-load-balancing @aws-sdk/client-elastic-load-balancing-v2 @aws-sdk/client-eventbridge @aws-sdk/client-iam @aws-sdk/client-kinesis @aws-sdk/client-kms @aws-sdk/client-lambda @aws-sdk/client-rds @aws-sdk/client-route-53 @aws-sdk/client-secrets-manager @aws-sdk/client-sfn @aws-sdk/client-sns @aws-sdk/client-ssm @aws-sdk/client-sts @aws-sdk/client-waf @aws-sdk/client-wafv2",
+    "install:dev:cloud": "pnpm add -D flat @aws-sdk/client-acm @aws-sdk/client-api-gateway @aws-sdk/client-apigatewayv2 @aws-sdk/client-backup @aws-sdk/client-cloudfront @aws-sdk/client-cloudtrail @aws-sdk/client-cloudwatch @aws-sdk/client-cloudwatch-logs @aws-sdk/client-cognito-identity-provider @aws-sdk/client-config-service @aws-sdk/client-dynamodb @aws-sdk/client-ec2 @aws-sdk/client-ecr @aws-sdk/client-ecs @aws-sdk/client-efs @aws-sdk/client-eks @aws-sdk/client-elasticache @aws-sdk/client-elastic-load-balancing @aws-sdk/client-elastic-load-balancing-v2 @aws-sdk/client-eventbridge @aws-sdk/client-iam @aws-sdk/client-kinesis @aws-sdk/client-kms @aws-sdk/client-lambda @aws-sdk/client-rds @aws-sdk/client-route-53 @aws-sdk/client-secrets-manager @aws-sdk/client-sfn @aws-sdk/client-sns @aws-sdk/client-sqs @aws-sdk/client-ssm @aws-sdk/client-sts @aws-sdk/client-waf @aws-sdk/client-wafv2",
     "install:dev:minimal": "pnpm run install:dev:core && echo '✅ Minimal dev setup complete (core only)'",
     "install:dev:common": "pnpm run install:dev:core && pnpm run install:dev:replicators && pnpm run install:dev:plugins && echo '✅ Common dev setup complete (core + replicators + plugins)'",
-    "install:dev:full": "pnpm run install:dev:core && pnpm run install:dev:replicators && pnpm run install:dev:plugins && pnpm run install:dev:puppeteer && pnpm run install:dev:cloud && echo '✅ Full dev setup complete (all dependencies)'"
+    "install:dev:full": "pnpm run install:dev:core && pnpm run install:dev:replicators && pnpm run install:dev:plugins && pnpm run install:dev:puppeteer && pnpm run install:dev:cloud && echo '✅ Full dev setup complete (all dependencies)'",
+    "docs": "serve docs -p 3000",
+    "build:embeddings": "tsx scripts/build-embeddings.ts",
+    "mcp:reindex": "tsx scripts/build-embeddings.ts"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.928.0",
@@ -123,7 +131,7 @@
     "nanoid": "5.1.6",
     "pino": "^10.1.0",
     "pino-pretty": "^13.1.2",
-    "recker": "^1.0.20"
+    "recker": "^1.0.26"
   },
   "optionalDependencies": {
     "@modelcontextprotocol/sdk": "^1.21.1",
@@ -147,9 +155,9 @@
     "@aws-sdk/client-ecs": "^3.0.0",
     "@aws-sdk/client-efs": "^3.0.0",
     "@aws-sdk/client-eks": "^3.0.0",
+    "@aws-sdk/client-elasticache": "^3.0.0",
     "@aws-sdk/client-elastic-load-balancing": "^3.0.0",
     "@aws-sdk/client-elastic-load-balancing-v2": "^3.0.0",
-    "@aws-sdk/client-elasticache": "^3.0.0",
     "@aws-sdk/client-eventbridge": "^3.0.0",
     "@aws-sdk/client-iam": "^3.0.0",
     "@aws-sdk/client-kinesis": "^3.0.0",
@@ -193,191 +201,6 @@
     "user-agents": "^1.0.0",
     "ws": "^8.0.0"
   },
-  "peerDependenciesMeta": {
-    "@aws-sdk/client-acm": {
-      "optional": true
-    },
-    "@aws-sdk/client-api-gateway": {
-      "optional": true
-    },
-    "@aws-sdk/client-apigatewayv2": {
-      "optional": true
-    },
-    "@aws-sdk/client-backup": {
-      "optional": true
-    },
-    "@aws-sdk/client-cloudfront": {
-      "optional": true
-    },
-    "@aws-sdk/client-cloudtrail": {
-      "optional": true
-    },
-    "@aws-sdk/client-cloudwatch": {
-      "optional": true
-    },
-    "@aws-sdk/client-cloudwatch-logs": {
-      "optional": true
-    },
-    "@aws-sdk/client-cognito-identity-provider": {
-      "optional": true
-    },
-    "@aws-sdk/client-config-service": {
-      "optional": true
-    },
-    "@aws-sdk/client-dynamodb": {
-      "optional": true
-    },
-    "@aws-sdk/client-ec2": {
-      "optional": true
-    },
-    "@aws-sdk/client-ecr": {
-      "optional": true
-    },
-    "@aws-sdk/client-ecs": {
-      "optional": true
-    },
-    "@aws-sdk/client-efs": {
-      "optional": true
-    },
-    "@aws-sdk/client-eks": {
-      "optional": true
-    },
-    "@aws-sdk/client-elasticache": {
-      "optional": true
-    },
-    "@aws-sdk/client-elastic-load-balancing": {
-      "optional": true
-    },
-    "@aws-sdk/client-elastic-load-balancing-v2": {
-      "optional": true
-    },
-    "@aws-sdk/client-eventbridge": {
-      "optional": true
-    },
-    "@aws-sdk/client-iam": {
-      "optional": true
-    },
-    "@aws-sdk/client-kinesis": {
-      "optional": true
-    },
-    "@aws-sdk/client-kms": {
-      "optional": true
-    },
-    "@aws-sdk/client-lambda": {
-      "optional": true
-    },
-    "@aws-sdk/client-rds": {
-      "optional": true
-    },
-    "@aws-sdk/client-route-53": {
-      "optional": true
-    },
-    "@aws-sdk/client-secrets-manager": {
-      "optional": true
-    },
-    "@aws-sdk/client-sfn": {
-      "optional": true
-    },
-    "@aws-sdk/client-sns": {
-      "optional": true
-    },
-    "@aws-sdk/client-sqs": {
-      "optional": true
-    },
-    "@aws-sdk/client-ssm": {
-      "optional": true
-    },
-    "@aws-sdk/client-sts": {
-      "optional": true
-    },
-    "@aws-sdk/client-waf": {
-      "optional": true
-    },
-    "@aws-sdk/client-wafv2": {
-      "optional": true
-    },
-    "@google-cloud/bigquery": {
-      "optional": true
-    },
-    "google-auth-library": {
-      "optional": true
-    },
-    "@hono/node-server": {
-      "optional": true
-    },
-    "@hono/swagger-ui": {
-      "optional": true
-    },
-    "@libsql/client": {
-      "optional": true
-    },
-    "@planetscale/database": {
-      "optional": true
-    },
-    "@tensorflow/tfjs-node": {
-      "optional": true
-    },
-    "amqplib": {
-      "optional": true
-    },
-    "bcrypt": {
-      "optional": true
-    },
-    "express": {
-      "optional": true
-    },
-    "hono": {
-      "optional": true
-    },
-    "jose": {
-      "optional": true
-    },
-    "@kubernetes/client-node": {
-      "optional": true
-    },
-    "node-cron": {
-      "optional": true
-    },
-    "nodemailer": {
-      "optional": true
-    },
-    "pg": {
-      "optional": true
-    },
-    "pino-http": {
-      "optional": true
-    },
-    "ejs": {
-      "optional": true
-    },
-    "enquirer": {
-      "optional": true
-    },
-    "pug": {
-      "optional": true
-    },
-    "puppeteer": {
-      "optional": true
-    },
-    "puppeteer-extra": {
-      "optional": true
-    },
-    "puppeteer-extra-plugin-stealth": {
-      "optional": true
-    },
-    "user-agents": {
-      "optional": true
-    },
-    "ghost-cursor": {
-      "optional": true
-    },
-    "ioredis": {
-      "optional": true
-    },
-    "ws": {
-      "optional": true
-    }
-  },
   "devDependencies": {
     "@babel/core": "^7.28.5",
     "@babel/preset-env": "^7.28.5",
@@ -395,7 +218,10 @@
     "chalk": "^5.6.2",
     "cli-table3": "^0.6.5",
     "commander": "^14.0.2",
+    "domhandler": "^5.0.3",
     "esbuild": "^0.25.12",
+    "fastembed": "^2.0.0",
+    "fuse.js": "^7.1.0",
     "got": "^14.6.4",
     "inquirer": "^12.11.0",
     "node-loader": "^2.1.0",
@@ -406,12 +232,14 @@
     "rollup-plugin-esbuild": "^6.2.1",
     "rollup-plugin-polyfill-node": "^0.13.0",
     "rollup-plugin-shebang-bin": "^0.1.0",
+    "serve": "^14.2.5",
     "tsx": "^4.20.6",
     "typescript": "5.9.3",
     "uuid": "^13.0.0",
     "vitest": "^4.0.15",
     "webpack": "^5.102.1",
-    "webpack-cli": "^6.0.1"
+    "webpack-cli": "^6.0.1",
+    "zod": "^4.1.13"
   },
   "funding": [
     "https://github.com/sponsors/forattini-dev"
