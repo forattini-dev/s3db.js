@@ -35,6 +35,17 @@ async function waitForServer(port, maxAttempts = 20) {
   throw new Error(`Server on port ${port} did not start in time`);
 }
 
+// Helper to wait for resource to be available
+async function waitForResource(db, resourceName, maxAttempts = 30) {
+  for (let i = 0; i < maxAttempts; i++) {
+    if (db.resources[resourceName]) {
+      return db.resources[resourceName];
+    }
+    await new Promise(resolve => setTimeout(resolve, 100));
+  }
+  throw new Error(`Resource '${resourceName}' was not created in time`);
+}
+
   // Helper to generate a random port within a safe range for ephemeral ports
   function getRandomPort() {
     // Ports 49152-65535 are dynamic/private, avoiding conflicts with well-known ports.
@@ -50,7 +61,10 @@ describe('API Plugin - Auth Drivers (New API)', () => {
 
     beforeAll(async () => {
       port = getRandomPort();
-      db = createDatabaseForTest(`api-auth-jwt-${Date.now()}`, { logLevel: 'silent' });
+      db = createDatabaseForTest(`api-auth-jwt-${Date.now()}`, {
+        logLevel: 'silent',
+        passphrase: 'test-passphrase' // Required for secret type encryption
+      });
       await db.connect();
 
       apiPlugin = new ApiPlugin({
@@ -90,28 +104,29 @@ describe('API Plugin - Auth Drivers (New API)', () => {
     });
 
     it('should authenticate with JWT token', async () => {
-      // Insert user
-      const testUser = {
-        id: 'user1',
-        email: 'jwt@test.com',
-        password: await encrypt('password123', 'test-passphrase')
-      };
-      const user = await db.resources.test_users.insert(testUser);
+      // Register user via HTTP endpoint (proper flow)
+      const registerResponse = await fetch(`http://localhost:${port}/auth/register`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          email: 'jwt@test.com',
+          password: 'password123'
+        })
+      });
+      expect(registerResponse.status).toBe(201);
 
-      // Login
-      const loginResult = await jwtLogin(
-        db.resources.test_users,
-        'jwt@test.com',
-        'password123',
-        {
-          secret: 'test-jwt-secret',
-          userField: 'email',
-          passwordField: 'password',
-          passphrase: 'test-passphrase'
-        }
-      );
+      // Login via HTTP endpoint
+      const loginResponse = await fetch(`http://localhost:${port}/auth/login`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          email: 'jwt@test.com',
+          password: 'password123'
+        })
+      });
 
-      expect(loginResult.success).toBe(true);
+      expect(loginResponse.status).toBe(200);
+      const loginResult = await loginResponse.json();
       expect(loginResult.token).toBeDefined();
       expect(loginResult.user.email).toBe('jwt@test.com');
 
@@ -143,7 +158,10 @@ describe('API Plugin - Auth Drivers (New API)', () => {
 
     beforeAll(async () => {
       port = getRandomPort();
-      db = createDatabaseForTest(`api-auth-apikey-${Date.now()}`, { logLevel: 'silent' });
+      db = createDatabaseForTest(`api-auth-apikey-${Date.now()}`, {
+        logLevel: 'silent',
+        passphrase: 'api-key-passphrase' // Required for secret type encryption
+      });
       await db.connect();
 
       apiPlugin = new ApiPlugin({
@@ -183,8 +201,11 @@ describe('API Plugin - Auth Drivers (New API)', () => {
     it('should authenticate with custom header', async () => {
       const apiKey = generateApiKey(32);
 
+      // Wait for resource to be available
+      const resource = await waitForResource(db, 'api_clients');
+
       // Create API client
-      await db.resources.api_clients.insert({
+      await resource.insert({
         id: 'client1',
         name: 'Test Client',
         apiKey,
@@ -203,7 +224,10 @@ describe('API Plugin - Auth Drivers (New API)', () => {
     it('should authenticate with query parameter', async () => {
       const apiKey = generateApiKey(32);
 
-      await db.resources.api_clients.insert({
+      // Wait for resource to be available
+      const resource = await waitForResource(db, 'api_clients');
+
+      await resource.insert({
         id: 'client2',
         name: 'Query Client',
         apiKey,
@@ -233,7 +257,10 @@ describe('API Plugin - Auth Drivers (New API)', () => {
 
     beforeAll(async () => {
       port = getRandomPort();
-      db = createDatabaseForTest(`api-auth-basic-${Date.now()}`, { logLevel: 'silent' });
+      db = createDatabaseForTest(`api-auth-basic-${Date.now()}`, {
+        logLevel: 'silent',
+        passphrase: 'basic-pass' // Required for secret type encryption
+      });
       await db.connect();
 
       apiPlugin = new ApiPlugin({
@@ -274,11 +301,14 @@ describe('API Plugin - Auth Drivers (New API)', () => {
     });
 
     it('should authenticate with Basic Auth', async () => {
-      // Create user
-      await db.resources.basic_users.insert({
+      // Wait for resource to be available
+      const resource = await waitForResource(db, 'basic_users');
+
+      // Insert user directly with plain password (will be auto-encrypted by secret type)
+      await resource.insert({
         id: 'user1',
         username: 'basicuser',
-        password: await encrypt('password123', 'basic-pass'),
+        password: 'password123',  // Plain - auto-encrypted by secret type
         active: true
       });
 
@@ -318,7 +348,10 @@ describe('API Plugin - Auth Drivers (New API)', () => {
 
     beforeAll(async () => {
       port = getRandomPort();
-      db = createDatabaseForTest(`api-auth-multi-${Date.now()}`, { logLevel: 'silent' });
+      db = createDatabaseForTest(`api-auth-multi-${Date.now()}`, {
+        logLevel: 'silent',
+        passphrase: 'secret' // Required for secret type encryption
+      });
       await db.connect();
 
       apiPlugin = new ApiPlugin({
@@ -365,31 +398,30 @@ describe('API Plugin - Auth Drivers (New API)', () => {
     });
 
     it('should authenticate with JWT from admin_users', async () => {
-      // Note: Don't manually encrypt - resource has 'secret' field type which auto-encrypts
-      await db.resources.admin_users.insert({
+      // Wait for resource to be available
+      const resource = await waitForResource(db, 'admin_users');
+
+      // Insert user directly with plain password (will be auto-encrypted by secret type)
+      await resource.insert({
         id: 'admin1',
         email: 'admin@test.com',
-        password: 'admin123',  // Plain password - will be auto-encrypted by S3DB
+        password: 'admin123',  // Plain - auto-encrypted by secret type
         role: 'admin'
       });
 
-      const loginResult = await jwtLogin(
-        db.resources.admin_users,
-        'admin@test.com',
-        'admin123',
-        {
-          secret: 'admin-secret',
-          userField: 'email',
-          passwordField: 'password',
-          passphrase: 'secret'
-        }
-      );
+      // Login via HTTP endpoint
+      const loginResponse = await fetch(`http://localhost:${port}/auth/login`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          email: 'admin@test.com',
+          password: 'admin123'
+        })
+      });
 
-      if (!loginResult.success) {
-        console.log('Login failed:', loginResult);
-      }
-
-      expect(loginResult.success).toBe(true);
+      expect(loginResponse.status).toBe(200);
+      const loginResult = await loginResponse.json();
+      expect(loginResult.token).toBeDefined();
 
       const response = await fetch(`http://localhost:${port}/admin_users`, {
         headers: {
@@ -403,7 +435,10 @@ describe('API Plugin - Auth Drivers (New API)', () => {
     it('should authenticate with API Key from service_accounts', async () => {
       const apiKey = generateApiKey();
 
-      await db.resources.service_accounts.insert({
+      // Wait for resource to be available
+      const resource = await waitForResource(db, 'service_accounts');
+
+      await resource.insert({
         id: 'service1',
         name: 'Service 1',
         apiKey,

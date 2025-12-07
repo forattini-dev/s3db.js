@@ -1524,8 +1524,23 @@ export class StateMachinePlugin extends Plugin {
         }
       };
 
-      // Attach the proxy to the resource
-      resource._attachStateMachine(machineProxy);
+      // Store the machine proxy on the resource (for internal use)
+      resource._stateMachine = machineProxy;
+
+      // Inject the `state` accessor via Object.defineProperty
+      // This provides the public API: resource.state.send(), resource.state.get(), etc.
+      Object.defineProperty(resource, 'state', {
+        get: () => ({
+          send: async (id, event, eventData) => machineProxy.send(id, event, eventData),
+          get: async (id) => machineProxy.getState(id),
+          canTransition: async (id, event) => machineProxy.canTransition(id, event),
+          getValidEvents: async (id) => machineProxy.getValidEvents(id),
+          initialize: async (id, context) => machineProxy.initializeEntity(id, context),
+          history: async (id, options) => machineProxy.getTransitionHistory(id, options)
+        }),
+        configurable: true,
+        enumerable: false
+      });
 
       // 🪵 Debug: attached machine to resource
       this.logger.debug({ machineName, resourceName: resource.name }, `Attached machine '${machineName}' to resource '${resource.name}'`);
