@@ -80,7 +80,10 @@ export function createClientForTest(testName, options = {}) {
     return new MemoryClient({
       bucket,
       keyPrefix,
-      verbose: finalOptions.verbose || false
+      verbose: finalOptions.verbose || false,
+      // Safety valve: Limit memory per client to prevent OOM
+      maxMemoryMB: 256,
+      evictionEnabled: true
     });
   }
 
@@ -336,7 +339,12 @@ export function createMemoryDatabaseForTest(testName, options = {}) {
     keyPrefix: s3Prefix(testName),
     enforceLimits: options.enforceLimits || false,
     persistPath: options.persistPath,
-    verbose: options.verbose || false
+    verbose: options.verbose || false,
+    // Safety valve: Limit memory per client to prevent OOM
+    // If a test tries to store >256MB, it will evict old data or throw,
+    // saving the machine from freezing.
+    maxMemoryMB: 256,
+    evictionEnabled: true
   });
 
   const params = {
@@ -376,3 +384,46 @@ export function createMemoryDatabaseForTest(testName, options = {}) {
 
   return database;
 }
+
+// ============================================
+// Mock Utilities Re-exports
+// ============================================
+
+// Re-export mock utilities for convenience
+// Usage: import { createMockDatabase, schemas } from '#tests/config.js';
+export {
+  MockClient,
+  createMockClient,
+  createMockDatabase,
+  createConnectedMockDatabase,
+  createDatabaseWithResource,
+  createSchemaFromTemplate,
+  schemas,
+  dataGenerators,
+  generateMany,
+  cleanupMockDatabases
+} from './mocks/factories.js';
+
+export {
+  users,
+  userList,
+  products,
+  productList,
+  orders,
+  orderList,
+  configs,
+  errors as errorFixtures,
+  embeddings,
+  createTestContext
+} from './mocks/fixtures.js';
+
+export {
+  createSpy,
+  createAsyncSpy,
+  spyOnClient,
+  spyOnResource,
+  spyOnDatabase,
+  createClientMocks,
+  trackEvents,
+  waitForEvent
+} from './mocks/spies.js';

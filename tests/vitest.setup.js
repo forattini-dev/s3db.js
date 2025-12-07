@@ -19,25 +19,16 @@ if (process.env.S3DB_DISABLE_CRON === undefined) {
 global._testDatabases = global._testDatabases || new Set();
 
 // Cleanup after each test
+// NOTE: Do NOT disconnect databases here - tests using beforeAll/afterAll
+// manage their own lifecycle. Disconnecting here breaks shared test fixtures.
 beforeEach(() => {
   // Reset any global state if needed
 });
 
 afterEach(async () => {
-  const { MemoryClient } = await import('#src/clients/memory-client.class.js');
-
-  // Disconnect test databases
-  if (global._testDatabases && global._testDatabases.size > 0) {
-    const databases = Array.from(global._testDatabases);
-    await Promise.allSettled(databases.map(db => {
-      if (db && typeof db.disconnect === 'function') {
-        return db.disconnect().catch(() => {});
-      }
-    }));
-  }
-
-  // Clear storage
-  MemoryClient.clearAllStorage();
+  // Do NOT disconnect databases here!
+  // Tests using beforeAll need their databases to persist across tests.
+  // Each test file is responsible for cleanup in afterAll.
 });
 
 afterAll(async () => {
