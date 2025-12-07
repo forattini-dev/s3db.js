@@ -896,11 +896,10 @@ export class Schema {
         continue;
       }
 
-      // Handle passwords
+      // Handle passwords - Password hashing is done by the Validator's custom type handler
+      // (passwordHandler in validator.class.js), not by mapper hooks. This prevents double-hashing.
       if (defStr.includes("password") || defType === 'password') {
-        if (this.options.autoEncrypt) {
-          this.addHook("beforeMap", name, "hashPassword");
-        }
+        // No beforeMap hook - Validator handles hashing during validation
         // No afterUnmap hook - passwords are one-way hashed
         // Skip other processing for passwords
         continue;
@@ -1180,7 +1179,13 @@ export class Schema {
     return cloned;
   }
 
+  /**
+   * @deprecated Use ResourceValidator.validate() instead. This method will be removed in a future version.
+   */
   async validate(resourceItem, { mutateOriginal = false } = {}) {
+    if (process.env.NODE_ENV !== 'production') {
+      console.warn('[DEPRECATION] Schema.validate() is deprecated. Use ResourceValidator.validate() instead.');
+    }
     let data = mutateOriginal ? resourceItem : cloneDeep(resourceItem)
     const result = await this.validator(data);
     return result
