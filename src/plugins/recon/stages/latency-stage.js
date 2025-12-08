@@ -1,10 +1,9 @@
 /**
  * LatencyStage
  *
- * Network latency measurement:
- * - Ping (ICMP echo) with metrics
- * - Traceroute (mtr or traceroute)
- * - Hop analysis
+ * Network latency measurement using RedBlue:
+ * - ICMP ping with statistics
+ * - Traceroute support (when available)
  */
 
 export class LatencyStage {
@@ -14,105 +13,135 @@ export class LatencyStage {
     this.config = plugin.config;
   }
 
-  async execute(target, options = {}) {
-    const config = { ...this.config.latency, ...options };
+  async execute(target, featureConfig = {}) {
     const results = {};
 
-    // Execute ping if enabled
-    if (config.ping !== false) {
-      results.ping = await this.executePing(target);
+    if (featureConfig.ping !== false) {
+      results.ping = await this._executePing(target, featureConfig);
     }
 
-    // Execute traceroute if enabled
-    if (config.traceroute !== false) {
-      results.traceroute = await this.executeTraceroute(target);
+    if (featureConfig.traceroute) {
+      results.traceroute = await this._executeTrace(target, featureConfig);
     }
 
-    return results;
+    const hasSuccess = Object.values(results).some(r => r.status === 'ok');
+
+    return {
+      status: hasSuccess ? 'ok' : 'empty',
+      ...results
+    };
   }
 
-  async executePing(target) {
-    const args = ['-n', '-c', String(this.config.ping.count), target.host];
-    const run = await this.commandRunner.run('ping', args, {
-      timeout: this.config.ping.timeout
-    });
+  async _executePing(target, config) {
+    const count = config.count || this.config.ping?.count || 4;
+    const timeout = config.timeout || this.config.ping?.timeout || 10000;
 
-    if (!run.ok) {
+    const result = await this.commandRunner.runRedBlue(
+      'network',
+      'host',
+      'ping',
+      target.host,
+      {
+        timeout,
+        flags: [
+          '--count', String(count),
+          ...(config.interval ? ['--interval', String(config.interval)] : [])
+        ]
+      }
+    );
+
+    if (result.status === 'unavailable') {
       return {
         status: 'unavailable',
-        message: run.error?.message || 'Ping failed',
-        stderr: run.stderr
+        message: 'RedBlue (rb) is not available',
+        metadata: result.metadata
       };
     }
 
-    const metrics = this._parsePingOutput(run.stdout);
+    if (result.status === 'error') {
+      return {
+        status: 'error',
+        message: result.error,
+        metadata: result.metadata
+      };
+    }
+
+    const metrics = this._normalizeMetrics(result.data);
 
     return {
       status: 'ok',
-      stdout: run.stdout,
-      metrics
+      metrics,
+      metadata: result.metadata
     };
   }
 
-  async executeTraceroute(target) {
-    if (await this.commandRunner.isAvailable('mtr')) {
-      const args = [
-        '--report',
-        '--report-cycles',
-        String(this.config.traceroute.cycles),
-        '--json',
-        target.host
-      ];
-      const mtrResult = await this.commandRunner.run('mtr', args, {
-        timeout: this.config.traceroute.timeout,
-        maxBuffer: 4 * 1024 * 1024
-      });
-
-      if (mtrResult.ok) {
-        try {
-          const parsed = JSON.parse(mtrResult.stdout);
-          return {
-            status: 'ok',
-            type: 'mtr',
-            report: parsed
-          };
-        } catch (error) {
-          // Fallback to plain text interpretation
-          return {
-            status: 'ok',
-            type: 'mtr',
-            stdout: mtrResult.stdout
-          };
-        }
+  async _executeTrace(target, config) {
+    const result = await this.commandRunner.runRedBlue(
+      'network',
+      'trace',
+      'route',
+      target.host,
+      {
+        timeout: config.traceTimeout || 30000
       }
-    }
+    );
 
-    if (await this.commandRunner.isAvailable('traceroute')) {
-      const tracerouteResult = await this.commandRunner.run(
-        'traceroute',
-        ['-n', target.host],
-        {
-          timeout: this.config.traceroute.timeout
-        }
-      );
-
-      if (tracerouteResult.ok) {
-        return {
-          status: 'ok',
-          type: 'traceroute',
-          stdout: tracerouteResult.stdout
-        };
-      }
+    if (result.status !== 'ok') {
+      return result;
     }
 
     return {
-      status: 'unavailable',
-      message: 'Neither mtr nor traceroute is available'
+      status: 'ok',
+      hops: result.data?.hops || result.data,
+      metadata: result.metadata
     };
   }
 
-  _parsePingOutput(text) {
-    const metrics = {
+  _normalizeMetrics(data) {
+    if (!data || typeof data !== 'object') {
+      return this._defaultMetrics();
+    }
+
+    if (data.raw) {
+      return this._parseRawPing(data.raw);
+    }
+
+    return {
+      packetsTransmitted: data.packets_transmitted || data.packetsTransmitted || data.sent || null,
+      packetsReceived: data.packets_received || data.packetsReceived || data.received || null,
+      packetLoss: data.packet_loss || data.packetLoss || data.loss || null,
+      min: data.min || data.rtt_min || null,
+      avg: data.avg || data.rtt_avg || data.average || null,
+      max: data.max || data.rtt_max || null,
+      stdDev: data.stddev || data.std_dev || data.mdev || null
+    };
+  }
+
+  _parseRawPing(raw) {
+    const metrics = this._defaultMetrics();
+
+    const packetMatch = raw.match(/(\d+)\s+packets transmitted,\s+(\d+)\s+received,.*?([\d.]+)%\s+packet loss/i);
+    if (packetMatch) {
+      metrics.packetsTransmitted = parseInt(packetMatch[1]);
+      metrics.packetsReceived = parseInt(packetMatch[2]);
+      metrics.packetLoss = parseFloat(packetMatch[3]);
+    }
+
+    const rttMatch = raw.match(/=\s*([\d.]+)\/([\d.]+)\/([\d.]+)(?:\/([\d.]+))?/);
+    if (rttMatch) {
+      metrics.min = parseFloat(rttMatch[1]);
+      metrics.avg = parseFloat(rttMatch[2]);
+      metrics.max = parseFloat(rttMatch[3]);
+      if (rttMatch[4]) {
+        metrics.stdDev = parseFloat(rttMatch[4]);
+      }
+    }
+
+    return metrics;
+  }
+
+  _defaultMetrics() {
+    return {
       packetsTransmitted: null,
       packetsReceived: null,
       packetLoss: null,
@@ -121,28 +150,5 @@ export class LatencyStage {
       max: null,
       stdDev: null
     };
-
-    const packetLine = text.split('\n').find((line) => line.includes('packets transmitted'));
-    if (packetLine) {
-      const match = packetLine.match(/(\d+)\s+packets transmitted,\s+(\d+)\s+received,.*?([\d.]+)% packet loss/);
-      if (match) {
-        metrics.packetsTransmitted = Number(match[1]);
-        metrics.packetsReceived = Number(match[2]);
-        metrics.packetLoss = Number(match[3]);
-      }
-    }
-
-    const statsLine = text.split('\n').find((line) => line.includes('min/avg/max'));
-    if (statsLine) {
-      const match = statsLine.match(/=\s*([\d.]+)\/([\d.]+)\/([\d.]+)\/([\d.]+)/);
-      if (match) {
-        metrics.min = Number(match[1]);
-        metrics.avg = Number(match[2]);
-        metrics.max = Number(match[3]);
-        metrics.stdDev = Number(match[4]);
-      }
-    }
-
-    return metrics;
   }
 }

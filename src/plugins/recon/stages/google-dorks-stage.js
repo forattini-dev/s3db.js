@@ -15,11 +15,33 @@
  * Uses 100% free web scraping (no API key required)
  */
 
+import { createHttpClient } from '#src/concerns/http-client.js';
+
 export class GoogleDorksStage {
   constructor(plugin) {
     this.plugin = plugin;
     this.commandRunner = plugin.commandRunner;
     this.config = plugin.config;
+    this._httpClient = null;
+  }
+
+  async _getHttpClient() {
+    if (!this._httpClient) {
+      this._httpClient = await createHttpClient({
+        headers: {
+          'User-Agent': this.config.curl?.userAgent || 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+        },
+        timeout: 15000,
+        retry: {
+          maxAttempts: 2,
+          delay: 1000,
+          backoff: 'exponential',
+          retryAfter: true,
+          retryOn: [429, 500, 502, 503, 504]
+        }
+      });
+    }
+    return this._httpClient;
   }
 
   /**
@@ -358,12 +380,8 @@ export class GoogleDorksStage {
       const encodedQuery = encodeURIComponent(query);
       const url = `https://html.duckduckgo.com/html/?q=${encodedQuery}`;
 
-      const response = await fetch(url, {
-        headers: {
-          'User-Agent': this.config.curl?.userAgent || 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
-        },
-        signal: AbortSignal.timeout ? AbortSignal.timeout(15000) : undefined
-      });
+      const client = await this._getHttpClient();
+      const response = await client.get(url);
 
       if (!response.ok) {
         return results;

@@ -7,6 +7,7 @@
  * - Output buffering
  * - Error handling
  * - Automatic process cleanup via ProcessManager
+ * - RedBlue CLI integration
  */
 
 import { spawn } from 'child_process';
@@ -15,6 +16,7 @@ export class CommandRunner {
   constructor(processManager = null) {
     this.availabilityCache = new Map();
     this.processManager = processManager;
+    this.redblueAvailable = null;
   }
 
   /**
@@ -144,5 +146,93 @@ export class CommandRunner {
    */
   clearCache() {
     this.availabilityCache.clear();
+    this.redblueAvailable = null;
+  }
+
+  /**
+   * Check if RedBlue (rb) is available
+   */
+  async isRedBlueAvailable() {
+    if (this.redblueAvailable !== null) {
+      return this.redblueAvailable;
+    }
+    this.redblueAvailable = await this.isAvailable('rb');
+    return this.redblueAvailable;
+  }
+
+  /**
+   * Execute a RedBlue command with JSON output
+   * @param {string} domain - Command domain (network, dns, web, recon, tls)
+   * @param {string} resource - Resource type (ports, record, asset, domain, etc.)
+   * @param {string} verb - Action verb (scan, lookup, fingerprint, etc.)
+   * @param {string} target - Target host/IP/URL
+   * @param {Object} options - Additional options
+   * @param {string[]} options.flags - Additional CLI flags
+   * @param {number} options.timeout - Command timeout in ms (default: 60000)
+   * @param {boolean} options.json - Request JSON output (default: true)
+   * @returns {Promise<Object>} Parsed result with status, data, and metadata
+   */
+  async runRedBlue(domain, resource, verb, target, options = {}) {
+    const startTime = Date.now();
+    const timeout = options.timeout || 60000;
+    const flags = options.flags || [];
+    const requestJson = options.json !== false;
+
+    const args = [domain, resource, verb];
+    if (target) {
+      args.push(target);
+    }
+
+    if (requestJson && !flags.includes('-o') && !flags.includes('--output')) {
+      args.push('-o', 'json');
+    }
+
+    args.push(...flags);
+
+    const command = `rb ${args.join(' ')}`;
+    const result = await this.run('rb', args, {
+      timeout,
+      maxBuffer: 8 * 1024 * 1024
+    });
+
+    const duration = Date.now() - startTime;
+
+    if (!result.ok) {
+      return {
+        status: result.error?.code === 'ENOENT' ? 'unavailable' : 'error',
+        error: result.error?.message || result.stderr || 'RedBlue command failed',
+        metadata: {
+          command,
+          duration_ms: duration,
+          timestamp: new Date().toISOString(),
+          exitCode: result.exitCode
+        }
+      };
+    }
+
+    let data = null;
+    const stdout = result.stdout.trim();
+
+    if (requestJson && stdout) {
+      try {
+        data = JSON.parse(stdout);
+      } catch {
+        data = { raw: stdout };
+      }
+    } else {
+      data = { raw: stdout };
+    }
+
+    const isEmpty = !stdout || stdout === '[]' || stdout === '{}' || stdout === 'null';
+
+    return {
+      status: isEmpty ? 'empty' : 'ok',
+      data,
+      metadata: {
+        command,
+        duration_ms: duration,
+        timestamp: new Date().toISOString()
+      }
+    };
   }
 }

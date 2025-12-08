@@ -13,11 +13,33 @@
  * - dnsdumpster.com (unlimited, requires CSRF token handling)
  */
 
+import { createHttpClient } from '#src/concerns/http-client.js';
+
 export class DNSDumpsterStage {
   constructor(plugin) {
     this.plugin = plugin;
     this.commandRunner = plugin.commandRunner;
     this.config = plugin.config;
+    this._httpClient = null;
+  }
+
+  async _getHttpClient() {
+    if (!this._httpClient) {
+      this._httpClient = await createHttpClient({
+        headers: {
+          'User-Agent': this.config.curl?.userAgent || 'Mozilla/5.0 (compatible; ReconBot/1.0)'
+        },
+        timeout: 15000,
+        retry: {
+          maxAttempts: 2,
+          delay: 1000,
+          backoff: 'exponential',
+          retryAfter: true,
+          retryOn: [429, 500, 502, 503, 504]
+        }
+      });
+    }
+    return this._httpClient;
   }
 
   /**
@@ -126,12 +148,8 @@ export class DNSDumpsterStage {
    */
   async getCsrfToken(baseUrl, options = {}) {
     try {
-      const response = await fetch(baseUrl, {
-        headers: {
-          'User-Agent': this.config.curl?.userAgent || 'Mozilla/5.0 (compatible; ReconBot/1.0)'
-        },
-        signal: AbortSignal.timeout ? AbortSignal.timeout(10000) : undefined
-      });
+      const client = await this._getHttpClient();
+      const response = await client.get(baseUrl);
 
       if (!response.ok) {
         return [null, null];
@@ -167,16 +185,14 @@ export class DNSDumpsterStage {
       formData.append('targetip', domain);
       formData.append('user', 'free');
 
-      const response = await fetch(baseUrl, {
-        method: 'POST',
+      const client = await this._getHttpClient();
+      const response = await client.post(baseUrl, {
         headers: {
-          'User-Agent': this.config.curl?.userAgent || 'Mozilla/5.0 (compatible; ReconBot/1.0)',
           'Content-Type': 'application/x-www-form-urlencoded',
           'Referer': baseUrl,
           'Cookie': cookie
         },
-        body: formData.toString(),
-        signal: AbortSignal.timeout ? AbortSignal.timeout(15000) : undefined
+        body: formData.toString()
       });
 
       if (!response.ok) {

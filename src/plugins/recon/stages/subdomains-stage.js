@@ -1,11 +1,11 @@
 /**
  * SubdomainsStage
  *
- * Subdomain enumeration with multiple tools:
- * - amass (OWASP, comprehensive)
- * - subfinder (fast, API-based)
- * - assetfinder (passive)
- * - crt.sh (certificate transparency logs)
+ * Subdomain enumeration using RedBlue:
+ * - Certificate Transparency logs
+ * - DNS bruteforce with wordlists
+ * - Multi-threaded discovery
+ * - Subdomain takeover detection
  */
 
 export class SubdomainsStage {
@@ -16,122 +16,109 @@ export class SubdomainsStage {
   }
 
   async execute(target, featureConfig = {}) {
-    const aggregated = new Set();
-    const sources = {};
+    const result = await this.commandRunner.runRedBlue(
+      'recon',
+      'domain',
+      'subdomains',
+      target.host,
+      {
+        timeout: featureConfig.timeout || 120000,
+        flags: this._buildFlags(featureConfig)
+      }
+    );
 
-    const executeCliCollector = async (name, command, args, parser) => {
-      if (!featureConfig[name]) {
-        return;
-      }
-      const run = await this.commandRunner.run(command, args, { timeout: 60000, maxBuffer: 8 * 1024 * 1024 });
-      if (!run.ok) {
-        sources[name] = {
-          status: run.error?.code === 'ENOENT' ? 'unavailable' : 'error',
-          message: run.error?.message || `${command} failed`,
-          stderr: run.stderr
-        };
-        return;
-      }
-      const items = parser(run.stdout, run.stderr);
-      items.forEach((item) => aggregated.add(item));
-      sources[name] = {
-        status: 'ok',
-        count: items.length,
-        sample: items.slice(0, 10)
+    if (result.status === 'unavailable') {
+      return {
+        status: 'unavailable',
+        message: 'RedBlue (rb) is not available',
+        metadata: result.metadata
       };
-      if (this.config.storage.persistRawOutput) {
-        sources[name].raw = this._truncateOutput(run.stdout);
-      }
-    };
-
-    await executeCliCollector('amass', 'amass', ['enum', '-d', target.host, '-o', '-'], (stdout) =>
-      stdout
-        .split(/\r?\n/)
-        .map((line) => line.trim())
-        .filter(Boolean)
-    );
-
-    await executeCliCollector('subfinder', 'subfinder', ['-d', target.host, '-silent'], (stdout) =>
-      stdout
-        .split(/\r?\n/)
-        .map((line) => line.trim())
-        .filter(Boolean)
-    );
-
-    await executeCliCollector('assetfinder', 'assetfinder', ['--subs-only', target.host], (stdout) =>
-      stdout
-        .split(/\r?\n/)
-        .map((line) => line.trim())
-        .filter(Boolean)
-    );
-
-    if (featureConfig.crtsh) {
-      try {
-        const response = await fetch(`https://crt.sh/?q=%25.${target.host}&output=json`, {
-          headers: { 'User-Agent': this.config.curl.userAgent },
-          signal: AbortSignal.timeout ? AbortSignal.timeout(10000) : undefined
-        });
-        if (response.ok) {
-          const data = await response.json();
-          const entries = Array.isArray(data) ? data : [];
-          const hostnames = entries
-            .map((entry) => entry.name_value)
-            .filter(Boolean)
-            .flatMap((value) => value.split('\n'))
-            .map((value) => value.trim())
-            .filter(Boolean);
-          hostnames.forEach((hostname) => aggregated.add(hostname));
-          sources.crtsh = {
-            status: 'ok',
-            count: hostnames.length,
-            sample: hostnames.slice(0, 10)
-          };
-        } else {
-          sources.crtsh = {
-            status: 'error',
-            message: `crt.sh responded with status ${response.status}`
-          };
-        }
-      } catch (error) {
-        sources.crtsh = {
-          status: 'error',
-          message: error?.message || 'crt.sh lookup failed'
-        };
-      }
     }
 
-    const list = Array.from(aggregated).sort();
+    if (result.status === 'error') {
+      return {
+        status: 'error',
+        message: result.error,
+        metadata: result.metadata
+      };
+    }
 
-    // Check for subdomain takeover vulnerabilities
+    const subdomains = this._normalizeSubdomains(result.data);
+
     let takeoverResults = null;
-    if (featureConfig.checkTakeover && list.length > 0) {
-      takeoverResults = await this.checkSubdomainTakeover(list, featureConfig);
+    if (featureConfig.checkTakeover && subdomains.list.length > 0) {
+      takeoverResults = await this._checkSubdomainTakeover(
+        subdomains.list,
+        featureConfig
+      );
     }
 
     return {
-      _individual: sources,
-      _aggregated: {
-        status: list.length > 0 ? 'ok' : 'empty',
-        total: list.length,
-        list,
-        sources,
-        takeover: takeoverResults
-      },
-      status: list.length > 0 ? 'ok' : 'empty',
-      total: list.length,
-      list,
-      sources,
-      takeover: takeoverResults
+      status: subdomains.list.length > 0 ? 'ok' : 'empty',
+      total: subdomains.list.length,
+      list: subdomains.list,
+      sources: subdomains.sources,
+      takeover: takeoverResults,
+      metadata: result.metadata
     };
   }
 
-  /**
-   * Check for subdomain takeover vulnerabilities
-   * @param {Array<string>} subdomains - List of subdomains
-   * @param {Object} options - Takeover check options
-   * @returns {Promise<Object>} Takeover check results
-   */
-  async checkSubdomainTakeover(subdomains, options = {}) {
+  _buildFlags(config) {
+    const flags = [];
+
+    if (config.passive) {
+      flags.push('--passive');
+    }
+
+    if (config.recursive) {
+      flags.push('--recursive');
+    }
+
+    if (config.wordlist) {
+      flags.push('--wordlist', config.wordlist);
+    }
+
+    if (config.threads) {
+      flags.push('--threads', String(config.threads));
+    }
+
+    return flags;
+  }
+
+  _normalizeSubdomains(data) {
+    if (!data || typeof data !== 'object') {
+      return { list: [], sources: {} };
+    }
+
+    if (data.raw) {
+      const list = data.raw
+        .split('\n')
+        .map(line => line.trim())
+        .filter(Boolean);
+      return { list: [...new Set(list)].sort(), sources: { redblue: list.length } };
+    }
+
+    if (Array.isArray(data)) {
+      const list = data.map(item =>
+        typeof item === 'string' ? item : item.subdomain || item.name || ''
+      ).filter(Boolean);
+      return { list: [...new Set(list)].sort(), sources: { redblue: list.length } };
+    }
+
+    if (data.subdomains) {
+      const list = Array.isArray(data.subdomains)
+        ? data.subdomains
+        : [];
+      return {
+        list: [...new Set(list)].sort(),
+        sources: data.sources || { redblue: list.length }
+      };
+    }
+
+    return { list: [], sources: {} };
+  }
+
+  async _checkSubdomainTakeover(subdomains, options = {}) {
     const results = {
       status: 'ok',
       vulnerable: [],
@@ -139,46 +126,29 @@ export class SubdomainsStage {
       errors: []
     };
 
-    // Known fingerprints for subdomain takeover
     const takeoverFingerprints = {
       'github': {
         cname: 'github.io',
-        response: ['There isn\'t a GitHub Pages site here', 'For root URLs'],
         severity: 'high'
       },
       'heroku': {
         cname: 'herokuapp.com',
-        response: ['No such app', 'There\'s nothing here'],
         severity: 'high'
       },
       'aws-s3': {
         cname: 's3.amazonaws.com',
-        response: ['NoSuchBucket', 'The specified bucket does not exist'],
         severity: 'high'
       },
       'aws-cloudfront': {
         cname: 'cloudfront.net',
-        response: ['The request could not be satisfied', 'Bad request'],
         severity: 'medium'
       },
       'azure': {
         cname: 'azurewebsites.net',
-        response: ['404 Web Site not found', 'Error 404'],
         severity: 'high'
-      },
-      'bitbucket': {
-        cname: 'bitbucket.io',
-        response: ['Repository not found'],
-        severity: 'high'
-      },
-      'fastly': {
-        cname: 'fastly.net',
-        response: ['Fastly error: unknown domain'],
-        severity: 'medium'
       },
       'shopify': {
         cname: 'myshopify.com',
-        response: ['Sorry, this shop is currently unavailable'],
         severity: 'high'
       }
     };
@@ -190,35 +160,35 @@ export class SubdomainsStage {
       try {
         results.checked++;
 
-        // Check CNAME record
-        const cname = await this.resolveCNAME(subdomain);
+        const dnsResult = await this.commandRunner.runRedBlue(
+          'dns',
+          'record',
+          'lookup',
+          subdomain,
+          {
+            timeout: 5000,
+            flags: ['--type', 'CNAME']
+          }
+        );
 
-        if (cname) {
-          // Check if CNAME matches known vulnerable patterns
-          for (const [provider, fingerprint] of Object.entries(takeoverFingerprints)) {
-            if (cname.toLowerCase().includes(fingerprint.cname)) {
-              // Fetch the subdomain to check for error responses
-              const httpCheck = await this.checkHttpResponse(subdomain);
+        if (dnsResult.status !== 'ok' || !dnsResult.data) {
+          continue;
+        }
 
-              if (httpCheck && httpCheck.status >= 400) {
-                // Check if response contains takeover indicators
-                const isVulnerable = fingerprint.response.some(indicator =>
-                  httpCheck.body?.toLowerCase().includes(indicator.toLowerCase())
-                );
+        const cname = this._extractCname(dnsResult.data);
+        if (!cname) continue;
 
-                if (isVulnerable) {
-                  results.vulnerable.push({
-                    subdomain,
-                    provider,
-                    cname,
-                    severity: fingerprint.severity,
-                    evidence: `CNAME points to ${cname} but returns ${httpCheck.status}`,
-                    status: httpCheck.status,
-                    recommendation: `Claim the ${provider} resource or remove the DNS record`
-                  });
-                }
-              }
-            }
+        for (const [provider, fingerprint] of Object.entries(takeoverFingerprints)) {
+          if (cname.toLowerCase().includes(fingerprint.cname)) {
+            results.vulnerable.push({
+              subdomain,
+              provider,
+              cname,
+              severity: fingerprint.severity,
+              evidence: `CNAME points to ${cname}`,
+              recommendation: `Claim the ${provider} resource or remove the DNS record`
+            });
+            break;
           }
         }
       } catch (error) {
@@ -236,60 +206,21 @@ export class SubdomainsStage {
     return results;
   }
 
-  /**
-   * Resolve CNAME record for a domain
-   * @param {string} domain - Domain to resolve
-   * @returns {Promise<string|null>} CNAME record or null
-   */
-  async resolveCNAME(domain) {
-    const run = await this.commandRunner.run('dig', ['+short', 'CNAME', domain], {
-      timeout: 5000
-    });
+  _extractCname(data) {
+    if (typeof data === 'string') {
+      return data.trim().replace(/\.$/, '');
+    }
 
-    if (run.ok && run.stdout) {
-      const cname = run.stdout.trim().replace(/\.$/, ''); // Remove trailing dot
-      return cname || null;
+    if (data.raw) {
+      const match = data.raw.match(/CNAME\s+(\S+)/i);
+      return match ? match[1].replace(/\.$/, '') : null;
+    }
+
+    if (data.cname) {
+      const cname = Array.isArray(data.cname) ? data.cname[0] : data.cname;
+      return typeof cname === 'string' ? cname.replace(/\.$/, '') : null;
     }
 
     return null;
-  }
-
-  /**
-   * Check HTTP response for a subdomain
-   * @param {string} subdomain - Subdomain to check
-   * @returns {Promise<Object|null>} HTTP response details
-   */
-  async checkHttpResponse(subdomain) {
-    try {
-      const run = await this.commandRunner.run('curl', [
-        '-sL',
-        '-w', '%{http_code}',
-        '-m', '10',
-        `https://${subdomain}`
-      ], {
-        timeout: 15000,
-        maxBuffer: 1024 * 1024 // 1MB max
-      });
-
-      if (run.ok) {
-        const output = run.stdout;
-        const statusMatch = output.match(/(\d{3})$/);
-        const status = statusMatch ? parseInt(statusMatch[1]) : 0;
-        const body = output.replace(/\d{3}$/, '');
-
-        return { status, body };
-      }
-    } catch (error) {
-      // Ignore errors, subdomain might not be accessible
-    }
-
-    return null;
-  }
-
-  _truncateOutput(text, maxLength = 10000) {
-    if (!text || text.length <= maxLength) {
-      return text;
-    }
-    return text.substring(0, maxLength) + '\n... (truncated)';
   }
 }

@@ -1,15 +1,10 @@
 /**
- * MassDNS Stage
+ * MassDNSStage
  *
- * High-performance DNS resolver for mass subdomain enumeration
- *
- * Discovers:
- * - Subdomains via wordlist-based brute force
- * - A/AAAA records
- * - Fast resolution (1000s of queries per second)
- *
- * Uses 100% free CLI tool:
- * - massdns (https://github.com/blechschmidt/massdns)
+ * High-performance DNS resolution using RedBlue:
+ * - Mass subdomain resolution
+ * - Wordlist-based brute force
+ * - Fast parallel queries
  */
 
 export class MassDNSStage {
@@ -19,284 +14,144 @@ export class MassDNSStage {
     this.config = plugin.config;
   }
 
-  /**
-   * Execute MassDNS lookup
-   * @param {Object} target - Target object with host property
-   * @param {Object} options - MassDNS options
-   * @returns {Promise<Object>} MassDNS results
-   */
-  async execute(target, options = {}) {
-    const result = {
-      status: 'ok',
-      host: target.host,
-      subdomains: [],
-      resolvedCount: 0,
-      totalAttempts: 0,
-      errors: {}
-    };
-
-    // Track individual tool results for artifact persistence
-    const individual = {
-      massdns: { status: 'ok', raw: null, subdomains: [], resolvedCount: 0 },
-      wordlist: { status: 'ok', path: null, entriesUsed: 0 }
-    };
-
-    // Check if massdns is available
-    const isAvailable = await this.commandRunner.isAvailable('massdns');
-
-    if (!isAvailable) {
-      result.status = 'unavailable';
-      result.errors.massdns = 'massdns not found in PATH';
-      individual.massdns.status = 'unavailable';
-
-      return {
-        _individual: individual,
-        _aggregated: result,
-        ...result
-      };
-    }
-
-    // Check if wordlist is provided
-    const wordlist = options.wordlist || this.config.massdns?.wordlist;
+  async execute(target, featureConfig = {}) {
+    const wordlist = featureConfig.wordlist || this.config.massdns?.wordlist;
 
     if (!wordlist) {
-      result.status = 'error';
-      result.errors.wordlist = 'No wordlist provided for massdns';
-      individual.wordlist.status = 'error';
-
       return {
-        _individual: individual,
-        _aggregated: result,
-        ...result
+        status: 'error',
+        message: 'No wordlist provided for mass DNS resolution',
+        host: target.host,
+        subdomains: [],
+        resolvedCount: 0
       };
     }
 
-    individual.wordlist.path = wordlist;
+    const flags = ['--wordlist', wordlist];
 
-    // Check if resolvers file exists
-    const resolvers = options.resolvers || this.config.massdns?.resolvers || '/etc/resolv.conf';
+    if (featureConfig.rate) {
+      flags.push('--rate', String(featureConfig.rate));
+    }
 
-    try {
-      // Generate domain list from wordlist
-      const domainList = await this.generateDomainList(target.host, wordlist, options);
+    if (featureConfig.resolvers) {
+      flags.push('--resolvers', featureConfig.resolvers);
+    }
 
-      if (domainList.length === 0) {
-        result.status = 'empty';
-        result.errors.domains = 'No domains generated from wordlist';
-        individual.wordlist.status = 'empty';
-
-        return {
-          _individual: individual,
-          _aggregated: result,
-          ...result
-        };
+    const result = await this.commandRunner.runRedBlue(
+      'dns',
+      'record',
+      'bruteforce',
+      target.host,
+      {
+        timeout: featureConfig.timeout || 120000,
+        flags
       }
+    );
 
-      result.totalAttempts = domainList.length;
-      individual.wordlist.entriesUsed = domainList.length;
+    if (result.status === 'unavailable') {
+      return {
+        status: 'unavailable',
+        message: 'RedBlue (rb) is not available',
+        host: target.host,
+        subdomains: [],
+        resolvedCount: 0,
+        metadata: result.metadata
+      };
+    }
 
-      // Run massdns
-      const massdnsResults = await this.runMassDNS(domainList, resolvers, options);
+    if (result.status === 'error') {
+      return {
+        status: 'error',
+        message: result.error,
+        host: target.host,
+        subdomains: [],
+        resolvedCount: 0,
+        metadata: result.metadata
+      };
+    }
 
-      result.subdomains = massdnsResults.subdomains;
-      result.resolvedCount = massdnsResults.resolvedCount;
+    const resolved = this._normalizeResolved(result.data, target.host);
 
-      individual.massdns.subdomains = massdnsResults.subdomains;
-      individual.massdns.resolvedCount = massdnsResults.resolvedCount;
+    return {
+      status: resolved.subdomains.length > 0 ? 'ok' : 'empty',
+      host: target.host,
+      ...resolved,
+      metadata: result.metadata
+    };
+  }
 
-      // Save raw output if persistRawOutput is enabled
-      if (this.config?.storage?.persistRawOutput && massdnsResults.raw) {
-        individual.massdns.raw = massdnsResults.raw;
-      }
+  _normalizeResolved(data, baseDomain) {
+    if (!data || typeof data !== 'object') {
+      return { subdomains: [], resolvedCount: 0, totalAttempts: 0 };
+    }
 
-      if (result.resolvedCount === 0) {
-        result.status = 'empty';
-      }
+    if (data.raw) {
+      return this._parseRawResolved(data.raw, baseDomain);
+    }
 
-    } catch (error) {
-      result.status = 'error';
-      result.errors.general = error.message;
-      individual.massdns.status = 'error';
+    const subdomains = [];
+
+    if (Array.isArray(data.subdomains)) {
+      subdomains.push(...data.subdomains.map(s => this._normalizeSubdomain(s)));
+    } else if (Array.isArray(data.results)) {
+      subdomains.push(...data.results.map(s => this._normalizeSubdomain(s)));
+    } else if (Array.isArray(data.resolved)) {
+      subdomains.push(...data.resolved.map(s => this._normalizeSubdomain(s)));
+    } else if (Array.isArray(data)) {
+      subdomains.push(...data.map(s => this._normalizeSubdomain(s)));
     }
 
     return {
-      _individual: individual,
-      _aggregated: result,
-      ...result // Root level for compatibility
+      subdomains: subdomains.filter(Boolean),
+      resolvedCount: subdomains.length,
+      totalAttempts: data.totalAttempts || data.attempts || null
     };
   }
 
-  /**
-   * Generate domain list from wordlist
-   * Reads wordlist and appends target domain to each entry
-   */
-  async generateDomainList(domain, wordlistPath, options = {}) {
-    const maxSubdomains = options.maxSubdomains || 1000;
+  _normalizeSubdomain(subdomain) {
+    if (!subdomain) return null;
 
-    try {
-      // Use cat to read wordlist
-      const catRun = await this.commandRunner.run('cat', [wordlistPath], {
-        timeout: 5000,
-        maxBuffer: 10 * 1024 * 1024
-      });
-
-      if (!catRun.ok || !catRun.stdout) {
-        return [];
-      }
-
-      // Parse wordlist and append domain
-      const words = catRun.stdout
-        .split('\n')
-        .map(line => line.trim())
-        .filter(line => line.length > 0 && !line.startsWith('#'))
-        .slice(0, maxSubdomains);
-
-      return words.map(word => `${word}.${domain}`);
-
-    } catch (error) {
-      return [];
+    if (typeof subdomain === 'string') {
+      return { subdomain, ip: null };
     }
+
+    return {
+      subdomain: subdomain.subdomain || subdomain.name || subdomain.host || subdomain.domain,
+      ip: subdomain.ip || subdomain.address || subdomain.a || null,
+      ips: subdomain.ips || subdomain.addresses || null,
+      cname: subdomain.cname || null
+    };
   }
 
-  /**
-   * Run massdns with domain list
-   */
-  async runMassDNS(domainList, resolversFile, options = {}) {
-    const result = {
-      subdomains: [],
-      resolvedCount: 0
-    };
+  _parseRawResolved(raw, baseDomain) {
+    const subdomains = [];
+    const lines = raw.split('\n').filter(Boolean);
 
-    try {
-      // Create temporary file with domain list
-      const tempFile = `/tmp/massdns-domains-${Date.now()}.txt`;
-      const domainsContent = domainList.join('\n');
+    for (const line of lines) {
+      const match = line.match(/^([\w\-\.]+)\.\s+A\s+([\d\.]+)$/);
+      if (match) {
+        const subdomain = match[1].replace(/\.$/, '');
+        const ip = match[2];
 
-      // Write domains to temp file
-      const writeRun = await this.commandRunner.run('sh', [
-        '-c',
-        `echo "${domainsContent.replace(/"/g, '\\"')}" > ${tempFile}`
-      ], { timeout: 5000 });
-
-      if (!writeRun.ok) {
-        return result;
-      }
-
-      // Run massdns
-      // -r: resolvers file
-      // -t: record type (A)
-      // -o: output format (simple)
-      // -q: quiet
-      const massdnsArgs = [
-        '-r', resolversFile,
-        '-t', 'A',
-        '-o', 'S',
-        '-q',
-        tempFile
-      ];
-
-      // Add rate limit if specified
-      if (options.rate) {
-        massdnsArgs.unshift('-s', options.rate.toString());
-      }
-
-      const massdnsRun = await this.commandRunner.run('massdns', massdnsArgs, {
-        timeout: options.timeout || 60000,
-        maxBuffer: 10 * 1024 * 1024
-      });
-
-      // Cleanup temp file
-      await this.commandRunner.run('rm', ['-f', tempFile], { timeout: 1000 });
-
-      if (!massdnsRun.ok || !massdnsRun.stdout) {
-        return result;
-      }
-
-      // Parse massdns output
-      // Format: domain. A ip
-      const subdomains = [];
-      const lines = massdnsRun.stdout.split('\n');
-
-      for (const line of lines) {
-        const trimmed = line.trim();
-        if (!trimmed) continue;
-
-        // Parse: subdomain.domain.com. A 1.2.3.4
-        const match = trimmed.match(/^([\w\-\.]+)\.\s+A\s+([\d\.]+)$/);
-
-        if (match) {
-          const subdomain = match[1].replace(/\.$/, '');
-          const ip = match[2];
-
-          if (subdomain && ip) {
-            subdomains.push({ subdomain, ip });
-          }
+        if (subdomain && ip && subdomain.endsWith(baseDomain)) {
+          subdomains.push({ subdomain, ip });
         }
+        continue;
       }
 
-      result.subdomains = subdomains;
-      result.resolvedCount = subdomains.length;
-      result.raw = massdnsRun.stdout;
-
-    } catch (error) {
-      // Return empty result on error
+      const simpleMatch = line.match(/^([\w\-\.]+)\s+([\d\.]+)$/);
+      if (simpleMatch) {
+        subdomains.push({
+          subdomain: simpleMatch[1],
+          ip: simpleMatch[2]
+        });
+      }
     }
 
-    return result;
-  }
-
-  /**
-   * Fallback: Use traditional dig-based subdomain enumeration
-   * This is used if massdns is not available
-   */
-  async fallbackDigEnum(domain, wordlist, options = {}) {
-    const result = {
-      subdomains: [],
-      resolvedCount: 0
+    return {
+      subdomains,
+      resolvedCount: subdomains.length,
+      totalAttempts: null
     };
-
-    try {
-      const domainList = await this.generateDomainList(domain, wordlist, options);
-      const maxConcurrent = 10;
-
-      // Process in batches to avoid overwhelming DNS
-      for (let i = 0; i < domainList.length; i += maxConcurrent) {
-        const batch = domainList.slice(i, i + maxConcurrent);
-
-        const batchResults = await Promise.all(
-          batch.map(async (subdomain) => {
-            const digRun = await this.commandRunner.run('dig', ['+short', 'A', subdomain], {
-              timeout: 3000
-            });
-
-            if (digRun.ok && digRun.stdout) {
-              const ips = digRun.stdout
-                .split('\n')
-                .map(line => line.trim())
-                .filter(line => /^\d+\.\d+\.\d+\.\d+$/.test(line));
-
-              if (ips.length > 0) {
-                return ips.map(ip => ({ subdomain, ip }));
-              }
-            }
-
-            return [];
-          })
-        );
-
-        // Flatten and add to result
-        result.subdomains.push(...batchResults.flat());
-
-        // Small delay between batches
-        await new Promise(resolve => setTimeout(resolve, 100));
-      }
-
-      result.resolvedCount = result.subdomains.length;
-
-    } catch (error) {
-      // Return empty result on error
-    }
-
-    return result;
   }
 }

@@ -14,11 +14,33 @@
  * - hackertarget.com (100 queries/day free)
  */
 
+import { createHttpClient } from '#src/concerns/http-client.js';
+
 export class ASNStage {
   constructor(plugin) {
     this.plugin = plugin;
     this.commandRunner = plugin.commandRunner;
     this.config = plugin.config;
+    this._httpClient = null;
+  }
+
+  async _getHttpClient() {
+    if (!this._httpClient) {
+      this._httpClient = await createHttpClient({
+        headers: {
+          'User-Agent': this.config.curl?.userAgent || 'ReconPlugin/1.0'
+        },
+        timeout: 10000,
+        retry: {
+          maxAttempts: 2,
+          delay: 500,
+          backoff: 'exponential',
+          retryAfter: true,
+          retryOn: [429, 500, 502, 503, 504]
+        }
+      });
+    }
+    return this._httpClient;
   }
 
   /**
@@ -174,13 +196,8 @@ export class ASNStage {
   async lookupASNViaIPToASN(ip, options = {}) {
     try {
       const url = `https://api.iptoasn.com/v1/as/ip/${encodeURIComponent(ip)}`;
-
-      const response = await fetch(url, {
-        headers: {
-          'User-Agent': this.config.curl?.userAgent || 'ReconPlugin/1.0'
-        },
-        signal: AbortSignal.timeout ? AbortSignal.timeout(10000) : undefined
-      });
+      const client = await this._getHttpClient();
+      const response = await client.get(url);
 
       if (!response.ok) {
         return null;
@@ -227,13 +244,8 @@ export class ASNStage {
   async lookupASNViaHackerTarget(ip, options = {}) {
     try {
       const url = `https://api.hackertarget.com/aslookup/?q=${encodeURIComponent(ip)}`;
-
-      const response = await fetch(url, {
-        headers: {
-          'User-Agent': this.config.curl?.userAgent || 'ReconPlugin/1.0'
-        },
-        signal: AbortSignal.timeout ? AbortSignal.timeout(10000) : undefined
-      });
+      const client = await this._getHttpClient();
+      const response = await client.get(url);
 
       if (!response.ok) {
         return null;

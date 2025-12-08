@@ -1,10 +1,11 @@
 /**
  * PortsStage
  *
- * Port scanning with multiple tools:
- * - nmap (fast, detailed service detection)
- * - masscan (ultra-fast, full port range)
- * - Aggregates results from both scanners
+ * Port scanning using RedBlue:
+ * - Common ports preset (fast)
+ * - Full port range scanning
+ * - Service detection with banners
+ * - Fast mode (masscan-style)
  */
 
 export class PortsStage {
@@ -15,155 +16,171 @@ export class PortsStage {
   }
 
   async execute(target, featureConfig = {}) {
-    const scanners = {};
-    const openPorts = new Map();
-
-    if (featureConfig.nmap) {
-      const result = await this.executeNmap(target, { extraArgs: featureConfig.nmapArgs });
-      scanners.nmap = result;
-      if (result.status === 'ok' && Array.isArray(result.summary?.openPorts)) {
-        for (const entry of result.summary.openPorts) {
-          openPorts.set(entry.port, entry);
-        }
+    const result = await this.commandRunner.runRedBlue(
+      'network',
+      'ports',
+      'scan',
+      target.host,
+      {
+        timeout: featureConfig.timeout || 60000,
+        flags: this._buildFlags(featureConfig)
       }
-    }
+    );
 
-    if (featureConfig.masscan) {
-      const result = await this.executeMasscan(target, featureConfig.masscan);
-      scanners.masscan = result;
-      if (result.status === 'ok' && Array.isArray(result.openPorts)) {
-        for (const entry of result.openPorts) {
-          if (!openPorts.has(entry.port)) {
-            openPorts.set(entry.port, entry);
-          }
-        }
-      }
-    }
-
-    return {
-      _individual: scanners,
-      _aggregated: {
-        status: openPorts.size > 0 ? 'ok' : 'empty',
-        openPorts: Array.from(openPorts.values()),
-        scanners
-      },
-      status: openPorts.size > 0 ? 'ok' : 'empty',
-      openPorts: Array.from(openPorts.values()),
-      scanners
-    };
-  }
-
-  async executeNmap(target, options = {}) {
-    if (!(await this.commandRunner.isAvailable('nmap'))) {
+    if (result.status === 'unavailable') {
       return {
         status: 'unavailable',
-        message: 'nmap is not available on this system'
+        message: 'RedBlue (rb) is not available',
+        metadata: result.metadata
       };
     }
 
-    const topPorts = options.topPorts ?? this.config.nmap.topPorts;
-    const extraArgs = options.extraArgs ?? this.config.nmap.extraArgs;
-
-    const args = [
-      '-Pn',
-      '--top-ports',
-      String(topPorts),
-      target.host,
-      ...extraArgs
-    ];
-
-    const result = await this.commandRunner.run('nmap', args, {
-      timeout: 20000,
-      maxBuffer: 4 * 1024 * 1024
-    });
-
-    if (!result.ok) {
+    if (result.status === 'error') {
       return {
         status: 'error',
-        message: result.error?.message || 'nmap scan failed',
-        stderr: result.stderr
+        message: result.error,
+        metadata: result.metadata
       };
     }
 
+    const ports = this._normalizePorts(result.data);
+
     return {
-      status: 'ok',
-      summary: this._parseNmapOutput(result.stdout),
-      raw: this.config.storage.persistRawOutput ? this._truncateOutput(result.stdout) : undefined
+      status: ports.length > 0 ? 'ok' : 'empty',
+      openPorts: ports,
+      total: ports.length,
+      metadata: result.metadata
     };
   }
 
-  async executeMasscan(target, featureConfig = {}) {
-    if (!(await this.commandRunner.isAvailable('masscan'))) {
-      return {
-        status: 'unavailable',
-        message: 'masscan is not available on this system'
-      };
+  _buildFlags(config) {
+    const flags = [];
+
+    if (config.preset) {
+      flags.push('--preset', config.preset);
+    } else {
+      flags.push('--preset', 'common');
     }
 
-    const ports = featureConfig.ports ?? '1-65535';
-    const rate = featureConfig.rate ?? 1000;
-
-    const args = ['-p', ports, target.host, '--rate', String(rate), '--wait', '0'];
-    const result = await this.commandRunner.run('masscan', args, {
-      timeout: featureConfig.timeout ?? 30000,
-      maxBuffer: 4 * 1024 * 1024
-    });
-
-    if (!result.ok) {
-      return {
-        status: result.error?.code === 'ENOENT' ? 'unavailable' : 'error',
-        message: result.error?.message || 'masscan scan failed',
-        stderr: result.stderr
-      };
+    if (config.fast) {
+      flags.push('--fast');
     }
 
-    const openPorts = result.stdout
-      .split(/\r?\n/)
-      .map((line) => line.trim())
-      .filter((line) => line.toLowerCase().startsWith('discovered open port'))
-      .map((line) => {
-        const parts = line.split(' ');
-        const portProto = parts[3];
-        const ip = parts[5];
+    if (config.threads) {
+      flags.push('--threads', String(config.threads));
+    }
+
+    if (config.timeout) {
+      flags.push('--timeout', String(config.timeout));
+    }
+
+    if (config.intel) {
+      flags.push('--intel');
+    }
+
+    return flags;
+  }
+
+  _normalizePorts(data) {
+    if (!data || typeof data !== 'object') {
+      return [];
+    }
+
+    if (data.raw) {
+      return this._parseRawOutput(data.raw);
+    }
+
+    if (Array.isArray(data)) {
+      return data.map(port => this._normalizePortEntry(port)).filter(Boolean);
+    }
+
+    if (data.ports) {
+      return data.ports.map(port => this._normalizePortEntry(port)).filter(Boolean);
+    }
+
+    if (data.open_ports) {
+      return data.open_ports.map(port => this._normalizePortEntry(port)).filter(Boolean);
+    }
+
+    return [];
+  }
+
+  _normalizePortEntry(entry) {
+    if (!entry) return null;
+
+    if (typeof entry === 'number') {
+      return { port: entry, protocol: 'tcp', state: 'open' };
+    }
+
+    if (typeof entry === 'string') {
+      const match = entry.match(/^(\d+)(\/(\w+))?/);
+      if (match) {
         return {
-          port: portProto,
-          ip
+          port: parseInt(match[1]),
+          protocol: match[3] || 'tcp',
+          state: 'open'
         };
-      });
+      }
+      return null;
+    }
 
     return {
-      status: openPorts.length ? 'ok' : 'empty',
-      openPorts,
-      raw: this.config.storage.persistRawOutput ? this._truncateOutput(result.stdout) : undefined
+      port: entry.port || entry.portNumber || entry.number,
+      protocol: entry.protocol || entry.proto || 'tcp',
+      state: entry.state || entry.status || 'open',
+      service: entry.service || entry.serviceName || null,
+      banner: entry.banner || entry.version || null,
+      product: entry.product || null
     };
   }
 
-  _parseNmapOutput(raw) {
+  _parseRawOutput(raw) {
+    const ports = [];
     const lines = raw.split('\n');
-    const openPorts = [];
-    const detectedServices = [];
 
     for (const line of lines) {
-      const match = line.match(/^(\d+\/[a-z]+)\s+(open|filtered|closed)\s+([^\s]+)(.*)$/);
-      if (match && match[2] === 'open') {
-        const port = match[1];
-        const service = match[3];
-        const detail = match[4]?.trim();
-        openPorts.push({ port, service, detail });
-        detectedServices.push(`${service}${detail ? ` ${detail}` : ''}`.trim());
+      const portMatch = line.match(/(\d+)\/(\w+)\s+(open|filtered)/i);
+      if (portMatch) {
+        ports.push({
+          port: parseInt(portMatch[1]),
+          protocol: portMatch[2].toLowerCase(),
+          state: portMatch[3].toLowerCase()
+        });
       }
     }
 
-    return {
-      openPorts,
-      detectedServices: Array.from(new Set(detectedServices))
-    };
+    return ports;
   }
 
-  _truncateOutput(text, maxLength = 10000) {
-    if (!text || text.length <= maxLength) {
-      return text;
+  async executeRangeScan(target, startPort, endPort, featureConfig = {}) {
+    const result = await this.commandRunner.runRedBlue(
+      'network',
+      'ports',
+      'range',
+      target.host,
+      {
+        timeout: featureConfig.timeout || 120000,
+        flags: [
+          String(startPort),
+          String(endPort),
+          ...(featureConfig.fast ? ['--fast'] : []),
+          ...(featureConfig.threads ? ['--threads', String(featureConfig.threads)] : [])
+        ]
+      }
+    );
+
+    if (result.status !== 'ok') {
+      return result;
     }
-    return text.substring(0, maxLength) + '\n... (truncated)';
+
+    const ports = this._normalizePorts(result.data);
+
+    return {
+      status: ports.length > 0 ? 'ok' : 'empty',
+      openPorts: ports,
+      total: ports.length,
+      range: { start: startPort, end: endPort },
+      metadata: result.metadata
+    };
   }
 }
