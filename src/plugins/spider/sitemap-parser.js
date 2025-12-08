@@ -18,8 +18,20 @@
  */
 
 import { gunzipSync } from 'zlib'
+import { createHttpClient } from '#src/concerns/http-client.js'
 
 export class SitemapParser {
+  /**
+   * @param {Object} config - Parser configuration
+   * @param {string} [config.userAgent='s3db-spider'] - User-Agent string
+   * @param {number} [config.fetchTimeout=30000] - Request timeout in ms
+   * @param {number} [config.maxSitemaps=50] - Max sitemaps to process from index
+   * @param {number} [config.maxUrls=50000] - Max URLs to extract
+   * @param {boolean} [config.followSitemapIndex=true] - Follow sitemap index recursively
+   * @param {number} [config.cacheTimeout=3600000] - Cache timeout in ms (1 hour)
+   * @param {Function} [config.fetcher] - Custom fetcher function
+   * @param {CrawlContext} [config.context] - Shared crawl context for session state
+   */
   constructor(config = {}) {
     this.config = {
       userAgent: config.userAgent || 's3db-spider',
@@ -28,14 +40,21 @@ export class SitemapParser {
       maxUrls: config.maxUrls || 50000,             // Max URLs to extract
       followSitemapIndex: config.followSitemapIndex !== false,
       cacheTimeout: config.cacheTimeout || 3600000, // 1 hour
+      context: config.context || null,
       ...config
     }
+
+    // Shared crawl context (optional)
+    this._context = this.config.context
 
     // Cache parsed sitemaps
     this.cache = new Map()
 
     // Custom fetcher (for testing)
     this.fetcher = config.fetcher || null
+
+    // HTTP client (initialized lazily)
+    this._httpClient = null
 
     // Stats
     this.stats = {
@@ -129,6 +148,36 @@ export class SitemapParser {
   }
 
   /**
+   * Get or create HTTP client
+   * Uses shared CrawlContext if available for consistent session state
+   * @private
+   */
+  async _getHttpClient() {
+    if (!this._httpClient) {
+      const baseConfig = this._context
+        ? this._context.getHttpClientConfig('https://example.com')
+        : {
+            headers: {
+              'User-Agent': this.config.userAgent
+            }
+          }
+
+      this._httpClient = await createHttpClient({
+        ...baseConfig,
+        timeout: this.config.fetchTimeout,
+        retry: {
+          maxAttempts: 2,
+          delay: 1000,
+          backoff: 'exponential',
+          retryAfter: true,
+          retryOn: [429, 500, 502, 503, 504]
+        }
+      })
+    }
+    return this._httpClient
+  }
+
+  /**
    * Fetch sitemap content
    * @private
    */
@@ -140,30 +189,25 @@ export class SitemapParser {
       content = result.content || result
       contentType = result.contentType || ''
     } else {
-      const controller = new AbortController()
-      const timeout = setTimeout(() => controller.abort(), this.config.fetchTimeout)
+      const client = await this._getHttpClient()
+      const response = await client.get(url)
 
-      try {
-        const response = await fetch(url, {
-          signal: controller.signal,
-          headers: { 'User-Agent': this.config.userAgent }
-        })
+      if (this._context) {
+        this._context.processResponse(response, url)
+      }
 
-        if (!response.ok) {
-          throw new Error(`HTTP ${response.status}`)
-        }
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}`)
+      }
 
-        contentType = response.headers.get('content-type') || ''
+      contentType = response.headers.get('content-type') || ''
 
-        // Check if gzipped
-        if (url.endsWith('.gz') || contentType.includes('gzip')) {
-          const buffer = await response.arrayBuffer()
-          content = this._decompress(Buffer.from(buffer))
-        } else {
-          content = await response.text()
-        }
-      } finally {
-        clearTimeout(timeout)
+      // Check if gzipped
+      if (url.endsWith('.gz') || contentType.includes('gzip')) {
+        const buffer = await response.arrayBuffer()
+        content = this._decompress(Buffer.from(buffer))
+      } else {
+        content = await response.text()
       }
     }
 

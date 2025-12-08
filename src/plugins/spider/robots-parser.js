@@ -9,21 +9,39 @@
  * - Sitemap extraction
  */
 
+import { createHttpClient } from '#src/concerns/http-client.js';
+
 export class RobotsParser {
+  /**
+   * @param {Object} config - Parser configuration
+   * @param {string} [config.userAgent='s3db-spider'] - User-Agent string
+   * @param {boolean} [config.defaultAllow=true] - Allow by default if no robots.txt
+   * @param {number} [config.cacheTimeout=3600000] - Cache timeout in ms (1 hour)
+   * @param {number} [config.fetchTimeout=10000] - Request timeout in ms
+   * @param {Function} [config.fetcher] - Custom fetcher function
+   * @param {CrawlContext} [config.context] - Shared crawl context for session state
+   */
   constructor(config = {}) {
     this.config = {
       userAgent: config.userAgent || 's3db-spider',
       defaultAllow: config.defaultAllow !== false,
       cacheTimeout: config.cacheTimeout || 3600000, // 1 hour
       fetchTimeout: config.fetchTimeout || 10000,   // 10 seconds
+      context: config.context || null,
       ...config
     }
+
+    // Shared crawl context (optional)
+    this._context = this.config.context
 
     // Cache parsed robots.txt per domain
     this.cache = new Map()
 
     // Custom fetcher (for testing)
     this.fetcher = config.fetcher || null
+
+    // HTTP client (initialized lazily)
+    this._httpClient = null
   }
 
   /**
@@ -116,29 +134,52 @@ export class RobotsParser {
   }
 
   /**
+   * Get or create HTTP client
+   * Uses shared CrawlContext if available for consistent session state
+   * @private
+   */
+  async _getHttpClient() {
+    if (!this._httpClient) {
+      const baseConfig = this._context
+        ? this._context.getHttpClientConfig('https://example.com')
+        : {
+            headers: {
+              'User-Agent': this.config.userAgent
+            }
+          }
+
+      this._httpClient = await createHttpClient({
+        ...baseConfig,
+        timeout: this.config.fetchTimeout,
+        retry: {
+          maxAttempts: 2,
+          delay: 500,
+          backoff: 'exponential',
+          retryAfter: true,
+          retryOn: [429, 500, 502, 503, 504]
+        }
+      })
+    }
+    return this._httpClient
+  }
+
+  /**
    * Fetch robots.txt content
    * @private
    */
   async _fetchRobotsTxt(url) {
-    const controller = new AbortController()
-    const timeout = setTimeout(() => controller.abort(), this.config.fetchTimeout)
+    const client = await this._getHttpClient()
+    const response = await client.get(url)
 
-    try {
-      const response = await fetch(url, {
-        signal: controller.signal,
-        headers: {
-          'User-Agent': this.config.userAgent
-        }
-      })
-
-      if (!response.ok) {
-        throw new Error(`HTTP ${response.status}`)
-      }
-
-      return await response.text()
-    } finally {
-      clearTimeout(timeout)
+    if (this._context) {
+      this._context.processResponse(response, url)
     }
+
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}`)
+    }
+
+    return await response.text()
   }
 
   /**

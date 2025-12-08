@@ -26,7 +26,21 @@
  * Based on red team reconnaissance best practices.
  */
 
+import { createHttpClient } from '#src/concerns/http-client.js'
+
 export class DeepDiscovery {
+  /**
+   * @param {Object} config - Discovery configuration
+   * @param {string} [config.userAgent='s3db-spider'] - User-Agent string
+   * @param {number} [config.timeout=10000] - Request timeout in ms
+   * @param {number} [config.maxConcurrent=10] - Max concurrent requests
+   * @param {boolean} [config.checkSubdomains=true] - Check for subdomains
+   * @param {boolean} [config.detectFrameworks=true] - Detect web frameworks
+   * @param {boolean} [config.detectEcommerce=true] - Detect e-commerce platforms
+   * @param {boolean} [config.detectCMS=true] - Detect CMS platforms
+   * @param {Function} [config.fetcher] - Custom fetcher function
+   * @param {CrawlContext} [config.context] - Shared crawl context for session state
+   */
   constructor(config = {}) {
     this.config = {
       userAgent: config.userAgent || 's3db-spider',
@@ -37,8 +51,15 @@ export class DeepDiscovery {
       detectEcommerce: config.detectEcommerce !== false,
       detectCMS: config.detectCMS !== false,
       fetcher: config.fetcher || null,
+      context: config.context || null,
       ...config
     }
+
+    // Shared crawl context (optional)
+    this._context = this.config.context
+
+    // HTTP client (initialized lazily)
+    this._httpClient = null
 
     this.discovered = {
       sitemaps: [],
@@ -721,6 +742,36 @@ export class DeepDiscovery {
   }
 
   /**
+   * Get or create HTTP client
+   * Uses shared CrawlContext if available for consistent session state
+   * @private
+   */
+  async _getHttpClient() {
+    if (!this._httpClient) {
+      const baseConfig = this._context
+        ? this._context.getHttpClientConfig('https://example.com')
+        : {
+            headers: {
+              'User-Agent': this.config.userAgent
+            }
+          }
+
+      this._httpClient = await createHttpClient({
+        ...baseConfig,
+        timeout: this.config.timeout,
+        retry: {
+          maxAttempts: 1,
+          delay: 500,
+          backoff: 'fixed',
+          retryAfter: true,
+          retryOn: [429, 502, 503, 504]
+        }
+      })
+    }
+    return this._httpClient
+  }
+
+  /**
    * Check if URL exists (HEAD request)
    * @private
    */
@@ -734,23 +785,9 @@ export class DeepDiscovery {
       }
     }
 
-    // If no fetcher, use global fetch - let errors propagate to _probeUrls
-    const controller = new AbortController()
-    const timeout = setTimeout(() => controller.abort(), this.config.timeout)
-
-    try {
-      const response = await fetch(url, {
-        method: 'HEAD',
-        signal: controller.signal,
-        headers: { 'User-Agent': this.config.userAgent }
-      })
-
-      clearTimeout(timeout)
-      return response.ok
-    } catch (err) {
-      clearTimeout(timeout)
-      throw err
-    }
+    const client = await this._getHttpClient()
+    const response = await client.request(url, { method: 'HEAD' })
+    return response.ok
   }
 
   /**
@@ -774,10 +811,8 @@ export class DeepDiscovery {
     }
 
     try {
-      const response = await fetch(url, {
-        method: 'HEAD',
-        headers: { 'User-Agent': this.config.userAgent }
-      })
+      const client = await this._getHttpClient()
+      const response = await client.request(url, { method: 'HEAD' })
       return response.headers.get('content-type') || 'unknown'
     } catch {
       return 'unknown'
@@ -794,20 +829,15 @@ export class DeepDiscovery {
       return result.content || result
     }
 
-    const controller = new AbortController()
-    const timeout = setTimeout(() => controller.abort(), this.config.timeout)
+    const client = await this._getHttpClient()
+    const response = await client.get(url)
 
-    try {
-      const response = await fetch(url, {
-        signal: controller.signal,
-        headers: { 'User-Agent': this.config.userAgent }
-      })
-
-      if (!response.ok) return null
-      return await response.text()
-    } finally {
-      clearTimeout(timeout)
+    if (this._context) {
+      this._context.processResponse(response, url)
     }
+
+    if (!response.ok) return null
+    return await response.text()
   }
 
   /**
