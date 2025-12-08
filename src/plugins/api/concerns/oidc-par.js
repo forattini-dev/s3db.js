@@ -8,6 +8,26 @@
  * @see https://datatracker.ietf.org/doc/html/rfc9126
  */
 
+import { createHttpClient } from '../../../concerns/http-client.js';
+
+let httpClient = null;
+
+async function getHttpClient() {
+  if (!httpClient) {
+    httpClient = await createHttpClient({
+      timeout: 30000,
+      retry: {
+        maxAttempts: 3,
+        delay: 1000,
+        backoff: 'exponential',
+        retryAfter: true,
+        retryOn: [429, 500, 502, 503, 504]
+      }
+    });
+  }
+  return httpClient;
+}
+
 /**
  * Push authorization request to PAR endpoint
  *
@@ -49,10 +69,10 @@ export async function pushAuthorizationRequest(parEndpoint, params, clientAuth) 
   }
 
   // Send PAR request
-  const response = await fetch(parEndpoint, {
-    method: 'POST',
+  const client = await getHttpClient();
+  const response = await client.post(parEndpoint, {
     headers,
-    body: formData
+    body: formData.toString()
   });
 
   if (!response.ok) {

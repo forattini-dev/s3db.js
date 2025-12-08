@@ -54,6 +54,7 @@ import crypto from 'crypto';
 import { SignJWT, jwtVerify } from 'jose';
 import { getCookie, setCookie, deleteCookie } from 'hono/cookie';
 import { createLogger } from '../../../concerns/logger.js';
+import { createHttpClient } from '../../../concerns/http-client.js';
 import { unauthorized } from '../utils/response-formatter.js';
 import { applyProviderPreset, applyProviderQuirks } from './providers.js';
 import { createAuthDriverRateLimiter } from '../middlewares/rate-limit.js';
@@ -96,6 +97,25 @@ if (!logger || typeof logger.info !== 'function') {
     error: (...args) => console.error('[OIDC-ERROR]', ...args)
   };
   Object.assign(logger, fallbackLogger);
+}
+
+// HTTP client (initialized lazily)
+let httpClient = null;
+
+async function getHttpClient() {
+  if (!httpClient) {
+    httpClient = await createHttpClient({
+      timeout: 30000,
+      retry: {
+        maxAttempts: 3,
+        delay: 1000,
+        backoff: 'exponential',
+        retryAfter: true,
+        retryOn: [429, 500, 502, 503, 504]
+      }
+    });
+  }
+  return httpClient;
 }
 
 /**
@@ -515,15 +535,15 @@ async function getOrCreateUser(usersResource, claims, config, context, hookExecu
  * Refresh access token using refresh token
  */
 async function refreshAccessToken(tokenEndpoint, refreshToken, clientId, clientSecret) {
-  const response = await fetch(tokenEndpoint, {
-    method: 'POST',
+  const client = await getHttpClient();
+  const response = await client.post(tokenEndpoint, {
     headers: getOidcFetchHeaders({
       'Authorization': `Basic ${Buffer.from(`${clientId}:${clientSecret}`).toString('base64')}`
     }),
     body: new URLSearchParams({
       grant_type: 'refresh_token',
       refresh_token: refreshToken
-    })
+    }).toString()
   });
 
   if (!response.ok) {
@@ -682,7 +702,8 @@ const config = {
 
     // Perform discovery
     try {
-      const res = await fetch(`${issuer.replace(/\/$/, '')}/.well-known/openid-configuration`);
+      const client = await getHttpClient();
+      const res = await client.get(`${issuer.replace(/\/$/, '')}/.well-known/openid-configuration`);
       if (res.ok) {
         const doc = await res.json();
         const endpoints = {
@@ -946,10 +967,10 @@ const config = {
         tokenBody.set('client_id', clientId);
       }
 
-      const response = await fetch(ep.tokenEndpoint, {
-        method: 'POST',
+      const client = await getHttpClient();
+      const response = await client.post(ep.tokenEndpoint, {
         headers: getOidcFetchHeaders(authHeader ? { 'Authorization': authHeader } : {}),
-        body: tokenBody
+        body: tokenBody.toString()
       });
 
       if (!response.ok) {
@@ -1471,10 +1492,10 @@ const config = {
         tokenBody.set('client_id', clientId);
       }
 
-      const tokenResponse = await fetch(ep.tokenEndpoint, {
-        method: 'POST',
+      const client = await getHttpClient();
+      const tokenResponse = await client.post(ep.tokenEndpoint, {
         headers: getOidcFetchHeaders(authHeader ? { 'Authorization': authHeader } : {}),
-        body: tokenBody
+        body: tokenBody.toString()
       });
 
       if (!tokenResponse.ok) {

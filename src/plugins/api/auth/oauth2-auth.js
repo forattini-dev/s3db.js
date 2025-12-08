@@ -37,6 +37,7 @@
 
 import { createRemoteJWKSet, jwtVerify } from 'jose';
 import { createLogger } from '../../../concerns/logger.js';
+import { createHttpClient } from '../../../concerns/http-client.js';
 import { applyProviderPreset } from './providers.js';
 import { OAuth2ResourceManager } from './resource-manager.js';
 
@@ -44,6 +45,24 @@ import { OAuth2ResourceManager } from './resource-manager.js';
 const logger = createLogger({ name: 'OAuth2Auth', level: 'info' });
 // Cache for JWKS (avoids fetching on every request)
 const jwksCache = new Map();
+// HTTP client (initialized lazily)
+let httpClient = null;
+
+async function getHttpClient() {
+  if (!httpClient) {
+    httpClient = await createHttpClient({
+      timeout: 10000,
+      retry: {
+        maxAttempts: 3,
+        delay: 1000,
+        backoff: 'exponential',
+        retryAfter: true,
+        retryOn: [429, 500, 502, 503, 504]
+      }
+    });
+  }
+  return httpClient;
+}
 
 /**
  * Create OAuth2 authentication handler (NEW API)
@@ -89,9 +108,10 @@ export async function createOAuth2Handler(inputConfig, database) {
   const resolveJwksUri = async () => {
     if (jwksUri) return jwksUri;
     const base = issuer.replace(/\/$/, '');
+    const client = await getHttpClient();
     // Try OAuth 2.0 Authorization Server Metadata (RFC 8414)
     try {
-      const asr = await fetch(`${base}/.well-known/oauth-authorization-server`);
+      const asr = await client.get(`${base}/.well-known/oauth-authorization-server`);
       if (asr.ok) {
         const meta = await asr.json();
         if (meta.jwks_uri) return meta.jwks_uri;
@@ -99,7 +119,7 @@ export async function createOAuth2Handler(inputConfig, database) {
     } catch {}
     // Try OIDC discovery
     try {
-      const oidc = await fetch(`${base}/.well-known/openid-configuration`);
+      const oidc = await client.get(`${base}/.well-known/openid-configuration`);
       if (oidc.ok) {
         const meta = await oidc.json();
         if (meta.jwks_uri) return meta.jwks_uri;
@@ -197,11 +217,13 @@ export async function createOAuth2Handler(inputConfig, database) {
       const intCfg = introspection || {};
       if (intCfg.enabled !== true) return null;
 
+      const client = await getHttpClient();
+
       // Determine endpoint: explicit -> discovery -> issuer default
       let endpoint = intCfg.endpoint;
       if (!endpoint && intCfg.useDiscovery !== false && issuer) {
         try {
-          const res = await fetch(`${issuer.replace(/\/$/, '')}/.well-known/openid-configuration`);
+          const res = await client.get(`${issuer.replace(/\/$/, '')}/.well-known/openid-configuration`);
           if (res.ok) {
             const doc = await res.json();
             endpoint = doc.introspection_endpoint || endpoint;
@@ -220,13 +242,12 @@ export async function createOAuth2Handler(inputConfig, database) {
 
       try {
         const basic = Buffer.from(`${intCfg.clientId || ''}:${intCfg.clientSecret || ''}`).toString('base64');
-        const resp = await fetch(endpoint, {
-          method: 'POST',
+        const resp = await client.post(endpoint, {
           headers: {
             'Content-Type': 'application/x-www-form-urlencoded',
             'Authorization': `Basic ${basic}`
           },
-          body: new URLSearchParams({ token })
+          body: new URLSearchParams({ token }).toString()
         });
         if (!resp.ok) {
           if (logLevel === 'debug' || c.get('logLevel') === 'debug' || c.get('logLevel') === 'trace') {

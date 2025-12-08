@@ -33,6 +33,7 @@
 import { createVerify, createPublicKey } from 'crypto';
 import { getCronManager } from '../../../concerns/cron-manager.js';
 import { createLogger } from '../../../concerns/logger.js';
+import { createHttpClient } from '../../../concerns/http-client.js';
 
 /**
  * Validate JWT claims
@@ -144,6 +145,29 @@ export class OIDCClient {
     this.cronManager = getCronManager();
     this.refreshJobName = null;
     this.logLevel = 'info'; // migrated from verbose
+
+    // HTTP client (initialized lazily)
+    this._httpClient = null;
+  }
+
+  /**
+   * Get or create HTTP client
+   * @private
+   */
+  async _getHttpClient() {
+    if (!this._httpClient) {
+      this._httpClient = await createHttpClient({
+        timeout: 10000,
+        retry: {
+          maxAttempts: 3,
+          delay: 1000,
+          backoff: 'exponential',
+          retryAfter: true,
+          retryOn: [429, 500, 502, 503, 504]
+        }
+      });
+    }
+    return this._httpClient;
   }
 
   /**
@@ -164,7 +188,8 @@ export class OIDCClient {
    */
   async fetchDiscovery() {
     try {
-      const response = await fetch(this.discoveryUri);
+      const client = await this._getHttpClient();
+      const response = await client.get(this.discoveryUri);
 
       if (!response.ok) {
         throw new Error(`Failed to fetch discovery document: ${response.status}`);
@@ -195,7 +220,8 @@ export class OIDCClient {
     }
 
     try {
-      const response = await fetch(this.jwksUri);
+      const client = await this._getHttpClient();
+      const response = await client.get(this.jwksUri);
 
       if (!response.ok) {
         throw new Error(`Failed to fetch JWKS: ${response.status}`);
@@ -414,13 +440,13 @@ export class OIDCClient {
     }
 
     try {
-      const response = await fetch(this.discoveryCache.introspection_endpoint, {
-        method: 'POST',
+      const client = await this._getHttpClient();
+      const response = await client.post(this.discoveryCache.introspection_endpoint, {
         headers: {
           'Content-Type': 'application/x-www-form-urlencoded',
           'Authorization': `Basic ${Buffer.from(`${clientId}:${clientSecret}`).toString('base64')}`
         },
-        body: new URLSearchParams({ token })
+        body: new URLSearchParams({ token }).toString()
       });
 
       if (!response.ok) {
