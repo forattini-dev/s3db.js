@@ -1,4 +1,5 @@
 import tryFn from "#src/concerns/try-fn.js";
+import { createHttpClient } from "#src/concerns/http-client.js";
 import BaseReplicator from './base-replicator.class.js';
 
 /**
@@ -134,6 +135,9 @@ class WebhookReplicator extends BaseReplicator {
       retriedRequests: 0,
       totalRetries: 0
     };
+
+    // HTTP client (initialized in initialize())
+    this._httpClient = null;
   }
 
   validateConfig() {
@@ -175,37 +179,6 @@ class WebhookReplicator extends BaseReplicator {
       isValid: errors.length === 0,
       errors
     };
-  }
-
-  /**
-   * Build headers with authentication
-   * @returns {Object} Headers object
-   */
-  _buildHeaders() {
-    const headers = {
-      'Content-Type': 'application/json',
-      'User-Agent': 's3db-webhook-replicator',
-      ...this.headers
-    };
-
-    if (this.auth) {
-      switch (this.auth.type) {
-        case 'bearer':
-          headers['Authorization'] = `Bearer ${this.auth.token}`;
-          break;
-
-        case 'basic':
-          const credentials = Buffer.from(`${this.auth.username}:${this.auth.password}`).toString('base64');
-          headers['Authorization'] = `Basic ${credentials}`;
-          break;
-
-        case 'apikey':
-          headers[this.auth.header] = this.auth.value;
-          break;
-      }
-    }
-
-    return headers;
   }
 
   /**
@@ -294,25 +267,49 @@ class WebhookReplicator extends BaseReplicator {
   }
 
   /**
-   * Make HTTP request with retries
+   * Get or create HTTP client
+   * @returns {Promise<Object>} HTTP client instance
+   */
+  async _getHttpClient() {
+    if (!this._httpClient) {
+      this._httpClient = await createHttpClient({
+        baseUrl: this.url,
+        headers: {
+          'User-Agent': 's3db-webhook-replicator',
+          ...this.headers
+        },
+        timeout: this.timeout,
+        auth: this.auth,
+        retry: {
+          maxAttempts: this.retries,
+          delay: this.retryDelay,
+          backoff: this.retryStrategy,
+          jitter: true,
+          retryAfter: true,
+          retryOn: this.retryOnStatus
+        }
+      });
+    }
+    return this._httpClient;
+  }
+
+  /**
+   * Make HTTP request with retries (using http-client wrapper)
    * @param {Object} payload - Request payload
-   * @param {number} attempt - Current attempt number
    * @returns {Promise<Object>} Response
    */
-  async _makeRequest(payload, attempt = 0) {
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), this.timeout);
+  async _makeRequest(payload) {
+    this.stats.totalRequests++;
 
     try {
-      const response = await fetch(this.url, {
-        method: this.method,
-        headers: this._buildHeaders(),
-        body: JSON.stringify(payload),
-        signal: controller.signal
-      });
+      const client = await this._getHttpClient();
 
-      clearTimeout(timeoutId);
-      this.stats.totalRequests++;
+      // Make request using http-client wrapper
+      // The wrapper handles retry logic, Retry-After headers, and authentication
+      const response = await client.request('', {
+        method: this.method,
+        body: payload
+      });
 
       // Check if response is OK
       if (response.ok) {
@@ -324,26 +321,7 @@ class WebhookReplicator extends BaseReplicator {
         };
       }
 
-      // Check if we should retry this status code
-      if (this.retryOnStatus.includes(response.status) && attempt < this.retries) {
-        this.stats.retriedRequests++;
-        this.stats.totalRetries++;
-
-        // Calculate retry delay
-        const delay = this.retryStrategy === 'exponential'
-          ? this.retryDelay * Math.pow(2, attempt)
-          : this.retryDelay;
-
-        this.logger.debug(
-          { attempt: attempt + 1, maxRetries: this.retries, delay, status: response.status },
-          'Retrying request after error status'
-        );
-
-        await new Promise(resolve => setTimeout(resolve, delay));
-        return this._makeRequest(payload, attempt + 1);
-      }
-
-      // Failed without retry
+      // Failed without retry (client already retried)
       this.stats.failedRequests++;
       const errorText = await response.text().catch(() => '');
 
@@ -355,28 +333,7 @@ class WebhookReplicator extends BaseReplicator {
       };
 
     } catch (error) {
-      clearTimeout(timeoutId);
-
-      // Retry on network errors
-      if (attempt < this.retries) {
-        this.stats.retriedRequests++;
-        this.stats.totalRetries++;
-
-        const delay = this.retryStrategy === 'exponential'
-          ? this.retryDelay * Math.pow(2, attempt)
-          : this.retryDelay;
-
-        this.logger.debug(
-          { attempt: attempt + 1, maxRetries: this.retries, delay, error: error.message },
-          'Retrying request after network error'
-        );
-
-        await new Promise(resolve => setTimeout(resolve, delay));
-        return this._makeRequest(payload, attempt + 1);
-      }
-
       this.stats.failedRequests++;
-      this.stats.totalRequests++;
 
       return {
         success: false,

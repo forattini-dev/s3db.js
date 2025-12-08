@@ -1,5 +1,6 @@
 import { BaseCloudDriver } from './base-driver.js';
 import { PluginError } from '../../../errors.js';
+import { createHttpClient } from '../../../concerns/http-client.js';
 
 /**
  * Production-ready MongoDB Atlas inventory driver using mongodb-atlas-api-client.
@@ -23,6 +24,7 @@ export class MongoDBAtlasInventoryDriver extends BaseCloudDriver {
     this._privateKey = null;
     this._baseUrl = 'https://cloud.mongodb.com/api/atlas/v2';
     this._organizationId = this.config?.organizationId || null;
+    this._httpClient = null;
 
     // Services to collect (can be filtered via config.services)
     this._services = this.config?.services || [
@@ -84,49 +86,69 @@ export class MongoDBAtlasInventoryDriver extends BaseCloudDriver {
   }
 
   /**
-   * Make authenticated request to Atlas API.
+   * Get or create HTTP client for Atlas API.
    */
-  async _makeRequest(endpoint, options = {}) {
-    const crypto = await import('crypto');
-    const https = await import('https');
-
-    const url = new URL(endpoint, this._baseUrl);
-    const method = options.method || 'GET';
-
-    // HTTP Digest Authentication
-    const nonce = crypto.randomBytes(16).toString('hex');
-    const timestamp = new Date().toISOString();
-
-    return new Promise((resolve, reject) => {
-      const req = https.request({
-        hostname: url.hostname,
-        path: url.pathname + url.search,
-        method,
+  async _getHttpClient() {
+    if (!this._httpClient) {
+      this._httpClient = await createHttpClient({
+        baseUrl: this._baseUrl,
         headers: {
           'Accept': 'application/vnd.atlas.2025-03-12+json',
           'Content-Type': 'application/json'
         },
-        auth: `${this._publicKey}:${this._privateKey}`
-      }, (res) => {
-        let data = '';
-        res.on('data', chunk => data += chunk);
-        res.on('end', () => {
-          try {
-            resolve(JSON.parse(data));
-          } catch (err) {
-            resolve(data);
-          }
-        });
+        auth: {
+          type: 'basic',
+          username: this._publicKey,
+          password: this._privateKey
+        },
+        timeout: 30000,
+        retry: {
+          maxAttempts: 3,
+          delay: 1000,
+          backoff: 'exponential',
+          retryAfter: true,
+          retryOn: [429, 500, 502, 503, 504]
+        }
       });
+    }
+    return this._httpClient;
+  }
 
-      req.on('error', reject);
+  /**
+   * Make authenticated request to Atlas API.
+   */
+  async _makeRequest(endpoint, options = {}) {
+    const client = await this._getHttpClient();
+    const method = (options.method || 'GET').toLowerCase();
 
-      if (options.body) {
-        req.write(JSON.stringify(options.body));
-      }
+    let response;
+    if (method === 'get') {
+      response = await client.get(endpoint);
+    } else if (method === 'post') {
+      response = await client.post(endpoint, {
+        body: options.body ? JSON.stringify(options.body) : undefined
+      });
+    } else if (method === 'put') {
+      response = await client.put(endpoint, {
+        body: options.body ? JSON.stringify(options.body) : undefined
+      });
+    } else if (method === 'delete') {
+      response = await client.delete(endpoint);
+    } else {
+      response = await client.get(endpoint);
+    }
 
-      req.end();
-    });
+    if (!response.ok) {
+      const text = await response.text();
+      throw new Error(`Atlas API error ${response.status}: ${text}`);
+    }
+
+    const text = await response.text();
+    try {
+      return JSON.parse(text);
+    } catch {
+      return text;
+    }
   }
 
   /**

@@ -190,6 +190,8 @@ export { BackupPlugin } from './backup.plugin.js';
 export { KubernetesInventoryPlugin } from './kubernetes-inventory.plugin.js';
 export { PuppeteerPlugin } from './puppeteer.plugin.js';
 export { SpiderPlugin } from './spider.plugin.js';
+export { CrawlContext } from './spider/crawl-context.js';
+export { HybridFetcher } from './spider/hybrid-fetcher.js';
 export { CookieFarmPlugin } from './cookie-farm.plugin.js';
 export { CookieFarmSuitePlugin } from './cookie-farm-suite.plugin.js';
 export { ReconPlugin } from './recon.plugin.js';

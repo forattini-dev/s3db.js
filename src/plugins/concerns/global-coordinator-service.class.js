@@ -25,7 +25,12 @@
  *     heartbeatJitter: 1000,
  *     leaseTimeout: 15000,
  *     workerTimeout: 20000,
- *     diagnosticsEnabled: true
+ *     diagnosticsEnabled: true,
+ *     circuitBreaker: {
+ *       failureThreshold: 5,    // Open after 5 consecutive failures
+ *       resetTimeout: 30000,    // Try to close after 30 seconds
+ *       halfOpenMaxAttempts: 1  // Allow 1 test request in half-open state
+ *     }
  *   }
  * });
  *
@@ -90,7 +95,22 @@ export class GlobalCoordinatorService extends EventEmitter {
       workerRegistrations: 0,
       workerTimeouts: 0,
       startTime: null,
-      lastHeartbeatTime: null
+      lastHeartbeatTime: null,
+      circuitBreakerTrips: 0,
+      circuitBreakerState: 'closed'
+    };
+
+    // Circuit breaker state
+    this._circuitBreaker = {
+      state: 'closed', // 'closed', 'open', 'half-open'
+      failureCount: 0,
+      lastFailureTime: null,
+      lastSuccessTime: null,
+      openedAt: null,
+      // Configuration (can be overridden via config.circuitBreaker)
+      failureThreshold: config.circuitBreaker?.failureThreshold ?? 5,
+      resetTimeout: config.circuitBreaker?.resetTimeout ?? 30000, // 30 seconds
+      halfOpenMaxAttempts: config.circuitBreaker?.halfOpenMaxAttempts ?? 1
     };
 
     // Storage helper (will be initialized in initialize())
@@ -309,6 +329,12 @@ export class GlobalCoordinatorService extends EventEmitter {
   async _heartbeatCycle() {
     if (!this.isRunning || !this.storage) return;
 
+    // Check circuit breaker before proceeding
+    if (!this._circuitBreakerAllows()) {
+      this.logger.debug({ namespace: this.namespace }, `[HEARTBEAT] SKIPPED - circuit breaker open`);
+      return;
+    }
+
     try {
       const startMs = Date.now();
       this.logger.debug({ namespace: this.namespace }, `[HEARTBEAT] START`);
@@ -381,6 +407,9 @@ export class GlobalCoordinatorService extends EventEmitter {
       const durationMs = Date.now() - startMs;
       this.metrics.electionDurationMs = durationMs;
 
+      // Record success for circuit breaker
+      this._circuitBreakerSuccess();
+
       if (durationMs > 100) {
         this.logger.warn({ namespace: this.namespace, durationMs }, `[PERF] SLOW HEARTBEAT detected`);
       } else {
@@ -388,6 +417,8 @@ export class GlobalCoordinatorService extends EventEmitter {
       }
 
     } catch (err) {
+      // Record failure for circuit breaker
+      this._circuitBreakerFailure();
       this._logError('Heartbeat cycle failed', err);
     }
   }
@@ -744,6 +775,105 @@ export class GlobalCoordinatorService extends EventEmitter {
    */
   _getMetadataKey() {
     return this.storage.getPluginKey(null, `namespace=${this.namespace}`, 'metadata.json');
+  }
+
+  // ==================== INTERNAL: CIRCUIT BREAKER ====================
+
+  /**
+   * Check if circuit breaker allows operation
+   * @private
+   * @returns {boolean} True if operation should proceed
+   */
+  _circuitBreakerAllows() {
+    const cb = this._circuitBreaker;
+    const now = Date.now();
+
+    if (cb.state === 'closed') {
+      return true;
+    }
+
+    if (cb.state === 'open') {
+      // Check if reset timeout has elapsed
+      if (now - cb.openedAt >= cb.resetTimeout) {
+        cb.state = 'half-open';
+        this.metrics.circuitBreakerState = 'half-open';
+        this._log('Circuit breaker transitioning to half-open');
+        return true;
+      }
+      return false;
+    }
+
+    // half-open: allow limited attempts
+    return true;
+  }
+
+  /**
+   * Record successful operation for circuit breaker
+   * @private
+   */
+  _circuitBreakerSuccess() {
+    const cb = this._circuitBreaker;
+
+    if (cb.state === 'half-open') {
+      // Successful test request, close the circuit
+      cb.state = 'closed';
+      cb.failureCount = 0;
+      this.metrics.circuitBreakerState = 'closed';
+      this._log('Circuit breaker closed after successful recovery');
+    } else if (cb.state === 'closed') {
+      // Reset failure count on success
+      cb.failureCount = 0;
+    }
+
+    cb.lastSuccessTime = Date.now();
+  }
+
+  /**
+   * Record failed operation for circuit breaker
+   * @private
+   */
+  _circuitBreakerFailure() {
+    const cb = this._circuitBreaker;
+    const now = Date.now();
+
+    cb.failureCount++;
+    cb.lastFailureTime = now;
+
+    if (cb.state === 'half-open') {
+      // Failed during half-open, reopen circuit
+      cb.state = 'open';
+      cb.openedAt = now;
+      this.metrics.circuitBreakerState = 'open';
+      this.metrics.circuitBreakerTrips++;
+      this._log('Circuit breaker reopened after half-open failure');
+      this.emit('circuitBreaker:open', { namespace: this.namespace, failureCount: cb.failureCount });
+    } else if (cb.state === 'closed' && cb.failureCount >= cb.failureThreshold) {
+      // Threshold exceeded, open circuit
+      cb.state = 'open';
+      cb.openedAt = now;
+      this.metrics.circuitBreakerState = 'open';
+      this.metrics.circuitBreakerTrips++;
+      this._log(`Circuit breaker opened after ${cb.failureCount} failures`);
+      this.emit('circuitBreaker:open', { namespace: this.namespace, failureCount: cb.failureCount });
+    }
+  }
+
+  /**
+   * Get circuit breaker status
+   * @returns {Object} Circuit breaker state and metrics
+   */
+  getCircuitBreakerStatus() {
+    const cb = this._circuitBreaker;
+    return {
+      state: cb.state,
+      failureCount: cb.failureCount,
+      failureThreshold: cb.failureThreshold,
+      resetTimeout: cb.resetTimeout,
+      lastFailureTime: cb.lastFailureTime,
+      lastSuccessTime: cb.lastSuccessTime,
+      openedAt: cb.openedAt,
+      trips: this.metrics.circuitBreakerTrips
+    };
   }
 
   // ==================== INTERNAL: UTILITIES ====================
