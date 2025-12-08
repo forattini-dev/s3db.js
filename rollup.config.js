@@ -216,6 +216,7 @@ export default {
 
     // Peer dependencies - Puppeteer ecosystem (user installs - optional)
     'puppeteer',
+    'puppeteer-core',
     'puppeteer-extra',
     'puppeteer-extra-plugin-stealth',
     'user-agents',

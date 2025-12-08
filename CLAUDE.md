@@ -154,9 +154,223 @@ All coordinator plugins share `GlobalCoordinatorService` for leader election. On
 ```javascript
 const coordinator = await database.getGlobalCoordinator('default');
 console.log('Leader:', await coordinator.getLeader());
+console.log('Circuit Breaker:', coordinator.getCircuitBreakerStatus());
+```
+
+**Circuit Breaker:** Protects against repeated S3 failures. Opens after 5 consecutive failures, resets after 30 seconds.
+
+```javascript
+// Custom circuit breaker config
+const coordinator = new GlobalCoordinatorService({
+  namespace: 'production',
+  database: db,
+  config: {
+    circuitBreaker: {
+      failureThreshold: 5,    // Open after 5 failures
+      resetTimeout: 30000     // Try to close after 30s
+    }
+  }
+});
+
+// Listen for circuit breaker events
+coordinator.on('circuitBreaker:open', ({ namespace, failureCount }) => {
+  console.warn(`Circuit breaker opened for ${namespace}`);
+});
 ```
 
 Plugins with coordination: S3QueuePlugin, SchedulerPlugin, TTLPlugin, EventualConsistencyPlugin
+
+## HTTP Client Wrapper
+
+Unified HTTP client (`src/concerns/http-client.js`) for all plugins. Uses recker when available, falls back to native fetch.
+
+### Installation
+
+```bash
+# Optional - enhanced HTTP features (connection pooling, keep-alive)
+pnpm add recker
+```
+
+### Basic Usage
+
+```javascript
+import { createHttpClient } from '#src/concerns/http-client.js';
+
+const client = await createHttpClient({
+  baseUrl: 'https://api.example.com',
+  timeout: 10000,
+  auth: { type: 'bearer', token: 'secret' },
+  retry: {
+    maxAttempts: 3,
+    delay: 1000,
+    backoff: 'exponential',
+    retryAfter: true,
+    retryOn: [429, 500, 502, 503, 504]
+  }
+});
+
+const response = await client.get('/users');
+const data = await response.json();
+```
+
+### Authentication Types
+
+```javascript
+// Bearer Token
+auth: { type: 'bearer', token: 'your-jwt-token' }
+
+// Basic Auth
+auth: { type: 'basic', username: 'user', password: 'pass' }
+
+// API Key (custom header)
+auth: { type: 'apikey', header: 'X-API-Key', value: 'your-key' }
+```
+
+### HTTP Methods
+
+```javascript
+// GET
+await client.get('/users');
+await client.get('/users?status=active');
+
+// POST with JSON body
+await client.post('/users', { body: { name: 'John' } });
+
+// POST with form data
+await client.post('/auth', {
+  headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+  body: new URLSearchParams({ grant_type: 'client_credentials' }).toString()
+});
+
+// Generic request
+await client.request('/endpoint', { method: 'PUT', body: data });
+```
+
+### Retry Configuration
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `maxAttempts` | number | 3 | Maximum retry attempts |
+| `delay` | number | 1000 | Initial delay in ms |
+| `backoff` | string | 'exponential' | 'exponential' or 'fixed' |
+| `jitter` | boolean | true | Add randomness to prevent thundering herd |
+| `retryAfter` | boolean | true | Respect Retry-After header |
+| `retryOn` | number[] | [429,500,502,503,504] | Status codes to retry |
+
+### Class Pattern (for plugins)
+
+```javascript
+class MyPlugin {
+  constructor() {
+    this._httpClient = null;
+  }
+
+  async _getHttpClient() {
+    if (!this._httpClient) {
+      this._httpClient = await createHttpClient({
+        timeout: 15000,
+        retry: { maxAttempts: 3, backoff: 'exponential' }
+      });
+    }
+    return this._httpClient;
+  }
+}
+```
+
+### Module Pattern (for utilities)
+
+```javascript
+let httpClient = null;
+
+async function getHttpClient() {
+  if (!httpClient) {
+    httpClient = await createHttpClient({ timeout: 30000 });
+  }
+  return httpClient;
+}
+```
+
+**Features:** Bearer/Basic/API key auth, exponential backoff with jitter, Retry-After header support, timeout handling, lazy initialization.
+
+**Plugins using it:** WebhookReplicator, Spider (robots-parser, sitemap-parser, deep-discovery), API Auth (oidc-client, oauth2-auth, oidc-auth, oidc-par), Recon Stages (asn, subdomains, dnsdumpster, osint, google-dorks), Cloud Inventory (mongodb-atlas-driver)
+
+## Hybrid Spider (CrawlContext + HybridFetcher)
+
+Unified session state between HTTP client and puppeteer for web crawling.
+
+### CrawlContext - Session State Manager
+
+```javascript
+import { CrawlContext } from 's3db.js';
+
+const context = new CrawlContext({
+  userAgent: 'MyBot/1.0',
+  proxy: 'http://proxy:8080',
+  timezone: 'America/New_York',
+  viewport: { width: 1920, height: 1080 }
+});
+
+// Cookies shared between HTTP and puppeteer
+context.setCookies([{ name: 'session', value: 'abc', domain: 'example.com' }]);
+context.setCookiesFromHeader('auth=token; Path=/', 'https://example.com');
+
+// Get HTTP config (includes cookies)
+const httpConfig = context.getHttpClientConfig('https://example.com');
+
+// Configure puppeteer page (sets cookies, user-agent, viewport)
+await context.configurePage(page);
+
+// Persist session
+const json = context.toJSON();
+const restored = CrawlContext.fromJSON(json);
+```
+
+### HybridFetcher - Smart HTTP/Browser Routing
+
+```javascript
+import { HybridFetcher, CrawlContext } from 's3db.js';
+
+const context = new CrawlContext({ userAgent: 'MyBot/1.0' });
+const fetcher = new HybridFetcher({ context, strategy: 'auto' });
+
+// Auto: tries HTTP first, falls back to puppeteer for SPAs
+const { html, method } = await fetcher.fetch('https://example.com');
+console.log(`Fetched with ${method}`); // 'http' or 'puppeteer'
+
+// Force specific strategy
+const fetcher2 = new HybridFetcher({ strategy: 'recker-only' });  // HTTP only
+const fetcher3 = new HybridFetcher({ strategy: 'puppeteer-only' }); // Browser only
+
+// Cleanup
+await fetcher.close();
+```
+
+### JavaScript Detection
+
+HybridFetcher auto-detects SPAs via patterns:
+- Next.js: `__NEXT_DATA__`
+- React: Empty `<div id="root"></div>`
+- Angular: `ng-app`, `ng-controller`
+- Vue: `v-cloak`, `v-if`, `v-for`
+- Nuxt: `__NUXT__`
+- Loading spinners, noscript warnings
+
+### Spider Plugin Integration
+
+```javascript
+import { RobotsParser, SitemapParser, DeepDiscovery, CrawlContext } from 's3db.js';
+
+// Share context across all spider components
+const context = new CrawlContext({ userAgent: 's3db-spider' });
+
+const robots = new RobotsParser({ context });
+const sitemap = new SitemapParser({ context });
+const discovery = new DeepDiscovery({ context });
+
+// All share cookies, headers, session state
+await robots.isAllowed('https://example.com/page');
+await sitemap.parse('https://example.com/sitemap.xml');
+```
 
 ## Constraints
 

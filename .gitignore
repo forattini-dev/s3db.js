@@ -17,8 +17,12 @@ test-partition-cache/
 # Temporary directories
 tmp/
 .tmp/
-openspec/specs/*
-openspec/changes/*
+
+# Cloned tool repositories (recon dependencies)
+assetfinder/
+masscan/
+massdns/
+subfinder/
 
 # AI Agent directories
 .agent/

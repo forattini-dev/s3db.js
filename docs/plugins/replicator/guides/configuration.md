@@ -426,18 +426,63 @@ await users.updateAttributes({
   resources: ['users'],
   config: {
     url: 'https://api.example.com/webhook',
+    method: 'POST',  // HTTP method (default: POST)
+
+    // Authentication (bearer, basic, or apikey)
     auth: {
       type: 'bearer',
       token: process.env.WEBHOOK_TOKEN
     },
+
+    // Custom headers
     headers: {
       'X-Custom-Header': 'value'
     },
+
+    // Timeouts and retries
     timeout: 5000,
-    retries: 3
+    retries: 3,
+    retryDelay: 1000,
+    retryStrategy: 'exponential',  // 'fixed' or 'exponential'
+    retryOnStatus: [429, 500, 502, 503, 504],
+
+    // Batch mode (optional)
+    batch: false,
+    batchSize: 100
   }
 }
 ```
+
+#### Webhook Authentication Types
+
+```javascript
+// Bearer Token
+auth: { type: 'bearer', token: 'your-token' }
+
+// Basic Auth
+auth: { type: 'basic', username: 'user', password: 'pass' }
+
+// API Key
+auth: { type: 'apikey', header: 'X-API-Key', value: 'your-key' }
+```
+
+#### Retry Configuration
+
+The webhook replicator uses smart retry logic with:
+- **Exponential backoff** with jitter to prevent thundering herd
+- **Retry-After header** support for rate limiting
+- **Configurable status codes** to retry on
+
+```javascript
+{
+  retries: 3,                // Max retry attempts
+  retryDelay: 1000,          // Initial delay in ms
+  retryStrategy: 'exponential',  // Doubles delay each retry
+  retryOnStatus: [429, 500, 502, 503, 504]
+}
+```
+
+> **Note:** If you have `recker` installed, the webhook replicator will use it for enhanced HTTP features (connection pooling, keep-alive). Otherwise, it falls back to native fetch.
 
 ### MongoDB
 

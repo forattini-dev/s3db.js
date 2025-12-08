@@ -221,9 +221,6 @@ importers:
       puppeteer-extra-plugin-stealth:
         specifier: ^2.0.0
         version: 2.11.2(puppeteer-extra@3.3.6(puppeteer-core@24.32.0)(puppeteer@24.32.0(typescript@5.9.3)))
-      recker:
-        specifier: ^1.0.26
-        version: 1.0.26(ioredis@5.8.2)
       user-agents:
         specifier: ^1.0.0
         version: 1.1.669
@@ -316,6 +313,9 @@ importers:
       ora:
         specifier: ^9.0.0
         version: 9.0.0
+      recker:
+        specifier: ^1.0.26
+        version: 1.0.26(ioredis@5.8.2)
       rollup:
         specifier: ^4.53.2
         version: 4.53.3

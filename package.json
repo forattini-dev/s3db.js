@@ -130,8 +130,7 @@
     "lodash-es": "^4.17.21",
     "nanoid": "5.1.6",
     "pino": "^10.1.0",
-    "pino-pretty": "^13.1.2",
-    "recker": "^1.0.26"
+    "pino-pretty": "^13.1.2"
   },
   "optionalDependencies": {
     "@modelcontextprotocol/sdk": "^1.21.1",
@@ -155,9 +154,9 @@
     "@aws-sdk/client-ecs": "^3.0.0",
     "@aws-sdk/client-efs": "^3.0.0",
     "@aws-sdk/client-eks": "^3.0.0",
-    "@aws-sdk/client-elasticache": "^3.0.0",
     "@aws-sdk/client-elastic-load-balancing": "^3.0.0",
     "@aws-sdk/client-elastic-load-balancing-v2": "^3.0.0",
+    "@aws-sdk/client-elasticache": "^3.0.0",
     "@aws-sdk/client-eventbridge": "^3.0.0",
     "@aws-sdk/client-iam": "^3.0.0",
     "@aws-sdk/client-kinesis": "^3.0.0",
@@ -198,6 +197,7 @@
     "puppeteer": "^24.29.1",
     "puppeteer-extra": "^3.0.0",
     "puppeteer-extra-plugin-stealth": "^2.0.0",
+    "recker": "^1.0.26",
     "user-agents": "^1.0.0",
     "ws": "^8.0.0"
   },
@@ -227,6 +227,7 @@
     "node-loader": "^2.1.0",
     "nodemon": "^3.1.10",
     "ora": "^9.0.0",
+    "recker": "^1.0.26",
     "rollup": "^4.53.2",
     "rollup-plugin-copy": "^3.5.0",
     "rollup-plugin-esbuild": "^6.2.1",
