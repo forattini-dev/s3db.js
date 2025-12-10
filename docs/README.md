@@ -119,12 +119,12 @@
 
 > **Plugins:** [API Plugin](./docs/plugins/api/README.md) • [Identity Plugin](./docs/plugins/identity/README.md) • [All Plugins](#-plugins)
 
-> **Guides:** [Path-based Basic + OIDC Migration](./docs/guides/path-based-auth-migration.md)
+> **Guides:** [Path-based Basic + OIDC Migration](./docs/guides/path-based-auth-migration.md) • [Testing Guide](./guides/testing.md)
 
 
-> **Integrations:** [MCP Server](./docs/mcp.md) • [Model Context Protocol](./docs/mcp.md)
+> **Integrations:** [MCP Guide](./mcp.md) • [CLI Guide](./cli.md) • [Model Context Protocol](./mcp.md)
 
-> **Advanced:** [Executor Pool Benchmark](./docs/benchmarks/executor-pool.md) • [Performance Tuning](./docs/benchmarks/) • [Migration Guides](./docs/examples/) • [TypeScript Support](./docs/typescript/)
+> **Advanced:** [Executor Pool Benchmark](./docs/benchmarks/executor-pool.md) • [Performance Tuning](./docs/benchmarks/) • [Migration Guides](./docs/examples/) • [TypeScript Guide](./guides/typescript.md)
 
 ---
 
@@ -332,30 +332,47 @@ s3db.js includes comprehensive TypeScript definitions out of the box. Get full t
 #### Basic Usage (Automatic Types)
 
 ```typescript
-import { Database, DatabaseConfig, Resource } from 's3db.js';
+import { S3db, S3dbConfig, Resource } from 's3db.js';
 
-// Type-safe configuration
-const config: DatabaseConfig = {
+// 1. Define your data interface for type safety
+interface User {
+  id: string; // S3db automatically adds 'id'
+  name: string;
+  email: string;
+  age?: number; // Optional field
+}
+
+// 2. Type-safe configuration for your S3db instance
+const config: S3dbConfig = { // Using S3dbConfig for clarity
   connectionString: 's3://ACCESS_KEY:SECRET@bucket/path',
   logLevel: 'debug',
-  executorPool: { concurrency: 100 }  // Default - nested under executorPool
+  executorPool: { concurrency: 100 }
 };
 
-const db = new Database(config);
+const db = new S3db(config);
 
+// 3. Create resource with explicit type for improved developer experience
 // TypeScript knows all methods and options!
-await db.createResource({
+// We're creating a resource that will store 'User' objects
+const usersResource = await db.createResource<User>({
   name: 'users',
   attributes: {
     name: 'string|required',
     email: 'string|required|email',
-    age: 'number|min:0'
+    age: 'number|min:0' // Age is optional in interface, but required by schema
   }
 });
 
-// Full autocomplete for all operations
-const users: Resource<any> = db.resources.users;
-const user = await users.insert({ name: 'Alice', email: 'alice@example.com', age: 28 });
+// Full autocomplete and type-checking for all operations!
+// 'usersResource' is now automatically inferred as Resource<User>
+const newUser: User = { name: 'Alice', email: 'alice@example.com', age: 28 };
+const user = await usersResource.insert(newUser);
+
+//  user.id will be correctly typed
+console.log(user.id);
+//  user.email will be correctly typed
+console.log(user.email);
+//  user.nme; // ❌ Compilation Error: Property 'nme' does not exist on type 'User'.
 ```
 
 #### Advanced: Generate Resource Types
@@ -373,9 +390,9 @@ See the complete example in [`docs/examples/typescript-usage-example.ts`](docs/e
 
 ---
 
-## 🗄️ Database
+## 🗄️ S3db
 
-A Database is a logical container for your resources, stored in a specific S3 bucket path. The database manages resource metadata, connections, and provides the core interface for all operations.
+An S3db instance is a logical container for your resources, stored in a specific S3 bucket path. It manages resource metadata, connections, and provides the core interface for all operations.
 
 ### Configuration Parameters
 
@@ -562,21 +579,29 @@ client.clear();
 
 **Testing Example:**
 
-```javascript
-import { describe, test, beforeEach, afterEach } from '@jest/globals';
-import { S3db } from 's3db.js';
+```typescript
+import { describe, it, beforeEach, afterEach, expect } from 'vitest';
+import { S3db, Resource } from 's3db.js';
 
-describe('User Tests', () => {
-  let db, users, snapshot;
+interface User {
+  id: string;
+  name: string;
+  email: string;
+}
+
+describe('User Tests (MemoryClient)', () => {
+  let db: S3db;
+  let users: Resource<User>;
+  let snapshot: any; // MemoryClient snapshot type can be `any` for simplicity here
 
   beforeEach(async () => {
-    // Simple connection string setup!
+    // Simple connection string setup for in-memory testing!
     db = new S3db({
       connectionString: 'memory://test-db/my-tests'
     });
     await db.connect();
 
-    users = await db.createResource({
+    users = await db.createResource<User>({
       name: 'users',
       attributes: { name: 'string', email: 'email' }
     });
@@ -590,10 +615,23 @@ describe('User Tests', () => {
     db.client.restore(snapshot);
   });
 
-  test('should insert user', async () => {
-    await users.insert({ id: 'u1', name: 'John', email: 'john@test.com' });
+  it('should insert user', async () => {
+    const newUser: User = { id: 'u1', name: 'John', email: 'john@test.com' };
+    await users.insert(newUser);
     const user = await users.get('u1');
-    expect(user.name).toBe('John');
+    expect(user).toMatchObject(newUser);
+  });
+
+  it('should retrieve multiple users', async () => {
+    const user1: User = { id: 'u1', name: 'Alice', email: 'alice@test.com' };
+    const user2: User = { id: 'u2', name: 'Bob', email: 'bob@test.com' };
+    await users.insert(user1);
+    await users.insert(user2);
+
+    const allUsers = await users.list();
+    expect(allUsers).toHaveLength(2);
+    expect(allUsers).toContainEqual(user1);
+    expect(allUsers).toContainEqual(user2);
   });
 });
 ```
@@ -694,7 +732,7 @@ bucket-name/
 - ✅ **Plugin isolation** - Each plugin has its own namespace
 - ✅ **Consistent naming** - `resource=`, `partition=`, `plugin=`, `id=` prefixes
 
-### Creating a Database
+### Creating an S3db Instance
 
 ```javascript
 import { S3db } from 's3db.js';
@@ -735,7 +773,7 @@ const db = new S3db({
 await db.connect();
 ```
 
-### Database Methods
+### S3db Methods
 
 | Method | Description |
 |--------|-------------|
@@ -793,7 +831,7 @@ httpClientOptions: {
 ```
 </details>
 
-**Complete documentation**: See above for all Database configuration options
+**Complete documentation**: See above for all S3db configuration options
 
 ---
 
@@ -806,7 +844,7 @@ s3db.js uses **[Pino](https://getpino.io)** - a blazing-fast, low-overhead JSON 
 All components (Database, Plugins, Resources) automatically inherit the global log level:
 
 ```javascript
-const db = new Database({
+const db = new S3db({
   connectionString: 's3://bucket/db',
   loggerOptions: {
     level: 'warn'  // ← Database, Resources, and Plugins all inherit 'warn'
@@ -823,7 +861,7 @@ s3db.js provides two built-in format presets for different environments:
 
 **JSON Format** (Production - Structured Logs):
 ```javascript
-const db = new Database({
+const db = new S3db({
   connectionString: 's3://bucket/db',
   loggerOptions: {
     level: 'info',
@@ -836,7 +874,7 @@ const db = new Database({
 
 **Pretty Format** (Development - Human Readable):
 ```javascript
-const db = new Database({
+const db = new S3db({
   connectionString: 's3://bucket/db',
   loggerOptions: {
     level: 'debug',
@@ -853,7 +891,7 @@ const db = new Database({
 // Automatically chooses format based on:
 // - TTY detection (terminal vs piped)
 // - NODE_ENV (development vs production)
-const db = new Database({
+const db = new S3db({
   connectionString: 's3://bucket/db',
   loggerOptions: {
     level: 'info'
@@ -886,7 +924,7 @@ logger.error({ err: error }, 'Validation failed');
 Fine-tune log levels for specific plugins or resources using `childLevels`:
 
 ```javascript
-const db = new Database({
+const db = new S3db({
   connectionString: 's3://bucket/db',
   loggerOptions: {
     level: 'warn',  // ← Global default
@@ -995,7 +1033,7 @@ S3DB_LOG_PRETTY=false node app.js  # Same as S3DB_LOG_FORMAT=json
 #### Production (Minimal Logs)
 
 ```javascript
-const db = new Database({
+const db = new S3db({
   connectionString: process.env.S3DB_CONNECTION,
   loggerOptions: {
     level: 'warn',
@@ -1007,13 +1045,12 @@ const db = new Database({
       'Plugin:audit': 'info'
     }
   }
-});
-```
+});```
 
 #### Development (Verbose)
 
 ```javascript
-const db = new Database({
+const db = new S3db({
   connectionString: 'http://localhost:9000/bucket',
   loggerOptions: {
     level: 'debug',
@@ -1027,13 +1064,12 @@ const db = new Database({
       'Plugin:metrics': 'silent'
     }
   }
-});
-```
+});```
 
 #### Debug Specific Plugin
 
 ```javascript
-const db = new Database({
+const db = new S3db({
   connectionString: 's3://bucket/db',
   loggerOptions: {
     level: 'warn',
@@ -1044,8 +1080,7 @@ const db = new Database({
       'Plugin:ttl': 'trace'
     }
   }
-});
-```
+});```
 
 ### Discovering Child Logger Names
 
@@ -1753,11 +1788,11 @@ s3db.js features **Separate Executor Pools** - a revolutionary architecture wher
 
 ### Separate Pools Architecture (NEW!)
 
-Each database instance gets **its own executor pool**, enabling:
+Each S3db instance gets **its own executor pool**, enabling:
 
 - **🚀 40-50% faster** at medium scale (5,000+ operations)
 - **📈 13x less memory** at large scale (10,000+ operations)
-- **⏱️ Zero contention** between concurrent databases
+- **⏱️ Zero contention** between concurrent S3db instances
 - **🛡️ Auto-retry** with exponential backoff
 - **🧠 Adaptive tuning** - automatically adjusts concurrency based on performance
 - **Default parallelism: 100** (up from 10, optimized for S3 throughput)
@@ -1767,9 +1802,9 @@ Each database instance gets **its own executor pool**, enabling:
 Executor pool is **enabled by default** with optimized settings:
 
 ```javascript
-import { Database } from 's3db.js'
+import { S3db } from 's3db.js'
 
-const db = new Database({
+const db = new S3db({
   connectionString: 's3://bucket/database'
   // That's it! Executor pool is automatically configured with:
   // - Separate pool per database (zero contention)
@@ -1787,7 +1822,7 @@ await db.connect()
 Executor pools (and the standalone `TasksRunner`/`TasksPool`) support lightweight vs full-featured schedulers, observability exports, and adaptive concurrency:
 
 ```javascript
-const db = new Database({
+const db = new S3db({
   connectionString: 's3://bucket/database',
   executorPool: {
     features: { profile: 'light', emitEvents: false }, // or 'balanced'
@@ -1814,9 +1849,9 @@ Use the light profile for PromisePool-style throughput when you just need FIFO f
 Customize concurrency for your specific workload:
 
 ```javascript
-import { Database } from 's3db.js'
+import { S3db } from 's3db.js'
 
-const db = new Database({
+const db = new S3db({
   connectionString: 's3://bucket/database',
   executorPool: {
     concurrency: 200,         // Increase for high-throughput scenarios
@@ -1924,13 +1959,13 @@ Separate Pools comes pre-configured with production-ready defaults. Override onl
 
 ```javascript
 // Minimal - uses all defaults (recommended)
-const db = new Database({
+const db = new S3db({
   connectionString: 's3://bucket/database'
   // executorPool uses defaults: { concurrency: 100 }
 })
 
 // Custom - override specific settings
-const db = new Database({
+const db = new S3db({
   connectionString: 's3://bucket/database',
   executorPool: {
     concurrency: 200,               // Concurrency per database pool (default: 100)

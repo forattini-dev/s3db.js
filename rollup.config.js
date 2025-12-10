@@ -1,17 +1,39 @@
 import json from '@rollup/plugin-json';
 import commonjs from '@rollup/plugin-commonjs';
 import resolve from '@rollup/plugin-node-resolve';
-import esbuild, { minify } from 'rollup-plugin-esbuild';
-import nodePolyfills from 'rollup-plugin-polyfill-node';
-import terser from '@rollup/plugin-terser';
-import { readFileSync, copyFileSync, existsSync, mkdirSync, statSync, unlinkSync, readdirSync } from 'fs';
-import { dirname, join } from 'path';
+import esbuild from 'rollup-plugin-esbuild';
+import typescript from '@rollup/plugin-typescript'; // Added this import
+import { readFileSync, copyFileSync, existsSync, mkdirSync, statSync, unlinkSync } from 'fs';
+import { dirname, resolve as pathResolve } from 'path';
 
 // Read package.json to get version
 const packageJson = JSON.parse(readFileSync('./package.json', 'utf8'));
 
+// Plugin to resolve .js imports to .ts files when .js doesn't exist
+function jsToTsResolver() {
+  return {
+    name: 'js-to-ts-resolver',
+    resolveId(source, importer) {
+      // Only handle relative imports ending in .js
+      if (!source.endsWith('.js') || !importer) return null;
+      if (!source.startsWith('.') && !source.startsWith('/')) return null;
+
+      const importerDir = dirname(importer);
+      const jsPath = pathResolve(importerDir, source);
+      const tsPath = jsPath.replace(/\.js$/, '.ts');
+
+      // If .js doesn't exist but .ts does, resolve to .ts
+      if (!existsSync(jsPath) && existsSync(tsPath)) {
+        return tsPath;
+      }
+
+      return null;
+    }
+  };
+}
+
 export default {
-  input: 'src/index.js',
+  input: 'src/index.ts',
 
   output: [
     // CommonJS for Node.js (require)
@@ -33,64 +55,35 @@ export default {
   ],
 
   plugins: [
+    jsToTsResolver(),
     commonjs(),
     resolve({
-      preferBuiltins: true, // S3DB is Node.js focused
-      exportConditions: ['node'], // Target Node.js environment
+      preferBuiltins: true,
+      exportConditions: ['node'],
+      extensions: ['.ts', '.js', '.mjs', '.json']
     }),
     json(),
     // Remove node polyfills - S3DB is Node.js only
     // nodePolyfills not needed for server-side library
 
-    // Copy TypeScript definitions to dist (only once)
-    {
-      name: 'copy-types',
-      buildEnd() {
-        const sourceFile = 'src/s3db.d.ts';
-        const targetFile = 'dist/s3db.d.ts';
-        
-        if (existsSync(sourceFile)) {
-          // Ensure dist directory exists
-          const distDir = dirname(targetFile);
-          if (!existsSync(distDir)) {
-            mkdirSync(distDir, { recursive: true });
-          }
-          
-          // Only copy if target doesn't exist or source is newer
-          let shouldCopy = !existsSync(targetFile);
-          if (!shouldCopy) {
-            const sourceStats = statSync(sourceFile);
-            const targetStats = statSync(targetFile);
-            shouldCopy = sourceStats.mtime > targetStats.mtime;
-          }
-          
-          if (shouldCopy) {
-            copyFileSync(sourceFile, targetFile);
-            console.log(`✅ Copied ${sourceFile} to ${targetFile}`);
-          }
-        }
-      }
-    },
     
+    typescript({
+      tsconfig: './tsconfig.build.json',
+      isolatedModules: true,
+      module: 'NodeNext',
+      moduleResolution: 'NodeNext'
+    }),
+
     // Replace __PACKAGE_VERSION__ with actual version during build
     {
       name: 'version-replacement',
       transform(code, id) {
-        if (id.includes('database.class.js')) {
-          return code.replace(/__PACKAGE_VERSION__/g, `"${packageJson.version}"`);
+        if (id.includes('database.class.js') || id.includes('database.class.ts')) {
+          return code.replace(/__PACKAGE_VERSION__/g, packageJson.version); // Removed quotes
         }
         return null;
       }
-    },
-    
-    esbuild({
-      sourceMap: true,
-      target: 'node18', // Target Node.js 18+ (modern but stable)
-      treeShaking: true,
-      define: {
-        __PACKAGE_VERSION__: `"${packageJson.version}"`
-      }
-    }),
+    },,
 
     // Clean up legacy CommonJS artifacts from previous builds
     {

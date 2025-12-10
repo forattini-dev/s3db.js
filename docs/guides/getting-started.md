@@ -30,9 +30,9 @@ yarn add s3db.js
 ### 1. Create a Database Connection
 
 ```javascript
-import { Database } from 's3db.js';
+import { S3db } from 's3db.js'; // Use S3db instead of Database
 
-const db = new Database({
+const db = new S3db({
   connectionString: 's3://ACCESS_KEY:SECRET_KEY@mybucket?region=us-east-1'
 });
 
@@ -83,7 +83,7 @@ const allUsers = await users.list();
 ### AWS S3
 
 ```javascript
-const db = new Database({
+const db = new S3db({
   connectionString: 's3://ACCESS_KEY:SECRET_KEY@mybucket?region=us-east-1'
 });
 ```
@@ -99,7 +99,7 @@ docker run -p 9000:9000 -p 9001:9001 \
 ```
 
 ```javascript
-const db = new Database({
+const db = new S3db({
   connectionString: 'http://minioadmin:minioadmin@localhost:9000/mybucket'
 });
 ```
@@ -107,7 +107,7 @@ const db = new Database({
 ### Memory (Testing)
 
 ```javascript
-const db = new Database({
+const db = new S3db({
   connectionString: 'memory://testbucket/myapp'
 });
 ```
@@ -115,7 +115,7 @@ const db = new Database({
 ### FileSystem (Local)
 
 ```javascript
-const db = new Database({
+const db = new S3db({
   connectionString: 'file:///tmp/s3db-data'
 });
 ```
@@ -216,14 +216,14 @@ const users = await db.createResource({
   name: 'users',
   attributes: { ... },
   hooks: {
-    beforeInsert: async (data) => {
+    beforeInsert: async (data: any) => { // Added type 'any'
       data.slug = slugify(data.name);
       return data;
     },
-    afterInsert: async (result) => {
+    afterInsert: async (result: any) => { // Added type 'any'
       console.log('User created:', result.id);
     },
-    beforeUpdate: async (id, data) => {
+    beforeUpdate: async (id: string, data: any) => { // Added types 'string', 'any'
       data.updatedBy = getCurrentUser();
       return data;
     }
@@ -236,15 +236,15 @@ const users = await db.createResource({
 Listen to resource events:
 
 ```javascript
-users.on('inserted', ({ id, data }) => {
+users.on('inserted', ({ id, data }: { id: string, data: any }) => { // Added types
   console.log('New user:', id);
 });
 
-users.on('updated', ({ id, data, previous }) => {
+users.on('updated', ({ id, data, previous }: { id: string, data: any, previous: any }) => { // Added types
   console.log('User updated:', id);
 });
 
-users.on('deleted', ({ id }) => {
+users.on('deleted', ({ id }: { id: string }) => { // Added type
   console.log('User deleted:', id);
 });
 ```
@@ -254,10 +254,12 @@ users.on('deleted', ({ id }) => {
 Extend functionality with plugins:
 
 ```javascript
-import { Database } from 's3db.js';
-import { CachePlugin, TTLPlugin, ApiPlugin } from 's3db.js/plugins';
+import { S3db } from 's3db.js';
+// Import ApiPlugin from its specific path
+import { CachePlugin, TTLPlugin } from 's3db.js/plugins'; // Other plugins can stay
+import { ApiPlugin } from 's3db.js/plugins/api'; // Specific import for ApiPlugin
 
-const db = new Database({
+const db = new S3db({
   connectionString: '...',
   plugins: [
     new CachePlugin({ driver: 'memory', ttl: 300000 }),
@@ -286,7 +288,7 @@ LOG_LEVEL=info
 ```
 
 ```javascript
-const db = new Database({
+const db = new S3db({
   connectionString: process.env.S3_CONNECTION_STRING,
   passphrase: process.env.ENCRYPTION_KEY,
   logLevel: process.env.LOG_LEVEL
@@ -316,16 +318,16 @@ try {
 s3db.js includes TypeScript definitions:
 
 ```typescript
-import { Database, Resource } from 's3db.js';
+import { S3db, Resource } from 's3db.js';
 
 interface User {
   id: string;
   email: string;
   name: string;
-  createdAt: Date;
+  createdAt?: Date; // createdAt is optional when inserting, added by timestamps:true
 }
 
-const db = new Database({ connectionString: '...' });
+const db = new S3db({ connectionString: '...' });
 await db.connect();
 
 const users = await db.createResource<User>({
@@ -337,10 +339,12 @@ const users = await db.createResource<User>({
   timestamps: true
 });
 
-const user: User = await users.insert({
+const newUser: User = { // Use a variable for the new user for clarity
   email: 'alice@example.com',
   name: 'Alice'
-});
+};
+const user: User = await users.insert(newUser); // newUser is inferred as User
+
 ```
 
 ## CLI
@@ -366,6 +370,10 @@ s3db delete users abc123
 
 ## Next Steps
 
+- [TypeScript Guide](./typescript.md) - Master type safety with s3db.js
+- [Testing Guide](./testing.md) - Efficiently test your S3db applications
+- [MCP Integration Guide](./mcp.md) - Expose S3db to AI agents
+- [CLI Reference](./cli.md) - Interact with S3db from the command line
 - [Database](../core/database.md) - Full Database API
 - [Resource](../core/resource.md) - CRUD operations deep dive
 - [Schema](../core/schema.md) - All field types and validation
@@ -376,11 +384,11 @@ s3db delete users abc123
 ## Example: Complete Application
 
 ```javascript
-import { Database } from 's3db.js';
+import { S3db } from 's3db.js';
 import { CachePlugin, TTLPlugin } from 's3db.js/plugins';
 
 // Initialize
-const db = new Database({
+const db = new S3db({
   connectionString: process.env.S3_CONNECTION_STRING,
   passphrase: process.env.ENCRYPTION_KEY,
   logLevel: 'info',

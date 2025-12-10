@@ -2,12 +2,16 @@
 
 - **Getting Started**
   - [Introduction](/)
-  - [Quick Start](/#-quick-start)
+  - [Quick Start](guides/getting-started.md)
   - [Installation](/#-installation)
+  - [TypeScript Guide](guides/typescript.md)
+  - [Testing Guide](guides/testing.md)
+  - [CLI Reference](cli.md)
+  - [MCP Integration Guide](mcp.md)
 
-- **Core**
+- **Core Concepts**
   - [Overview](core/README.md)
-  - [Database](core/database.md)
+  - [S3db Instance](core/database.md)
   - [Resource](core/resource.md)
   - [Schema & Validation](core/schema.md)
   - [Behaviors](core/behaviors.md)
@@ -28,11 +32,14 @@
   - [Memory Client](clients/memory-client.md)
   - [Filesystem Client](clients/filesystem-client.md)
 
-- **Plugins**
+- **The "Mega" Plugins**
+  - [API Plugin](plugins/api/README.md)
+  - [Identity (OIDC)](plugins/identity/README.md)
+  - [Recon System](plugins/recon/README.md)
+  - [Cloud Inventory](plugins/cloud-inventory/README.md)
+
+- **Plugins (Other)**
   - [Overview](plugins/README.md)
-  - **API & Auth**
-    - [API](plugins/api/README.md)
-    - [Identity (OIDC)](plugins/identity/README.md)
   - **Performance**
     - [Cache](plugins/cache/README.md)
     - [Eventual Consistency](plugins/eventual-consistency/README.md)
@@ -58,10 +65,8 @@
     - [Spider](plugins/spider/README.md)
     - [Cookie Farm](plugins/cookie-farm/README.md)
   - **DevOps**
-    - [Cloud Inventory](plugins/cloud-inventory/README.md)
     - [Kubernetes Inventory](plugins/kubernetes-inventory/README.md)
     - [TFState](plugins/tfstate/README.md)
-    - [Recon](plugins/recon/README.md)
     - [Costs](plugins/costs/README.md)
   - **Other**
     - [Coordinator](plugins/coordinator/README.md)
@@ -73,16 +78,12 @@
 
 - **Guides**
   - [Overview](guides/README.md)
-  - [Getting Started](guides/getting-started.md)
   - [Performance Tuning](guides/performance-tuning.md)
-  - [Testing Strategies](guides/testing-strategies.md)
   - [Security Best Practices](guides/security-best-practices.md)
   - [Multi-Tenancy](guides/multi-tenancy.md)
 
 - **Reference**
   - [Overview](reference/README.md)
-  - [CLI](reference/cli.md)
-  - [MCP Server](reference/mcp.md)
   - [Connection Strings](reference/connection-strings.md)
   - [Errors](reference/errors.md)
 

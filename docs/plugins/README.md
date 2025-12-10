@@ -2,7 +2,7 @@
 
 > **Explore the full plugin ecosystem for s3db.js—performance, observability, automation, and more.**
 >
-> **Navigation:** [Quick Start ↓](#-quick-start) | [Architecture ↓](#️-plugin-architecture) | [Plugin List ↓](#-all-available-plugins) | [Documentation Standard ↓](#-documentation-standard)
+> **Navigation:** [Quick Start ↓](#-quick-start) | [Architecture ↓](#️-plugin-architecture) | [Plugin List ↓](#-all-available-plugins)
 
 ---
 
@@ -11,26 +11,7 @@
   <em>26 production-ready plugins • Zero core modifications • Infinite possibilities</em>
 </p>
 
----
 
-## 📖 Documentation Standard
-
-**All plugin documentation follows a standardized format for consistency and ease of use.**
-
-- **[📋 Documentation Standard](../plugin-docs-standard.md)** - Complete specification with 12 required sections
-- **[📝 Full Template](../templates/plugin-doc-template.md)** - Comprehensive template for complex plugins
-- **[📝 Minimal Template](../templates/plugin-doc-minimal.md)** - Streamlined template for simple plugins
-- **[🌟 Gold Standard](./puppeteer/README.md)** - Exemplar implementation (1,850+ lines)
-
-### Quality Badges
-
-Plugin documentation quality is indicated with badges:
-
-- 🟢 **Complete**: All requirements met, passes quality checklist (12 sections, 10+ FAQ, examples, cross-links)
-- 🟡 **Partial**: Most sections present (8-11), some content missing or minimal
-- 🔴 **Minimal**: Stub documentation, incomplete sections
-
-**Contributing:** When documenting plugins, use the templates above to achieve 🟢 Complete rating.
 
 ---
 
@@ -38,37 +19,37 @@ Plugin documentation quality is indicated with badges:
 
 | Plugin | Purpose | Use Cases | Docs |
 |--------|---------|-----------|------|
-| **[🌐 API](./api/README.md)** | Auto-generated REST API with OpenAPI, path-based auth, template engine | RESTful endpoints, Swagger UI, multi-auth, SSR | [→](./api/README.md) |
-| **[📝 Audit](./audit.md)** | Comprehensive operation logging | Compliance, security | [→](./audit.md) |
-| **[💾 Backup](./backup.md)** | Multi-destination backup system | Data protection, disaster recovery | [→](./backup.md) |
-| **[💾 Cache](./cache.md)** | Multi-driver caching (memory/S3/filesystem) | Performance, cost reduction | [→](./cache.md) |
-| **[💰 Costs](./costs.md)** | Real-time AWS S3 cost tracking | Budget monitoring, optimization | [→](./costs.md) |
-| **[☁️ Cloud Inventory](./cloud-inventory.md)** | Multi-cloud inventory with versioning & diffs | CMDB, compliance, drift detection | [→](./cloud-inventory.md) |
-| **[⚡ Eventual Consistency](./eventual-consistency.md)** | Transaction-based counters | Balances, analytics, aggregations | [→](./eventual-consistency.md) |
-| **[🔍 FullText](./fulltext.md)** | Full-text search capabilities | Search, content discovery | [→](./fulltext.md) |
-| **[🌍 Geo](./geo.md)** | Location-based queries & proximity search | Store locators, routing | [→](./geo.md) |
-| **[🕸️ Graph](./graphs.md)** | Graph database with vertices, edges, A* pathfinding | Social networks, recommendations, knowledge graphs | [→](./graphs.md) |
-| **[🔐 Identity](./identity/README.md)** | OAuth2/OIDC authentication with MFA | SSO, user management, whitelabel UI | [→](./identity/README.md) |
-| **[☸️ Kubernetes Inventory](./kubernetes-inventory/)** | Multi-cluster K8s inventory with versioning & diffs | CMDB, compliance, cluster monitoring | [→](./kubernetes-inventory/) |
-| **[📥 Importer](./importer.md)** | Multi-format data import | JSON, CSV, bulk migrations | [→](./importer.md) |
-| **[📊 Metrics](./metrics.md)** | Performance & usage analytics | Monitoring, insights | [→](./metrics.md) |
-| **[🤖 ML](./ml-plugin/)** | Machine learning model management | Model inference, predictions | [→](./ml-plugin/) |
-| **[🛰️ Recon](./recon/)** | Full-stack recon (DNS, ports, TLS, subdomains) with scheduled sweeps | Incident response, asset discovery, continuous monitoring | [→](./recon/) |
-| **[📬 Queue Consumer](./queue-consumer.md)** | Process RabbitMQ/SQS messages | Event-driven architecture | [→](./queue-consumer.md) |
-| **[🔗 Relation](./relation.md)** | ORM-like relationships (hasOne, hasMany, belongsTo, belongsToMany) | Relational data, joins, nested loading | [→](./relation.md) |
-| **[🔄 Replicator](./replicator/)** | Real-time data replication | PostgreSQL, BigQuery, SQS, S3DB | [→](./replicator/) |
-| **[🔒 S3Queue](./s3-queue/)** | Distributed queue with zero race conditions | Task queues, worker pools | [→](./s3-queue/) |
-| **[🕷️ Spider Suite](./spider/)** | Crawling bundle (Puppeteer + S3 queue + TTL) | Web scraping pipelines, sitemap refresh, link audits | [→](./spider/README.md) |
-| **[🍪 Cookie Farm Suite](./cookie-farm/README.md)** | Persona farming bundle (Cookie Farm + Puppeteer + Queue) | Anti-bot personas, warmup workflows, session rotation | [→](./cookie-farm/README.md) |
-| **[🎭 Puppeteer](./puppeteer/README.md)** | Headless browser automation with anti-detection & pooling | Scraping, testing, cookie farming | [→](./puppeteer/README.md) |
-| **[⏰ Scheduler](./scheduler/)** | Cron-based job scheduling | Maintenance, batch processing | [→](./scheduler/) |
-| **[🤖 State Machine](./state-machine/)** | Finite state machine workflows | Business processes, automation | [→](./state-machine/) |
-| **[📧 SMTP](./smtp.md)** | Enterprise email delivery with 4 providers & webhooks | Transactional email, notifications, email server mode | [→](./smtp.md) |
-| **[🏗️ Tfstate](./tfstate.md)** | Track Terraform infrastructure changes | DevOps, infrastructure monitoring | [→](./tfstate.md) |
-| **[🏆 Tournament](./tournament.md)** | Esports & sports tournament engine | Brackets, match reporting, leagues | [→](./tournament.md) |
-| **[🌳 Tree](./trees.md)** | Hierarchical data with Nested Set & Adjacency List | Categories, org charts, file systems | [→](./trees.md) |
-| **[⏳ TTL](./ttl/)** | Automatic record expiration | Sessions, cache invalidation | [→](./ttl/) |
-| **[🎯 Vector](./vector/)** | Vector similarity search (cosine, euclidean) | RAG, semantic search, ML | [→](./vector/) |
+| **[🌐 API](/plugins/api/README.md)** | Auto-generated REST API with OpenAPI, path-based auth, template engine | RESTful endpoints, Swagger UI, multi-auth, SSR | [→](/plugins/api/README.md) |
+| **[📝 Audit](/plugins/audit/README.md)** | Comprehensive operation logging | Compliance, security | [→](/plugins/audit/README.md) |
+| **[💾 Backup](/plugins/backup/README.md)** | Multi-destination backup system | Data protection, disaster recovery | [→](/plugins/backup/README.md) |
+| **[💾 Cache](/plugins/cache/README.md)** | Multi-driver caching (memory/S3/filesystem) | Performance, cost reduction | [→](/plugins/cache/README.md) |
+| **[💰 Costs](/plugins/costs/README.md)** | Real-time AWS S3 cost tracking | Budget monitoring, optimization | [→](/plugins/costs/README.md) |
+| **[☁️ Cloud Inventory](/plugins/cloud-inventory/README.md)** | Multi-cloud inventory with versioning & diffs | CMDB, compliance, drift detection | [→](/plugins/cloud-inventory/README.md) |
+| **[⚡ Eventual Consistency](/plugins/eventual-consistency/README.md)** | Transaction-based counters | Balances, analytics, aggregations | [→](/plugins/eventual-consistency/README.md) |
+| **[🔍 FullText](/plugins/fulltext/README.md)** | Full-text search capabilities | Search, content discovery | [→](/plugins/fulltext/README.md) |
+| **[🌍 Geo](/plugins/geo/README.md)** | Location-based queries & proximity search | Store locators, routing | [→](/plugins/geo/README.md) |
+| **[🕸️ Graph](/plugins/graphs/README.md)** | Graph database with vertices, edges, A* pathfinding | Social networks, recommendations, knowledge graphs | [→](/plugins/graphs/README.md) |
+| **[🔐 Identity](/plugins/identity/README.md)** | OAuth2/OIDC authentication with MFA | SSO, user management, whitelabel UI | [→](/plugins/identity/README.md) |
+| **[☸️ Kubernetes Inventory](/plugins/kubernetes-inventory/README.md)** | Multi-cluster K8s inventory with versioning & diffs | CMDB, compliance, cluster monitoring | [→](/plugins/kubernetes-inventory/README.md) |
+| **[📥 Importer](/plugins/importer/README.md)** | Multi-format data import | JSON, CSV, bulk migrations | [→](/plugins/importer/README.md) |
+| **[📊 Metrics](/plugins/metrics/README.md)** | Performance & usage analytics | Monitoring, insights | [→](/plugins/metrics/README.md) |
+| **[🤖 ML](/plugins/ml-plugin/README.md)** | Machine learning model management | Model inference, predictions | [→](/plugins/ml-plugin/README.md) |
+| **[🛰️ Recon](/plugins/recon/README.md)** | Full-stack recon (DNS, ports, TLS, subdomains) with scheduled sweeps | Incident response, asset discovery, continuous monitoring | [→](/plugins/recon/README.md) |
+| **[📬 Queue Consumer](/plugins/queue-consumer/README.md)** | Process RabbitMQ/SQS messages | Event-driven architecture | [→](/plugins/queue-consumer/README.md) |
+| **[🔗 Relation](/plugins/relation/README.md)** | ORM-like relationships (hasOne, hasMany, belongsTo, belongsToMany) | Relational data, joins, nested loading | [→](/plugins/relation/README.md) |
+| **[🔄 Replicator](/plugins/replicator/README.md)** | Real-time data replication | PostgreSQL, BigQuery, SQS, S3DB | [→](/plugins/replicator/README.md) |
+| **[🔒 S3Queue](/plugins/s3-queue/README.md)** | Distributed queue with zero race conditions | Task queues, worker pools | [→](/plugins/s3-queue/README.md) |
+| **[🕷️ Spider Suite](/plugins/spider/README.md)** | Crawling bundle (Puppeteer + S3 queue + TTL) | Web scraping pipelines, sitemap refresh, link audits | [→](/plugins/spider/README.md) |
+| **[🍪 Cookie Farm Suite](/plugins/cookie-farm/README.md)** | Persona farming bundle (Cookie Farm + Puppeteer + Queue) | Anti-bot personas, warmup workflows, session rotation | [→](/plugins/cookie-farm/README.md) |
+| **[🎭 Puppeteer](/plugins/puppeteer/README.md)** | Headless browser automation with anti-detection & pooling | Scraping, testing, cookie farming | [→](/plugins/puppeteer/README.md) |
+| **[⏰ Scheduler](/plugins/scheduler/README.md)** | Cron-based job scheduling | Maintenance, batch processing | [→](/plugins/scheduler/README.md) |
+| **[🤖 State Machine](/plugins/state-machine/README.md)** | Finite state machine workflows | Business processes, automation | [→](/plugins/state-machine/README.md) |
+| **[📧 SMTP](/plugins/smtp/README.md)** | Enterprise email delivery with 4 providers & webhooks | Transactional email, notifications, email server mode | [→](/plugins/smtp/README.md) |
+| **[🏗️ Tfstate](/plugins/tfstate/README.md)** | Track Terraform infrastructure changes | DevOps, infrastructure monitoring | [→](/plugins/tfstate/README.md) |
+| **[🏆 Tournament](/plugins/tournament/README.md)** | Esports & sports tournament engine | Brackets, match reporting, leagues | [→](/plugins/tournament/README.md) |
+| **[🌳 Tree](/plugins/trees/README.md)** | Hierarchical data with Nested Set & Adjacency List | Categories, org charts, file systems | [→](/plugins/trees/README.md) |
+| **[⏳ TTL](/plugins/ttl/README.md)** | Automatic record expiration | Sessions, cache invalidation | [→](/plugins/ttl/README.md) |
+| **[🎯 Vector](/plugins/vector/README.md)** | Vector similarity search (cosine, euclidean) | RAG, semantic search, ML | [→](/plugins/vector/README.md) |
 
 **💡 Can't find what you need?** [Build your own plugin](#-plugin-development) in ~50 lines of code!
 
