@@ -10,7 +10,7 @@
   "bin": {
     "s3db.js": "./bin/cli.js",
     "s3db": "./bin/cli.js",
-    "s3db-mcp": "./mcp/entrypoint.js"
+    "s3db-mcp": "./mcp/entrypoint.ts"
   },
   "repository": {
     "type": "git",
@@ -233,6 +233,7 @@
     "nodemon": "^3.1.11",
     "ora": "^9.0.0",
     "recker": "^1.0.37",
+    "redis": "^5.10.0",
     "rollup": "^4.53.3",
     "rollup-plugin-copy": "^3.5.0",
     "rollup-plugin-dts": "^6.3.0",

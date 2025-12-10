@@ -6,7 +6,6 @@
     "emitDeclarationOnly": false,
     "outDir": "./dist",
     "allowJs": false,
-    "checkJs": false
   },
   "include": ["src/**/*.ts"],
   "exclude": ["**/*.test.ts", "**/*.spec.ts", "node_modules", "dist", "tests"]

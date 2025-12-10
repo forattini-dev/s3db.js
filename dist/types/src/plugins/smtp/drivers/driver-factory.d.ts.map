@@ -1,0 +1,1 @@
+{"version":3,"file":"driver-factory.d.ts","sourceRoot":"","sources":["../../../../../../src/plugins/smtp/drivers/driver-factory.ts"],"names":[],"mappings":"AAAA,OAAO,EAAE,eAAe,EAAE,YAAY,EAAE,aAAa,EAAE,MAAM,mBAAmB,CAAC;AAajF,wBAAsB,YAAY,CAChC,UAAU,EAAE,MAAM,EAClB,MAAM,GAAE,YAAiB,EACzB,OAAO,GAAE,aAAkB,GAC1B,OAAO,CAAC,eAAe,CAAC,CAe1B;AAED,wBAAgB,mBAAmB,IAAI,MAAM,EAAE,CAE9C"}
