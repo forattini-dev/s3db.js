@@ -37,9 +37,9 @@ const pluginExclusions = [
   // Cache tests with known failures (need investigation)
   'tests/plugins/cache/memory/**',
   'tests/plugins/cache/partition-aware/**',
-  'tests/plugins/cache/plugin-core-behaviour.test.js',
+  'tests/plugins/cache/plugin-core-behaviour.test.ts',
   // Root level plugin tests (need individual investigation - use test:plugins:root to run)
-  'tests/plugins/*.test.js',
+  'tests/plugins/*.test.ts',
 ];
 
 export default defineConfig({
@@ -51,7 +51,7 @@ export default defineConfig({
   },
   test: {
     globals: true,
-    include: ['tests/**/*.test.js'],
+    include: ['tests/**/*.test.ts'],
     exclude: [...coreExclusions, ...pluginExclusions],
 
     // Timeouts (5min test, 2min hook)
@@ -72,14 +72,14 @@ export default defineConfig({
     },
 
     environment: 'node',
-    setupFiles: ['./tests/vitest.setup.js'],
+    setupFiles: ['./tests/vitest.setup.ts'],
 
     coverage: {
       provider: 'v8',
       reporter: ['text', 'json', 'html'],
-      include: ['src/**/*.js'],
+      include: ['src/**/*.ts'],
       exclude: [
-        'src/index.js',
+        'src/index.ts',
         'src/cli/**',
         'src/partition-drivers/**',
       ],
