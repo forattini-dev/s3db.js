@@ -2,7 +2,7 @@
 
 > **Distributed worker queues backed by S3 with zero-duplication guarantees.**
 >
-> **Navigation:** [← Plugin Index](../README.md) | [Guides ↓](#-documentation-index) | [FAQ ↓](./guides/patterns-best-practices.md#-faq)
+> **Navigation:** [← Plugin Index](/plugins/README.md) | [Guides ↓](#-documentation-index) | [FAQ ↓](/plugins/s3-queue/guides/patterns-best-practices.md#-faq)
 
 ---
 

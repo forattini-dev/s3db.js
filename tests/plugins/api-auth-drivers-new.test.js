@@ -11,7 +11,7 @@
 
 import { Database } from '../../src/database.class.js';
 import { ApiPlugin } from '../../src/plugins/api/index.js';
-import { createDatabaseForTest } from '../config.js';
+import { createDatabaseForTest, sleep } from '../config.js';
 import { jwtLogin } from '../../src/plugins/api/auth/jwt-auth.js';
 import { generateApiKey } from '../../src/plugins/api/auth/api-key-auth.js';
 import { encrypt } from '../../src/concerns/crypto.js';
@@ -81,10 +81,19 @@ describe('API Plugin - Auth Drivers (New API)', () => {
                 userField: 'email',
                 passwordField: 'password',
                 passphrase: 'test-passphrase',
-                createResource: true
+                createResource: true,
+                allowRegistration: true,
+                registration: {
+                  allowedFields: ['username']
+                }
               }
             }
           ]
+        },
+        resources: { // Added resources config
+          test_users: {
+            auth: true // Allow any authenticated user access
+          }
         }
       });
 
@@ -110,6 +119,7 @@ describe('API Plugin - Auth Drivers (New API)', () => {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           email: 'jwt@test.com',
+          username: 'jwtuser',
           password: 'password123'
         })
       });
@@ -127,13 +137,23 @@ describe('API Plugin - Auth Drivers (New API)', () => {
 
       expect(loginResponse.status).toBe(200);
       const loginResult = await loginResponse.json();
-      expect(loginResult.token).toBeDefined();
-      expect(loginResult.user.email).toBe('jwt@test.com');
+      expect(loginResult.data.token).toBeDefined();
+      expect(loginResult.data.user.email).toBe('jwt@test.com');
+
+      // Verify token access to /auth/me
+      const meResponse = await fetch(`http://localhost:${port}/auth/me`, {
+        headers: {
+          Authorization: `Bearer ${loginResult.data.token}`
+        }
+      });
+      expect(meResponse.status).toBe(200);
+      const meResult = await meResponse.json();
+      expect(meResult.data.id).toBe(loginResult.data.user.id);
 
       // Use token to access API
       const response = await fetch(`http://localhost:${port}/test_users`, {
         headers: {
-          Authorization: `Bearer ${loginResult.token}`
+          Authorization: `Bearer ${loginResult.data.token}`
         }
       });
 
@@ -363,7 +383,7 @@ describe('API Plugin - Auth Drivers (New API)', () => {
             {
               driver: 'jwt',
               config: {
-                resource: 'admin_users',
+                resource: 'plg_api_users', // Changed from 'admin_users'
                 secret: 'admin-secret',
                 passphrase: 'secret',
                 userField: 'email',
@@ -380,6 +400,14 @@ describe('API Plugin - Auth Drivers (New API)', () => {
               }
             }
           ]
+        },
+        resources: { // Added resources config for this block
+          plg_api_users: {
+            auth: true
+          },
+          service_accounts: {
+            auth: ['apiKey']
+          }
         }
       });
 
@@ -393,21 +421,23 @@ describe('API Plugin - Auth Drivers (New API)', () => {
     });
 
     it('should create separate resources for each driver', async () => {
-      expect(db.resources.admin_users).toBeDefined();
+      expect(db.resources.plg_api_users).toBeDefined();
       expect(db.resources.service_accounts).toBeDefined();
     });
 
     it('should authenticate with JWT from admin_users', async () => {
       // Wait for resource to be available
-      const resource = await waitForResource(db, 'admin_users');
+      const resource = await waitForResource(db, 'plg_api_users');
 
       // Insert user directly with plain password (will be auto-encrypted by secret type)
       await resource.insert({
         id: 'admin1',
         email: 'admin@test.com',
+        username: 'adminuser', // Added username
         password: 'admin123',  // Plain - auto-encrypted by secret type
         role: 'admin'
       });
+      await sleep(50);
 
       // Login via HTTP endpoint
       const loginResponse = await fetch(`http://localhost:${port}/auth/login`, {
@@ -421,11 +451,11 @@ describe('API Plugin - Auth Drivers (New API)', () => {
 
       expect(loginResponse.status).toBe(200);
       const loginResult = await loginResponse.json();
-      expect(loginResult.token).toBeDefined();
+      expect(loginResult.data.token).toBeDefined();
 
-      const response = await fetch(`http://localhost:${port}/admin_users`, {
+      const response = await fetch(`http://localhost:${port}/plg_api_users`, {
         headers: {
-          Authorization: `Bearer ${loginResult.token}`
+          Authorization: `Bearer ${loginResult.data.token}`
         }
       });
 

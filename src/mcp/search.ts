@@ -50,15 +50,17 @@ export class SearchService {
     }
   }
 
-  // Simple Cosine Similarity
-  private cosineSimilarity(vecA: number[], vecB: number[]): number {
+  // Simple Cosine Similarity (reserved for future semantic search)
+  private _cosineSimilarity(vecA: number[], vecB: number[]): number {
     let dotProduct = 0;
     let normA = 0;
     let normB = 0;
     for (let i = 0; i < vecA.length; i++) {
-      dotProduct += vecA[i] * vecB[i];
-      normA += vecA[i] * vecA[i];
-      normB += vecB[i] * vecB[i];
+      const a = vecA[i] ?? 0;
+      const b = vecB[i] ?? 0;
+      dotProduct += a * b;
+      normA += a * a;
+      normB += b * b;
     }
     return dotProduct / (Math.sqrt(normA) * Math.sqrt(normB));
   }

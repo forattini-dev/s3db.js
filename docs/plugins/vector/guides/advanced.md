@@ -2,7 +2,7 @@
 
 **Prev:** [API Reference](./api-reference.md)
 **Next:** [Best Practices](./best-practices.md)
-**Main:** [README](../README.md) | **All guides:** [Index](../README.md#-documentation-index)
+**Main:** [README](/plugins/vector/README.md) | **All guides:** [Index](/plugins/vector/README.md#-documentation-index)
 
 > **In this guide:**
 > - Event system and monitoring

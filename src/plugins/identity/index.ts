@@ -1,0 +1,2069 @@
+/**
+ * Identity Provider Plugin - OAuth2/OIDC Authorization Server
+ *
+ * Provides complete OAuth2 + OpenID Connect server functionality:
+ * - RSA key management for token signing
+ * - OAuth2 grant types (authorization_code, client_credentials, refresh_token)
+ * - OIDC flows (id_token, userinfo endpoint)
+ * - Token introspection
+ * - Client registration
+ *
+ * @example
+ * import { Database } from 's3db.js';
+ * import { IdentityPlugin } from 's3db.js/plugins/identity';
+ *
+ * const db = new Database({ connectionString: '...' });
+ * await db.connect();
+ *
+ * await db.usePlugin(new IdentityPlugin({
+ *   port: 4000,
+ *   issuer: 'http://localhost:4000',
+ *   supportedScopes: ['openid', 'profile', 'email', 'read:api', 'write:api'],
+ *   supportedGrantTypes: ['authorization_code', 'refresh_token', 'client_credentials'],
+ *   accessTokenExpiry: '15m',
+ *   idTokenExpiry: '15m',
+ *   refreshTokenExpiry: '7d'
+ * }));
+ */
+
+import { Plugin } from '../plugin.class.js';
+import { requirePluginDependency } from '../concerns/plugin-dependencies.js';
+import tryFn from '../../concerns/try-fn.js';
+import { OAuth2Server } from './oauth2-server.js';
+import { RateLimiter } from './concerns/rate-limit.js';
+import { resolveResourceNames } from '../concerns/resource-names.js';
+import { prepareResourceConfigs, type PreparedResourceConfigs } from './concerns/config.js';
+import { PluginError } from '../../errors.js';
+import {
+  BASE_USER_ATTRIBUTES,
+  BASE_TENANT_ATTRIBUTES,
+  BASE_CLIENT_ATTRIBUTES,
+  mergeResourceConfig
+} from './concerns/resource-schemas.js';
+import { verifyPassword } from './concerns/password.js';
+import { hashPassword } from '../../concerns/password-hashing.js';
+import { createBuiltInAuthDrivers } from './drivers/index.js';
+import { AuthDriver, type AuthenticateResult, type AuthDriverContext } from './drivers/auth-driver.interface.js';
+import { idGenerator } from '../../concerns/id.js';
+import { OnboardingManager, type OnboardingConfig } from './concerns/onboarding-manager.js';
+import type { KeyManager } from './rsa-keys.js';
+import type { SessionManager } from './session-manager.js';
+import type { EmailService } from './email-service.js';
+import type { FailbanManager } from '../../concerns/failban-manager.js';
+import type { AuditPlugin } from '../audit.plugin.js';
+import type { MFAManager } from './concerns/mfa-manager.js';
+import type { IdentityServer } from './server.js';
+
+export interface CorsConfig {
+  enabled: boolean;
+  origin: string | string[];
+  methods: string[];
+  allowedHeaders: string[];
+  credentials: boolean;
+  maxAge: number;
+}
+
+export interface ContentSecurityPolicyConfig {
+  enabled: boolean;
+  directives: Record<string, string[]>;
+  reportOnly: boolean;
+  reportUri: string | null;
+}
+
+export interface SecurityConfig {
+  enabled: boolean;
+  contentSecurityPolicy: ContentSecurityPolicyConfig;
+}
+
+export interface LoggingConfig {
+  enabled: boolean;
+  format: string;
+}
+
+export interface OnboardingOptions {
+  enabled: boolean;
+  mode: 'interactive' | 'env' | 'config' | 'callback' | 'disabled';
+  force: boolean;
+  adminEmail?: string;
+  adminPassword?: string;
+  adminName?: string;
+  admin?: {
+    email: string;
+    password: string;
+    name?: string;
+    scopes?: string[];
+  };
+  onFirstRun?: (context: any) => Promise<void>;
+  interactive?: Record<string, any>;
+  passwordPolicy?: Record<string, any>;
+}
+
+export interface SessionOptions {
+  sessionExpiry: string;
+  cookieName: string;
+  cookiePath: string;
+  cookieHttpOnly: boolean;
+  cookieSecure: boolean;
+  cookieSameSite: 'Strict' | 'Lax' | 'None';
+  cleanupInterval: number;
+  enableCleanup: boolean;
+}
+
+export interface PasswordPolicyConfig {
+  minLength: number;
+  maxLength: number;
+  requireUppercase: boolean;
+  requireLowercase: boolean;
+  requireNumbers: boolean;
+  requireSymbols: boolean;
+  bcryptRounds: number;
+}
+
+export interface RegistrationConfig {
+  enabled: boolean;
+  requireEmailVerification: boolean;
+  allowedDomains: string[] | null;
+  blockedDomains: string[];
+  customMessage: string | null;
+}
+
+export interface UIConfig {
+  title: string;
+  companyName: string;
+  legalName: string;
+  tagline: string;
+  welcomeMessage: string;
+  logoUrl: string | null;
+  logo: string | null;
+  favicon: string | null;
+  primaryColor: string;
+  secondaryColor: string;
+  successColor: string;
+  dangerColor: string;
+  warningColor: string;
+  infoColor: string;
+  textColor: string;
+  textMuted: string;
+  backgroundColor: string;
+  backgroundLight: string;
+  borderColor: string;
+  fontFamily: string;
+  fontSize: string;
+  borderRadius: string;
+  boxShadow: string;
+  footerText: string | null;
+  supportEmail: string | null;
+  privacyUrl: string;
+  termsUrl: string;
+  socialLinks: Record<string, string> | null;
+  customCSS: string | null;
+  customPages: Record<string, string>;
+  baseUrl: string;
+}
+
+export interface SMTPConfig {
+  host: string;
+  port: number;
+  secure: boolean;
+  auth: {
+    user: string;
+    pass: string;
+  };
+  tls: {
+    rejectUnauthorized: boolean;
+  };
+}
+
+export interface EmailTemplatesConfig {
+  baseUrl: string;
+  brandName: string;
+  brandLogo: string | null;
+  brandColor: string;
+  supportEmail: string | null;
+  customFooter: string | null;
+}
+
+export interface EmailConfig {
+  enabled: boolean;
+  from: string;
+  replyTo: string | null;
+  smtp: SMTPConfig;
+  templates: EmailTemplatesConfig;
+}
+
+export interface MFAConfig {
+  enabled: boolean;
+  required: boolean;
+  issuer: string;
+  algorithm: 'SHA1' | 'SHA256' | 'SHA512';
+  digits: number;
+  period: number;
+  window: number;
+  backupCodesCount: number;
+  backupCodeLength: number;
+}
+
+export interface AuditConfig {
+  enabled: boolean;
+  includeData: boolean;
+  includePartitions: boolean;
+  maxDataSize: number;
+  resources: string[];
+  events: string[];
+}
+
+export interface AccountLockoutConfig {
+  enabled: boolean;
+  maxAttempts: number;
+  lockoutDuration: number;
+  resetOnSuccess: boolean;
+}
+
+export interface GeoConfig {
+  enabled: boolean;
+  databasePath: string | null;
+  allowedCountries: string[];
+  blockedCountries: string[];
+  blockUnknown: boolean;
+}
+
+export interface FailbanEndpoints {
+  login: boolean;
+  token: boolean;
+  register: boolean;
+}
+
+export interface FailbanConfig {
+  enabled: boolean;
+  maxViolations: number;
+  violationWindow: number;
+  banDuration: number;
+  whitelist: string[];
+  blacklist: string[];
+  persistViolations: boolean;
+  endpoints: FailbanEndpoints;
+  geo: GeoConfig;
+}
+
+export interface RateLimitEndpoint {
+  windowMs: number;
+  max: number;
+}
+
+export interface RateLimitConfig {
+  enabled: boolean;
+  login: RateLimitEndpoint;
+  token: RateLimitEndpoint;
+  authorize: RateLimitEndpoint;
+}
+
+export interface PKCEConfig {
+  enabled: boolean;
+  required: boolean;
+  methods: string[];
+}
+
+export interface FeaturesConfig {
+  discovery: boolean;
+  jwks: boolean;
+  token: boolean;
+  authorize: boolean;
+  userinfo: boolean;
+  introspection: boolean;
+  revocation: boolean;
+  registration: boolean;
+  builtInLoginUI: boolean;
+  customLoginHandler: ((req: any, res: any) => Promise<void>) | null;
+  pkce: PKCEConfig;
+  refreshTokens: boolean;
+  refreshTokenRotation: boolean;
+  revokeOldRefreshTokens: boolean;
+}
+
+export interface InternalResourceDescriptor {
+  defaultName: string;
+  override?: string;
+}
+
+export interface InternalResourceDescriptors {
+  oauthKeys: InternalResourceDescriptor;
+  authCodes: InternalResourceDescriptor;
+  sessions: InternalResourceDescriptor;
+  passwordResetTokens: InternalResourceDescriptor;
+  mfaDevices: InternalResourceDescriptor;
+}
+
+export interface InternalResourceNames {
+  oauthKeys: string;
+  authCodes: string;
+  sessions: string;
+  passwordResetTokens: string;
+  mfaDevices: string;
+}
+
+export interface IdentityPluginConfig {
+  port: number;
+  host: string;
+  logLevel: string;
+  issuer: string;
+  supportedScopes: string[];
+  supportedGrantTypes: string[];
+  supportedResponseTypes: string[];
+  accessTokenExpiry: string;
+  idTokenExpiry: string;
+  refreshTokenExpiry: string;
+  authCodeExpiry: string;
+  resources: PreparedResourceConfigs;
+  resourceNames: InternalResourceNames;
+  cors: CorsConfig;
+  security: SecurityConfig;
+  logging: LoggingConfig;
+  onboarding: OnboardingOptions;
+  session: SessionOptions;
+  passwordPolicy: PasswordPolicyConfig;
+  registration: RegistrationConfig;
+  ui: UIConfig;
+  email: EmailConfig;
+  mfa: MFAConfig;
+  audit: AuditConfig;
+  accountLockout: AccountLockoutConfig;
+  failban: FailbanConfig;
+  rateLimit: RateLimitConfig;
+  features: FeaturesConfig;
+  authDrivers: AuthDriversConfig | false;
+}
+
+export interface AuthDriversConfig {
+  disableBuiltIns?: boolean;
+  drivers?: AuthDriver[];
+  custom?: AuthDriver[];
+  customDrivers?: AuthDriver[];
+  builtIns?: Record<string, any>;
+  [key: string]: any;
+}
+
+export interface IdentityPluginOptions {
+  port?: number;
+  host?: string;
+  logLevel?: string;
+  issuer?: string;
+  supportedScopes?: string[];
+  supportedGrantTypes?: string[];
+  supportedResponseTypes?: string[];
+  accessTokenExpiry?: string;
+  idTokenExpiry?: string;
+  refreshTokenExpiry?: string;
+  authCodeExpiry?: string;
+  resources?: any;
+  resourceNames?: Partial<InternalResourceNames>;
+  internalResources?: Partial<InternalResourceNames>;
+  cors?: Partial<CorsConfig>;
+  security?: Partial<SecurityConfig>;
+  logging?: Partial<LoggingConfig>;
+  onboarding?: Partial<OnboardingOptions>;
+  session?: Partial<SessionOptions>;
+  passwordPolicy?: Partial<PasswordPolicyConfig>;
+  registration?: Partial<RegistrationConfig>;
+  ui?: Partial<UIConfig> & { logo?: string };
+  email?: Partial<EmailConfig>;
+  mfa?: Partial<MFAConfig>;
+  audit?: Partial<AuditConfig>;
+  accountLockout?: Partial<AccountLockoutConfig>;
+  failban?: Partial<FailbanConfig>;
+  rateLimit?: Partial<RateLimitConfig>;
+  features?: Partial<FeaturesConfig>;
+  authDrivers?: AuthDriversConfig | false;
+  [key: string]: unknown;
+}
+
+export interface RegisterOAuthClientOptions {
+  name?: string;
+  clientId?: string;
+  clientSecret?: string;
+  redirectUris: string[];
+  allowedScopes?: string[];
+  grantTypes?: string[];
+  responseTypes?: string[];
+  tokenEndpointAuthMethod?: string;
+  audiences?: string[];
+  metadata?: Record<string, any>;
+}
+
+export interface RegisterOAuthClientResult {
+  clientId: string;
+  clientSecret: string;
+  redirectUris: string[];
+  allowedScopes: string[];
+  grantTypes: string[];
+  responseTypes: string[];
+}
+
+export interface CompleteOnboardingOptions {
+  admin?: {
+    email: string;
+    password: string;
+    name?: string;
+    scopes?: string[];
+  };
+  clients?: Array<{
+    name?: string;
+    redirectUris: string[];
+    [key: string]: any;
+  }>;
+}
+
+export interface IntegrationMetadata {
+  version: number;
+  issuedAt: string;
+  cacheTtl: number;
+  issuer: string;
+  discoveryUrl: string;
+  jwksUrl: string;
+  authorizationUrl: string;
+  tokenUrl: string;
+  userinfoUrl: string;
+  introspectionUrl: string;
+  revocationUrl: string;
+  supportedScopes: string[];
+  supportedGrantTypes: string[];
+  supportedResponseTypes: string[];
+  resources: {
+    users: string;
+    tenants: string;
+    clients: string;
+  };
+  clientRegistration: {
+    url: string;
+    supportedAuth: string[];
+  };
+}
+
+export interface OnboardingStatus {
+  completed: boolean;
+  error?: string;
+  [key: string]: any;
+}
+
+export interface ServerInfo {
+  isRunning: boolean;
+  [key: string]: any;
+}
+
+export interface AuthenticateWithPasswordParams {
+  email: string;
+  password: string;
+  user?: any;
+}
+
+export interface AuthenticateWithPasswordResult {
+  success: boolean;
+  error?: string;
+  statusCode?: number;
+  user?: Record<string, any>;
+}
+
+interface Logger {
+  info: (message: string, ...args: any[]) => void;
+  error: (message: string, ...args: any[]) => void;
+  warn: (message: string, ...args: any[]) => void;
+  debug: (message: string | Record<string, any>, ...args: any[]) => void;
+}
+
+interface Resource {
+  name: string;
+  insert: (data: Record<string, any>) => Promise<any>;
+  get: (id: string) => Promise<any>;
+  update: (id: string, data: Record<string, any>) => Promise<any>;
+  delete: (id: string) => Promise<void>;
+  query: (filter: Record<string, any>) => Promise<any[]>;
+  list: (options?: { limit?: number }) => Promise<any[]>;
+}
+
+interface Database {
+  createResource: (config: Record<string, any>) => Promise<Resource>;
+  deleteResource: (name: string) => Promise<void>;
+  resources: Record<string, Resource>;
+  usePlugin: (plugin: any) => Promise<void>;
+  pluginRegistry?: Record<string, any>;
+}
+
+/**
+ * Identity Provider Plugin class
+ */
+export class IdentityPlugin extends Plugin {
+  declare config: IdentityPluginConfig;
+  declare namespace: string;
+
+  private _internalResourceOverrides: Partial<InternalResourceNames>;
+  private _internalResourceDescriptors: InternalResourceDescriptors;
+  public internalResourceNames: InternalResourceNames;
+
+  public server: IdentityServer | null;
+  public oauth2Server: OAuth2Server | null;
+  public sessionManager: SessionManager | null;
+  public emailService: EmailService | null;
+  public failbanManager: FailbanManager | null;
+  public auditPlugin: AuditPlugin | null;
+  public mfaManager: MFAManager | null;
+  public onboardingManager: OnboardingManager;
+  public keyManager: KeyManager | null;
+
+  public oauth2KeysResource: Resource | null;
+  public oauth2AuthCodesResource: Resource | null;
+  public sessionsResource: Resource | null;
+  public passwordResetTokensResource: Resource | null;
+  public mfaDevicesResource: Resource | null;
+
+  public usersResource: Resource | null;
+  public tenantsResource: Resource | null;
+  public clientsResource: Resource | null;
+
+  public rateLimiters: Record<string, RateLimiter>;
+  public authDrivers: Map<string, AuthDriver>;
+  public authDriverInstances: AuthDriver[];
+
+  constructor(options: IdentityPluginOptions = {}) {
+    super(options);
+
+    this._internalResourceOverrides = options.resourceNames || options.internalResources || {};
+    this._internalResourceDescriptors = {
+      oauthKeys: {
+        defaultName: 'plg_identity_oauth_keys',
+        override: this._internalResourceOverrides.oauthKeys
+      },
+      authCodes: {
+        defaultName: 'plg_identity_auth_codes',
+        override: this._internalResourceOverrides.authCodes
+      },
+      sessions: {
+        defaultName: 'plg_identity_sessions',
+        override: this._internalResourceOverrides.sessions
+      },
+      passwordResetTokens: {
+        defaultName: 'plg_identity_password_reset_tokens',
+        override: this._internalResourceOverrides.passwordResetTokens
+      },
+      mfaDevices: {
+        defaultName: 'plg_identity_mfa_devices',
+        override: this._internalResourceOverrides.mfaDevices
+      }
+    };
+    this.internalResourceNames = this._resolveInternalResourceNames();
+
+    const normalizedResources = prepareResourceConfigs(options.resources);
+
+    this.config = {
+      port: options.port !== undefined ? options.port : 4000,
+      host: options.host || '0.0.0.0',
+      logLevel: options.logLevel || 'info',
+
+      issuer: options.issuer || `http://localhost:${options.port || 4000}`,
+      supportedScopes: options.supportedScopes || ['openid', 'profile', 'email', 'offline_access'],
+      supportedGrantTypes: options.supportedGrantTypes || ['authorization_code', 'refresh_token', 'client_credentials', 'password'],
+      supportedResponseTypes: options.supportedResponseTypes || ['code', 'token', 'id_token'],
+
+      accessTokenExpiry: options.accessTokenExpiry || '15m',
+      idTokenExpiry: options.idTokenExpiry || '15m',
+      refreshTokenExpiry: options.refreshTokenExpiry || '7d',
+      authCodeExpiry: options.authCodeExpiry || '10m',
+
+      resources: normalizedResources,
+
+      resourceNames: this.internalResourceNames,
+
+      cors: {
+        enabled: options.cors?.enabled !== false,
+        origin: options.cors?.origin || '*',
+        methods: options.cors?.methods || ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+        allowedHeaders: options.cors?.allowedHeaders || ['Content-Type', 'Authorization', 'X-API-Key'],
+        credentials: options.cors?.credentials !== false,
+        maxAge: options.cors?.maxAge || 86400
+      },
+
+      security: {
+        enabled: options.security?.enabled !== false,
+        contentSecurityPolicy: {
+          enabled: true,
+          directives: {
+            'default-src': ["'self'"],
+            'script-src': ["'self'", "'unsafe-inline'"],
+            'style-src': ["'self'", "'unsafe-inline'", 'https://unpkg.com'],
+            'img-src': ["'self'", 'data:', 'https:'],
+            'font-src': ["'self'", 'https://unpkg.com'],
+            ...options.security?.contentSecurityPolicy?.directives
+          },
+          reportOnly: options.security?.contentSecurityPolicy?.reportOnly || false,
+          reportUri: options.security?.contentSecurityPolicy?.reportUri || null
+        }
+      },
+
+      logging: {
+        enabled: options.logging?.enabled || false,
+        format: options.logging?.format || ':method :path :status :response-time ms'
+      },
+
+      onboarding: {
+        enabled: options.onboarding?.enabled !== false,
+        mode: options.onboarding?.mode || 'interactive',
+        force: options.onboarding?.force || false,
+        adminEmail: options.onboarding?.adminEmail,
+        adminPassword: options.onboarding?.adminPassword,
+        adminName: options.onboarding?.adminName,
+        admin: options.onboarding?.admin,
+        onFirstRun: options.onboarding?.onFirstRun,
+        interactive: options.onboarding?.interactive || {},
+        passwordPolicy: options.onboarding?.passwordPolicy || {}
+      },
+
+      session: {
+        sessionExpiry: options.session?.sessionExpiry || '24h',
+        cookieName: options.session?.cookieName || 's3db_session',
+        cookiePath: options.session?.cookiePath || '/',
+        cookieHttpOnly: options.session?.cookieHttpOnly !== false,
+        cookieSecure: options.session?.cookieSecure || false,
+        cookieSameSite: options.session?.cookieSameSite || 'Lax',
+        cleanupInterval: options.session?.cleanupInterval || 3600000,
+        enableCleanup: options.session?.enableCleanup !== false
+      },
+
+      passwordPolicy: {
+        minLength: options.passwordPolicy?.minLength || 8,
+        maxLength: options.passwordPolicy?.maxLength || 128,
+        requireUppercase: options.passwordPolicy?.requireUppercase !== false,
+        requireLowercase: options.passwordPolicy?.requireLowercase !== false,
+        requireNumbers: options.passwordPolicy?.requireNumbers !== false,
+        requireSymbols: options.passwordPolicy?.requireSymbols || false,
+        bcryptRounds: options.passwordPolicy?.bcryptRounds || 10
+      },
+
+      registration: {
+        enabled: options.registration?.enabled !== false,
+        requireEmailVerification: options.registration?.requireEmailVerification !== false,
+        allowedDomains: options.registration?.allowedDomains || null,
+        blockedDomains: options.registration?.blockedDomains || [],
+        customMessage: options.registration?.customMessage || null
+      },
+
+      ui: {
+        title: options.ui?.title || 'S3DB Identity',
+        companyName: options.ui?.companyName || 'S3DB',
+        legalName: options.ui?.legalName || options.ui?.companyName || 'S3DB Corp',
+        tagline: options.ui?.tagline || 'Secure Identity & Access Management',
+        welcomeMessage: options.ui?.welcomeMessage || 'Welcome back!',
+        logoUrl: options.ui?.logoUrl || null,
+        logo: (() => {
+          if (options.ui?.logo) {
+            this.logger?.warn(
+              '[IdentityPlugin] DEPRECATED: The "logo" field is deprecated. ' +
+              'Use "logoUrl" instead: { ui: { logoUrl: "..." } }. ' +
+              'This will be removed in v17.0.'
+            );
+          }
+          return options.ui?.logo || null;
+        })(),
+        favicon: options.ui?.favicon || null,
+
+        primaryColor: options.ui?.primaryColor || '#007bff',
+        secondaryColor: options.ui?.secondaryColor || '#6c757d',
+        successColor: options.ui?.successColor || '#28a745',
+        dangerColor: options.ui?.dangerColor || '#dc3545',
+        warningColor: options.ui?.warningColor || '#ffc107',
+        infoColor: options.ui?.infoColor || '#17a2b8',
+        textColor: options.ui?.textColor || '#212529',
+        textMuted: options.ui?.textMuted || '#6c757d',
+        backgroundColor: options.ui?.backgroundColor || '#ffffff',
+        backgroundLight: options.ui?.backgroundLight || '#f8f9fa',
+        borderColor: options.ui?.borderColor || '#dee2e6',
+
+        fontFamily: options.ui?.fontFamily || '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
+        fontSize: options.ui?.fontSize || '16px',
+
+        borderRadius: options.ui?.borderRadius || '0.375rem',
+        boxShadow: options.ui?.boxShadow || '0 0.125rem 0.25rem rgba(0, 0, 0, 0.075)',
+
+        footerText: options.ui?.footerText || null,
+        supportEmail: options.ui?.supportEmail || null,
+        privacyUrl: options.ui?.privacyUrl || '/privacy',
+        termsUrl: options.ui?.termsUrl || '/terms',
+
+        socialLinks: options.ui?.socialLinks || null,
+
+        customCSS: options.ui?.customCSS || null,
+
+        customPages: options.ui?.customPages || {},
+
+        baseUrl: options.ui?.baseUrl || `http://localhost:${options.port || 4000}`
+      },
+
+      email: {
+        enabled: options.email?.enabled !== false,
+        from: options.email?.from || 'noreply@s3db.identity',
+        replyTo: options.email?.replyTo || null,
+        smtp: {
+          host: options.email?.smtp?.host || 'localhost',
+          port: options.email?.smtp?.port || 587,
+          secure: options.email?.smtp?.secure || false,
+          auth: {
+            user: options.email?.smtp?.auth?.user || '',
+            pass: options.email?.smtp?.auth?.pass || ''
+          },
+          tls: {
+            rejectUnauthorized: options.email?.smtp?.tls?.rejectUnauthorized !== false
+          }
+        },
+        templates: {
+          baseUrl: options.email?.templates?.baseUrl || options.ui?.baseUrl || `http://localhost:${options.port || 4000}`,
+          brandName: options.email?.templates?.brandName || options.ui?.title || 'S3DB Identity',
+          brandLogo: options.email?.templates?.brandLogo || options.ui?.logo || null,
+          brandColor: options.email?.templates?.brandColor || options.ui?.primaryColor || '#007bff',
+          supportEmail: options.email?.templates?.supportEmail || options.email?.replyTo || null,
+          customFooter: options.email?.templates?.customFooter || null
+        }
+      },
+
+      mfa: {
+        enabled: options.mfa?.enabled || false,
+        required: options.mfa?.required || false,
+        issuer: options.mfa?.issuer || options.ui?.title || 'S3DB Identity',
+        algorithm: options.mfa?.algorithm || 'SHA1',
+        digits: options.mfa?.digits || 6,
+        period: options.mfa?.period || 30,
+        window: options.mfa?.window || 1,
+        backupCodesCount: options.mfa?.backupCodesCount || 10,
+        backupCodeLength: options.mfa?.backupCodeLength || 8
+      },
+
+      audit: {
+        enabled: options.audit?.enabled !== false,
+        includeData: options.audit?.includeData !== false,
+        includePartitions: options.audit?.includePartitions !== false,
+        maxDataSize: options.audit?.maxDataSize || 10000,
+        resources: options.audit?.resources || ['users', 'plg_oauth_clients'],
+        events: options.audit?.events || [
+          'login', 'logout', 'login_failed',
+          'account_locked', 'account_unlocked',
+          'ip_banned', 'ip_unbanned',
+          'password_reset_requested', 'password_changed',
+          'email_verified', 'user_created', 'user_deleted',
+          'mfa_enrolled', 'mfa_disabled', 'mfa_verified', 'mfa_failed'
+        ]
+      },
+
+      accountLockout: {
+        enabled: options.accountLockout?.enabled !== false,
+        maxAttempts: options.accountLockout?.maxAttempts || 5,
+        lockoutDuration: options.accountLockout?.lockoutDuration || 900000,
+        resetOnSuccess: options.accountLockout?.resetOnSuccess !== false
+      },
+
+      failban: {
+        enabled: options.failban?.enabled !== false,
+        maxViolations: options.failban?.maxViolations || 5,
+        violationWindow: options.failban?.violationWindow || 300000,
+        banDuration: options.failban?.banDuration || 900000,
+        whitelist: options.failban?.whitelist || ['127.0.0.1', '::1'],
+        blacklist: options.failban?.blacklist || [],
+        persistViolations: options.failban?.persistViolations !== false,
+        endpoints: {
+          login: options.failban?.endpoints?.login !== false,
+          token: options.failban?.endpoints?.token !== false,
+          register: options.failban?.endpoints?.register !== false
+        },
+        geo: {
+          enabled: options.failban?.geo?.enabled || false,
+          databasePath: options.failban?.geo?.databasePath || null,
+          allowedCountries: options.failban?.geo?.allowedCountries || [],
+          blockedCountries: options.failban?.geo?.blockedCountries || [],
+          blockUnknown: options.failban?.geo?.blockUnknown || false
+        }
+      },
+
+      rateLimit: {
+        enabled: options.rateLimit?.enabled !== false,
+        login: {
+          windowMs: options.rateLimit?.login?.windowMs || 60000,
+          max: options.rateLimit?.login?.max ?? 10
+        },
+        token: {
+          windowMs: options.rateLimit?.token?.windowMs || 60000,
+          max: options.rateLimit?.token?.max ?? 60
+        },
+        authorize: {
+          windowMs: options.rateLimit?.authorize?.windowMs || 60000,
+          max: options.rateLimit?.authorize?.max ?? 30
+        }
+      },
+
+      features: {
+        discovery: options.features?.discovery !== false,
+        jwks: options.features?.jwks !== false,
+        token: options.features?.token !== false,
+        authorize: options.features?.authorize !== false,
+        userinfo: options.features?.userinfo !== false,
+        introspection: options.features?.introspection !== false,
+        revocation: options.features?.revocation !== false,
+        registration: options.features?.registration !== false,
+
+        builtInLoginUI: options.features?.builtInLoginUI !== false,
+        customLoginHandler: options.features?.customLoginHandler || null,
+
+        pkce: {
+          enabled: options.features?.pkce?.enabled !== false,
+          required: options.features?.pkce?.required || false,
+          methods: options.features?.pkce?.methods || ['S256', 'plain']
+        },
+
+        refreshTokens: options.features?.refreshTokens !== false,
+        refreshTokenRotation: options.features?.refreshTokenRotation || false,
+        revokeOldRefreshTokens: options.features?.revokeOldRefreshTokens !== false
+      },
+
+      authDrivers: options.authDrivers || {}
+    };
+
+    this.server = null;
+    this.oauth2Server = null;
+    this.sessionManager = null;
+    this.emailService = null;
+    this.failbanManager = null;
+    this.auditPlugin = null;
+    this.mfaManager = null;
+    this.keyManager = null;
+    this.onboardingManager = new OnboardingManager({
+      db: null as any,
+      config: {
+        enabled: this.config.onboarding.enabled,
+        mode: this.config.onboarding.mode,
+        admin: this.config.onboarding.admin,
+        callback: this.config.onboarding.onFirstRun,
+        force: this.config.onboarding.force
+      },
+      resources: {
+        users: this.config.resources.users as any,
+        tenants: this.config.resources.tenants as any,
+        clients: this.config.resources.clients as any
+      },
+      options: {
+        issuer: this.config.issuer,
+        logLevel: this.config.logLevel
+      }
+    });
+
+    this.oauth2KeysResource = null;
+    this.oauth2AuthCodesResource = null;
+    this.sessionsResource = null;
+    this.passwordResetTokensResource = null;
+    this.mfaDevicesResource = null;
+
+    this.usersResource = null;
+    this.tenantsResource = null;
+    this.clientsResource = null;
+
+    this.rateLimiters = this._createRateLimiters();
+    this.authDrivers = new Map();
+    this.authDriverInstances = [];
+  }
+
+  private _resolveInternalResourceNames(): InternalResourceNames {
+    return resolveResourceNames('identity', this._internalResourceDescriptors as any, {
+      namespace: this.namespace
+    }) as unknown as InternalResourceNames;
+  }
+
+  override onNamespaceChanged(): void {
+    this.internalResourceNames = this._resolveInternalResourceNames();
+    if (this.config) {
+      this.config.resourceNames = this.internalResourceNames;
+    }
+  }
+
+  private async _validateDependencies(): Promise<void> {
+    await requirePluginDependency('identity-plugin', {
+      throwOnError: true,
+      checkVersions: true
+    });
+  }
+
+  private _createRateLimiters(): Record<string, RateLimiter> {
+    if (!this.config.rateLimit.enabled) {
+      return {};
+    }
+
+    const limiters: Record<string, RateLimiter> = {};
+    const { login, token, authorize } = this.config.rateLimit;
+
+    if (login?.max > 0 && login?.windowMs > 0) {
+      limiters.login = new RateLimiter(login);
+    }
+
+    if (token?.max > 0 && token?.windowMs > 0) {
+      limiters.token = new RateLimiter(token);
+    }
+
+    if (authorize?.max > 0 && authorize?.windowMs > 0) {
+      limiters.authorize = new RateLimiter(authorize);
+    }
+
+    return limiters;
+  }
+
+  override async onInstall(): Promise<void> {
+    this.logger.debug(`[Identity Plugin] onInstall() START ${Date.now()}`);
+
+    if (this.config.logLevel) {
+      this.logger.info('[Identity Plugin] Installing...');
+    }
+
+    try {
+      const startDeps = Date.now();
+      await this._validateDependencies();
+      this.logger.debug(`[Identity Plugin] _validateDependencies() took ${Date.now() - startDeps}ms`);
+    } catch (err: any) {
+      this.logger.error(`[Identity Plugin] Dependency validation failed: ${err.message}`);
+      throw err;
+    }
+
+    const startUserResources = Date.now();
+    await this._createUserManagedResources();
+    this.logger.debug(`[Identity Plugin] _createUserManagedResources() took ${Date.now() - startUserResources}ms`);
+
+    const startOAuth2Resources = Date.now();
+    await this._createOAuth2Resources();
+    this.logger.debug(`[Identity Plugin] _createOAuth2Resources() took ${Date.now() - startOAuth2Resources}ms`);
+
+    const startOAuth2Server = Date.now();
+    await this._initializeOAuth2Server();
+    this.logger.debug(`[Identity Plugin] _initializeOAuth2Server() took ${Date.now() - startOAuth2Server}ms`);
+
+    const startSessionManager = Date.now();
+    await this._initializeSessionManager();
+    this.logger.debug(`[Identity Plugin] _initializeSessionManager() took ${Date.now() - startSessionManager}ms`);
+
+    const startEmailService = Date.now();
+    await this._initializeEmailService();
+    this.logger.debug(`[Identity Plugin] _initializeEmailService() took ${Date.now() - startEmailService}ms`);
+
+    const startFailbanManager = Date.now();
+    await this._initializeFailbanManager();
+    this.logger.debug(`[Identity Plugin] _initializeFailbanManager() took ${Date.now() - startFailbanManager}ms`);
+
+    const startAuditPlugin = Date.now();
+    await this._initializeAuditPlugin();
+    this.logger.debug(`[Identity Plugin] _initializeAuditPlugin() took ${Date.now() - startAuditPlugin}ms`);
+
+    const startMFAManager = Date.now();
+    await this._initializeMFAManager();
+    this.logger.debug(`[Identity Plugin] _initializeMFAManager() took ${Date.now() - startMFAManager}ms`);
+
+    const startAuthDrivers = Date.now();
+    await this._initializeAuthDrivers();
+    this.logger.debug(`[Identity Plugin] _initializeAuthDrivers() took ${Date.now() - startAuthDrivers}ms`);
+
+    const startOnboarding = Date.now();
+    await this._runOnboarding();
+    this.logger.debug(`[Identity Plugin] _runOnboarding() took ${Date.now() - startOnboarding}ms`);
+
+    this._exposeIntegrationMetadata();
+
+    if (this.config.logLevel) {
+      this.logger.info('[Identity Plugin] Installed successfully');
+    }
+    this.logger.debug(`[Identity Plugin] onInstall() END ${Date.now()}`);
+  }
+
+  private _exposeIntegrationMetadata(): void {
+    if (!this.database.pluginRegistry) {
+      this.database.pluginRegistry = {};
+    }
+
+    if (!this.database.pluginRegistry.identity) {
+      this.database.pluginRegistry.identity = this as any;
+    }
+
+    Object.defineProperty(this, 'integration', {
+      get: () => this.getIntegrationMetadata(),
+      enumerable: true,
+      configurable: false
+    });
+
+    Object.defineProperty(this, 'resources', {
+      get: () => ({
+        users: this.usersResource,
+        tenants: this.tenantsResource,
+        clients: this.clientsResource
+      }),
+      enumerable: true,
+      configurable: false
+    });
+  }
+
+  private async _createOAuth2Resources(): Promise<void> {
+    this.logger.debug(`[Identity Plugin] _createOAuth2Resources() START ${Date.now()}`);
+
+    const names = this.internalResourceNames;
+
+    const [okKeys, errKeys, keysResource] = await tryFn(() =>
+      this.database.createResource({
+        name: names.oauthKeys,
+        attributes: {
+          kid: 'string|required',
+          publicKey: 'string|required',
+          privateKey: 'secret|required',
+          algorithm: 'string|default:RS256',
+          use: 'string|default:sig',
+          active: 'boolean|default:true',
+          createdAt: 'string|optional'
+        },
+        behavior: 'body-overflow',
+        timestamps: true,
+        createdBy: 'IdentityPlugin'
+      })
+    );
+
+    if (okKeys) {
+      this.oauth2KeysResource = keysResource as unknown as Resource;
+      if (this.config.logLevel) {
+        this.logger.info(`[Identity Plugin] Created ${names.oauthKeys} resource`);
+      }
+    } else if (this.database.resources[names.oauthKeys]) {
+      this.oauth2KeysResource = (this.database.resources[names.oauthKeys] ?? null) as Resource | null;
+      if (this.config.logLevel) {
+        this.logger.info(`[Identity Plugin] Using existing ${names.oauthKeys} resource`);
+      }
+    } else {
+      throw errKeys;
+    }
+
+    const [okCodes, errCodes, codesResource] = await tryFn(() =>
+      this.database.createResource({
+        name: names.authCodes,
+        attributes: {
+          code: 'string|required',
+          clientId: 'string|required',
+          userId: 'string|required',
+          redirectUri: 'string|required',
+          scope: 'string|optional',
+          expiresAt: 'string|required',
+          used: 'boolean|default:false',
+          codeChallenge: 'string|optional',
+          codeChallengeMethod: 'string|optional',
+          createdAt: 'string|optional'
+        },
+        behavior: 'body-overflow',
+        timestamps: true,
+        createdBy: 'IdentityPlugin'
+      })
+    );
+
+    if (okCodes) {
+      this.oauth2AuthCodesResource = codesResource as unknown as Resource;
+      if (this.config.logLevel) {
+        this.logger.info(`[Identity Plugin] Created ${names.authCodes} resource`);
+      }
+    } else if (this.database.resources[names.authCodes]) {
+      this.oauth2AuthCodesResource = (this.database.resources[names.authCodes] ?? null) as Resource | null;
+      if (this.config.logLevel) {
+        this.logger.info(`[Identity Plugin] Using existing ${names.authCodes} resource`);
+      }
+    } else {
+      throw errCodes;
+    }
+
+    const [okSessions, errSessions, sessionsResource] = await tryFn(() =>
+      this.database.createResource({
+        name: names.sessions,
+        attributes: {
+          userId: 'string|required',
+          expiresAt: 'string|required',
+          ipAddress: 'ip4|optional',
+          userAgent: 'string|optional',
+          metadata: 'object|optional',
+          createdAt: 'string|optional'
+        },
+        behavior: 'body-overflow',
+        timestamps: true,
+        createdBy: 'IdentityPlugin'
+      })
+    );
+
+    if (okSessions) {
+      this.sessionsResource = sessionsResource as unknown as Resource;
+      if (this.config.logLevel) {
+        this.logger.info(`[Identity Plugin] Created ${names.sessions} resource`);
+      }
+    } else if (this.database.resources[names.sessions]) {
+      this.sessionsResource = (this.database.resources[names.sessions] ?? null) as Resource | null;
+      if (this.config.logLevel) {
+        this.logger.info(`[Identity Plugin] Using existing ${names.sessions} resource`);
+      }
+    } else {
+      throw errSessions;
+    }
+
+    const [okResetTokens, errResetTokens, resetTokensResource] = await tryFn(() =>
+      this.database.createResource({
+        name: names.passwordResetTokens,
+        attributes: {
+          userId: 'string|required',
+          token: 'string|required',
+          expiresAt: 'string|required',
+          used: 'boolean|default:false',
+          createdAt: 'string|optional'
+        },
+        behavior: 'body-overflow',
+        timestamps: true,
+        createdBy: 'IdentityPlugin'
+      })
+    );
+
+    if (okResetTokens) {
+      this.passwordResetTokensResource = resetTokensResource as unknown as Resource;
+      if (this.config.logLevel) {
+        this.logger.info(`[Identity Plugin] Created ${names.passwordResetTokens} resource`);
+      }
+    } else if (this.database.resources[names.passwordResetTokens]) {
+      this.passwordResetTokensResource = (this.database.resources[names.passwordResetTokens] ?? null) as Resource | null;
+      if (this.config.logLevel) {
+        this.logger.info(`[Identity Plugin] Using existing ${names.passwordResetTokens} resource`);
+      }
+    } else {
+      throw errResetTokens;
+    }
+
+    if (this.config.mfa.enabled) {
+      const [okMFA, errMFA, mfaResource] = await tryFn(() =>
+        this.database.createResource({
+          name: names.mfaDevices,
+          attributes: {
+            userId: 'string|required',
+            type: 'string|required',
+            secret: 'secret|required',
+            verified: 'boolean|default:false',
+            backupCodes: 'array|items:string',
+            enrolledAt: 'string',
+            lastUsedAt: 'string|optional',
+            deviceName: 'string|optional',
+            metadata: 'object|optional'
+          },
+          behavior: 'body-overflow',
+          timestamps: true,
+          partitions: {
+            byUser: {
+              fields: { userId: 'string' }
+            }
+          },
+          createdBy: 'IdentityPlugin'
+        })
+      );
+
+      if (okMFA) {
+        this.mfaDevicesResource = mfaResource as unknown as Resource;
+        if (this.config.logLevel) {
+          this.logger.info(`[Identity Plugin] Created ${names.mfaDevices} resource`);
+        }
+      } else if (this.database.resources[names.mfaDevices]) {
+        this.mfaDevicesResource = (this.database.resources[names.mfaDevices] ?? null) as Resource | null;
+        if (this.config.logLevel) {
+          this.logger.info(`[Identity Plugin] Using existing ${names.mfaDevices} resource`);
+        }
+      } else {
+        this.logger.warn(`[Identity Plugin] MFA enabled but failed to create ${names.mfaDevices} resource: ${errMFA?.message}`);
+      }
+    }
+  }
+
+  private async _createUserManagedResources(): Promise<void> {
+    this.logger.debug(`[Identity Plugin] _createUserManagedResources() START ${Date.now()}`);
+
+    const usersConfig = this.config.resources.users as any;
+
+    const usersBaseConfig = {
+      attributes: BASE_USER_ATTRIBUTES,
+      behavior: 'body-overflow',
+      timestamps: true
+    };
+
+    const usersMergedConfig = mergeResourceConfig(
+      usersBaseConfig,
+      usersConfig.userConfig,
+      'users'
+    );
+
+    usersConfig.mergedConfig = usersMergedConfig;
+
+    const [okUsers, errUsers, usersResource] = await tryFn(() =>
+      this.database.createResource(usersMergedConfig as any)
+    );
+
+    if (okUsers) {
+      this.usersResource = usersResource as unknown as Resource;
+      if (this.config.logLevel) {
+        this.logger.info(`[Identity Plugin] Created ${usersMergedConfig.name} resource with merged config`);
+      }
+    } else if (this.database.resources[usersMergedConfig.name!]) {
+      this.usersResource = (this.database.resources[usersMergedConfig.name!] ?? null) as Resource | null;
+      if (this.config.logLevel) {
+        this.logger.info(`[Identity Plugin] Using existing ${usersMergedConfig.name} resource`);
+      }
+    } else {
+      throw errUsers;
+    }
+
+    const tenantsConfig = this.config.resources.tenants as any;
+
+    const tenantsBaseConfig = {
+      attributes: BASE_TENANT_ATTRIBUTES,
+      behavior: 'body-overflow',
+      timestamps: true
+    };
+
+    const tenantsMergedConfig = mergeResourceConfig(
+      tenantsBaseConfig,
+      tenantsConfig.userConfig,
+      'tenants'
+    );
+
+    tenantsConfig.mergedConfig = tenantsMergedConfig;
+
+    const [okTenants, errTenants, tenantsResource] = await tryFn(() =>
+      this.database.createResource(tenantsMergedConfig as any)
+    );
+
+    if (okTenants) {
+      this.tenantsResource = tenantsResource as unknown as Resource;
+      if (this.config.logLevel) {
+        this.logger.info(`[Identity Plugin] Created ${tenantsMergedConfig.name} resource with merged config`);
+      }
+    } else if (this.database.resources[tenantsMergedConfig.name!]) {
+      this.tenantsResource = (this.database.resources[tenantsMergedConfig.name!] ?? null) as Resource | null;
+      if (this.config.logLevel) {
+        this.logger.info(`[Identity Plugin] Using existing ${tenantsMergedConfig.name} resource`);
+      }
+    } else {
+      throw errTenants;
+    }
+
+    const clientsConfig = this.config.resources.clients as any;
+
+    const clientsBaseConfig = {
+      attributes: BASE_CLIENT_ATTRIBUTES,
+      behavior: 'body-overflow',
+      timestamps: true
+    };
+
+    const clientsMergedConfig = mergeResourceConfig(
+      clientsBaseConfig,
+      clientsConfig.userConfig,
+      'clients'
+    );
+
+    clientsConfig.mergedConfig = clientsMergedConfig;
+
+    const [okClients, errClients, clientsResource] = await tryFn(() =>
+      this.database.createResource(clientsMergedConfig as any)
+    );
+
+    if (okClients) {
+      this.clientsResource = clientsResource as unknown as Resource;
+      if (this.config.logLevel) {
+        this.logger.info(`[Identity Plugin] Created ${clientsMergedConfig.name} resource with merged config`);
+      }
+    } else if (this.database.resources[clientsMergedConfig.name!]) {
+      this.clientsResource = (this.database.resources[clientsMergedConfig.name!] ?? null) as Resource | null;
+      if (this.config.logLevel) {
+        this.logger.info(`[Identity Plugin] Using existing ${clientsMergedConfig.name} resource`);
+      }
+    } else {
+      throw errClients;
+    }
+  }
+
+  private async _initializeOAuth2Server(): Promise<void> {
+    this.oauth2Server = new OAuth2Server({
+      issuer: this.config.issuer,
+      keyResource: this.oauth2KeysResource!,
+      userResource: this.usersResource!,
+      clientResource: this.clientsResource!,
+      authCodeResource: this.oauth2AuthCodesResource!,
+      supportedScopes: this.config.supportedScopes,
+      supportedGrantTypes: this.config.supportedGrantTypes,
+      supportedResponseTypes: this.config.supportedResponseTypes,
+      accessTokenExpiry: this.config.accessTokenExpiry,
+      idTokenExpiry: this.config.idTokenExpiry,
+      refreshTokenExpiry: this.config.refreshTokenExpiry,
+      authCodeExpiry: this.config.authCodeExpiry
+    });
+
+    await this.oauth2Server.initialize();
+    this.oauth2Server.setIdentityPlugin(this as any);
+    this.keyManager = (this.oauth2Server as any).keyManager;
+
+    if (this.config.logLevel) {
+      this.logger.info('[Identity Plugin] OAuth2 Server initialized');
+      this.logger.info(`[Identity Plugin] Issuer: ${this.config.issuer}`);
+      this.logger.info(`[Identity Plugin] Supported scopes: ${this.config.supportedScopes.join(', ')}`);
+      this.logger.info(`[Identity Plugin] Supported grant types: ${this.config.supportedGrantTypes.join(', ')}`);
+    }
+  }
+
+  private async _initializeSessionManager(): Promise<void> {
+    const { SessionManager } = await import('./session-manager.js');
+
+    this.sessionManager = new SessionManager({
+      sessionResource: this.sessionsResource!,
+      config: this.config.session
+    });
+
+    if (this.config.logLevel) {
+      this.logger.info('[Identity Plugin] Session Manager initialized');
+      this.logger.info(`[Identity Plugin] Session expiry: ${this.config.session.sessionExpiry}`);
+      this.logger.info(`[Identity Plugin] Cookie name: ${this.config.session.cookieName}`);
+    }
+  }
+
+  private async _initializeEmailService(): Promise<void> {
+    const { EmailService } = await import('./email-service.js');
+
+    this.emailService = new EmailService({
+      enabled: this.config.email.enabled,
+      from: this.config.email.from,
+      replyTo: this.config.email.replyTo,
+      smtp: this.config.email.smtp,
+      templates: this.config.email.templates,
+      logLevel: this.config.logLevel
+    });
+
+    if (this.config.logLevel) {
+      this.logger.info('[Identity Plugin] Email Service initialized');
+      this.logger.info(`[Identity Plugin] Email enabled: ${this.config.email.enabled}`);
+      if (this.config.email.enabled) {
+        this.logger.info(`[Identity Plugin] SMTP host: ${this.config.email.smtp.host}:${this.config.email.smtp.port}`);
+        this.logger.info(`[Identity Plugin] From address: ${this.config.email.from}`);
+      }
+    }
+  }
+
+  private async _initializeFailbanManager(): Promise<void> {
+    if (!this.config.failban.enabled) {
+      if (this.config.logLevel) {
+        this.logger.info('[Identity Plugin] Failban disabled');
+      }
+      return;
+    }
+
+    const { FailbanManager } = await import('../../concerns/failban-manager.js');
+
+    this.failbanManager = new FailbanManager({
+      database: this.database as any,
+      enabled: this.config.failban.enabled,
+      maxViolations: this.config.failban.maxViolations,
+      violationWindow: this.config.failban.violationWindow,
+      banDuration: this.config.failban.banDuration,
+      whitelist: this.config.failban.whitelist,
+      blacklist: this.config.failban.blacklist,
+      persistViolations: this.config.failban.persistViolations,
+      logLevel: this.config.logLevel as any,
+      geo: this.config.failban.geo
+    });
+
+    await this.failbanManager.initialize();
+
+    if (this.config.logLevel) {
+      this.logger.info('[Identity Plugin] Failban Manager initialized');
+      this.logger.info(`[Identity Plugin] Max violations: ${this.config.failban.maxViolations}`);
+      this.logger.info(`[Identity Plugin] Violation window: ${this.config.failban.violationWindow}ms`);
+      this.logger.info(`[Identity Plugin] Ban duration: ${this.config.failban.banDuration}ms`);
+      this.logger.info(`[Identity Plugin] Protected endpoints: login=${this.config.failban.endpoints.login}, token=${this.config.failban.endpoints.token}, register=${this.config.failban.endpoints.register}`);
+      if (this.config.failban.geo.enabled) {
+        this.logger.info(`[Identity Plugin] GeoIP enabled`);
+        this.logger.info(`[Identity Plugin] Allowed countries: ${this.config.failban.geo.allowedCountries.join(', ') || 'all'}`);
+        this.logger.info(`[Identity Plugin] Blocked countries: ${this.config.failban.geo.blockedCountries.join(', ') || 'none'}`);
+      }
+    }
+  }
+
+  private async _initializeAuditPlugin(): Promise<void> {
+    if (!this.config.audit.enabled) {
+      if (this.config.logLevel) {
+        this.logger.info('[Identity Plugin] Audit logging disabled');
+      }
+      return;
+    }
+
+    const { AuditPlugin } = await import('../audit.plugin.js');
+
+    this.auditPlugin = new AuditPlugin({
+      includeData: this.config.audit.includeData,
+      includePartitions: this.config.audit.includePartitions,
+      maxDataSize: this.config.audit.maxDataSize
+    } as any);
+
+    await this.database.usePlugin(this.auditPlugin as any);
+
+    if (this.config.logLevel) {
+      this.logger.info('[Identity Plugin] Audit Plugin initialized');
+      this.logger.info(`[Identity Plugin] Auditing resources: ${this.config.audit.resources.join(', ')}`);
+      this.logger.info(`[Identity Plugin] Include data: ${this.config.audit.includeData}`);
+      this.logger.info(`[Identity Plugin] Max data size: ${this.config.audit.maxDataSize} bytes`);
+    }
+  }
+
+  private async _logAuditEvent(event: string, data: Record<string, any> = {}): Promise<void> {
+    if (!this.config.audit.enabled || !this.auditPlugin) {
+      return;
+    }
+
+    if (!this.config.audit.events.includes(event)) {
+      return;
+    }
+
+    try {
+      await (this.auditPlugin as any).logCustomEvent(event, data);
+
+      if (this.config.logLevel) {
+        this.logger.info(`[Audit] ${event}: ${JSON.stringify(data)}`);
+      }
+    } catch (error: any) {
+      this.logger.error(`[Audit] Failed to log event ${event}: ${error.message}`);
+    }
+  }
+
+  private async _initializeMFAManager(): Promise<void> {
+    if (!this.config.mfa.enabled) {
+      if (this.config.logLevel) {
+        this.logger.info('[Identity Plugin] MFA disabled');
+      }
+      return;
+    }
+
+    const { MFAManager } = await import('./concerns/mfa-manager.js');
+
+    this.mfaManager = new MFAManager({
+      issuer: this.config.mfa.issuer,
+      algorithm: this.config.mfa.algorithm,
+      digits: this.config.mfa.digits,
+      period: this.config.mfa.period,
+      window: this.config.mfa.window,
+      backupCodesCount: this.config.mfa.backupCodesCount,
+      backupCodeLength: this.config.mfa.backupCodeLength
+    });
+
+    await this.mfaManager.initialize();
+
+    if (this.config.logLevel) {
+      this.logger.info('[Identity Plugin] MFA Manager initialized');
+      this.logger.info(`[Identity Plugin] Issuer: ${this.config.mfa.issuer}`);
+      this.logger.info(`[Identity Plugin] Algorithm: ${this.config.mfa.algorithm}`);
+      this.logger.info(`[Identity Plugin] Digits: ${this.config.mfa.digits}`);
+      this.logger.info(`[Identity Plugin] Period: ${this.config.mfa.period}s`);
+      this.logger.info(`[Identity Plugin] Required: ${this.config.mfa.required}`);
+    }
+  }
+
+  private async _initializeAuthDrivers(): Promise<void> {
+    const driverConfig = this.config.authDrivers;
+
+    if (driverConfig === false) {
+      this.authDrivers = new Map();
+      this.authDriverInstances = [];
+      return;
+    }
+    const disableBuiltIns = this._isPlainObject(driverConfig) && (driverConfig as AuthDriversConfig).disableBuiltIns === true;
+
+    const context: AuthDriverContext = {
+      database: this.database,
+      config: this.config,
+      resources: {
+        users: this.usersResource!,
+        tenants: this.tenantsResource!,
+        clients: this.clientsResource!
+      },
+      helpers: {
+        password: {
+          hash: hashPassword,
+          verify: verifyPassword
+        }
+      }
+    };
+
+    const drivers: AuthDriver[] = [];
+
+    if (!disableBuiltIns) {
+      const builtInOptions = this._extractBuiltInDriverOptions(driverConfig as AuthDriversConfig);
+      drivers.push(...createBuiltInAuthDrivers(builtInOptions));
+    }
+
+    drivers.push(...this._collectCustomAuthDrivers(driverConfig as AuthDriversConfig));
+
+    if (!drivers.length) {
+      this.authDrivers = new Map();
+      this.authDriverInstances = [];
+      return;
+    }
+
+    this.authDrivers = new Map();
+    this.authDriverInstances = [];
+
+    for (const driver of drivers) {
+      if (!driver || typeof driver.initialize !== 'function') {
+        throw new PluginError('Auth drivers must implement initialize(context)', {
+          pluginName: 'IdentityPlugin',
+          operation: 'initializeAuthDrivers',
+          statusCode: 500,
+          retriable: false,
+          suggestion: 'Ensure custom auth drivers extend AuthDriver and implement initialize(context).'
+        });
+      }
+
+      try {
+        await driver.initialize(context);
+      } catch (error: any) {
+        const driverName = driver.name || driver.constructor?.name || 'UnknownDriver';
+        throw new PluginError(`Failed to initialize auth driver "${driverName}": ${error.message}`, {
+          pluginName: 'IdentityPlugin',
+          operation: 'initializeAuthDrivers',
+          statusCode: 500,
+          retriable: false,
+          suggestion: 'Review driver configuration and ensure required dependencies are available.',
+          cause: error,
+          metadata: { driverName }
+        });
+      }
+
+      const supportedTypes = Array.isArray(driver.supportedTypes) && driver.supportedTypes.length > 0
+        ? driver.supportedTypes
+        : driver.name
+          ? [driver.name]
+          : [];
+
+      if (!supportedTypes.length) {
+        const driverName = driver.constructor?.name || 'AuthDriver';
+        throw new PluginError(`Auth driver "${driverName}" must declare supportedTypes or name`, {
+          pluginName: 'IdentityPlugin',
+          operation: 'registerAuthDriver',
+          statusCode: 500,
+          retriable: false,
+          suggestion: 'Set driver.supportedTypes = ["password"] or provide a name property to map grants.',
+          metadata: { driverName }
+        });
+      }
+
+      for (const type of supportedTypes) {
+        if (!type) continue;
+        if (this.authDrivers.has(type)) {
+          const existingDriver = this.authDrivers.get(type)!;
+          const existingName = existingDriver?.name || existingDriver?.constructor?.name || 'AuthDriver';
+          const newName = driver.name || driver.constructor?.name || 'AuthDriver';
+          throw new PluginError(`Duplicate auth driver registration for type "${type}"`, {
+            pluginName: 'IdentityPlugin',
+            operation: 'registerAuthDriver',
+            statusCode: 409,
+            retriable: false,
+            suggestion: 'Remove duplicate registrations or use distinct driver types for each grant.',
+            metadata: { type, existingDriver: existingName, newDriver: newName }
+          });
+        }
+        this.authDrivers.set(type, driver);
+      }
+
+      this.authDriverInstances.push(driver);
+    }
+  }
+
+  getAuthDriver(type: string): AuthDriver | undefined {
+    return this.authDrivers.get(type);
+  }
+
+  private _sanitizeAuthSubject(subject: any): any {
+    if (!subject || typeof subject !== 'object') {
+      return subject;
+    }
+
+    const sensitiveFields = [
+      'password',
+      'passwordHash',
+      'password_hash',
+      'salt',
+      'secret',
+      'secrets',
+      'clientSecret',
+      'mfaSecret',
+      'totpSecret',
+      'backupCodes'
+    ];
+
+    const sanitized = { ...subject };
+    for (const field of sensitiveFields) {
+      if (sanitized[field] !== undefined) {
+        delete sanitized[field];
+      }
+    }
+
+    return sanitized;
+  }
+
+  async authenticateWithPassword(params: AuthenticateWithPasswordParams): Promise<AuthenticateWithPasswordResult> {
+    const { email, password, user } = params;
+    const driver = this.getAuthDriver('password');
+    if (!driver) {
+      return {
+        success: false,
+        error: 'password_driver_not_configured',
+        statusCode: 500
+      };
+    }
+
+    const result = await driver.authenticate({
+      type: 'password',
+      email,
+      password,
+      user
+    });
+
+    if (result?.success && result.user) {
+      return {
+        ...result,
+        user: this._sanitizeAuthSubject(result.user)
+      };
+    }
+
+    return result;
+  }
+
+  private _collectCustomAuthDrivers(config: AuthDriversConfig | null | undefined): AuthDriver[] {
+    const candidates: AuthDriver[] = [];
+
+    const addCandidate = (candidate: any): void => {
+      if (!candidate) return;
+
+      if (Array.isArray(candidate)) {
+        if (candidate.length > 0 && typeof candidate[0] === 'function') {
+          const [Ctor, options] = candidate;
+          const instance = new Ctor(options);
+          if (!(instance instanceof AuthDriver)) {
+            throw new PluginError('Custom auth driver constructors must extend AuthDriver', {
+              pluginName: 'IdentityPlugin',
+              operation: 'collectCustomAuthDrivers',
+              statusCode: 500,
+              retriable: false,
+              suggestion: 'Extend AuthDriver to ensure consistent interface for initialize/authenticate.'
+            });
+          }
+          candidates.push(instance);
+          return;
+        }
+        for (const item of candidate) {
+          addCandidate(item);
+        }
+        return;
+      }
+
+      if (candidate instanceof AuthDriver) {
+        candidates.push(candidate);
+        return;
+      }
+
+      if (typeof candidate === 'function') {
+        const instance = new candidate();
+        if (!(instance instanceof AuthDriver)) {
+          throw new PluginError('Custom auth driver constructors must extend AuthDriver', {
+            pluginName: 'IdentityPlugin',
+            operation: 'collectCustomAuthDrivers',
+            statusCode: 500,
+            retriable: false,
+            suggestion: 'Update the constructor to extend AuthDriver before registering it.'
+          });
+        }
+        candidates.push(instance);
+        return;
+      }
+
+      if (candidate && typeof candidate === 'object' &&
+        typeof candidate.initialize === 'function' &&
+        typeof candidate.authenticate === 'function'
+      ) {
+        candidates.push(candidate);
+        return;
+      }
+
+      throw new PluginError('Invalid auth driver provided. Drivers must extend AuthDriver.', {
+        pluginName: 'IdentityPlugin',
+        operation: 'collectCustomAuthDrivers',
+        statusCode: 400,
+        retriable: false,
+        suggestion: 'Provide an AuthDriver instance, subclass, or plain object with initialize/authenticate methods.'
+      });
+    };
+
+    if (Array.isArray(config)) {
+      addCandidate(config);
+      return candidates;
+    }
+
+    if (this._isPlainObject(config)) {
+      addCandidate(config!.drivers);
+      addCandidate(config!.custom);
+      addCandidate(config!.customDrivers);
+    }
+
+    return candidates;
+  }
+
+  private _extractBuiltInDriverOptions(config: AuthDriversConfig | null | undefined): Record<string, any> {
+    if (!this._isPlainObject(config)) {
+      return {};
+    }
+
+    if (this._isPlainObject(config!.builtIns)) {
+      return config!.builtIns!;
+    }
+
+    const {
+      drivers,
+      custom,
+      customDrivers,
+      disableBuiltIns,
+      ...builtInOptions
+    } = config!;
+
+    return builtInOptions;
+  }
+
+  private _isPlainObject(value: any): boolean {
+    return value != null && typeof value === 'object' && !Array.isArray(value);
+  }
+
+  override async onStart(): Promise<void> {
+    if (this.config.logLevel) {
+      this.logger.info('[Identity Plugin] Starting server...');
+    }
+
+    const { IdentityServer } = await import('./server.js');
+
+    this.server = new IdentityServer({
+      port: this.config.port,
+      host: this.config.host,
+      logLevel: this.config.logLevel,
+      issuer: this.config.issuer,
+      oauth2Server: this.oauth2Server!,
+      sessionManager: this.sessionManager!,
+      usersResource: this.usersResource! as any,
+      identityPlugin: this as any,
+      failbanManager: this.failbanManager as any,
+      failbanConfig: this.config.failban,
+      accountLockoutConfig: this.config.accountLockout as any,
+      cors: this.config.cors as any,
+      security: this.config.security,
+      logging: this.config.logging,
+      logger: this.logger
+    } as any);
+
+    await this.server.start();
+
+    this.emit('plugin.started', {
+      port: this.config.port,
+      host: this.config.host,
+      issuer: this.config.issuer
+    });
+  }
+
+  override async onStop(): Promise<void> {
+    if (this.config.logLevel) {
+      this.logger.info('[Identity Plugin] Stopping server...');
+    }
+
+    if (this.server) {
+      await this.server.stop();
+      this.server = null;
+    }
+
+    if (this.sessionManager) {
+      this.sessionManager.stopCleanup();
+    }
+
+    if (this.emailService) {
+      await this.emailService.close();
+    }
+
+    if (this.failbanManager) {
+      await this.failbanManager.cleanup();
+    }
+
+    this.emit('plugin.stopped');
+  }
+
+  override async onUninstall(options: { purgeData?: boolean } = {}): Promise<void> {
+    const { purgeData = false } = options;
+
+    await this.onStop();
+
+    if (purgeData) {
+      const resourcesToDelete = new Set([
+        this.internalResourceNames.oauthKeys,
+        this.internalResourceNames.authCodes,
+        this.internalResourceNames.sessions,
+        this.internalResourceNames.passwordResetTokens,
+        this.internalResourceNames.mfaDevices,
+        'plg_oauth_clients'
+      ]);
+
+      for (const resourceName of resourcesToDelete) {
+        const [ok] = await tryFn(() => (this.database as any).deleteResource(resourceName));
+        if (ok && this.config.logLevel) {
+          this.logger.info(`[Identity Plugin] Deleted ${resourceName} resource`);
+        }
+      }
+    }
+
+    if (this.config.logLevel) {
+      this.logger.info('[Identity Plugin] Uninstalled successfully');
+    }
+  }
+
+  getServerInfo(): ServerInfo {
+    return this.server ? this.server.getInfo() : { isRunning: false };
+  }
+
+  getOAuth2Server(): OAuth2Server | null {
+    return this.oauth2Server;
+  }
+
+  async registerOAuthClient(options: RegisterOAuthClientOptions): Promise<RegisterOAuthClientResult> {
+    if (!this.clientsResource) {
+      throw new PluginError('IdentityPlugin clients resource not initialized', {
+        pluginName: 'IdentityPlugin',
+        operation: 'registerOAuthClient',
+        statusCode: 500,
+        retriable: false,
+        suggestion: 'Ensure IdentityPlugin resources.clients is configured before registering OAuth clients.'
+      });
+    }
+
+    const {
+      name,
+      redirectUris = [],
+      allowedScopes = this.config.supportedScopes,
+      grantTypes = ['authorization_code', 'refresh_token'],
+      responseTypes = ['code'],
+      tokenEndpointAuthMethod = 'client_secret_basic',
+      audiences = [],
+      metadata = {}
+    } = options;
+
+    if (!Array.isArray(redirectUris) || redirectUris.length === 0) {
+      throw new PluginError('registerOAuthClient requires at least one redirect URI', {
+        pluginName: 'IdentityPlugin',
+        operation: 'registerOAuthClient',
+        statusCode: 400,
+        retriable: false,
+        suggestion: 'Provide redirectUris when calling registerOAuthClient().'
+      });
+    }
+
+    const clientId = options.clientId || idGenerator();
+    const clientSecret = options.clientSecret || `${idGenerator()}${idGenerator()}`;
+
+    const clientRecord = {
+      clientId,
+      clientSecret,
+      name: name || `API Client ${clientId}`,
+      redirectUris,
+      allowedScopes,
+      grantTypes,
+      responseTypes,
+      tokenEndpointAuthMethod,
+      metadata: {
+        ...(Array.isArray(audiences) && audiences.length > 0 ? { audiences } : {}),
+        ...metadata
+      },
+      active: true
+    };
+
+    const client = await this.clientsResource.insert(clientRecord);
+
+    if ((this.auditPlugin as any)?.log) {
+      await (this.auditPlugin as any).log({
+        action: 'oauth_client_registered',
+        resource: 'oauth_clients',
+        resourceId: client.id,
+        metadata: {
+          clientId,
+          clientName: clientRecord.name,
+          grantTypes,
+          redirectUris,
+          createdAt: new Date().toISOString()
+        }
+      });
+    }
+
+    return {
+      clientId,
+      clientSecret,
+      redirectUris,
+      allowedScopes,
+      grantTypes,
+      responseTypes
+    };
+  }
+
+  private async _runOnboarding(): Promise<void> {
+    if (!this.config.onboarding.enabled) {
+      if (this.config.logLevel) {
+        this.logger.info('[Onboarding] Disabled via config');
+      }
+      return;
+    }
+
+    (this.onboardingManager as any).db = this.database;
+    (this.onboardingManager as any).resources = {
+      users: this.usersResource!,
+      tenants: this.tenantsResource!,
+      clients: this.clientsResource!
+    };
+    (this.onboardingManager as any).auditPlugin = this.auditPlugin;
+
+    const firstRun = await this.onboardingManager.detectFirstRun();
+
+    if (!firstRun && !this.config.onboarding.force) {
+      if (this.config.logLevel) {
+        this.logger.info('[Onboarding] Admin exists, skipping onboarding');
+      }
+      return;
+    }
+
+    const mode = this.config.onboarding.mode;
+
+    if (this.config.logLevel) {
+      this.logger.info(`[Onboarding] Starting first-run setup (mode: ${mode})`);
+    }
+
+    try {
+      switch (mode) {
+        case 'interactive':
+          await this.onboardingManager.runInteractiveMode();
+          break;
+
+        case 'env':
+          await this.onboardingManager.runEnvMode();
+          break;
+
+        case 'config':
+          await this.onboardingManager.runConfigMode();
+          break;
+
+        case 'callback':
+          await this.onboardingManager.runCallbackMode();
+          break;
+
+        case 'disabled':
+          if (this.config.logLevel) {
+            this.logger.warn('[Onboarding] Disabled - admin account must be created manually');
+          }
+          break;
+
+        default:
+          throw new PluginError(`Unknown onboarding mode: ${mode}`, {
+            pluginName: 'IdentityPlugin',
+            operation: '_runOnboarding',
+            statusCode: 400,
+            retriable: false,
+            suggestion: 'Use one of: interactive, env, config, callback, disabled'
+          });
+      }
+
+      if (mode !== 'disabled' && this.config.logLevel) {
+        this.logger.info('[Onboarding] Setup complete');
+      }
+    } catch (error: any) {
+      this.logger?.error('[Onboarding] Setup failed:', error);
+      throw error;
+    }
+  }
+
+  async getOnboardingStatus(): Promise<OnboardingStatus> {
+    if (!this.onboardingManager) {
+      this.logger.debug('[Identity Plugin] Onboarding manager not initialized in getOnboardingStatus');
+      return {
+        completed: false,
+        error: 'Onboarding manager not initialized'
+      };
+    }
+    const status = await this.onboardingManager.getOnboardingStatus();
+    this.logger.debug({ status }, '[Identity Plugin] getOnboardingStatus result');
+    return status;
+  }
+
+  async completeOnboarding(options: CompleteOnboardingOptions = {}): Promise<void> {
+    if (!this.onboardingManager) {
+      throw new PluginError('Onboarding manager not initialized', {
+        pluginName: 'IdentityPlugin',
+        operation: 'completeOnboarding',
+        statusCode: 500,
+        retriable: false
+      });
+    }
+
+    if (options.admin) {
+      await this.onboardingManager.createAdmin(options.admin);
+    }
+
+    if (options.clients) {
+      for (const client of options.clients) {
+        await this.onboardingManager.createClient(client as any);
+      }
+    }
+
+    await this.onboardingManager.markOnboardingComplete({
+      adminEmail: options.admin?.email,
+      clientsCreated: options.clients?.length || 0
+    });
+  }
+
+  async markOnboardingComplete(): Promise<void> {
+    if (!this.onboardingManager) {
+      throw new PluginError('Onboarding manager not initialized', {
+        pluginName: 'IdentityPlugin',
+        operation: 'markOnboardingComplete',
+        statusCode: 500,
+        retriable: false
+      });
+    }
+    await this.onboardingManager.markOnboardingComplete();
+  }
+
+  getIntegrationMetadata(): IntegrationMetadata {
+    const baseUrl = this.config.issuer;
+
+    return {
+      version: 1,
+      issuedAt: new Date().toISOString(),
+      cacheTtl: 3600,
+
+      issuer: baseUrl,
+      discoveryUrl: `${baseUrl}/.well-known/openid-configuration`,
+      jwksUrl: `${baseUrl}/.well-known/jwks.json`,
+      authorizationUrl: `${baseUrl}/oauth/authorize`,
+      tokenUrl: `${baseUrl}/oauth/token`,
+      userinfoUrl: `${baseUrl}/oauth/userinfo`,
+      introspectionUrl: `${baseUrl}/oauth/introspect`,
+      revocationUrl: `${baseUrl}/oauth/revoke`,
+
+      supportedScopes: this.config.supportedScopes,
+      supportedGrantTypes: this.config.supportedGrantTypes,
+      supportedResponseTypes: this.config.supportedResponseTypes,
+
+      resources: {
+        users: this.usersResource?.name || (this.config.resources.users as any).name,
+        tenants: this.tenantsResource?.name || (this.config.resources.tenants as any).name,
+        clients: this.clientsResource?.name || (this.config.resources.clients as any).name
+      },
+
+      clientRegistration: {
+        url: `${baseUrl}/oauth/register`,
+        supportedAuth: ['client_secret_post', 'client_secret_basic']
+      }
+    };
+  }
+}
+
+export default IdentityPlugin;

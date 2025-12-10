@@ -1,8 +1,8 @@
 # 💡 Usage Patterns & Real-World Scenarios
 
-**Prev:** [← Configuration](./configuration.md)
-**Next:** [Best Practices →](./best-practices.md)
-**Main:** [← Replicator Plugin](../README.md) | **All guides:** [Index](../README.md#-documentation-guides)
+**Prev:** [← Configuration](/plugins/replicator/guides/configuration.md)
+**Next:** [Best Practices →](/plugins/replicator/guides/best-practices.md)
+**Main:** [← Replicator Plugin](/plugins/replicator/README.md) | **All guides:** [Index](/plugins/replicator/README.md#-documentation-guides)
 
 > **In this guide:**
 > - 6 progressive patterns (Beginner → Advanced)
@@ -696,6 +696,6 @@ new ReplicatorPlugin({
 
 ---
 
-**Prev:** [← Configuration](./configuration.md)
-**Next:** [Best Practices →](./best-practices.md)
-**Main:** [← Replicator Plugin](../README.md)
+**Prev:** [← Configuration](/plugins/replicator/guides/configuration.md)
+**Next:** [Best Practices →](/plugins/replicator/guides/best-practices.md)
+**Main:** [← Replicator Plugin](/plugins/replicator/README.md)

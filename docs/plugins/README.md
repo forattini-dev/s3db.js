@@ -719,10 +719,10 @@ describe('MyPlugin Namespace Support', () => {
 
 ### Related Documentation
 
-- [ReconPlugin Namespace Implementation](./recon/namespace.md)
-- [Multi-Instance Example](../examples/e45-recon-multi-instance.js)
-- [Namespace Detection Example](../examples/e46-recon-namespace-detection.js)
-- [Custom Plugin Example](../examples/e47-namespace-concern-usage.js)
+- [ReconPlugin Namespace Implementation](/plugins/recon/namespace.md)
+- [Multi-Instance Example](/examples/e45-recon-multi-instance.js)
+- [Namespace Detection Example](/examples/e46-recon-namespace-detection.js)
+- [Custom Plugin Example](/examples/e47-namespace-concern-usage.js)
 
 ---
 
@@ -1470,7 +1470,7 @@ const report = await getPluginDependencyReport();
 console.log(report);
 ```
 
-**See also:** [Plugin Dependency Validation Example](../examples/e46-plugin-dependency-validation.js)
+**See also:** [Plugin Dependency Validation Example](/examples/e46-plugin-dependency-validation.js)
 
 ---
 
@@ -3316,18 +3316,18 @@ const db = new Database({
 
 Each plugin has comprehensive documentation:
 
-- [Cache Plugin](./cache.md) - Intelligent caching system
-- [Costs Plugin](./costs.md) - AWS S3 cost tracking
-- [Audit Plugin](./audit.md) - Comprehensive audit logging
-- [Metrics Plugin](./metrics.md) - Performance monitoring
-- [Backup Plugin](./backup.md) - Data backup and recovery
-- [Replicator Plugin](./replicator/) - Data replication
-- [FullText Plugin](./fulltext.md) - Full-text search
-- [Eventual Consistency Plugin](./eventual-consistency.md) - Event sourcing for numeric fields
-- [State Machine Plugin](./state-machine/) - Workflow management
-- [Scheduler Plugin](./scheduler/) - Job scheduling
-- [Queue Consumer Plugin](./queue-consumer.md) - Message processing
-- [S3Queue Plugin](./s3-queue/) - Distributed queue processing
+- [Cache Plugin](/plugins/cache/README.md) - Intelligent caching system
+- [Costs Plugin](/plugins/costs/README.md) - AWS S3 cost tracking
+- [Audit Plugin](/plugins/audit/README.md) - Comprehensive audit logging
+- [Metrics Plugin](/plugins/metrics/README.md) - Performance monitoring
+- [Backup Plugin](/plugins/backup/README.md) - Data backup and recovery
+- [Replicator Plugin](/plugins/replicator/README.md) - Data replication
+- [FullText Plugin](/plugins/fulltext/README.md) - Full-text search
+- [Eventual Consistency Plugin](/plugins/eventual-consistency/README.md) - Event sourcing for numeric fields
+- [State Machine Plugin](/plugins/state-machine/README.md) - Workflow management
+- [Scheduler Plugin](/plugins/scheduler/README.md) - Job scheduling
+- [Queue Consumer Plugin](/plugins/queue-consumer/README.md) - Message processing
+- [S3Queue Plugin](/plugins/s3-queue/README.md) - Distributed queue processing
 
 ### Testing Plugins
 
@@ -3430,20 +3430,20 @@ Each individual plugin file follows a consistent structure:
 
 For detailed information about namespace support:
 
-- **[Plugin Namespace API](./namespace.md)** - Complete API reference
-- **[Namespace Changes](./NAMESPACE-CHANGES.md)** - Pattern changes and migration guide
-- **[Namespace Tests](./NAMESPACE-TESTS.md)** - Test coverage documentation
-- **[ReconPlugin Namespace Example](./recon-namespace.md)** - Production implementation example
-- **[Multi-Instance Example](../examples/e45-recon-multi-instance.js)** - Running 3 instances simultaneously
-- **[Namespace Detection Example](../examples/e46-recon-namespace-detection.js)** - Automatic detection demo
-- **[Custom Plugin Example](../examples/e47-namespace-concern-usage.js)** - Implementing namespace support
+- **[Plugin Namespace API](/plugins/namespace.md)** - Complete API reference
+- **[Namespace Changes](/plugins/NAMESPACE-CHANGES.md)** - Pattern changes and migration guide
+- **[Namespace Tests](/plugins/NAMESPACE-TESTS.md)** - Test coverage documentation
+- **[ReconPlugin Namespace Example](/plugins/recon-namespace.md)** - Production implementation example
+- **[Multi-Instance Example](/examples/e45-recon-multi-instance.js)** - Running 3 instances simultaneously
+- **[Namespace Detection Example](/examples/e46-recon-namespace-detection.js)** - Automatic detection demo
+- **[Custom Plugin Example](/examples/e47-namespace-concern-usage.js)** - Implementing namespace support
 
 ### Community & Support
 
 - [GitHub Issues](https://github.com/s3db-js/s3db.js/issues) - Bug reports and feature requests
 - [Discussions](https://github.com/s3db-js/s3db.js/discussions) - Community discussions
-- [Plugin Development Guide](./plugin-development.md) - Detailed guide for creating custom plugins
-- [Plugin API Reference](./plugin-api.md) - Complete API documentation
+- [Plugin Development Guide](/plugins/plugin-development.md) - Detailed guide for creating custom plugins
+- [Plugin API Reference](/plugins/plugin-api.md) - Complete API documentation
 - [Community Plugin Registry](https://github.com/s3db-js/plugins) - Third-party plugins
 
 ---

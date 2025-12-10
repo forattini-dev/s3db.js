@@ -1,7 +1,7 @@
 # ✅ Best Practices, Troubleshooting & FAQ
 
 **Prev:** [Advanced](./advanced.md)
-**Main:** [README](../README.md) | **All guides:** [Index](../README.md#-documentation-index)
+**Main:** [README](/plugins/vector/README.md) | **All guides:** [Index](/plugins/vector/README.md#-documentation-index)
 
 > **In this guide:**
 > - 5 best practices with code examples

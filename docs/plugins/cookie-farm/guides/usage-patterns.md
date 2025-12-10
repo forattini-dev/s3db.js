@@ -2,7 +2,7 @@
 
 **Prev:** [← Configuration](./configuration.md)
 **Next:** [Best Practices →](./best-practices.md)
-**Main:** [← Cookie Farm Plugin](../README.md) | **All guides:** [Index](../README.md#-documentation-guides)
+**Main:** [← Cookie Farm Plugin](/plugins/cookie-farm/README.md) | **All guides:** [Index](/plugins/cookie-farm/README.md#-documentation-guides)
 
 > **In this guide:**
 > - 5 progressive real-world patterns
@@ -862,4 +862,4 @@ await db.usePlugin(new ReplicatorPlugin({
 
 **Prev:** [← Configuration](./configuration.md)
 **Next:** [Best Practices →](./best-practices.md)
-**Main:** [← Cookie Farm Plugin](../README.md)
+**Main:** [← Cookie Farm Plugin](/plugins/cookie-farm/README.md)

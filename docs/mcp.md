@@ -122,6 +122,6 @@ Each tool has a clear schema for its parameters and expected output, enabling se
 
 ## 🔗 Next Steps
 
-*   [CLI Reference](./cli.md) - Learn more about the `s3db` command-line interface.
-*   [Core Concepts: S3db Instances](../core/database.md) - Understand database configuration.
+*   [CLI Reference](/cli.md) - Learn more about the `s3db` command-line interface.
+*   [Core Concepts: S3db Instances](/core/database.md) - Understand database configuration.
 *   [Model Context Protocol Documentation](https://modelcontextprotocol.dev/docs) - Learn more about the MCP standard.

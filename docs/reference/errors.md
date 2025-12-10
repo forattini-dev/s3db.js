@@ -407,6 +407,6 @@ try {
 
 ## See Also
 
-- [Database](../core/database.md) - Error context
-- [Resource](../core/resource.md) - CRUD error handling
-- [Security Best Practices](../guides/security-best-practices.md) - Error security
+- [Database](/core/database.md) - Error context
+- [Resource](/core/resource.md) - CRUD error handling
+- [Security Best Practices](/guides/security-best-practices.md) - Error security

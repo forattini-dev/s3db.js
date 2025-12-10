@@ -37,7 +37,7 @@ You get: Auto CRUD • Auth • Guards • Metrics • Docs • Security
 - ✅ Graceful shutdown
 - ✅ Security headers (CSP, HSTS, etc)
 
-**[→ Deployment guide](./guides/deployment.md)**
+**[→ Deployment guide](/plugins/api/guides/deployment.md)**
 
 ---
 
@@ -51,7 +51,7 @@ You get: Auto CRUD • Auth • Guards • Metrics • Docs • Security
 
 **Built on Hono:** 12x faster than Express, 3x faster than Fastify
 
-**[→ Performance benchmarks](./guides/deployment.md#performance)**
+**[→ Performance benchmarks](/plugins/api/guides/deployment.md#performance)**
 
 ---
 
@@ -73,7 +73,7 @@ routes: {
 }
 ```
 
-**[→ Routing guide](./reference/routing.md)**
+**[→ Routing guide](/plugins/api/reference/routing.md)**
 
 ---
 
@@ -90,7 +90,7 @@ static: [{
 }]
 ```
 
-**[→ Static files guide](./guides/static-files.md)**
+**[→ Static files guide](/plugins/api/guides/static-files.md)**
 
 ---
 
@@ -109,7 +109,7 @@ Both return standardized error responses, but with different capabilities:
 - `ctx.error()` - Quick & simple (enhanced context)
 - `c.error()` - Advanced features (anywhere)
 
-**[→ Enhanced context guide](./reference/enhanced-context.md)**
+**[→ Enhanced context guide](/plugins/api/reference/enhanced-context.md)**
 
 ---
 
@@ -139,7 +139,7 @@ auth: {
 }
 ```
 
-**[→ OIDC guide](./guides/oidc.md)**
+**[→ OIDC guide](/plugins/api/guides/oidc.md)**
 
 ---
 
@@ -162,7 +162,7 @@ auth: {
 }
 ```
 
-**[→ Path-based auth guide](./guides/authentication.md#path-based-auth)**
+**[→ Path-based auth guide](/plugins/api/guides/authentication.md#path-based-auth)**
 
 ---
 
@@ -185,7 +185,7 @@ guard: {
 
 **Benefits:** O(1) lookups • Zero SQL • Impossible to leak tenant data
 
-**[→ Multi-tenancy guide](./guides/guards.md#multi-tenancy)**
+**[→ Multi-tenancy guide](/plugins/api/guides/guards.md#multi-tenancy)**
 
 ---
 
@@ -217,7 +217,7 @@ guard: {
 }
 ```
 
-**[→ Guards guide](./guides/guards.md)**
+**[→ Guards guide](/plugins/api/guides/guards.md)**
 
 ---
 
@@ -234,7 +234,7 @@ config: {
 }
 ```
 
-**[→ OIDC guide](./guides/oidc.md#implicit-token-refresh)**
+**[→ OIDC guide](/plugins/api/guides/oidc.md#implicit-token-refresh)**
 
 ---
 
@@ -262,7 +262,7 @@ config: {
 }
 ```
 
-**[→ OIDC troubleshooting](./guides/oidc.md#troubleshooting)**
+**[→ OIDC troubleshooting](/plugins/api/guides/oidc.md#troubleshooting)**
 
 ---
 
@@ -298,7 +298,7 @@ auth: {
 }
 ```
 
-**[→ Authentication guide](./guides/authentication.md)**
+**[→ Authentication guide](/plugins/api/guides/authentication.md)**
 
 ---
 
@@ -349,7 +349,7 @@ routes: {
 }
 ```
 
-**[→ Security guide](./guides/security.md#rate-limiting)**
+**[→ Security guide](/plugins/api/guides/security.md#rate-limiting)**
 
 ---
 
@@ -376,7 +376,7 @@ Enable metrics:
 metrics: { enabled: true }
 ```
 
-**[→ Deployment guide](./guides/deployment.md#metrics)**
+**[→ Deployment guide](/plugins/api/guides/deployment.md#metrics)**
 
 ---
 
@@ -397,7 +397,7 @@ await db.usePlugin(new ApiPlugin({
 }));
 ```
 
-**[→ Performance guide](./guides/deployment.md#performance)**
+**[→ Performance guide](/plugins/api/guides/deployment.md#performance)**
 
 ---
 
@@ -431,7 +431,7 @@ health: {
 }
 ```
 
-**[→ Kubernetes guide](./guides/deployment.md#kubernetes)**
+**[→ Kubernetes guide](/plugins/api/guides/deployment.md#kubernetes)**
 
 ---
 
@@ -451,7 +451,7 @@ failban: {
 }
 ```
 
-**[→ Security guide](./guides/security.md#failban)**
+**[→ Security guide](/plugins/api/guides/security.md#failban)**
 
 ---
 
@@ -477,7 +477,7 @@ wget https://github.com/P3TERX/GeoLite.mmdb/raw/download/GeoLite2-Country.mmdb
 pnpm add @maxmind/geoip2-node
 ```
 
-**[→ GeoIP guide](./guides/security.md#geoip-blocking)**
+**[→ GeoIP guide](/plugins/api/guides/security.md#geoip-blocking)**
 
 ---
 
@@ -542,7 +542,7 @@ Check route precedence:
 3. Auth routes (`/auth/login`, `/auth/callback`, etc)
 4. Resource routes (`/users`, `/orders`, etc)
 
-**[→ Routing guide](./reference/routing.md)**
+**[→ Routing guide](/plugins/api/reference/routing.md)**
 
 ---
 
@@ -566,14 +566,14 @@ routes: {
 }
 ```
 
-**[→ Enhanced context guide](./reference/enhanced-context.md)**
+**[→ Enhanced context guide](/plugins/api/reference/enhanced-context.md)**
 
 ---
 
 ## Still Need Help?
 
-- **📖 [Documentation](../README.md)** - Complete guides
-- **🎯 [Examples](../../examples/)** - Working code examples
+- **📖 [Documentation](/plugins/api/README.md)** - Complete guides
+- **🎯 [Examples](/examples/)** - Working code examples
 - **🐛 [GitHub Issues](https://github.com/forattini-dev/s3db.js/issues)** - Report bugs
 - **💬 [Discussions](https://github.com/forattini-dev/s3db.js/discussions)** - Ask questions
 

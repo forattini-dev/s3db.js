@@ -1,5 +1,17 @@
 services:
 
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    profiles:
+      - test
+
   test-runner:
     image: node:22-slim
     working_dir: /app
@@ -9,14 +21,18 @@ services:
     environment:
       - NODE_ENV=test
       - CI=true
+      - REDIS_URL=redis://redis:6379
+    depends_on:
+      redis:
+        condition: service_healthy
     deploy:
       resources:
         limits:
           cpus: '2'
-          memory: 4G
+          memory: 5G
         reservations:
-          cpus: '1'
-          memory: 2G
+          cpus: '2'
+          memory: 5G
     command: ["tail", "-f", "/dev/null"]
     profiles:
       - test

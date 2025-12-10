@@ -1,0 +1,1 @@
+{"version":3,"file":"global-strategy.class.d.ts","sourceRoot":"","sources":["../../../../../../src/plugins/api/auth/strategies/global-strategy.class.ts"],"names":[],"mappings":"AAAA,OAAO,KAAK,EAAE,iBAAiB,EAAE,MAAM,MAAM,CAAC;AAC9C,OAAO,EAAE,gBAAgB,EAAgC,MAAM,0BAA0B,CAAC;AAG1F,qBAAa,kBAAmB,SAAQ,gBAAgB;IACvC,gBAAgB,IAAI,OAAO,CAAC,iBAAiB,CAAC;CA6B9D"}

@@ -1,0 +1,1 @@
+{"version":3,"file":"partitions.d.ts","sourceRoot":"","sources":["../../../../src/plugins/eventual-consistency/partitions.ts"],"names":[],"mappings":"AAAA;;;GAGG;AAEH,MAAM,WAAW,oBAAoB;IACnC,CAAC,KAAK,EAAE,MAAM,GAAG,MAAM,CAAC;CACzB;AAED,MAAM,WAAW,eAAe;IAC9B,CAAC,aAAa,EAAE,MAAM,GAAG;QACvB,MAAM,EAAE,oBAAoB,CAAC;KAC9B,CAAC;CACH;AAED;;;;;;;;;GASG;AACH,wBAAgB,qBAAqB,IAAI,eAAe,CAoBvD"}

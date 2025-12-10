@@ -62,7 +62,7 @@ auth: {
 ```
 
 **✨ Latest OIDC enhancements:** Auto token refresh • Continue URL • Provider quirks (Google/Azure/Auth0) • Cross-subdomain auth
-**[→ OIDC Quick Start](./guides/oidc.md)**
+**[→ OIDC Quick Start](/plugins/api/guides/oidc.md)**
 
 ---
 
@@ -72,35 +72,35 @@ auth: {
 
 | Guide | Description | Read Time |
 |-------|-------------|-----------|
-| **[Authentication](./guides/authentication.md)** | JWT, OAuth2/OIDC, API Keys, Basic Auth | 10 min |
-| **[Identity Integration](./guides/identity.md)** | Delegate auth to IdentityPlugin + remote metadata | 15 min |
-| **[Guards](./guides/guards.md)** | Row-level security, multi-tenancy, RBAC | 15 min |
-| **[Security](./guides/security.md)** | Failban, rate limiting, GeoIP blocking | 10 min |
-| **[Deployment](./guides/deployment.md)** | Docker, Kubernetes, production tips | 15 min |
+| **[Authentication](/plugins/api/guides/authentication.md)** | JWT, OAuth2/OIDC, API Keys, Basic Auth | 10 min |
+| **[Identity Integration](/plugins/api/guides/identity.md)** | Delegate auth to IdentityPlugin + remote metadata | 15 min |
+| **[Guards](/plugins/api/guides/guards.md)** | Row-level security, multi-tenancy, RBAC | 15 min |
+| **[Security](/plugins/api/guides/security.md)** | Failban, rate limiting, GeoIP blocking | 10 min |
+| **[Deployment](/plugins/api/guides/deployment.md)** | Docker, Kubernetes, production tips | 15 min |
 
 ### Features Deep Dive
 
 | Guide | Description | Read Time |
 |-------|-------------|-----------|
-| **[OIDC Guide](./guides/oidc.md)** | ✨ Complete OAuth2/OIDC setup (Google, Azure, etc) | 20 min |
-| **[OpenAPI Docs](./guides/openapi.md)** | Customize Swagger UI, add descriptions | 10 min |
-| **[Routing](./reference/routing.md)** | Custom routes, precedence, path rules | 5 min |
+| **[OIDC Guide](/plugins/api/guides/oidc.md)** | ✨ Complete OAuth2/OIDC setup (Google, Azure, etc) | 20 min |
+| **[OpenAPI Docs](/plugins/api/guides/openapi.md)** | Customize Swagger UI, add descriptions | 10 min |
+| **[Routing](/plugins/api/reference/routing.md)** | Custom routes, precedence, path rules | 5 min |
 
 ### Reference
 
 | Document | Description |
 |----------|-------------|
-| **[Configuration](./reference/configuration.md)** | All config options (alphabetical) |
-| **[Enhanced Context](./reference/enhanced-context.md)** | Route context API reference |
-| **[FAQ](./faq.md)** | Common questions and troubleshooting |
+| **[Configuration](/plugins/api/reference/configuration.md)** | All config options (alphabetical) |
+| **[Enhanced Context](/plugins/api/reference/enhanced-context.md)** | Route context API reference |
+| **[FAQ](/plugins/api/faq.md)** | Common questions and troubleshooting |
 
 ### Examples
 
 | Example | Description |
 |---------|-------------|
-| [e50-oidc-simple.js](../../examples/e50-oidc-simple.js) | Basic OIDC with Google |
-| [e88-oidc-enhancements.js](../../examples/e88-oidc-enhancements.js) | Complete OIDC enhancements demo |
-| [e101-path-based-basic-oidc.js](../../examples/e101-path-based-basic-oidc.js) | Dual auth (Basic + OIDC) |
+| [e50-oidc-simple.js](/examples/e50-oidc-simple.js) | Basic OIDC with Google |
+| [e88-oidc-enhancements.js](/examples/e88-oidc-enhancements.js) | Complete OIDC enhancements demo |
+| [e101-path-based-basic-oidc.js](/examples/e101-path-based-basic-oidc.js) | Dual auth (Basic + OIDC) |
 
 ---
 
@@ -126,7 +126,7 @@ const projects = await db.createResource({
 ```
 
 **Key wins:** O(1) tenant isolation • Zero SQL • Impossible to leak data
-**[→ Full guide](./guides/guards.md#multi-tenancy)**
+**[→ Full guide](/plugins/api/guides/guards.md#multi-tenancy)**
 
 ### URL Shortener
 
@@ -148,7 +148,7 @@ await db.usePlugin(new ApiPlugin({
 ```
 
 **Key wins:** Dual auth • GeoIP blocking • Public + protected routes
-**[→ Full guide](./guides/authentication.md#path-based-auth)**
+**[→ Full guide](/plugins/api/guides/authentication.md#path-based-auth)**
 
 ### E-commerce API
 
@@ -175,7 +175,7 @@ apiPlugin.events.on('resource:created', async ({ resource, item }) => {
 ```
 
 **Key wins:** User isolation • Admin override • Event-driven
-**[→ Full guide](./guides/guards.md#e-commerce)**
+**[→ Full guide](/plugins/api/guides/guards.md#e-commerce)**
 
 ---
 
@@ -221,7 +221,7 @@ GET     /metrics         # Prometheus metrics
 - **HTTP Keep-Alive:** 20-30% latency reduction
 - **Response Compression:** 70-85% bandwidth savings
 
-**[→ Performance guide](./guides/deployment.md#performance)**
+**[→ Performance guide](/plugins/api/guides/deployment.md#performance)**
 
 ---
 
@@ -281,7 +281,7 @@ You get: Auto CRUD • Auth • Guards • Metrics • Docs • Security
 - ✅ Graceful shutdown
 - ✅ Security headers (CSP, HSTS, etc)
 
-**[→ Deployment guide](./guides/deployment.md)**
+**[→ Deployment guide](/plugins/api/guides/deployment.md)**
 </details>
 
 <details>
@@ -309,7 +309,7 @@ auth: {
 }
 ```
 
-**[→ OIDC guide](./guides/oidc.md)**
+**[→ OIDC guide](/plugins/api/guides/oidc.md)**
 </details>
 
 <details>
@@ -332,7 +332,7 @@ guard: {
 
 **Benefits:** O(1) lookups • Zero SQL • Impossible to leak tenant data
 
-**[→ Multi-tenancy guide](./guides/guards.md#multi-tenancy)**
+**[→ Multi-tenancy guide](/plugins/api/guides/guards.md#multi-tenancy)**
 </details>
 
 <details>
@@ -354,7 +354,7 @@ routes: {
 }
 ```
 
-**[→ Routing guide](./reference/routing.md)**
+**[→ Routing guide](/plugins/api/reference/routing.md)**
 </details>
 
 <details>
@@ -371,7 +371,7 @@ static: [{
 }]
 ```
 
-**[→ Static files guide](./guides/static-files.md)** (if exists, otherwise remove this line)
+**[→ Static files guide](/plugins/api/guides/static-files.md)**
 </details>
 
 <details>
@@ -385,7 +385,7 @@ static: [{
 
 **Built on Hono:** 12x faster than Express, 3x faster than Fastify
 
-**[→ Performance benchmarks](./guides/deployment.md#performance)**
+**[→ Performance benchmarks](/plugins/api/guides/deployment.md#performance)**
 </details>
 
 <details>
@@ -405,7 +405,7 @@ failban: {
 }
 ```
 
-**[→ Security guide](./guides/security.md)**
+**[→ Security guide](/plugins/api/guides/security.md)**
 </details>
 
 <details>
@@ -427,7 +427,7 @@ failban: {
 }
 ```
 
-**[→ Observability guide](./guides/observability.md)** (if exists)
+**[→ Observability guide](/plugins/api/guides/observability.md)**
 </details>
 
 <details>
@@ -442,10 +442,10 @@ readinessProbe:
   httpGet: { path: /health/ready, port: 3000 }
 ```
 
-**[→ Kubernetes guide](./guides/deployment.md#kubernetes)**
+**[→ Kubernetes guide](/plugins/api/guides/deployment.md#kubernetes)**
 </details>
 
-**[→ See all FAQ](./faq.md)**
+**[→ See all FAQ](/plugins/api/faq.md)**
 
 ---
 
@@ -454,19 +454,19 @@ readinessProbe:
 | If you want to... | Start here |
 |-------------------|------------|
 | 🚀 Build your first API | [Quick Start](#-quick-start) above |
-| 🔐 Add authentication | [Authentication Guide](./guides/authentication.md) |
-| 🛡️ Secure your data | [Guards Guide](./guides/guards.md) |
-| 🌐 Use Google/Azure login | [OIDC Guide](./guides/oidc.md) |
-| 📊 Monitor performance | [Deployment Guide](./guides/deployment.md) |
-| 🐛 Troubleshoot issues | [FAQ](./faq.md) |
+| 🔐 Add authentication | [Authentication Guide](/plugins/api/guides/authentication.md) |
+| 🛡️ Secure your data | [Guards Guide](/plugins/api/guides/guards.md) |
+| 🌐 Use Google/Azure login | [OIDC Guide](/plugins/api/guides/oidc.md) |
+| 📊 Monitor performance | [Deployment Guide](/plugins/api/guides/deployment.md) |
+| 🐛 Troubleshoot issues | [FAQ](/plugins/api/faq.md) |
 
 ---
 
 ## 💬 Need Help?
 
-- **📖 [FAQ](./faq.md)** - Common questions answered
+- **📖 [FAQ](/plugins/api/faq.md)** - Common questions answered
 - **🔍 [Documentation](#-documentation)** - All guides in one place
-- **🎯 [Examples](../../examples/)** - Copy-paste solutions
+- **🎯 [Examples](/examples/)** - Copy-paste solutions
 - **🐛 GitHub Issues** - Found a bug? Let us know!
 
 ---

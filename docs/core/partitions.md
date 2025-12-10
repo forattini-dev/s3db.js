@@ -308,6 +308,6 @@ const customerPendingOrders = await orders.listPartition('byCustomerAndStatus', 
 
 ## See Also
 
-- [Resource](./resource.md) - CRUD operations
-- [Schema](./schema.md) - Field types
-- [Performance Tuning](../guides/performance-tuning.md) - Optimization strategies
+- [Resource](/core/resource.md) - CRUD operations
+- [Schema](/core/schema.md) - Field types
+- [Performance Tuning](/guides/performance-tuning.md) - Optimization strategies

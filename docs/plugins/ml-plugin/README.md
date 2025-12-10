@@ -192,10 +192,10 @@ A: Usually data quality. See [Troubleshooting Guide](./guides/best-practices.md#
 
 ## 🔗 Related Plugins
 
-- **[Replicator Plugin](../replicator.md)** - Sync to PostgreSQL, BigQuery, etc.
-- **[TTL Plugin](../ttl.md)** - Auto-cleanup old models
-- **[Cache Plugin](../cache.md)** - Cache predictions
-- **[Metrics Plugin](../metrics.md)** - Performance monitoring
+- **[Replicator Plugin](/plugins/replicator/README.md)** - Sync to PostgreSQL, BigQuery, etc.
+- **[TTL Plugin](/plugins/ttl/README.md)** - Auto-cleanup old models
+- **[Cache Plugin](/plugins/cache/README.md)** - Cache predictions
+- **[Metrics Plugin](/plugins/metrics/README.md)** - Performance monitoring
 
 ---
 
@@ -238,8 +238,8 @@ MIT - Same as s3db.js
 ---
 
 **Navigation:**
-- [← Back to Plugins Index](../README.md)
-- [Getting Started →](./guides/getting-started.md)
-- [Configuration →](./guides/configuration.md)
-- [Usage Patterns →](./guides/usage-patterns.md)
-- [Best Practices →](./guides/best-practices.md)
+- [← Back to Plugins Index](/plugins/README.md)
+- [Getting Started →](/plugins/ml-plugin/guides/getting-started.md)
+- [Configuration →](/plugins/ml-plugin/guides/configuration.md)
+- [Usage Patterns →](/plugins/ml-plugin/guides/usage-patterns.md)
+- [Best Practices →](/plugins/ml-plugin/guides/best-practices.md)

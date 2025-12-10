@@ -370,16 +370,16 @@ s3db delete users abc123
 
 ## Next Steps
 
-- [TypeScript Guide](./typescript.md) - Master type safety with s3db.js
-- [Testing Guide](./testing.md) - Efficiently test your S3db applications
-- [MCP Integration Guide](./mcp.md) - Expose S3db to AI agents
-- [CLI Reference](./cli.md) - Interact with S3db from the command line
-- [Database](../core/database.md) - Full Database API
-- [Resource](../core/resource.md) - CRUD operations deep dive
-- [Schema](../core/schema.md) - All field types and validation
-- [Partitions](../core/partitions.md) - Query optimization
-- [Plugins](../plugins/README.md) - Available plugins
-- [Examples](../examples/README.md) - 170+ examples
+- [TypeScript Guide](/guides/typescript.md) - Master type safety with s3db.js
+- [Testing Guide](/guides/testing.md) - Efficiently test your S3db applications
+- [MCP Integration Guide](/mcp.md) - Expose S3db to AI agents
+- [CLI Reference](/cli.md) - Interact with S3db from the command line
+- [Database](/core/database.md) - Full Database API
+- [Resource](/core/resource.md) - CRUD operations deep dive
+- [Schema](/core/schema.md) - All field types and validation
+- [Partitions](/core/partitions.md) - Query optimization
+- [Plugins](/plugins/README.md) - Available plugins
+- [Examples](/examples/README.md) - 170+ examples
 
 ## Example: Complete Application
 

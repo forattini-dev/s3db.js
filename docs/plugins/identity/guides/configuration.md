@@ -1,8 +1,8 @@
 # ⚙️ Configuration Guide
 
-**Prev:** [← Getting Started](./getting-started.md)
-**Next:** [Usage Patterns →](./usage-patterns.md)
-**Main:** [← Identity Plugin](../README.md) | **All guides:** [Index](../README.md#-documentation-hub)
+**Prev:** [← Getting Started](/plugins/identity/guides/getting-started.md)
+**Next:** [Usage Patterns →](/plugins/identity/guides/usage-patterns.md)
+**Main:** [← Identity Plugin](/plugins/identity/README.md) | **All guides:** [Index](/plugins/identity/README.md#-documentation-hub)
 
 > **In this guide:**
 > - Default configuration object
@@ -611,12 +611,12 @@ rateLimit: {
 
 1. **Set up your server** - Use one of the patterns above
 2. **Configure scopes** - Define what permissions your API needs
-3. **Create users and clients** - See [Getting Started](./getting-started.md)
+3. **Create users and clients** - See [Getting Started](/plugins/identity/guides/getting-started.md)
 4. **Test login flow** - Verify authorization_code flow works
 5. **Deploy to production** - Use Pattern 2 configuration
 
 ---
 
-**Prev:** [← Getting Started](./getting-started.md)
-**Next:** [Usage Patterns →](./usage-patterns.md)
-**Main:** [← Identity Plugin](../README.md)
+**Prev:** [← Getting Started](/plugins/identity/guides/getting-started.md)
+**Next:** [Usage Patterns →](/plugins/identity/guides/usage-patterns.md)
+**Main:** [← Identity Plugin](/plugins/identity/README.md)

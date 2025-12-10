@@ -1,6 +1,6 @@
 # 🐳 Production Deployment
 
-> **Navigation:** [← Back to API Plugin](./README.md) | [Configuration →](./configuration.md) | [Guards →](./guards.md)
+> **Navigation:** [← Back to API Plugin](/plugins/api/README.md) | [Configuration →](/plugins/api/reference/configuration.md) | [Guards →](/plugins/api/guides/guards.md)
 
 ---
 
@@ -907,10 +907,10 @@ sum by (operation) (rate(s3db_operations_total{resource="cars"}[5m]))
 
 ### Complete Example
 
-See [e48-metrics-prometheus.js](../examples/e48-metrics-prometheus.js) for a complete working example demonstrating both integrated and standalone modes.
+See [e48-metrics-prometheus.js](/examples/e48-metrics-prometheus.js) for a complete working example demonstrating both integrated and standalone modes.
 
-For detailed MetricsPlugin configuration and features, see [MetricsPlugin documentation](./metrics.md#prometheus-integration).
+For detailed MetricsPlugin configuration and features, see [MetricsPlugin documentation](/plugins/metrics/README.md#prometheus-integration).
 
 ---
 
-> **Navigation:** [← Back to API Plugin](./README.md) | [Configuration →](./configuration.md) | [Guards →](./guards.md)
+> **Navigation:** [← Back to API Plugin](/plugins/api/README.md) | [Configuration →](/plugins/api/reference/configuration.md) | [Guards →](/plugins/api/guides/guards.md)

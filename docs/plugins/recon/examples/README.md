@@ -177,11 +177,11 @@ Based on the reconnaissance data:
 
 ## 🔗 Related Documentation
 
-- [ReconPlugin Main Documentation](../recon.md)
-- [ReconPlugin Architecture](../architecture.md)
-- [Stage Results Format](../artifacts.md)
-- [Storage & Persistence](../storage.md)
-- [WHOIS Stage Implementation](../../../../src/plugins/recon/stages/whois-stage.js)
+- [ReconPlugin Main Documentation](/plugins/recon/README.md)
+- [ReconPlugin Architecture](/plugins/recon/architecture.md)
+- [Stage Results Format](/plugins/recon/artifacts.md)
+- [Storage & Persistence](/plugins/recon/storage.md)
+- WHOIS Stage Implementation - see `src/plugins/recon/stages/whois-stage.ts`
 
 ---
 

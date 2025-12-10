@@ -2,7 +2,7 @@
 
 > **Isolate data, manage multiple environments, and support multi-tenant architectures using the Plugin Namespace System.**
 >
-> **Related:** [Plugin Architecture](../plugins/README.md#️-plugin-architecture) | [API Reference](../plugins/README.md#-plugin-namespace-api-reference)
+> **Related:** [Plugin Architecture](/plugins/README.md#️-plugin-architecture) | [API Reference](/plugins/README.md#-plugin-namespace-api-reference)
 
 ---
 

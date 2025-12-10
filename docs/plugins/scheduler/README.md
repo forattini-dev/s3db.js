@@ -2,7 +2,7 @@
 
 > **Cron-based job orchestration with retries, distributed locks, and job history.**
 >
-> **Navigation:** [← Plugin Index](../README.md) | [Guides ↓](#-documentation-index) | [FAQ ↓](./guides/best-practices.md#-faq)
+> **Navigation:** [← Plugin Index](/plugins/README.md) | [Guides ↓](#-documentation-index) | [FAQ ↓](/plugins/scheduler/guides/best-practices.md#-faq)
 
 ---
 
@@ -277,7 +277,7 @@ scheduler.on('plg:scheduler:job-started', ({ jobName }) => {
 
 ### Learn More
 
-📚 **[Full Coordinator Documentation →](../coordinator.md)**
+📚 **[Full Coordinator Documentation →](/plugins/coordinator.md)**
 
 Comprehensive guide covering:
 - Election algorithm (lexicographic ordering)
@@ -327,8 +327,8 @@ The Scheduler Plugin provides robust job scheduling capabilities using cron expr
 
 ## See Also
 
-- [Configuration Guide](./guides/configuration.md) - Complete options reference
-- [Advanced Patterns Guide](./guides/advanced-patterns.md) - Complex workflows
-- [Best Practices Guide](./guides/best-practices.md) - Production deployment
-- [Coordinator Mode Documentation](../coordinator.md) - Multi-instance coordination
-- [Plugin Development Guide](../plugin-development.md) - Extend functionality
+- [Configuration Guide](/plugins/scheduler/guides/configuration.md) - Complete options reference
+- [Advanced Patterns Guide](/plugins/scheduler/guides/advanced-patterns.md) - Complex workflows
+- [Best Practices Guide](/plugins/scheduler/guides/best-practices.md) - Production deployment
+- [Coordinator Mode Documentation](/plugins/coordinator.md) - Multi-instance coordination
+- [Plugin Development Guide](/plugins/plugin-development.md) - Extend functionality

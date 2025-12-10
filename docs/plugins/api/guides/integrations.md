@@ -1,6 +1,6 @@
 # 🔌 Plugin Integrations
 
-> **Navigation:** [← Back to API Plugin](./README.md) | [Configuration →](./configuration.md)
+> **Navigation:** [← Back to API Plugin](/plugins/api/README.md) | [Configuration →](/plugins/api/reference/configuration.md)
 
 The API Plugin plays nicely with other first-party plugins. This guide shows how to expose their data through REST endpoints with zero ceremony.
 
@@ -8,7 +8,7 @@ The API Plugin plays nicely with other first-party plugins. This guide shows how
 
 ## Relation Plugin
 
-- Install the [RelationPlugin](../relation.md) *before* the API plugin.
+- Install the [RelationPlugin](/plugins/relation/README.md) *before* the API plugin.
 - All `GET` endpoints gain `?populate=` to hydrate relationships (`?populate=customer,items.product`).
 - Unknown relation paths raise `400 INVALID_POPULATE` automatically.
 - Individual relations can be hidden by setting `resources[resourceName].relations[relationName].expose = false`.

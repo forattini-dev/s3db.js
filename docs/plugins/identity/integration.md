@@ -14,7 +14,7 @@ Learn how to integrate the Identity Plugin with Resource Servers, client applica
 
 ## S3DB API Plugin Integration (standard OIDC)
 
-> Looking for the API-side configuration? See [`docs/plugins/api/guides/identity.md`](../api/guides/identity.md).
+> Looking for the API-side configuration? See [`docs/plugins/api/guides/identity.md`](/plugins/api/guides/identity.md).
 
 Configure the API plugin exactly as you would for any other OIDC provider:
 
@@ -375,10 +375,10 @@ const productsOIDC = new OIDCClient({
 - [Identity Plugin Main](./README.md) - Overview and quickstart
 
 **Examples:**
-- [e81-oauth2-resource-server.js](../../examples/e81-oauth2-resource-server.js) - Resource Server
-- [e82-oidc-web-app.js](../../examples/e82-oidc-web-app.js) - Web app integration
-- [e62-azure-ad-integration.js](../../examples/e62-azure-ad-integration.js) - Azure AD
-- [e63-keycloak-integration.js](../../examples/e63-keycloak-integration.js) - Keycloak
+- [e81-oauth2-resource-server.js](/examples/e81-oauth2-resource-server.js) - Resource Server
+- [e82-oidc-web-app.js](/examples/e82-oidc-web-app.js) - Web app integration
+- [e62-azure-ad-integration.js](/examples/e62-azure-ad-integration.js) - Azure AD
+- [e63-keycloak-integration.js](/examples/e63-keycloak-integration.js) - Keycloak
 
 ---
 

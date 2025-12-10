@@ -2575,11 +2575,11 @@ auth: {
 
 ## 📚 See Also
 
-- [Authentication Overview](./authentication.md) - All auth methods
-- [Configuration Reference](../reference/configuration.md) - Complete options
-- [Guards](./guards.md) - Row-level security
-- [Example: e50-oidc-simple.js](../../../examples/e50-oidc-simple.js)
-- [Example: e88-oidc-enhancements.js](../../../examples/e88-oidc-enhancements.js)
+- [Authentication Overview](/plugins/api/guides/authentication.md) - All auth methods
+- [Configuration Reference](/plugins/api/reference/configuration.md) - Complete options
+- [Guards](/plugins/api/guides/guards.md) - Row-level security
+- [Example: e50-oidc-simple.js](/examples/e50-oidc-simple.js)
+- [Example: e88-oidc-enhancements.js](/examples/e88-oidc-enhancements.js)
 
 ---
 

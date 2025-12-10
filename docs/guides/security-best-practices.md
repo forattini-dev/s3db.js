@@ -388,7 +388,7 @@ const db = new Database({
 
 ## See Also
 
-- [Encryption](../core/encryption.md) - Field-level encryption
-- [Errors](../reference/errors.md) - Error handling
-- [API Plugin](../plugins/api/README.md) - API security features
-- [Audit Plugin](../plugins/audit/README.md) - Audit logging
+- [Encryption](/core/encryption.md) - Field-level encryption
+- [Errors](/reference/errors.md) - Error handling
+- [API Plugin](/plugins/api/README.md) - API security features
+- [Audit Plugin](/plugins/audit/README.md) - Audit logging

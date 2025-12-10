@@ -394,11 +394,11 @@ A: Yes! Combine with CachePlugin for 100x faster repeated searches.
 
 ## 🔗 Related Documentation
 
-- **[Cache Plugin](../cache.md)** - Speed up vector searches with caching
-- **[Partitions](../../partitions.md)** - Organize vectors for faster filtering
-- **[Behaviors](../../behaviors.md)** - Handle large vectors with body-overflow
-- **[Hooks](../../hooks.md)** - Validate vectors before insert
-- **[Events](../../events.md)** - Comprehensive event system
+- **[Cache Plugin](/plugins/cache/README.md)** - Speed up vector searches with caching
+- **[Partitions](/core/partitions.md)** - Organize vectors for faster filtering
+- **[Behaviors](/core/behaviors.md)** - Handle large vectors with body-overflow
+- **[Hooks](/core/hooks.md)** - Validate vectors before insert
+- **[Events](/core/events.md)** - Comprehensive event system
 
 ---
 

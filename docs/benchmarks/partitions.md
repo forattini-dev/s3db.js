@@ -443,6 +443,6 @@ If results vary significantly:
 
 ## See Also
 
-- [Partition Documentation](../../docs/partitions.md)
-- [Performance Tips](../../README.md#performance-tips)
-- [EventualConsistency Benchmarks](./eventual-consistency.md)
+- [Partition Documentation](/core/partitions.md)
+- [Performance Tips](/README.md#performance-tips)
+- [EventualConsistency Benchmarks](/benchmarks/eventual-consistency.md)

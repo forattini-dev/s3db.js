@@ -2,7 +2,7 @@
 
 > S3-based distributed locking for atomic coordination across processes.
 
-[← Back to Core](../README.md) | [Distributed Sequence →](distributed-sequence.md)
+[← Back to Core](/core/README.md) | [Distributed Sequence →](/core/internals/distributed-sequence.md)
 
 ---
 

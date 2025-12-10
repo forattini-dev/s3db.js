@@ -2,7 +2,7 @@
 
 **Prev:** [Embedding Providers](./embedding-providers.md)
 **Next:** [API Reference](./api-reference.md)
-**Main:** [README](../README.md) | **All guides:** [Index](../README.md#-documentation-index)
+**Main:** [README](/plugins/vector/README.md) | **All guides:** [Index](/plugins/vector/README.md#-documentation-index)
 
 > **In this guide:**
 > - 5 real-world use cases with complete code

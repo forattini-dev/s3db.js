@@ -1,8 +1,8 @@
 # ⚙️ ML Plugin Configuration Guide
 
-**Prev:** [← Getting Started](./getting-started.md)
-**Next:** [Usage Patterns →](./usage-patterns.md)
-**Main:** [← ML Plugin](../README.md) | **All guides:** [Index](../README.md#-documentation-guides)
+**Prev:** [← Getting Started](/plugins/ml-plugin/guides/getting-started.md)
+**Next:** [Usage Patterns →](/plugins/ml-plugin/guides/usage-patterns.md)
+**Main:** [← ML Plugin](/plugins/ml-plugin/README.md) | **All guides:** [Index](/plugins/ml-plugin/README.md#-documentation-guides)
 
 > **In this guide:**
 > - Default configuration object
@@ -731,6 +731,6 @@ features: [
 
 ---
 
-**Prev:** [← Getting Started](./getting-started.md)
-**Next:** [Usage Patterns →](./usage-patterns.md)
-**Main:** [← ML Plugin](../README.md)
+**Prev:** [← Getting Started](/plugins/ml-plugin/guides/getting-started.md)
+**Next:** [Usage Patterns →](/plugins/ml-plugin/guides/usage-patterns.md)
+**Main:** [← ML Plugin](/plugins/ml-plugin/README.md)

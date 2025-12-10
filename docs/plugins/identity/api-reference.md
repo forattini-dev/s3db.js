@@ -335,9 +335,9 @@ await clientsResource.delete(clientId);
 - [Identity Plugin Main](./README.md) - Overview and quickstart
 
 **Examples:**
-- [e80-sso-oauth2-server.js](../../examples/e80-sso-oauth2-server.js) - Complete SSO server
-- [e81-oauth2-resource-server.js](../../examples/e81-oauth2-resource-server.js) - Resource Server validating tokens
-- [e82-oidc-web-app.js](../../examples/e82-oidc-web-app.js) - Web app integration
+- [e80-sso-oauth2-server.js](/examples/e80-sso-oauth2-server.js) - Complete SSO server
+- [e81-oauth2-resource-server.js](/examples/e81-oauth2-resource-server.js) - Resource Server validating tokens
+- [e82-oidc-web-app.js](/examples/e82-oidc-web-app.js) - Web app integration
 
 ---
 

@@ -676,4 +676,4 @@ To migrate existing Hono routes to ApiApp:
 
 ---
 
-**Need help?** Check the [OpenSpec proposal](../../../openspec/changes/api-app-wrapper/proposal.md) for architectural details and design decisions.
+**Need help?** Check the [OpenSpec proposal](/openspec/changes/api-app-wrapper/proposal.md) for architectural details and design decisions.

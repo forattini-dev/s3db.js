@@ -1,8 +1,8 @@
 # 🚀 Getting Started with Replicator Plugin
 
-**Prev:** [← Replicator Plugin](../README.md)
-**Next:** [Configuration →](./configuration.md)
-**Main:** [← Replicator Plugin](../README.md) | **All guides:** [Index](../README.md#-documentation-guides)
+**Prev:** [← Replicator Plugin](/plugins/replicator/README.md)
+**Next:** [Configuration →](/plugins/replicator/guides/configuration.md)
+**Main:** [← Replicator Plugin](/plugins/replicator/README.md) | **All guides:** [Index](/plugins/replicator/README.md#-documentation-guides)
 
 > **In this guide:**
 > - What is real-time CDC (Change Data Capture)
@@ -583,12 +583,12 @@ new ReplicatorPlugin({
 
 ## Next Steps
 
-1. **Configure your setup** → [Configuration Guide](./configuration.md)
-2. **See usage patterns** → [Usage Patterns](./usage-patterns.md)
-3. **Setup production** → [Best Practices](./best-practices.md)
+1. **Configure your setup** → [Configuration Guide](/plugins/replicator/guides/configuration.md)
+2. **See usage patterns** → [Usage Patterns](/plugins/replicator/guides/usage-patterns.md)
+3. **Setup production** → [Best Practices](/plugins/replicator/guides/best-practices.md)
 
 ---
 
-**Prev:** [← Replicator Plugin](../README.md)
-**Next:** [Configuration →](./configuration.md)
-**Main:** [← Replicator Plugin](../README.md)
+**Prev:** [← Replicator Plugin](/plugins/replicator/README.md)
+**Next:** [Configuration →](/plugins/replicator/guides/configuration.md)
+**Main:** [← Replicator Plugin](/plugins/replicator/README.md)

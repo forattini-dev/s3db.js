@@ -1,222 +1,217 @@
-# 🏆 Tournament Plugin
+# Tournament Plugin
 
 > **Manage esports and sports tournaments with multiple formats, automated brackets, and real-time match management.**
->
-> **Navigation:** [Installation](#-installation) | [Quick Start](#-quick-start) | [Supported Formats](#-supported-formats) | [API Reference](#-api-reference)
 
 ---
 
-The **TournamentPlugin** transforms s3db.js into a full-featured tournament engine. It handles the complexity of bracket generation, seeding, match scheduling, and standing calculations, allowing you to focus on the user experience.
+## TLDR
 
-## ✨ Key Features
+**Full-featured tournament engine with bracket generation, seeding, and standings.**
 
-- **Multiple Formats**: Single/Double Elimination, Round Robin, Swiss, Group Stages, and more.
-- **Automated Brackets**: Generates and updates brackets automatically as matches complete.
-- **Match Management**: Schedule matches, report scores, and handle walkovers.
-- **Participant Management**: Registration flows, check-ins, and seeding.
-- **Real-time Standings**: Auto-calculated leaderboards and rankings.
-- **Scalable**: Built on s3db.js partitions to handle thousands of matches.
-
----
-
-## 💾 Installation
-
-```bash
-npm install s3db.js
+**1 line to get started:**
+```javascript
+await db.usePlugin(new TournamentPlugin());
 ```
 
-*No additional peer dependencies required.*
+**Key features:**
+- 8 formats: Single/Double Elimination, Round Robin, Swiss, Groups, League, Ladder, Circuit
+- Automated bracket generation and match advancement
+- Registration, check-in, and seeding management
+- Real-time standings and leaderboards
+- Best-of series with game-level details
+
+**Use cases:**
+- Esports tournaments
+- Sports leagues
+- Competitive ladders
+- Multi-stage championships
 
 ---
 
-## 🚀 Quick Start
-
-### 1. Initialize the Plugin
+## Quick Start
 
 ```javascript
-import { S3db, TournamentPlugin } from 's3db.js';
+import { Database, TournamentPlugin } from 's3db.js';
 
-const db = new S3db({ connectionString: 's3://bucket/db' });
-
-// Register the plugin
-await db.usePlugin(new TournamentPlugin({
-  resourceNames: {
-    tournaments: 'tournaments',
-    matches: 'matches',
-    registrations: 'registrations'
-  }
-}));
-
+const db = new Database({ connectionString: 's3://...' });
 await db.connect();
-```
+await db.usePlugin(new TournamentPlugin());
 
-### 2. Create a Tournament
-
-```javascript
+// Create tournament
 const tournament = await db.plugins.tournament.create({
   name: 'Summer Championship 2024',
   organizerId: 'org-123',
-  format: 'single-elimination', // or 'round-robin', 'swiss', etc.
-  participantType: 'team',      // or 'user'
+  format: 'single-elimination',
+  config: { bestOf: 3, thirdPlaceMatch: true }
+});
+
+// Register teams
+await db.plugins.tournament.openRegistration(tournament.id);
+await db.plugins.tournament.register(tournament.id, 'team-alpha');
+await db.plugins.tournament.register(tournament.id, 'team-beta');
+
+// Start and play
+await db.plugins.tournament.startTournament(tournament.id);
+const matches = await db.plugins.tournament.getMatches(tournament.id);
+
+await db.plugins.tournament.reportResult(matches[0].id, {
+  score1: 2,
+  score2: 1,
+  winnerId: 'team-alpha'
+});
+```
+
+---
+
+## Dependencies
+
+**Zero external dependencies** - built directly into s3db.js core.
+
+---
+
+## Documentation Index
+
+| Guide | Description |
+|-------|-------------|
+| [Configuration](./guides/configuration.md) | All options, tournament formats, resource schemas, API reference |
+| [Usage Patterns](./guides/usage-patterns.md) | Tournament lifecycle, registration, match management, real-world examples |
+| [Best Practices](./guides/best-practices.md) | Performance, error handling, troubleshooting, FAQ |
+
+---
+
+## Quick Reference
+
+### Supported Formats
+
+| Format | Code | Description |
+|--------|------|-------------|
+| Single Elimination | `single-elimination` | Standard bracket, loser is out |
+| Double Elimination | `double-elimination` | Winners and losers brackets |
+| Round Robin | `round-robin` | Everyone plays everyone |
+| Swiss System | `swiss` | Non-elimination, similar records face each other |
+| Group Stage | `group-stage` | Groups followed by playoffs |
+| League | `league-playoffs` | Season with playoff bracket |
+| Ladder | `ladder` | Dynamic ranking challenges |
+| Circuit | `circuit` | Series of tournaments with points |
+
+### Created Resources
+
+| Resource | Description |
+|----------|-------------|
+| `plg_tournaments` | Tournament configuration and bracket data |
+| `plg_tournament_matches` | Individual match records and scores |
+| `plg_tournament_registrations` | Participant links and status |
+
+### Core Methods
+
+```javascript
+// Tournament Management
+await plugin.create({ name, format, config });
+await plugin.get(tournamentId);
+await plugin.update(tournamentId, { ... });
+await plugin.delete(tournamentId);
+
+// Lifecycle
+await plugin.openRegistration(tournamentId);
+await plugin.closeRegistration(tournamentId);
+await plugin.startTournament(tournamentId);
+
+// Registration
+await plugin.register(tournamentId, participantId);
+await plugin.checkIn(tournamentId, participantId);
+await plugin.setSeed(tournamentId, participantId, seed);
+
+// Matches
+await plugin.getMatches(tournamentId, { status: 'pending' });
+await plugin.reportResult(matchId, { score1, score2, winnerId });
+await plugin.reportWalkover(matchId, winnerId, reason);
+
+// Standings
+await plugin.getStandings(tournamentId);
+await plugin.getBracket(tournamentId);
+```
+
+---
+
+## Configuration Examples
+
+### Single Elimination
+
+```javascript
+const tournament = await plugin.create({
+  name: 'Championship',
+  format: 'single-elimination',
   config: {
-    bestOf: 3,                  // Bo3 matches
-    thirdPlaceMatch: true       // Include 3rd place decider
+    bestOf: 3,
+    thirdPlaceMatch: true
   }
 });
 ```
 
-### 3. Handle Registrations
+### Round Robin League
 
 ```javascript
-const tournamentId = tournament.id;
-
-// Open registration
-await db.plugins.tournament.openRegistration(tournamentId);
-
-// Register participants
-await db.plugins.tournament.register(tournamentId, 'team-alpha');
-await db.plugins.tournament.register(tournamentId, 'team-beta');
-await db.plugins.tournament.register(tournamentId, 'team-gamma');
-await db.plugins.tournament.register(tournamentId, 'team-delta');
-
-// Confirm them (if using a review process)
-await db.plugins.tournament.confirmRegistration(tournamentId, 'team-alpha');
-// ... confirm others ...
+const league = await plugin.create({
+  name: 'Premier Division',
+  format: 'round-robin',
+  config: {
+    rounds: 2,       // Double round robin
+    pointsWin: 3,
+    pointsDraw: 1
+  }
+});
 ```
 
-### 4. Start & Manage Matches
+### Swiss Tournament
 
 ```javascript
-// Start the tournament (generates bracket and initial matches)
-await db.plugins.tournament.startTournament(tournamentId);
+const swiss = await plugin.create({
+  name: 'Major Qualifier',
+  format: 'swiss',
+  config: {
+    rounds: 5,
+    advanceWins: 3,
+    eliminateLosses: 3
+  }
+});
+```
 
-// List upcoming matches
-const matches = await db.plugins.tournament.getMatches(tournamentId, { status: 'pending' });
-const firstMatch = matches[0];
+### Group Stage + Playoffs
 
-console.log(`Match ${firstMatch.matchNumber}: ${firstMatch.participant1Id} vs ${firstMatch.participant2Id}`);
-
-// Report result (advances winner automatically)
-await db.plugins.tournament.reportResult(firstMatch.id, {
-  score1: 2,
-  score2: 1,
-  winnerId: firstMatch.participant1Id
+```javascript
+const worldCup = await plugin.create({
+  name: 'World Cup',
+  format: 'group-stage',
+  config: {
+    groupSize: 4,
+    advancePerGroup: 2,
+    playoffFormat: 'single-elimination'
+  }
 });
 ```
 
 ---
 
-## 📋 Supported Formats
+## Tournament Lifecycle
 
-The plugin includes a modular format system.
+```
+draft → registration → in-progress → completed
+                   ↘      ↓
+                    → cancelled
+```
 
-| Format | Code | Description | Config Options |
-|--------|------|-------------|----------------|
-| **Single Elimination** | `single-elimination` | Standard bracket. Loser is out. | `bestOf`, `thirdPlaceMatch` |
-| **Double Elimination** | `double-elimination` | Winners and Losers brackets. | `bestOf`, `grandFinalReset` |
-| **Round Robin** | `round-robin` | Everyone plays everyone. | `rounds` (1=single, 2=double), `pointsWin`, `pointsDraw` |
-| **Swiss System** | `swiss` | Non-elimination format for many players. | `rounds`, `advanceWins`, `eliminateLosses` |
-| **Group Stage** | `group-stage` | Groups followed by playoffs. | `groupSize`, `advancePerGroup` |
-| **League** | `league-playoffs` | Long-running league season. | `seasonLength`, `promotionCount` |
-| **Ladder** | `ladder` | Dynamic ranking challenges. | `challengeRange`, `inactivityDays` |
-| **Circuit** | `circuit` | Series of tournaments with points. | `pointSystem` |
+| State | Description |
+|-------|-------------|
+| `draft` | Initial state, configuring tournament |
+| `registration` | Accepting participant sign-ups |
+| `in-progress` | Tournament running, reporting results |
+| `completed` | All matches finished |
+| `cancelled` | Tournament cancelled |
 
 ---
 
-## 📚 API Reference
+## See Also
 
-The plugin exposes managers for different aspects of the tournament lifecycle.
+- [Scheduler Plugin](../scheduler/README.md) - Schedule tournament events
+- [Cache Plugin](../cache/README.md) - Cache standings and brackets
 
-### Tournament Management
-
-```javascript
-// Create
-const t = await plugin.create({ ...options });
-
-// Get
-const t = await plugin.get(tournamentId);
-
-// Update settings
-await plugin.update(tournamentId, { name: 'New Name' });
-
-// Delete (cascades to matches and registrations)
-await plugin.delete(tournamentId);
-
-// List with filters
-const list = await plugin.list({ status: 'in-progress', organizerId: 'org-1' });
-```
-
-### Lifecycle Control
-
-```javascript
-// Registration Phase
-await plugin.openRegistration(id);
-await plugin.closeRegistration(id);
-
-// Execution Phase
-await plugin.startTournament(id); // Generates bracket
-await plugin.cancel(id, 'Rain delay');
-await plugin.complete(id); // Called automatically when final match ends
-```
-
-### Registration & Seeding
-
-```javascript
-// Register
-await plugin.register(id, participantId, { metadata: { ... } });
-
-// Lifecycle
-await plugin.checkIn(id, participantId);
-await plugin.withdraw(id, participantId);
-
-// Seeding
-await plugin.setSeed(id, participantId, 1); // Set #1 seed
-await plugin.shuffleSeeds(id); // Randomize remaining seeds
-```
-
-### Match Operations
-
-```javascript
-// Get specific match
-const match = await plugin.getMatch(matchId);
-
-// Schedule
-await plugin.scheduleMatch(matchId, startTimeTimestamp);
-
-// Report Result
-await plugin.reportResult(matchId, {
-  score1: 2,
-  score2: 0,
-  games: [ ... ], // Optional game details
-  metadata: { demoUrl: '...' }
-});
-
-// Walkover (W.O.)
-await plugin.reportWalkover(matchId, winnerId, 'Opponent did not show');
-```
-
-### Standings & Data
-
-```javascript
-// Get current standings/leaderboard
-const standings = await plugin.getStandings(tournamentId);
-// [
-//   { participantId: 'team-1', rank: 1, points: 9, ... },
-//   { participantId: 'team-2', rank: 2, points: 6, ... }
-// ]
-
-// Get full bracket structure (for visualization)
-const bracket = await plugin.getBracket(tournamentId);
-```
-
----
-
-## 🏗️ Data Structure
-
-The plugin creates three specialized resources in your database:
-
-1. **Tournaments** (`plg_tournaments`): Configuration, status, and bracket data.
-2. **Matches** (`plg_tournament_matches`): Individual match records, scores, and scheduling.
-3. **Registrations** (`plg_tournament_registrations`): Participant links and status.
-
-*Note: Resource names can be customized during plugin initialization.*

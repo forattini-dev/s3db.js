@@ -285,6 +285,6 @@ const user = await users.get('user123');
 
 ## See Also
 
-- [Schema](./schema.md) - Field types including `secret`
-- [Security Best Practices](../guides/security-best-practices.md) - Security guide
-- [Errors](../reference/errors.md) - CryptoError handling
+- [Schema](/core/schema.md) - Field types including `secret`
+- [Security Best Practices](/guides/security-best-practices.md) - Security guide
+- [Errors](/reference/errors.md) - CryptoError handling

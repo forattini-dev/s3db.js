@@ -234,6 +234,6 @@ describe('User Management', () => {
 
 ## 🔗 Next Steps
 
-*   [MemoryClient Documentation](../clients/memory-client.md)
-*   [Performance Tuning Guide](../guides/performance-tuning.md)
-*   [Core Concepts: Resources](../core/resource.md)
+*   [MemoryClient Documentation](/clients/memory-client.md)
+*   [Performance Tuning Guide](/guides/performance-tuning.md)
+*   [Core Concepts: Resources](/core/resource.md)

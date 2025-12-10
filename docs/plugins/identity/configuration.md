@@ -399,9 +399,9 @@ const identityPlugin = new IdentityPlugin({
 - [Identity Plugin Main](./README.md) - Overview and quickstart
 
 **Examples:**
-- [e80-sso-oauth2-server.js](../../examples/e80-sso-oauth2-server.js) - Complete SSO server
-- [e82-oidc-web-app.js](../../examples/e82-oidc-web-app.js) - Web app integration
-- [e60-oauth2-microservices.js](../../examples/e60-oauth2-microservices.js) - Microservices setup
+- [e80-sso-oauth2-server.js](/examples/e80-sso-oauth2-server.js) - Complete SSO server
+- [e82-oidc-web-app.js](/examples/e82-oidc-web-app.js) - Web app integration
+- [e60-oauth2-microservices.js](/examples/e60-oauth2-microservices.js) - Microservices setup
 
 ---
 

@@ -1,12 +1,10 @@
-# 📝 Audit Plugin
+# Audit Plugin
 
 > **Compliance-grade operation logging for every insert, update, and delete.**
->
-> **Navigation:** [← Plugin Index](./README.md) | [Configuration ↓](#-configuration-reference) | [FAQ ↓](#-faq)
 
 ---
 
-## ⚡ TLDR
+## TLDR
 
 Automatic tracking of **all** database operations (insert/update/delete) with complete history for compliance, security and debugging.
 
@@ -15,66 +13,29 @@ Automatic tracking of **all** database operations (insert/update/delete) with co
 await db.usePlugin(new AuditPlugin());  // Done! All operations are now logged
 ```
 
-> 🧩 **Namespaces**: Use `namespace: 'compliance'` (or pass an alias via `db.usePlugin`) when you need separate audit trails. The log resource becomes `plg_compliance_audits`.
-
-**Key features:**
-- ✅ Automatic logging of insert/update/delete/deleteMany
-- ✅ Stores before/after data (optional)
-- ✅ User tracking via `getCurrentUserId()`
-- ✅ Query by resource/operation/user/data
-- ✅ Size control with `maxDataSize`
+**Main features:**
+- Automatic logging of insert/update/delete/deleteMany
+- Stores before/after data (optional)
+- User tracking via `getCurrentUserId()`
+- Query by resource/operation/user/data
+- Size control with `maxDataSize`
 
 **When to use:**
-- 🔐 Compliance (GDPR, SOC2, HIPAA)
-- 🕵️ Security auditing
-- 🐛 Debug unexpected changes
-- 📊 User activity analytics
+- Compliance (GDPR, SOC2, HIPAA)
+- Security auditing
+- Debug unexpected changes
+- User activity analytics
 
-**Performance & Compliance:**
+**Access:**
 ```javascript
-// ❌ Without audit: No record of changes
-await users.delete('user-123'); // Who deleted? When? What data was lost?
-// - Can't answer "who deleted the customer?"
-// - Fails SOC2/HIPAA audits
-// - Can't recover from accidents
-// - No security forensics
-
-// ✅ With audit: Complete history
-await users.delete('user-123'); // Auto-logged with who/when/what
-// Query: "Who deleted user-123?"
-const log = await audits.query({ recordId: 'user-123', operation: 'deleted' });
-// Answer: "admin@company.com at 2024-01-15 10:30:42, data: {...}"
-// - Pass SOC2/HIPAA audits
-// - Full forensic trail
-// - Can investigate any change
+const audits = s3db.resources.plg_audits;
+const logs = await audits.list();
+console.log(`Tracked ${logs.length} operations`);
 ```
 
 ---
 
-## 📑 Table of Contents
-
-1. [⚡ TLDR](#-tldr)
-2. [⚡ Quickstart](#-quickstart)
-3. [📦 Dependencies](#-dependencies)
-4. [Usage Journey](#usage-journey)
-   - [Level 1: Basic Audit Trail](#level-1-basic-audit-trail)
-   - [Level 2: Add User Tracking](#level-2-add-user-tracking)
-   - [Level 3: Store Before/After Data](#level-3-store-beforeafter-data)
-   - [Level 4: Add Metadata & Context](#level-4-add-metadata--context)
-   - [Level 5: Filtered Audit Logging](#level-5-filtered-audit-logging)
-   - [Level 6: Production - Compliance Ready](#level-6-production---compliance-ready)
-5. [📊 Configuration Reference](#-configuration-reference)
-6. [📚 Configuration Examples](#-configuration-examples)
-7. [🔧 API Reference](#-api-reference)
-8. [✅ Best Practices](#-best-practices)
-9. [🚨 Error Handling](#-error-handling)
-10. [🔗 See Also](#-see-also)
-11. [🐛 Troubleshooting](#-troubleshooting)
-12. [❓ FAQ](#-faq)
-
----
-
-## ⚡ Quickstart
+## Quick Start
 
 ```javascript
 import { S3db, AuditPlugin } from 's3db.js';
@@ -99,331 +60,51 @@ const logs = await audits.list();
 console.log(`Tracked ${logs.length} operations:`, logs.map(l =>
   `${l.operation} on ${l.resourceName} by ${l.userId}`
 ));
-// Output: Tracked 3 operations: ['insert on users by system', 'update on users by system', 'delete on users by system']
 ```
 
 ---
 
-## 📦 Dependencies
+## Dependencies
 
-**Required:**
-```bash
-pnpm install s3db.js
-```
+**NO Peer Dependencies!** AuditPlugin works out-of-the-box with **zero external dependencies**.
 
-**NO Peer Dependencies!**
-
-AuditPlugin works out-of-the-box with **zero external dependencies**. All auditing capabilities use:
-- ✅ Node.js built-in modules
-- ✅ Core s3db.js functionality
-- ✅ No NPM packages required
+**What's Included:**
+- Node.js built-in modules
+- Core s3db.js functionality
+- No NPM packages required
 
 **Built-in Storage:**
-
-AuditPlugin stores audit logs directly in s3db using a dedicated resource (`plg_audits`):
-- Automatic partitioning by date for efficient queries
+- Automatic partitioning by date
 - TTL-based automatic cleanup (optional)
-- Full s3db query capabilities on audit logs
-- No external database or logging service required
-
-**Zero-Configuration Setup:**
-
-```javascript
-// Minimal setup - works immediately
-import { Database } from 's3db.js';
-import { AuditPlugin } from 's3db.js/plugins';
-
-const db = new Database({ connectionString: 's3://...' });
-await db.usePlugin(new AuditPlugin());  // That's it!
-await db.connect();
-
-// All operations are now audited automatically
-```
-
-**Optional Integrations:**
-
-While AuditPlugin requires no dependencies, it can optionally integrate with external services:
-
-**Replication to External Systems** (optional):
-```javascript
-import { AuditPlugin, ReplicatorPlugin } from 's3db.js/plugins';
-
-// Replicate audit logs to PostgreSQL/BigQuery/Elasticsearch
-await db.usePlugin(new AuditPlugin());
-await db.usePlugin(new ReplicatorPlugin({
-  resources: ['plg_audits'],
-  targets: [{
-    type: 'postgres',
-    connectionString: 'postgres://...',
-    table: 'audit_logs'
-  }]
-}));
-```
-
-**Why No Dependencies?**
-
-AuditPlugin avoids external packages to:
-- ✅ Ensure audit logs are always available (no external service downtime)
-- ✅ Eliminate security risks (no third-party audit processors)
-- ✅ Enable air-gapped deployments (audit completely offline)
-- ✅ Guarantee compliance (logs stored in your controlled S3 bucket)
-- ✅ Provide instant setup (no configuration, no credentials)
-
-**Complete Installation:**
-```bash
-# Install s3db.js - includes AuditPlugin
-pnpm install s3db.js
-
-# Optional: Add ReplicatorPlugin peer dependencies for external replication
-pnpm install pg  # For PostgreSQL replication
-# or
-pnpm install @google-cloud/bigquery  # For BigQuery replication
-```
-
-**Compliance & Security:**
-
-AuditPlugin is designed for compliance requirements:
-- ✅ GDPR: Track all data access and modifications
-- ✅ HIPAA: Comprehensive audit trail for PHI access
-- ✅ SOC 2: Automated logging of all database operations
-- ✅ ISO 27001: Complete activity monitoring
-
-All audit logs are:
-- Immutable (write-once, read-many)
-- Encrypted at rest (S3 server-side encryption)
-- Partitioned by date (efficient compliance reporting)
-- Queryable (full s3db query API available)
+- Full s3db query capabilities
 
 ---
 
-## Usage Journey
+## Documentation Index
 
-### Level 1: Basic Audit Trail
-
-Start here for simple operation tracking:
-
-```javascript
-// Step 1: Enable audit (one line!)
-plugins: [new AuditPlugin()]
-
-// Step 2: All operations auto-logged
-await users.insert({ name: 'John' });   // Logged
-await users.update('id', { name: 'Jane' });  // Logged
-await users.delete('id');  // Logged
-
-// Step 3: Query audit history
-const audits = db.resources.plg_audits;
-const userChanges = await audits.query({ resourceName: 'users' });
-```
-
-**What you get:** Complete operation history, zero code changes.
-
-### Level 2: Add User Tracking
-
-Know WHO made each change:
-
-```javascript
-new AuditPlugin({
-  getCurrentUserId: () => {
-    // Return current user ID from your auth system
-    return req.user?.id || 'anonymous';
-    // Or from Express session: req.session.userId
-    // Or from JWT: extractUserFromToken(req.headers.authorization)
-  }
-})
-
-// Now logs include userId
-await users.delete('user-123');
-// Logged: { userId: 'admin@company.com', operation: 'deleted', ... }
-
-// Find who deleted records
-const deletions = await audits.query({ operation: 'deleted', userId: 'admin@company.com' });
-```
-
-**What you get:** Know exactly WHO did WHAT.
-
-### Level 3: Store Before/After Data
-
-For compliance, store full data snapshots:
-
-```javascript
-new AuditPlugin({
-  includeData: true,  // Store oldData/newData
-  maxDataSize: 50000,  // 50KB limit per log
-  getCurrentUserId: () => req.user?.id
-})
-
-// Updates now store before/after
-await users.update('user-123', { email: 'newemail@example.com' });
-// Logged: {
-//   oldData: '{"email":"old@example.com"}',
-//   newData: '{"email":"newemail@example.com"}',
-//   userId: 'admin@company.com'
-// }
-
-// Investigate "what changed"
-const log = await audits.get('audit-id');
-const old = JSON.parse(log.oldData);
-const now = JSON.parse(log.newData);
-console.log(`Email changed from ${old.email} to ${now.email}`);
-```
-
-**What you get:** Full forensic trail, can see exact changes.
-
-### Level 4: Add Metadata & Context
-
-Enrich logs with custom data:
-
-```javascript
-new AuditPlugin({
-  includeData: true,
-  getCurrentUserId: () => req.user?.id,
-  getMetadata: () => ({
-    ip: req.ip,
-    userAgent: req.headers['user-agent'],
-    sessionId: req.session?.id,
-    apiVersion: 'v2'
-  })
-})
-
-// Logs now include context
-await users.delete('user-123');
-// Logged: {
-//   userId: 'admin@company.com',
-//   metadata: '{"ip":"192.168.1.1","userAgent":"Chrome/120",...}'
-// }
-
-// Investigate suspicious activity
-const suspiciousIp = '10.0.0.1';
-const actions = await audits.query({
-  metadata: { $contains: suspiciousIp }
-});
-```
-
-**What you get:** Rich context for security investigations.
-
-### Level 5: Filtered Audit Logging
-
-Only log specific resources or operations:
-
-```javascript
-new AuditPlugin({
-  includeData: true,
-  getCurrentUserId: () => req.user?.id,
-
-  // Only log sensitive resources
-  resources: ['users', 'payments', 'personal_data'],
-
-  // Or only log specific operations
-  operations: ['deleted', 'updated'],  // Skip inserts
-
-  // Or custom filter
-  shouldAudit: ({ resourceName, operation, data }) => {
-    // Don't log system resources
-    if (resourceName.startsWith('plg_')) return false;
-
-    // Always log deletes
-    if (operation === 'deleted') return true;
-
-    // Log updates to sensitive fields
-    if (operation === 'updated' && ('email' in data || 'password' in data)) {
-      return true;
-    }
-
-    return false;
-  }
-})
-```
-
-**What you get:** Controlled logging, reduced storage costs.
-
-### Level 6: Production - Compliance Ready
-
-Full compliance setup for HIPAA/SOC2/GDPR:
-
-```javascript
-new AuditPlugin({
-  includeData: true,
-  maxDataSize: 100000,  // 100KB for medical records
-
-  getCurrentUserId: () => {
-    // Extract from JWT or session
-    const token = req.headers.authorization?.replace('Bearer ', '');
-    const decoded = jwt.verify(token, process.env.JWT_SECRET);
-    return decoded.sub;  // User ID from JWT subject
-  },
-
-  getMetadata: () => ({
-    ip: req.ip,
-    userAgent: req.headers['user-agent'],
-    endpoint: req.path,
-    method: req.method,
-    timestamp: new Date().toISOString()
-  }),
-
-  // HIPAA: Log all access to patient data
-  resources: ['patients', 'medical_records', 'prescriptions'],
-
-  // Log all operations for compliance
-  operations: ['inserted', 'updated', 'deleted', 'deleteMany']
-})
-
-// Setup retention policy
-const audits = db.resources.plg_audits;
-
-// HIPAA: Keep 7 years
-const retention = 7 * 365 * 24 * 60 * 60 * 1000;
-
-// Cleanup old logs (run monthly)
-setInterval(async () => {
-  const cutoff = Date.now() - retention;
-  const oldLogs = await audits.query({
-    timestamp: { $lt: new Date(cutoff).toISOString() }
-  });
-
-  for (const log of oldLogs) {
-    await audits.delete(log.id);
-  }
-  console.log(`Cleaned up ${oldLogs.length} audit logs`);
-}, 30 * 24 * 60 * 60 * 1000);
-
-// Export for compliance reports
-app.get('/admin/audit-report', async (req, res) => {
-  const { startDate, endDate, userId, resourceName } = req.query;
-
-  const logs = await audits.query({
-    timestamp: {
-      $gte: startDate,
-      $lte: endDate
-    },
-    ...(userId && { userId }),
-    ...(resourceName && { resourceName })
-  });
-
-  res.json({
-    period: { start: startDate, end: endDate },
-    totalOperations: logs.length,
-    byOperation: groupBy(logs, 'operation'),
-    byUser: groupBy(logs, 'userId'),
-    logs: logs
-  });
-});
-```
-
-**What you get:** SOC2/HIPAA/GDPR compliance, full audit trail, retention policies.
+| Guide | Description |
+|-------|-------------|
+| [Configuration](/plugins/audit/guides/configuration.md) | All options, audit log structure, API reference |
+| [Usage Patterns](/plugins/audit/guides/usage-patterns.md) | Progressive adoption, compliance patterns, recovery |
+| [Best Practices](/plugins/audit/guides/best-practices.md) | Production tips, error handling, troubleshooting, FAQ |
 
 ---
 
-## 📊 Configuration Reference
+## Quick Reference
+
+### Core Options
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
-| `enabled` | boolean | `true` | Enable/disable audit logging globally |
-| `includeData` | boolean | `true` | Store before/after data snapshots in logs |
-| `includePartitions` | boolean | `true` | Include partition field values in logs |
-| `maxDataSize` | number | `10000` | Maximum size of data payloads (bytes). Larger data is truncated. |
+| `enabled` | boolean | `true` | Enable/disable audit logging |
+| `includeData` | boolean | `true` | Store before/after data snapshots |
+| `maxDataSize` | number | `10000` | Maximum data payload size (bytes) |
+| `getCurrentUserId` | function | `() => 'system'` | Function to get current user |
+| `getMetadata` | function | `undefined` | Function to add custom metadata |
+| `async` | boolean | `false` | Non-blocking audit logging |
 
-**Audit Log Structure:**
+### Audit Log Structure
+
 ```javascript
 {
   id: 'audit-abc123',
@@ -432,543 +113,73 @@ app.get('/admin/audit-report', async (req, res) => {
   recordId: 'user-123',
   userId: 'admin-456',
   timestamp: '2024-01-15T10:30:00.000Z',
-  oldData: '{"name":"John"}',           // JSON string (for updates/deletes)
-  newData: '{"name":"John Doe"}',       // JSON string (for inserts/updates)
-  partition: 'byStatus',                // Optional: partition name
-  partitionValues: '{"status":"active"}', // Optional: partition values
-  metadata: '{"ip":"192.168.1.1"}'      // Optional: custom metadata
+  oldData: '{"name":"John"}',      // For updates/deletes
+  newData: '{"name":"John Doe"}',  // For inserts/updates
+  metadata: '{"ip":"192.168.1.1"}' // Optional
 }
 ```
 
----
-
-## 📚 Configuration Examples
-
-### Example 1: Basic Audit (Default)
-
-All operations tracked with full data:
+### Key Methods
 
 ```javascript
-new AuditPlugin()
-
-// Tracks: insert, update, delete, deleteMany
-// Includes: before/after data, partition info
-// Storage: plg_audits resource
-```
-
-### Example 2: Minimal Audit (Metadata Only)
-
-Track operations without storing data payloads:
-
-```javascript
-new AuditPlugin({
-  includeData: false,
-  includePartitions: false
-})
-
-// Use case: GDPR compliance, reduce storage costs
-// Tracks: who did what, when
-// Excludes: actual data content
-```
-
-### Example 3: Custom User Tracking
-
-Extract user from request context:
-
-```javascript
-new AuditPlugin({
-  getCurrentUserId: () => {
-    // Access your auth context here
-    return global.currentUser?.id || 'anonymous';
-  }
-})
-
-const audits = s3db.resources.plg_audits;
-const logs = await audits.list();
-
-console.log('User activity:', logs.map(l =>
-  `${l.userId} performed ${l.operation} on ${l.resourceName}`
-));
-// Output: User activity: ['admin-123 performed insert on users', 'user-456 performed update on products']
-```
-
-### Example 4: Large Data Truncation
-
-Control storage size for large records:
-
-```javascript
-new AuditPlugin({
-  includeData: true,
-  maxDataSize: 1000  // 1KB limit
-})
-
-// Records larger than 1KB will be truncated with metadata:
-// {
-//   ...data,
-//   _truncated: true,
-//   _originalSize: 5234,
-//   _truncatedAt: '2024-01-15T10:30:00.000Z'
-// }
-
-const audits = s3db.resources.plg_audits;
-const truncated = (await audits.list()).filter(l =>
-  l.newData?.includes('_truncated')
-);
-
-console.log(`${truncated.length} logs were truncated`);
-```
-
-### Example 5: Query Audit History
-
-Find specific operations:
-
-```javascript
-const audits = s3db.resources.plg_audits;
-
-// Get all changes to a specific record
-const userHistory = await audits.list({
-  filter: log => log.resourceName === 'users' && log.recordId === 'user-123'
-});
-
-console.log(`User user-123 history:`, userHistory.map(h => ({
-  operation: h.operation,
-  timestamp: h.timestamp,
-  changedBy: h.userId
-})));
-
-// Get recent deletions
-const deletions = await audits.list({
-  filter: log => log.operation === 'deleted' &&
-    new Date(log.timestamp) > new Date(Date.now() - 24*60*60*1000)
-});
-
-console.log(`${deletions.length} deletions in last 24h`);
-```
-
----
-
-## 🔧 API Reference
-
-### Plugin Methods
-
-The AuditPlugin adds these helper methods:
-
-#### `getAuditLogs(options)`
-
-Query audit logs with filters:
-
-```javascript
-const plugin = s3db.plugins.find(p => p instanceof AuditPlugin);
-
+// Get audit logs with filters
 const logs = await plugin.getAuditLogs({
   resourceName: 'users',
   operation: 'deleted',
-  recordId: 'user-123',
-  startDate: new Date('2024-01-01'),
-  endDate: new Date('2024-01-31'),
-  limit: 100,
-  offset: 0
+  startDate: new Date('2024-01-01')
 });
 
-console.log(`Found ${logs.length} matching audit logs`);
-```
-
-#### `getRecordHistory(resourceName, recordId)`
-
-Get complete history for a specific record:
-
-```javascript
+// Get complete history for a record
 const history = await plugin.getRecordHistory('users', 'user-123');
 
-console.log('Record history:', history.map(h => ({
-  operation: h.operation,
-  timestamp: h.timestamp,
-  user: h.userId
-})));
-```
-
-#### `getAuditStats(options)`
-
-Get aggregated statistics:
-
-```javascript
+// Get aggregated statistics
 const stats = await plugin.getAuditStats({
   startDate: new Date('2024-01-01'),
   endDate: new Date('2024-01-31')
 });
 
-console.log('Audit statistics:', {
-  total: stats.total,
-  byOperation: stats.byOperation,
-  byResource: stats.byResource,
-  byUser: stats.byUser
-});
-// Output: Audit statistics: { total: 1250, byOperation: { insert: 500, update: 600, delete: 150 }, ... }
+// Cleanup old logs
+await plugin.cleanupOldAudits(90); // 90 days
 ```
 
----
-
-## ✅ Best Practices
-
-### 1. Minimize Storage Costs
+### User Tracking
 
 ```javascript
-// For high-volume applications
 new AuditPlugin({
-  includeData: false,      // Don't store data payloads
-  maxDataSize: 1000        // Or limit size
+  getCurrentUserId: () => req.user?.id || 'anonymous',
+  getMetadata: () => ({
+    ip: req.ip,
+    userAgent: req.headers['user-agent']
+  })
 })
 ```
 
-### 2. Query Efficiently
+### Performance Options
 
 ```javascript
-// Use filters instead of loading all logs
-const audits = s3db.resources.plg_audits;
-const recent = await audits.list({
-  filter: log => new Date(log.timestamp) > new Date(Date.now() - 86400000)
-});
-```
-
-### 3. Cleanup Old Logs
-
-```javascript
-// Archive or delete logs older than 90 days
-const cutoff = new Date(Date.now() - 90 * 24 * 60 * 60 * 1000);
-const oldLogs = await audits.list({
-  filter: log => new Date(log.timestamp) < cutoff
-});
-
-for (const log of oldLogs) {
-  await audits.delete(log.id);
-}
-
-console.log(`Cleaned up ${oldLogs.length} old audit logs`);
-```
-
----
-
-## 🚨 Error Handling
-
-### Common Errors
-
-#### Error 1: Audit Log Creation Failed
-
-**Problem**: Plugin fails to create audit logs for operations.
-
-**Causes:**
-- Insufficient S3 permissions
-- Audit resource (`plg_audits`) not created
-- Plugin not properly initialized
-
-**Solution:**
-```javascript
-try {
-  await db.usePlugin(new AuditPlugin({ enabled: true }));
-  await db.connect();
-} catch (error) {
-  if (error.message.includes('plg_audits')) {
-    console.error('Audit resource not created. Check plugin initialization.');
-  }
-  throw error;
-}
-```
-
-**Diagnosis:**
-```javascript
-// Check if audit resource exists
-const audits = db.resources.plg_audits;
-if (!audits) {
-  console.error('Audit resource missing - plugin may not have initialized');
-}
-
-// Check plugin is loaded
-const plugin = db.plugins.find(p => p.constructor.name === 'AuditPlugin');
-console.log('Plugin loaded:', !!plugin);
-```
-
----
-
-#### Error 2: Audit Storage Quota Exceeded
-
-**Problem**: Too many audit logs consuming excessive S3 storage.
-
-**Solution:**
-```javascript
-// Enable TTL for automatic cleanup
+// High-volume applications
 new AuditPlugin({
-  ttl: 90 * 24 * 60 * 60 * 1000,  // 90 days
-  includeData: false,  // Don't store full record data
-  maxDataSize: 1000    // Limit data size to 1KB
-})
-
-// Or manually clean old logs
-const audits = db.resources.plg_audits;
-const cutoffDate = new Date(Date.now() - 90 * 24 * 60 * 60 * 1000);
-
-const oldLogs = await audits.query({
-  'metadata.timestamp': { $lt: cutoffDate.toISOString() }
-});
-
-for (const log of oldLogs) {
-  await audits.delete(log.id);
-}
-```
-
----
-
-#### Error 3: Missing User Information in Logs
-
-**Problem**: Audit logs show `userId: 'system'` instead of actual user.
-
-**Solution:**
-```javascript
-// Implement getCurrentUserId to extract user from your context
-new AuditPlugin({
-  getCurrentUserId: (context) => {
-    // Extract from request headers (API plugin)
-    if (context?.req?.user) {
-      return context.req.user.id;
-    }
-
-    // Extract from JWT token
-    if (context?.auth?.userId) {
-      return context.auth.userId;
-    }
-
-    // Extract from environment (batch jobs)
-    if (process.env.BATCH_USER_ID) {
-      return process.env.BATCH_USER_ID;
-    }
-
-    return 'system';  // Fallback
-  }
+  async: true,           // Non-blocking
+  includeData: false,    // Skip data payloads
+  maxDataSize: 1000      // Or limit size
 })
 ```
 
 ---
 
-#### Error 4: Performance Impact from Auditing
+## Compliance Support
 
-**Problem**: Auditing slows down operations significantly.
-
-**Solution:**
-```javascript
-// Async auditing (non-blocking)
-new AuditPlugin({
-  async: true,           // Don't wait for audit log to be written
-  includeData: false,    // Skip storing full record data
-  excludeResources: [    // Skip low-priority resources
-    'plg_cache',
-    'plg_metrics'
-  ]
-})
-
-// Or selective auditing
-new AuditPlugin({
-  includeResources: ['users', 'orders', 'payments'],  // Only audit critical resources
-  operations: ['insert', 'update', 'delete']          // Skip reads
-})
-```
-
-**Benchmarks:**
-```javascript
-// Without auditing
-// insert: 45ms, update: 38ms
-
-// With sync auditing (async: false)
-// insert: 92ms (+104%), update: 81ms (+113%)
-
-// With async auditing (async: true)
-// insert: 47ms (+4%), update: 40ms (+5%)
-```
+| Standard | Support |
+|----------|---------|
+| GDPR | Full data access tracking |
+| HIPAA | PHI access audit trail |
+| SOC 2 | Automated operation logging |
+| ISO 27001 | Complete activity monitoring |
 
 ---
 
-#### Error 5: Audit Logs Not Queryable by Date
+## See Also
 
-**Problem**: Querying audit logs by date is slow or returns incorrect results.
-
-**Solution:**
-
-Audit logs are automatically partitioned by date. Use partition-aware queries:
-
-```javascript
-const audits = db.resources.plg_audits;
-
-// ✅ Good: Uses partition
-const logs = await audits.getFromPartition({
-  partitionName: 'byDate',
-  partitionValue: '2024-01-15',
-  limit: 100
-});
-
-// ❌ Bad: Full scan (slow)
-const logs = await audits.query({
-  'metadata.timestamp': { $gte: '2024-01-15T00:00:00Z' }
-});
-```
-
----
-
-### Troubleshooting Checklist
-
-**Plugin Not Creating Logs:**
-1. ✅ Check plugin is enabled: `enabled: true`
-2. ✅ Verify `plg_audits` resource exists
-3. ✅ Check S3 permissions (PutObject on bucket)
-4. ✅ Verify plugin initialized before operations
-5. ✅ Check no `excludeResources` blocking audits
-
-**Storage Issues:**
-1. ✅ Enable TTL: `ttl: 90 * 24 * 60 * 60 * 1000`
-2. ✅ Disable data storage: `includeData: false`
-3. ✅ Limit data size: `maxDataSize: 500`
-4. ✅ Exclude plugin resources from auditing
-5. ✅ Use partition-based cleanup
-
-**Performance Issues:**
-1. ✅ Enable async mode: `async: true`
-2. ✅ Exclude reads: `operations: ['insert', 'update', 'delete']`
-3. ✅ Whitelist critical resources only
-4. ✅ Disable data inclusion
-5. ✅ Consider ReplicatorPlugin for external storage
-
-**Query Performance:**
-1. ✅ Use partition queries (byDate, byResource)
-2. ✅ Add indexes on frequently queried fields
-3. ✅ Limit result sets with `limit` parameter
-4. ✅ Use date ranges for queries
-5. ✅ Consider BigQuery replication for analytics
-
----
-
-### Debug Mode
-
-Enable detailed logging to diagnose issues:
-
-```javascript
-new AuditPlugin({
-  debug: true,  // Logs all audit operations
-  onError: (error, context) => {
-    console.error('Audit error:', error);
-    console.error('Context:', context);
-    // Send to error tracking service
-    // errorTracker.captureException(error);
-  }
-})
-```
-
----
-
-## 🔗 See Also
-
-- [Metrics Plugin](./metrics.md) - Monitor performance alongside audit logs
-- [Replicator Plugin](./replicator.md) - Replicate audit logs to external systems
-- [Costs Plugin](./costs.md) - Track audit logging costs
-
----
-
-## 🐛 Troubleshooting
-
-**Issue: Audit logs not appearing**
-- Solution: Check `enabled: true` and ensure `plg_audits` resource exists
-
-**Issue: Too much storage used**
-- Solution: Set `includeData: false` or reduce `maxDataSize`
-
-**Issue: Missing user information**
-- Solution: Implement `getCurrentUserId()` to extract user from your auth context
-
----
-
-## ❓ FAQ
-
-### Basics
-
-**Q: What is automatically audited?**
-A: All operations: `inserted`, `updated`, `deleted` and `deleteMany`.
-
-**Q: Where are logs stored?**
-A: In a resource called `plg_audits` (by default), with partitioning by date and by resource.
-
-**Q: What is the performance impact?**
-A: Minimal. The plugin uses asynchronous events and doesn't block main operations.
-
-### Configuration
-
-**Q: How to disable full data capture?**
-A: Configure `includeData: false`:
-```javascript
-new AuditPlugin({
-  includeData: false  // Only metadata, no oldData/newData
-})
-```
-
-**Q: How to limit captured data size?**
-A: Use `maxDataSize`:
-```javascript
-new AuditPlugin({
-  maxDataSize: 5000  // Truncate after 5KB
-})
-```
-
-**Q: How to track the user who performed the operation?**
-A: Configure `getCurrentUserId`:
-```javascript
-const auditPlugin = new AuditPlugin();
-auditPlugin.getCurrentUserId = () => currentUser.id;
-```
-
-### Operations
-
-**Q: How to query a record's history?**
-A: Use `getRecordHistory`:
-```javascript
-const history = await auditPlugin.getRecordHistory('users', 'user-123');
-```
-
-**Q: How to get logs from a specific partition?**
-A: Use `getPartitionHistory`:
-```javascript
-const history = await auditPlugin.getPartitionHistory(
-  'orders',
-  'byRegion',
-  { region: 'US' }
-);
-```
-
-**Q: How to generate audit statistics?**
-A: Use `getAuditStats`:
-```javascript
-const stats = await auditPlugin.getAuditStats({
-  resourceName: 'users',
-  startDate: '2025-01-01',
-  endDate: '2025-01-31'
-});
-```
-
-### Maintenance
-
-**Q: How to cleanup old logs?**
-A: Use `cleanupOldAudits`:
-```javascript
-const deleted = await auditPlugin.cleanupOldAudits(90); // Remove logs older than 90 days
-```
-
-**Q: How to recover deleted data?**
-A: Query the audit log and use the `oldData` field:
-```javascript
-const logs = await auditPlugin.getAuditLogs({
-  resourceName: 'users',
-  operation: 'deleted',
-  recordId: 'user-123'
-});
-const deletedData = JSON.parse(logs[0].oldData);
-```
-
-### Troubleshooting
-
-**Q: Logs are not being created?**
-A: Check if the `plg_audits` resource was created correctly and if there are errors in the console (enable `logLevel: 'debug'`).
-
+- [Metrics Plugin](/plugins/metrics/README.md) - Monitor performance alongside audit logs
+- [Replicator Plugin](/plugins/replicator/README.md) - Replicate audit logs to external systems
+- [Costs Plugin](/plugins/costs/README.md) - Track audit logging costs

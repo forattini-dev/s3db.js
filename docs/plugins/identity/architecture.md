@@ -290,9 +290,9 @@ graph LR
 - [Identity Plugin Main](./README.md) - Overview and quickstart
 
 **Examples:**
-- [e80-sso-oauth2-server.js](../../examples/e80-sso-oauth2-server.js) - Complete SSO server
-- [e81-oauth2-resource-server.js](../../examples/e81-oauth2-resource-server.js) - Resource Server
-- [e60-oauth2-microservices.js](../../examples/e60-oauth2-microservices.js) - Microservices setup
+- [e80-sso-oauth2-server.js](/examples/e80-sso-oauth2-server.js) - Complete SSO server
+- [e81-oauth2-resource-server.js](/examples/e81-oauth2-resource-server.js) - Resource Server
+- [e60-oauth2-microservices.js](/examples/e60-oauth2-microservices.js) - Microservices setup
 
 ---
 

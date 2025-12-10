@@ -303,7 +303,7 @@ new ApiPlugin({
 
 ### RelationPlugin Integration
 
-- Install the [RelationPlugin](../relation.md) before the API plugin to expose relational hydration automatically.
+- Install the [RelationPlugin](/plugins/relation/README.md) before the API plugin to expose relational hydration automatically.
 - All `GET` endpoints gain a `populate` query parameter (e.g., `?populate=customer,items.product`).
 - Unknown relation paths return `400 INVALID_POPULATE` so consumers get immediate feedback.
 
@@ -705,7 +705,7 @@ middlewares: [
 
 ---
 
-> **Navigation:** [← Back to API Plugin](./README.md) | [Authentication →](./authentication.md) | [Deployment →](./deployment.md)
+> **Navigation:** [← Back to API Plugin](/plugins/api/README.md) | [Authentication →](/plugins/api/guides/authentication.md) | [Deployment →](/plugins/api/guides/deployment.md)
 
 ---
 
@@ -771,6 +771,6 @@ Provider-specific parameters are added automatically based on `issuer` URL:
 | Slack | `slack.com` | `team=<config.teamId>` |
 | GitLab | `gitlab.com` | Adds `read_user` scope |
 
-No configuration needed - works automatically! See [OIDC Enhancements](./oidc-enhancements.md) for details.
+No configuration needed - works automatically! See [OIDC Enhancements](/plugins/api/guides/oidc.md) for details.
 
 ---

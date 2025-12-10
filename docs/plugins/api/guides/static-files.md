@@ -2,7 +2,7 @@
 
 > **Quick Jump:** [💾 Filesystem](#filesystem-driver) | [☁️ S3 Driver](#s3-driver) | [⚛️ SPA Support](#spa-single-page-application-support) | [🔐 With Auth](#combining-with-authentication) | [⚙️ Config](#configuration-options)
 
-> **Navigation:** [← Back to API Plugin](./README.md) | [Authentication →](./authentication.md) | [Configuration →](./configuration.md)
+> **Navigation:** [← Back to API Plugin](/plugins/api/README.md) | [Authentication →](/plugins/api/guides/authentication.md) | [Configuration →](/plugins/api/reference/configuration.md)
 
 ---
 
@@ -404,9 +404,9 @@ static: [
 
 ## Examples
 
-- **[Example 84: Static File Serving](../../examples/e84-static-files.js)** - Filesystem + S3 drivers, ETag, Range requests, CORS
-- **[Example 85: Protected SPA](../../examples/e85-protected-spa.js)** - React app with JWT authentication and pathAuth
-- **[Example 87: OIDC + API Token Cookie](../../examples/e87-oidc-api-token-cookie.js)** - OIDC login with static file serving
+- **[Example 84: Static File Serving](/examples/e84-static-files.js)** - Filesystem + S3 drivers, ETag, Range requests, CORS
+- **[Example 85: Protected SPA](/examples/e85-protected-spa.js)** - React app with JWT authentication and pathAuth
+- **[Example 87: OIDC + API Token Cookie](/examples/e87-oidc-api-token-cookie.js)** - OIDC login with static file serving
 
 ---
 
@@ -421,29 +421,29 @@ You learned:
 - ✅ **Advanced Features** - ETag (304), Range requests (206), CORS, cache control
 
 **Next Steps:**
-1. Protect your SPA: [Authentication →](./authentication.md)
-2. Add API endpoints: [API Plugin →](./README.md)
-3. Try basic example: [Example 84](../../examples/e84-static-files.js)
-4. Try protected SPA: [Example 85](../../examples/e85-protected-spa.js)
-5. Deploy to production: [Deployment →](./deployment.md)
+1. Protect your SPA: [Authentication →](/plugins/api/guides/authentication.md)
+2. Add API endpoints: [API Plugin →](/plugins/api/README.md)
+3. Try basic example: [Example 84](/examples/e84-static-files.js)
+4. Try protected SPA: [Example 85](/examples/e85-protected-spa.js)
+5. Deploy to production: [Deployment →](/plugins/api/guides/deployment.md)
 
 ---
 
 ## 🔗 See Also
 
 **Related Documentation:**
-- [API Plugin](./README.md) - Main API Plugin documentation
-- [Authentication](./authentication.md) - Protect static files with auth
-- [Guards](./guards.md) - Authorization for API endpoints
-- [Configuration](./configuration.md) - Complete configuration reference
-- [Deployment](./deployment.md) - Production deployment guide
+- [API Plugin](/plugins/api/README.md) - Main API Plugin documentation
+- [Authentication](/plugins/api/guides/authentication.md) - Protect static files with auth
+- [Guards](/plugins/api/guides/guards.md) - Authorization for API endpoints
+- [Configuration](/plugins/api/reference/configuration.md) - Complete configuration reference
+- [Deployment](/plugins/api/guides/deployment.md) - Production deployment guide
 
 **Examples:**
-- [e84-static-files.js](../../examples/e84-static-files.js) - Filesystem + S3, all features
-- [e85-protected-spa.js](../../examples/e85-protected-spa.js) - Protected React app with JWT
-- [e87-oidc-api-token-cookie.js](../../examples/e87-oidc-api-token-cookie.js) - OIDC + SPA
-- [e47-api-plugin-basic.js](../../examples/e47-api-plugin-basic.js) - API + static files
+- [e84-static-files.js](/examples/e84-static-files.js) - Filesystem + S3, all features
+- [e85-protected-spa.js](/examples/e85-protected-spa.js) - Protected React app with JWT
+- [e87-oidc-api-token-cookie.js](/examples/e87-oidc-api-token-cookie.js) - OIDC + SPA
+- [e47-api-plugin-basic.js](/examples/e47-api-plugin-basic.js) - API + static files
 
 ---
 
-> **Navigation:** [← Back to API Plugin](./README.md) | [Authentication →](./authentication.md) | [Configuration →](./configuration.md)
+> **Navigation:** [← Back to API Plugin](/plugins/api/README.md) | [Authentication →](/plugins/api/guides/authentication.md) | [Configuration →](/plugins/api/reference/configuration.md)

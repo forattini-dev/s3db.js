@@ -303,6 +303,6 @@ s3://mybucket?region=us-east-1
 
 ## See Also
 
-- [Database](../core/database.md) - Database configuration
-- [Clients](../clients/README.md) - Storage backends
-- [Security Best Practices](../guides/security-best-practices.md) - Security guide
+- [Database](/core/database.md) - Database configuration
+- [Clients](/clients/README.md) - Storage backends
+- [Security Best Practices](/guides/security-best-practices.md) - Security guide

@@ -2,7 +2,7 @@
 
 **Prev:** [Getting Started](./getting-started.md)
 **Next:** [Usage Patterns](./usage-patterns.md)
-**Main:** [README](../README.md) | **All guides:** [Index](../README.md#-documentation-index)
+**Main:** [README](/plugins/vector/README.md) | **All guides:** [Index](/plugins/vector/README.md#-documentation-index)
 
 > **In this guide:**
 > - 5 embedding provider options

@@ -2,7 +2,7 @@
 
 > Shared leader election service for distributed plugin coordination.
 
-[← JSON Recovery](json-recovery.md) | [Back to Core →](../README.md)
+[← JSON Recovery](/core/internals/json-recovery.md) | [Back to Core →](/core/README.md)
 
 ---
 
@@ -341,6 +341,6 @@ if (metrics.electionDurationMs > 1000) {
 
 ## See Also
 
-- [Distributed Lock](distributed-lock.md) - Underlying locking mechanism
-- [S3Queue Plugin](../../plugins/s3-queue/README.md) - Queue processing with coordination
-- [Scheduler Plugin](../../plugins/scheduler/README.md) - Cron jobs with coordination
+- [Distributed Lock](/core/internals/distributed-lock.md) - Underlying locking mechanism
+- [S3Queue Plugin](/plugins/s3-queue/README.md) - Queue processing with coordination
+- [Scheduler Plugin](/plugins/scheduler/README.md) - Cron jobs with coordination

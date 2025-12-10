@@ -1,8 +1,8 @@
 # 💡 Usage Patterns & Scenarios
 
-**Prev:** [← Configuration](./configuration.md)
-**Next:** [Best Practices →](./best-practices.md)
-**Main:** [← Identity Plugin](../README.md) | **All guides:** [Index](../README.md#-documentation-hub)
+**Prev:** [← Configuration](/plugins/identity/guides/configuration.md)
+**Next:** [Best Practices →](/plugins/identity/guides/best-practices.md)
+**Main:** [← Identity Plugin](/plugins/identity/README.md) | **All guides:** [Index](/plugins/identity/README.md#-documentation-hub)
 
 > **In this guide:**
 > - 5 real-world OAuth2/OIDC scenarios
@@ -954,13 +954,13 @@ const token = await fetch(discovery.token_endpoint, {...});
 ## Next Steps
 
 1. **Choose your pattern** - Pick the scenario that matches your use case
-2. **Configure Identity Plugin** - Use settings from [Configuration Guide](./configuration.md)
+2. **Configure Identity Plugin** - Use settings from [Configuration Guide](/plugins/identity/guides/configuration.md)
 3. **Implement login flow** - Copy code from pattern above
 4. **Test with curl** - Verify endpoints work
-5. **Troubleshoot** - Check [Best Practices Guide](./best-practices.md)
+5. **Troubleshoot** - Check [Best Practices Guide](/plugins/identity/guides/best-practices.md)
 
 ---
 
-**Prev:** [← Configuration](./configuration.md)
-**Next:** [Best Practices →](./best-practices.md)
-**Main:** [← Identity Plugin](../README.md)
+**Prev:** [← Configuration](/plugins/identity/guides/configuration.md)
+**Next:** [Best Practices →](/plugins/identity/guides/best-practices.md)
+**Main:** [← Identity Plugin](/plugins/identity/README.md)

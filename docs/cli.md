@@ -335,6 +335,6 @@ s3db mcp --transport http --port 8000
 
 ## 🔗 Next Steps
 
-*   [MCP Integration Guide](./mcp.md) - Learn how to integrate S3db with AI agents.
-*   [Testing Guide](./testing.md) - Deep dive into testing utilities.
-*   [Performance Tuning Guide](../guides/performance-tuning.md) - Optimize your S3db applications.
+*   [MCP Integration Guide](/mcp.md) - Learn how to integrate S3db with AI agents.
+*   [Testing Guide](/guides/testing.md) - Deep dive into testing utilities.
+*   [Performance Tuning Guide](/guides/performance-tuning.md) - Optimize your S3db applications.

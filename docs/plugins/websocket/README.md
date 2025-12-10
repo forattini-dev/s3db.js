@@ -2,7 +2,7 @@
 
 > Real-time communication for s3db.js resources via WebSocket
 
-[← Back to Plugins](../README.md) | [Configuration](./reference/configuration.md) | [Examples](./examples/README.md) | [FAQ](./faq.md)
+[← Back to Plugins](/plugins/README.md) | [Configuration](/plugins/websocket/reference/configuration.md) | [Examples](/plugins/websocket/examples/README.md) | [FAQ](/plugins/websocket/faq.md)
 
 ---
 
@@ -10,13 +10,13 @@
 
 | Document | Description |
 |----------|-------------|
-| **[Configuration Reference](./reference/configuration.md)** | Complete options reference |
-| **[Client Protocol Guide](./guides/client-protocol.md)** | WebSocket message protocol |
-| **[Channels & Presence Guide](./guides/channels.md)** | Rooms and presence tracking |
-| **[Authentication Guide](./guides/authentication.md)** | JWT, API Key, OIDC setup |
-| **[Health Checks Guide](./guides/health-checks.md)** | Kubernetes-compatible health endpoints |
-| **[Examples](./examples/README.md)** | Real-world use cases |
-| **[FAQ](./faq.md)** | Frequently asked questions |
+| **[Configuration Reference](/plugins/websocket/reference/configuration.md)** | Complete options reference |
+| **[Client Protocol Guide](/plugins/websocket/guides/client-protocol.md)** | WebSocket message protocol |
+| **[Channels & Presence Guide](/plugins/websocket/guides/channels.md)** | Rooms and presence tracking |
+| **[Authentication Guide](/plugins/websocket/guides/authentication.md)** | JWT, API Key, OIDC setup |
+| **[Health Checks Guide](/plugins/websocket/guides/health-checks.md)** | Kubernetes-compatible health endpoints |
+| **[Examples](/plugins/websocket/examples/README.md)** | Real-world use cases |
+| **[FAQ](/plugins/websocket/faq.md)** | Frequently asked questions |
 
 ---
 
@@ -901,4 +901,4 @@ const wsPlugin = new WebSocketPlugin({
 
 ---
 
-[← Back to Plugins](../README.md) | [FAQ →](./faq.md) | [Top ↑](#-websocket-plugin)
+[← Back to Plugins](/plugins/README.md) | [FAQ →](/plugins/websocket/faq.md) | [Top ↑](#-websocket-plugin)

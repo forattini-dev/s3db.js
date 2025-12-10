@@ -2,7 +2,7 @@
 
 > **Enforce complex workflow transitions with guards, events, and audit trails.**
 >
-> **Navigation:** [← Plugin Index](../README.md) | [Guides ↓](#-documentation-index) | [FAQ ↓](./guides/best-practices-errors.md#-faq)
+> **Navigation:** [← Plugin Index](/plugins/README.md) | [Guides ↓](#-documentation-index) | [FAQ ↓](/plugins/state-machine/guides/best-practices-errors.md#-faq)
 
 ---
 
@@ -26,7 +26,7 @@ await orders.update('order-123', { paymentStatus: 'confirmed' });
 // State transition completed IMMEDIATELY ✅
 ```
 
-See [example e76](../examples/e76-state-machine-sync-events.js) for complete demo.
+See [example e76](/examples/e76-state-machine-sync-events.js) for complete demo.
 
 ---
 
@@ -43,17 +43,17 @@ Complete documentation organized by topic. Start here to find what you need.
 
 | Guide | Focus |
 |-------|-------|
-| **[Event-Based Triggers](./guides/event-triggers.md)** | Automatic transitions based on data changes |
-| **[Configuration](./guides/configuration.md)** | Plugin options & state definitions |
-| **[Usage Patterns](./guides/usage-patterns.md)** | Examples, API reference, advanced patterns |
-| **[Best Practices & Errors](./guides/best-practices-errors.md)** | Error handling, FAQ, troubleshooting |
+| **[Event-Based Triggers](/plugins/state-machine/guides/event-triggers.md)** | Automatic transitions based on data changes |
+| **[Configuration](/plugins/state-machine/guides/configuration.md)** | Plugin options & state definitions |
+| **[Usage Patterns](/plugins/state-machine/guides/usage-patterns.md)** | Examples, API reference, advanced patterns |
+| **[Best Practices & Errors](/plugins/state-machine/guides/best-practices-errors.md)** | Error handling, FAQ, troubleshooting |
 
 ### Getting Help
 
-1. **Quick questions?** Check [FAQ](./guides/best-practices-errors.md#-faq)
-2. **Configuration help?** See [Configuration Guide](./guides/configuration.md)
-3. **Event-based workflows?** See [Event-Based Triggers Guide](./guides/event-triggers.md)
-4. **Troubleshooting?** See [Best Practices Guide](./guides/best-practices-errors.md#troubleshooting)
+1. **Quick questions?** Check [FAQ](/plugins/state-machine/guides/best-practices-errors.md#-faq)
+2. **Configuration help?** See [Configuration Guide](/plugins/state-machine/guides/configuration.md)
+3. **Event-based workflows?** See [Event-Based Triggers Guide](/plugins/state-machine/guides/event-triggers.md)
+4. **Troubleshooting?** See [Best Practices Guide](/plugins/state-machine/guides/best-practices-errors.md#troubleshooting)
 
 ---
 
@@ -251,9 +251,9 @@ try {
 4. ✅ Invalid transitions prevented automatically
 
 **Next steps:**
-- Add guard functions for conditional transitions (see [Usage Patterns Guide](./guides/usage-patterns.md))
-- Add action handlers for transition side-effects (see [Usage Patterns Guide](./guides/usage-patterns.md#advanced-patterns))
-- Enable audit trail for state changes (see [Configuration Guide](./guides/configuration.md))
+- Add guard functions for conditional transitions (see [Usage Patterns Guide](/plugins/state-machine/guides/usage-patterns.md))
+- Add action handlers for transition side-effects (see [Usage Patterns Guide](/plugins/state-machine/guides/usage-patterns.md#advanced-patterns))
+- Enable audit trail for state changes (see [Configuration Guide](/plugins/state-machine/guides/configuration.md))
 
 ---
 
@@ -310,7 +310,7 @@ Here's a visual representation of an order processing state machine:
               └───────────┘
 ```
 
-> **Interactive Visualization**: Use the `visualize()` method to generate GraphViz diagrams. See [Usage Patterns Guide](./guides/usage-patterns.md#visualize) for details.
+> **Interactive Visualization**: Use the `visualize()` method to generate GraphViz diagrams. See [Usage Patterns Guide](/plugins/state-machine/guides/usage-patterns.md#visualize) for details.
 
 ---
 
@@ -336,8 +336,8 @@ Here's a visual representation of an order processing state machine:
 
 ## See Also
 
-- [Event-Based Triggers Guide](./guides/event-triggers.md) - Automatic transitions
-- [Configuration Guide](./guides/configuration.md) - Complete options reference
-- [Usage Patterns Guide](./guides/usage-patterns.md) - Examples & API
-- [Best Practices Guide](./guides/best-practices-errors.md) - Production deployment
-- [Plugin Development Guide](../plugin-development.md) - Extend functionality
+- [Event-Based Triggers Guide](/plugins/state-machine/guides/event-triggers.md) - Automatic transitions
+- [Configuration Guide](/plugins/state-machine/guides/configuration.md) - Complete options reference
+- [Usage Patterns Guide](/plugins/state-machine/guides/usage-patterns.md) - Examples & API
+- [Best Practices Guide](/plugins/state-machine/guides/best-practices-errors.md) - Production deployment
+- [Plugin Development Guide](/plugins/plugin-development.md) - Extend functionality

@@ -1,7 +1,7 @@
 # ✅ Best Practices & FAQ
 
-**Prev:** [← Usage Patterns](./usage-patterns.md)
-**Main:** [← Identity Plugin](../README.md) | **All guides:** [Index](../README.md#-documentation-hub)
+**Prev:** [← Usage Patterns](/plugins/identity/guides/usage-patterns.md)
+**Main:** [← Identity Plugin](/plugins/identity/README.md) | **All guides:** [Index](/plugins/identity/README.md#-documentation-hub)
 
 > **In this guide:**
 > - 5 essential best practices with code examples
@@ -1014,5 +1014,5 @@ console.log('Available keys:', jwks.keys.length);
 
 ---
 
-**Prev:** [← Usage Patterns](./usage-patterns.md)
-**Main:** [← Identity Plugin](../README.md)
+**Prev:** [← Usage Patterns](/plugins/identity/guides/usage-patterns.md)
+**Main:** [← Identity Plugin](/plugins/identity/README.md)

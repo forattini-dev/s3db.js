@@ -15,8 +15,8 @@ find a runnable script, understand what it demonstrates, and why it matters.
 ## Navigation helpers
 - [Use-case proposals](./use-cases.md) - scenario-driven "propostas" that suggest example playlists.
 - [Example catalog](./catalog.md) - alphabetical list of every script with keywords for Docsify search.
-- [Plugins overview](../plugins/README.md) - deep dive into each plugin once you know which one to explore.
-- [Client & resource references](../client.md), (../resources.md), (../schema.md) - API surface that examples rely on.
+- [Plugins overview](/plugins/README.md) - deep dive into each plugin once you know which one to explore.
+- [Client & resource references](/client.md), (/resources.md), (/schema.md) - API surface that examples rely on.
 
 ## Category cheat-sheet
 ### Data ingestion & schema
@@ -108,8 +108,8 @@ Each proposta is documented in more detail inside [use-cases.md](./use-cases.md)
 - Search by plugin names (`"API Plugin"`, `"Recon"`, `"ML Plugin"`, `"Costs Plugin"`) to list the relevant scripts.
 
 ## Related reading
-- [../multi-file-plugin-docs-standard.md](../multi-file-plugin-docs-standard.md) - how plugin docs are structured.
-- [../logging.md](../logging.md) & [../logger-best-practices.md](../logger-best-practices.md) - tie into the
+- [Plugin Docs Standard](/multi-file-plugin-docs-standard.md) - how plugin docs are structured.
+- [Logging](/logging.md) & [Logger Best Practices](/logger-best-practices.md) - tie into the
   observability samples.
-- [../mcp.md](../mcp.md) - background on the MCP server referenced by `e45-mcp-documentation-assistant.js`.
-- [../resources.md](../resources.md) & [../schema.md](../schema.md) - deep reference for building your own examples.
+- [MCP Guide](/mcp.md) - background on the MCP server referenced by `e45-mcp-documentation-assistant.js`.
+- [Resources](/resources.md) & [Schema](/schema.md) - deep reference for building your own examples.

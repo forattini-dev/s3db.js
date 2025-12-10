@@ -346,6 +346,6 @@ reader.on('data', async (record) => {
 
 ## See Also
 
-- [Resource](./resource.md) - CRUD operations
-- [Performance Tuning](../guides/performance-tuning.md) - Optimization
-- [Errors](../reference/errors.md) - StreamError handling
+- [Resource](/core/resource.md) - CRUD operations
+- [Performance Tuning](/guides/performance-tuning.md) - Optimization
+- [Errors](/reference/errors.md) - StreamError handling

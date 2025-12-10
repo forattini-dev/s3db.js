@@ -437,7 +437,7 @@ oidc: {
 - **🔒 Cache-Control Headers** - Prevents CDN caching
 - **⚡ Discovery Cache** - Thread-safe, per-request cache
 
-**[→ Complete OIDC Guide](./oidc.md)** - Deep dive with all features, configuration, troubleshooting
+**[→ Complete OIDC Guide](/plugins/api/guides/oidc.md)** - Deep dive with all features, configuration, troubleshooting
 
 ### OIDC vs OAuth2 Resource Server
 
@@ -743,12 +743,12 @@ auth: {
 
 ## See Also
 
-- **[OIDC Complete Guide](./oidc.md)** - Deep dive: all features, providers, troubleshooting
-- [Guards](./guards.md) - Row-level security
-- [Authorization Patterns](./authorization-patterns.md) - Advanced patterns
-- [Security](./security.md) - Failban, rate limiting, GeoIP
-- [Configuration](../reference/configuration.md) - All options
-- [FAQ](../faq.md) - More questions
+- **[OIDC Complete Guide](/plugins/api/guides/oidc.md)** - Deep dive: all features, providers, troubleshooting
+- [Guards](/plugins/api/guides/guards.md) - Row-level security
+- [Authorization Patterns](/plugins/api/guides/authorization-patterns.md) - Advanced patterns
+- [Security](/plugins/api/guides/security.md) - Failban, rate limiting, GeoIP
+- [Configuration](/plugins/api/reference/configuration.md) - All options
+- [FAQ](/plugins/api/faq.md) - More questions
 
 ---
 

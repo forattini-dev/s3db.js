@@ -2,7 +2,7 @@
 
 > **Real-time change data capture (CDC) to PostgreSQL, BigQuery, SQS, webhooks, and more.**
 >
-> **Navigation:** [Getting Started →](./guides/getting-started.md) | [Configuration →](./guides/configuration.md) | [Usage Patterns →](./guides/usage-patterns.md) | [Best Practices →](./guides/best-practices.md)
+> **Navigation:** [Getting Started →](/plugins/replicator/guides/getting-started.md) | [Configuration →](/plugins/replicator/guides/configuration.md) | [Usage Patterns →](/plugins/replicator/guides/usage-patterns.md) | [Best Practices →](/plugins/replicator/guides/best-practices.md)
 
 ---
 
@@ -134,7 +134,7 @@ await users.update('user-id', { name: 'Bob Updated' });
 All documentation is organized into focused guides:
 
 ### 🎯 For First-Time Users
-- **[Getting Started](./guides/getting-started.md)** (10 min) - Installation, quick start, common targets
+- **[Getting Started](/plugins/replicator/guides/getting-started.md)** (10 min) - Installation, quick start, common targets
   - What is real-time CDC
   - Installation & dependencies
   - 5-minute quick start
@@ -143,7 +143,7 @@ All documentation is organized into focused guides:
   - Error handling basics
 
 ### ⚙️ Configuration & Setup
-- **[Configuration Guide](./guides/configuration.md)** (15 min) - All configuration options & drivers
+- **[Configuration Guide](/plugins/replicator/guides/configuration.md)** (15 min) - All configuration options & drivers
   - Default configuration object
   - Plugin-level options
   - 3 configuration patterns (Development, PostgreSQL, Multi-destination)
@@ -153,7 +153,7 @@ All documentation is organized into focused guides:
   - Performance tuning
 
 ### 💡 Real-World Scenarios
-- **[Usage Patterns](./guides/usage-patterns.md)** (25 min) - 6 progressive patterns with complete code
+- **[Usage Patterns](/plugins/replicator/guides/usage-patterns.md)** (25 min) - 6 progressive patterns with complete code
   - Pattern 1: Simple Backup (S3DB → S3DB)
   - Pattern 2: Data Transformation
   - Pattern 3: Multi-Destination Replication
@@ -163,7 +163,7 @@ All documentation is organized into focused guides:
   - Copy-paste recipes
 
 ### ✅ Best Practices & Troubleshooting
-- **[Best Practices & FAQ](./guides/best-practices.md)** (25 min) - Production deployment
+- **[Best Practices & FAQ](/plugins/replicator/guides/best-practices.md)** (25 min) - Production deployment
   - 6 essential best practices with code examples
   - Error handling strategies
   - Common issues & solutions
@@ -327,7 +327,7 @@ Backup to multiple regions:
 **Replicator:** Real-time per-operation sync (fast, multiple destinations)
 **Backup:** Periodic snapshots (slow, disaster recovery)
 
-See [detailed comparison](./guides/best-practices.md#-faq) for more.
+See [detailed comparison](/plugins/replicator/guides/best-practices.md#-faq) for more.
 </details>
 
 <details>
@@ -360,7 +360,7 @@ new ReplicatorPlugin({
 Automatic retry with exponential backoff (up to 3 times by default).
 Failed operations stored in log resource.
 
-**[→ See recovery strategies](./guides/best-practices.md#error-handling-strategies)**
+**[→ See recovery strategies](/plugins/replicator/guides/best-practices.md#error-handling-strategies)**
 </details>
 
 <details>
@@ -385,22 +385,22 @@ Yes, use `shouldReplicate` filter:
 
 | Use Case | Driver | Guide |
 |----------|--------|-------|
-| **Dev/Testing** | S3DB | [Getting Started](./guides/getting-started.md) |
-| **Analytics** | PostgreSQL | [Usage Patterns](./guides/usage-patterns.md#pattern-3-multi-destination-replication) |
-| **Dashboards** | BigQuery | [Usage Patterns](./guides/usage-patterns.md#pattern-3-multi-destination-replication) |
-| **Event Stream** | SQS | [Usage Patterns](./guides/usage-patterns.md#pattern-3-multi-destination-replication) |
-| **Backup** | S3DB | [Getting Started](./guides/getting-started.md) |
-| **Production** | Multi-target | [Best Practices](./guides/best-practices.md#production-deployment-checklist) |
+| **Dev/Testing** | S3DB | [Getting Started](/plugins/replicator/guides/getting-started.md) |
+| **Analytics** | PostgreSQL | [Usage Patterns](/plugins/replicator/guides/usage-patterns.md#pattern-3-multi-destination-replication) |
+| **Dashboards** | BigQuery | [Usage Patterns](/plugins/replicator/guides/usage-patterns.md#pattern-3-multi-destination-replication) |
+| **Event Stream** | SQS | [Usage Patterns](/plugins/replicator/guides/usage-patterns.md#pattern-3-multi-destination-replication) |
+| **Backup** | S3DB | [Getting Started](/plugins/replicator/guides/getting-started.md) |
+| **Production** | Multi-target | [Best Practices](/plugins/replicator/guides/best-practices.md#production-deployment-checklist) |
 
 ---
 
 ## 🚀 Next Steps
 
-1. **New to replication?** → [Getting Started](./guides/getting-started.md)
-2. **Want to configure?** → [Configuration Guide](./guides/configuration.md)
-3. **Need code examples?** → [Usage Patterns](./guides/usage-patterns.md)
-4. **Going to production?** → [Best Practices](./guides/best-practices.md)
-5. **Troubleshooting?** → [Best Practices FAQ](./guides/best-practices.md#-faq)
+1. **New to replication?** → [Getting Started](/plugins/replicator/guides/getting-started.md)
+2. **Want to configure?** → [Configuration Guide](/plugins/replicator/guides/configuration.md)
+3. **Need code examples?** → [Usage Patterns](/plugins/replicator/guides/usage-patterns.md)
+4. **Going to production?** → [Best Practices](/plugins/replicator/guides/best-practices.md)
+5. **Troubleshooting?** → [Best Practices FAQ](/plugins/replicator/guides/best-practices.md#-faq)
 
 ---
 
@@ -408,10 +408,10 @@ Yes, use `shouldReplicate` filter:
 
 | Topic | Guide | Time |
 |-------|-------|------|
-| **Setup** | [Getting Started](./guides/getting-started.md) | 10 min |
-| **Configuration** | [Configuration Guide](./guides/configuration.md) | 15 min |
-| **Examples** | [Usage Patterns](./guides/usage-patterns.md) | 25 min |
-| **Production** | [Best Practices](./guides/best-practices.md) | 25 min |
+| **Setup** | [Getting Started](/plugins/replicator/guides/getting-started.md) | 10 min |
+| **Configuration** | [Configuration Guide](/plugins/replicator/guides/configuration.md) | 15 min |
+| **Examples** | [Usage Patterns](/plugins/replicator/guides/usage-patterns.md) | 25 min |
+| **Production** | [Best Practices](/plugins/replicator/guides/best-practices.md) | 25 min |
 
 **Total Reading Time: ~75 minutes for complete understanding**
 
@@ -419,21 +419,21 @@ Yes, use `shouldReplicate` filter:
 
 ## 🔗 Related Plugins
 
-- **[Backup Plugin](../backup.md)** - Periodic snapshots for disaster recovery
-- **[TTL Plugin](../ttl.md)** - Auto-expire old data
-- **[Audit Plugin](../audit.md)** - Track all changes
-- **[Cache Plugin](../cache.md)** - Speed up queries
+- **[Backup Plugin](/plugins/backup/README.md)** - Periodic snapshots for disaster recovery
+- **[TTL Plugin](/plugins/ttl/README.md)** - Auto-expire old data
+- **[Audit Plugin](/plugins/audit/README.md)** - Track all changes
+- **[Cache Plugin](/plugins/cache/README.md)** - Speed up queries
 
 ---
 
 ## 💬 Need Help?
 
-- 📖 Check the [FAQ](./guides/best-practices.md#-faq) - Most questions answered
+- 📖 Check the [FAQ](/plugins/replicator/guides/best-practices.md#-faq) - Most questions answered
 - 🔍 Read the [guide index](#-documentation-guides) - Find what you need
-- 🎯 Try [usage patterns](./guides/usage-patterns.md) - Copy-paste solutions
+- 🎯 Try [usage patterns](/plugins/replicator/guides/usage-patterns.md) - Copy-paste solutions
 - 🐛 Found a bug? Open an issue on GitHub
 - 💡 Have a question? Check detailed guides or ask the community
 
 ---
 
-**Ready to replicate?** Start with [Getting Started →](./guides/getting-started.md)
+**Ready to replicate?** Start with [Getting Started →](/plugins/replicator/guides/getting-started.md)

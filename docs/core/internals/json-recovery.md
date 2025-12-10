@@ -215,9 +215,9 @@ const db = new Database({
 
 ## Related Features
 
-- [Distributed Lock](distributed-lock.md) - Prevents concurrent corruption
-- [Backup Plugin](../../plugins/backup/README.md) - Regular metadata backups
-- [Audit Plugin](../../plugins/audit/README.md) - Track all changes
+- [Distributed Lock](/core/internals/distributed-lock.md) - Prevents concurrent corruption
+- [Backup Plugin](/plugins/backup/README.md) - Regular metadata backups
+- [Audit Plugin](/plugins/audit/README.md) - Track all changes
 
 ## Error Reference
 

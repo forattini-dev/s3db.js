@@ -2,7 +2,7 @@
 
 > **Quick Jump:** [🎯 Why Guards?](#-why-guards) | [📖 Syntax](#-guard-syntax) | [🔌 Integration](#-framework-integration) | [🎯 Patterns](#-common-patterns) | [📚 Helpers](#-helper-functions)
 
-> **Navigation:** [← Back to API Plugin](./README.md) | [Authentication →](./authentication.md) | [Deployment →](./deployment.md)
+> **Navigation:** [← Back to API Plugin](/plugins/api/README.md) | [Authentication →](/plugins/api/guides/authentication.md) | [Deployment →](/plugins/api/guides/deployment.md)
 
 ---
 
@@ -661,9 +661,9 @@ guard: {
 
 ## 🔗 Examples & Documentation
 
-- **Complete Example**: [docs/examples/e66-guards-live.js](../../examples/e66-guards-live.js)
-- **Before/After Comparison**: [docs/examples/e65-guards-comparison.js](../../examples/e65-guards-comparison.js)
-- **Authorization Patterns**: [authorization-patterns.md](./authorization-patterns.md) - Middleware examples for scopes, roles, ABAC
+- **Complete Example**: [docs/examples/e66-guards-live.js](/examples/e66-guards-live.js)
+- **Before/After Comparison**: [docs/examples/e65-guards-comparison.js](/examples/e65-guards-comparison.js)
+- **Authorization Patterns**: [authorization-patterns.md](/plugins/api/guides/authorization-patterns.md) - Middleware examples for scopes, roles, ABAC
 
 ---
 
@@ -690,27 +690,27 @@ You learned:
 - ✅ **Framework Integration** - Works with Hono, Express, Fastify
 
 **Next Steps:**
-1. Try the examples: [e66-guards-live.js](../../examples/e66-guards-live.js) | [e65-guards-comparison.js](../../examples/e65-guards-comparison.js)
-2. Read authentication docs: [Authentication →](./authentication.md)
-3. Learn about partitions: [Resource Documentation](../../resource.md)
-4. Deploy to production: [Deployment →](./deployment.md)
+1. Try the examples: [e66-guards-live.js](/examples/e66-guards-live.js) | [e65-guards-comparison.js](/examples/e65-guards-comparison.js)
+2. Read authentication docs: [Authentication →](/plugins/api/guides/authentication.md)
+3. Learn about partitions: [Resource Documentation](/resource.md)
+4. Deploy to production: [Deployment →](/plugins/api/guides/deployment.md)
 
 ---
 
 ## 🔗 See Also
 
 **Related Documentation:**
-- **[Authorization Patterns](./authorization-patterns.md)** - ✨ Advanced patterns (ABAC, granular scopes, middleware)
-- [API Plugin](../README.md) - Main API Plugin documentation
-- [Authentication](./authentication.md) - Set up JWT/OIDC authentication
-- [OIDC Guide](./oidc.md) - OAuth2/OIDC setup
-- [Configuration Reference](../reference/configuration.md) - All options
+- **[Authorization Patterns](/plugins/api/guides/authorization-patterns.md)** - ✨ Advanced patterns (ABAC, granular scopes, middleware)
+- [API Plugin](/plugins/api/README.md) - Main API Plugin documentation
+- [Authentication](/plugins/api/guides/authentication.md) - Set up JWT/OIDC authentication
+- [OIDC Guide](/plugins/api/guides/oidc.md) - OAuth2/OIDC setup
+- [Configuration Reference](/plugins/api/reference/configuration.md) - All options
 
 **Examples:**
-- [e66-guards-live.js](../../examples/e66-guards-live.js) - Complete guards example with live API
-- [e65-guards-comparison.js](../../examples/e65-guards-comparison.js) - Before/after comparison
-- [e49-api-plugin-complete.js](../../examples/e49-api-plugin-complete.js) - API with guards
+- [e66-guards-live.js](/examples/e66-guards-live.js) - Complete guards example with live API
+- [e65-guards-comparison.js](/examples/e65-guards-comparison.js) - Before/after comparison
+- [e49-api-plugin-complete.js](/examples/e49-api-plugin-complete.js) - API with guards
 
 ---
 
-> **Navigation:** [← Back to API Plugin](./README.md) | [Authentication →](./authentication.md) | [Deployment →](./deployment.md)
+> **Navigation:** [← Back to API Plugin](/plugins/api/README.md) | [Authentication →](/plugins/api/guides/authentication.md) | [Deployment →](/plugins/api/guides/deployment.md)

@@ -4,7 +4,7 @@
 >
 > Compatible with **any OIDC client library** (Passport.js, Spring Security, go-oidc, authlib). Use it like Google OAuth, Azure AD, or Keycloak — but self-hosted on S3.
 >
-> **Navigation:** [Getting Started →](./guides/getting-started.md) | [OIDC Integration →](./OIDC_INTEGRATION.md) | [Configuration →](./guides/configuration.md) | [Best Practices →](./guides/best-practices.md)
+> **Navigation:** [Getting Started →](/plugins/identity/guides/getting-started.md) | [OIDC Integration →](/plugins/identity/OIDC_INTEGRATION.md) | [Configuration →](/plugins/identity/guides/configuration.md) | [Best Practices →](/plugins/identity/guides/best-practices.md)
 
 ---
 
@@ -123,7 +123,7 @@ http://localhost:4000/oauth/authorize?response_type=code&client_id=my-app&redire
 All documentation is organized into focused guides:
 
 ### 🎯 For First-Time Users
-- **[Getting Started](./guides/getting-started.md)** (10 min) - Installation, setup, first example
+- **[Getting Started](/plugins/identity/guides/getting-started.md)** (10 min) - Installation, setup, first example
   - 3-step installation
   - Create your first SSO server
   - Create users and OAuth2 clients
@@ -132,7 +132,7 @@ All documentation is organized into focused guides:
   - Common mistakes
 
 ### ⚙️ Configuration & Setup
-- **[Configuration Guide](./guides/configuration.md)** (10 min) - All configuration options
+- **[Configuration Guide](/plugins/identity/guides/configuration.md)** (10 min) - All configuration options
   - Default configuration object
   - Complete option reference
   - 4 real-world patterns (Development, Production, Mobile, Multi-tenant)
@@ -140,7 +140,7 @@ All documentation is organized into focused guides:
   - Validation checklist
 
 ### 💡 Real-World Scenarios
-- **[Usage Patterns](./guides/usage-patterns.md)** (20 min) - 5 complete working examples
+- **[Usage Patterns](/plugins/identity/guides/usage-patterns.md)** (20 min) - 5 complete working examples
   - Pattern 1: Development SSO Server
   - Pattern 2: Web App with Backend
   - Pattern 3: Mobile App (PKCE)
@@ -150,7 +150,7 @@ All documentation is organized into focused guides:
   - Token handling best practices
 
 ### ✅ Best Practices & Troubleshooting
-- **[Best Practices & FAQ](./guides/best-practices.md)** (25 min) - Production deployment
+- **[Best Practices & FAQ](/plugins/identity/guides/best-practices.md)** (25 min) - Production deployment
   - 5 essential best practices
   - 5 pro tips & tricks
   - Common mistakes with solutions
@@ -360,23 +360,23 @@ api.addAuthDriver('oidc', oidcClient.middleware);
 
 | Use Case | Pattern | Guide |
 |----------|---------|-------|
-| **Dev/testing SSO** | Minimal setup | [Getting Started](./guides/getting-started.md) |
-| **Web app login** | authorization_code | [Usage Patterns](./guides/usage-patterns.md#pattern-2-web-app-backend) |
-| **Mobile/SPA** | authorization_code + PKCE | [Usage Patterns](./guides/usage-patterns.md#pattern-3-mobile-app-pkce-required) |
-| **Microservices** | client_credentials | [Usage Patterns](./guides/usage-patterns.md#pattern-4-service-to-service-client-credentials) |
-| **Multi-tenant** | Partitioned users | [Usage Patterns](./guides/usage-patterns.md#pattern-5-multi-tenant-saas) |
-| **Production deploy** | All features | [Configuration](./guides/configuration.md#pattern-2-production-enterprise-setup) |
-| **Troubleshooting** | Error solutions | [Best Practices](./guides/best-practices.md#-error-scenarios--troubleshooting) |
+| **Dev/testing SSO** | Minimal setup | [Getting Started](/plugins/identity/guides/getting-started.md) |
+| **Web app login** | authorization_code | [Usage Patterns](/plugins/identity/guides/usage-patterns.md#pattern-2-web-app-backend) |
+| **Mobile/SPA** | authorization_code + PKCE | [Usage Patterns](/plugins/identity/guides/usage-patterns.md#pattern-3-mobile-app-pkce-required) |
+| **Microservices** | client_credentials | [Usage Patterns](/plugins/identity/guides/usage-patterns.md#pattern-4-service-to-service-client-credentials) |
+| **Multi-tenant** | Partitioned users | [Usage Patterns](/plugins/identity/guides/usage-patterns.md#pattern-5-multi-tenant-saas) |
+| **Production deploy** | All features | [Configuration](/plugins/identity/guides/configuration.md#pattern-2-production-enterprise-setup) |
+| **Troubleshooting** | Error solutions | [Best Practices](/plugins/identity/guides/best-practices.md#-error-scenarios--troubleshooting) |
 
 ---
 
 ## 🚀 Next Steps
 
-1. **New to OAuth2/OIDC?** → [Getting Started](./guides/getting-started.md)
-2. **Want to configure?** → [Configuration Guide](./guides/configuration.md)
-3. **Need code examples?** → [Usage Patterns](./guides/usage-patterns.md)
-4. **Going to production?** → [Best Practices](./guides/best-practices.md)
-5. **Troubleshooting issue?** → [Best Practices FAQ](./guides/best-practices.md#-faq)
+1. **New to OAuth2/OIDC?** → [Getting Started](/plugins/identity/guides/getting-started.md)
+2. **Want to configure?** → [Configuration Guide](/plugins/identity/guides/configuration.md)
+3. **Need code examples?** → [Usage Patterns](/plugins/identity/guides/usage-patterns.md)
+4. **Going to production?** → [Best Practices](/plugins/identity/guides/best-practices.md)
+5. **Troubleshooting issue?** → [Best Practices FAQ](/plugins/identity/guides/best-practices.md#-faq)
 
 ---
 
@@ -384,10 +384,10 @@ api.addAuthDriver('oidc', oidcClient.middleware);
 
 | Topic | Guide | Time |
 |-------|-------|------|
-| **Setup** | [Getting Started](./guides/getting-started.md) | 10 min |
-| **Configuration** | [Configuration Guide](./guides/configuration.md) | 10 min |
-| **Examples** | [Usage Patterns](./guides/usage-patterns.md) | 20 min |
-| **Production** | [Best Practices](./guides/best-practices.md) | 25 min |
+| **Setup** | [Getting Started](/plugins/identity/guides/getting-started.md) | 10 min |
+| **Configuration** | [Configuration Guide](/plugins/identity/guides/configuration.md) | 10 min |
+| **Examples** | [Usage Patterns](/plugins/identity/guides/usage-patterns.md) | 20 min |
+| **Production** | [Best Practices](/plugins/identity/guides/best-practices.md) | 25 min |
 
 **Total Reading Time: ~65 minutes for complete understanding**
 
@@ -395,21 +395,21 @@ api.addAuthDriver('oidc', oidcClient.middleware);
 
 ## 🔗 Related Plugins
 
-- **[API Plugin](../api.md)** - Build Resource Servers that validate IdentityPlugin tokens
-- **[Audit Plugin](../audit.md)** - Track all authentication events
-- **[TTL Plugin](../ttl.md)** - Auto-expire sessions and tokens
-- **[Cache Plugin](../cache.md)** - Speed up token validation
+- **[API Plugin](/plugins/api/README.md)** - Build Resource Servers that validate IdentityPlugin tokens
+- **[Audit Plugin](/plugins/audit/README.md)** - Track all authentication events
+- **[TTL Plugin](/plugins/ttl/README.md)** - Auto-expire sessions and tokens
+- **[Cache Plugin](/plugins/cache/README.md)** - Speed up token validation
 
 ---
 
 ## 💬 Need Help?
 
-- 📖 Check the [FAQ](./guides/best-practices.md#-faq) - Most questions answered
+- 📖 Check the [FAQ](/plugins/identity/guides/best-practices.md#-faq) - Most questions answered
 - 🔍 Read the [guide index](#-documentation-guides) - Find what you need
-- 🎯 Try [usage patterns](./guides/usage-patterns.md) - Copy-paste solutions
+- 🎯 Try [usage patterns](/plugins/identity/guides/usage-patterns.md) - Copy-paste solutions
 - 🐛 Found a bug? Open an issue on GitHub
 - 💡 Have a question? Check detailed guides or ask the community
 
 ---
 
-**Ready to build your SSO?** Start with [Getting Started →](./guides/getting-started.md)
+**Ready to build your SSO?** Start with [Getting Started →](/plugins/identity/guides/getting-started.md)

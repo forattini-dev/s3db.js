@@ -1,7 +1,7 @@
 # ✅ Best Practices & Troubleshooting
 
-**Prev:** [← Usage Patterns](./usage-patterns.md)
-**Main:** [← Replicator Plugin](../README.md) | **All guides:** [Index](../README.md#-documentation-guides)
+**Prev:** [← Usage Patterns](/plugins/replicator/guides/usage-patterns.md)
+**Main:** [← Replicator Plugin](/plugins/replicator/README.md) | **All guides:** [Index](/plugins/replicator/README.md#-documentation-guides)
 
 > **In this guide:**
 > - 6 essential best practices with code examples
@@ -542,7 +542,7 @@ console.log('Webhook test:', response.status, response.statusText);
 - Can restore point-in-time (daily/weekly backup)
 - Perfect for: disaster recovery, compliance
 
-See [Replicator vs Backup comparison](../README.md#-tldr) for details.
+See [Replicator vs Backup comparison](/plugins/replicator/README.md#-tldr) for details.
 </details>
 
 <details>
@@ -791,5 +791,5 @@ curl -X POST https://api.example.com/webhook \
 
 ---
 
-**Prev:** [← Usage Patterns](./usage-patterns.md)
-**Main:** [← Replicator Plugin](../README.md)
+**Prev:** [← Usage Patterns](/plugins/replicator/guides/usage-patterns.md)
+**Main:** [← Replicator Plugin](/plugins/replicator/README.md)

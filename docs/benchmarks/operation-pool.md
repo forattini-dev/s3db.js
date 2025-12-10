@@ -921,8 +921,8 @@ The **OperationPool** is a fundamental architectural improvement that:
 
 **Next Steps:**
 
-1. Read [OperationPool API Documentation](../api/operation-pool.md)
-2. Review [Integration Guide](../guides/operation-pool-integration.md)
+1. Read [OperationPool API Documentation](/api/operation-pool.md)
+2. Review [Integration Guide](/guides/operation-pool-integration.md)
 3. Run benchmarks in your environment
 4. Enable in staging/production
 
@@ -932,8 +932,8 @@ The **OperationPool** is a fundamental architectural improvement that:
 
 - [AWS S3 Performance Guidelines](https://docs.aws.amazon.com/AmazonS3/latest/userguide/optimizing-performance.html)
 - [AWS S3 Request Rate Limits](https://docs.aws.amazon.com/AmazonS3/latest/userguide/optimizing-performance.html#request-rate-performance-considerations)
-- [OpenSpec Proposal: OperationPool](../../openspec/changes/add-operation-pool-and-task-manager/proposal.md)
-- [Benchmark Source Code](../../benchmarks/operation-pool-comparison.js)
+- [OpenSpec Proposal: OperationPool](/openspec/changes/add-operation-pool-and-task-manager/proposal.md)
+- Benchmark Source Code - see `benchmarks/operation-pool-comparison.js`
 
 ---
 

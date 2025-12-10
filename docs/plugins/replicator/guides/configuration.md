@@ -1,8 +1,8 @@
 # ⚙️ Configuration Guide
 
-**Prev:** [← Getting Started](./getting-started.md)
-**Next:** [Usage Patterns →](./usage-patterns.md)
-**Main:** [← Replicator Plugin](../README.md) | **All guides:** [Index](../README.md#-documentation-guides)
+**Prev:** [← Getting Started](/plugins/replicator/guides/getting-started.md)
+**Next:** [Usage Patterns →](/plugins/replicator/guides/usage-patterns.md)
+**Main:** [← Replicator Plugin](/plugins/replicator/README.md) | **All guides:** [Index](/plugins/replicator/README.md#-documentation-guides)
 
 > **In this guide:**
 > - Default configuration object
@@ -678,6 +678,6 @@ new ReplicatorPlugin({
 
 ---
 
-**Prev:** [← Getting Started](./getting-started.md)
-**Next:** [Usage Patterns →](./usage-patterns.md)
-**Main:** [← Replicator Plugin](../README.md)
+**Prev:** [← Getting Started](/plugins/replicator/guides/getting-started.md)
+**Next:** [Usage Patterns →](/plugins/replicator/guides/usage-patterns.md)
+**Main:** [← Replicator Plugin](/plugins/replicator/README.md)

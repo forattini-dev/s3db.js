@@ -46,10 +46,17 @@ Keep this managed block so 'openspec update' can refresh the instructions.
 - Avoid inline/block comments scattered through code. When documentation is necessary, use JSDoc blocks placed immediately before the class, function, method, or constant being described.
 
 ## Testing Guidelines
-- Jest for JS; TypeScript compile check via `pnpm run test:ts`.
-- Name tests `*.test.js` and mirror source paths (e.g., `tests/plugins/<plugin>.test.js`).
+- **Vitest** for unit/integration tests; TypeScript compile check via `pnpm run test:ts`.
+- Name tests `*.test.js` or `*.test.ts` and mirror source paths.
 - Plugin suites must maintain **≥90%** coverage (statements/branches/functions/lines) — run `pnpm run test:coverage` to verify.
 - Add integration tests when touching plugin APIs or cross-plugin flows.
+
+## Documentation Standards
+- **Reference:** The official documentation standard and templates are located in `openspec/documentation/`.
+- **Standard:** Read `openspec/documentation/standard.md` before writing docs.
+- **Templates:** Use `openspec/documentation/templates/` for new plugins.
+- **Gold Standard:** Refer to `docs/plugins/puppeteer/README.md` as the exemplar implementation of a public-facing doc.
+- **Goal:** Public docs (`docs/`) must be user-focused. No meta-language or internal instructions.
 
 ## Commit & Pull Request Guidelines
 - Follow conventional, descriptive subject lines (e.g., `feat: add cloud inventory plugin`).

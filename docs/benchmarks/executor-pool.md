@@ -919,8 +919,8 @@ The **ExecutorPool** is a fundamental architectural improvement that:
 
 **Next Steps:**
 
-1. Read [ExecutorPool API Documentation](../api/executor-pool.md)
-2. Review [Integration Guide](../guides/executor-pool-integration.md)
+1. Read [ExecutorPool API Documentation](/api/executor-pool.md)
+2. Review [Integration Guide](/guides/executor-pool-integration.md)
 3. Run benchmarks in your environment
 4. Enable in staging/production
 
@@ -930,8 +930,8 @@ The **ExecutorPool** is a fundamental architectural improvement that:
 
 - [AWS S3 Performance Guidelines](https://docs.aws.amazon.com/AmazonS3/latest/userguide/optimizing-performance.html)
 - [AWS S3 Request Rate Limits](https://docs.aws.amazon.com/AmazonS3/latest/userguide/optimizing-performance.html#request-rate-performance-considerations)
-- [OpenSpec Proposal: ExecutorPool](../../openspec/changes/rename-operations-pool-to-executor-pool/proposal.md)
-- [Benchmark Source Code](../../benchmarks/executor-pool-comparison.js)
+- [OpenSpec Proposal: ExecutorPool](/openspec/changes/rename-operations-pool-to-executor-pool/proposal.md)
+- Benchmark Source Code - see `benchmarks/executor-pool-comparison.js`
 
 ---
 

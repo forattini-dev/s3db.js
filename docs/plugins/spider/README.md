@@ -1,6 +1,30 @@
-# 🕷️ Spider Plugin
+# Spider Plugin
 
 > **Advanced web crawling with URL pattern matching, robots.txt compliance, and sitemap discovery.**
+
+---
+
+## TLDR
+
+**Complete web crawling toolkit with pattern matching, robots.txt compliance, and crawler compatibility analysis.**
+
+**1 line to get started:**
+```javascript
+await db.usePlugin(new SpiderPlugin({ patterns: { product: { match: '/products/:id' } } }))
+```
+
+**Key features:**
+- Express-style URL pattern matching with parameter extraction
+- RFC 9309 compliant robots.txt parser
+- Multi-format sitemap support (XML, gzip, RSS, Atom)
+- Link discovery with domain/pattern filtering
+- DeepDiscovery: Crawler compatibility analysis for Google, Bing, Yandex, Baidu
+
+**Use cases:**
+- SEO auditing and monitoring
+- E-commerce product scraping
+- News/content aggregation
+- Sitemap validation
 
 ---
 
@@ -25,101 +49,162 @@ const spider = new SpiderPlugin({
 })
 
 await db.usePlugin(spider)
+
+// Match URL and extract parameters
+const match = spider.matchUrl('https://example.com/products/123')
+console.log(match.params)      // { id: '123' }
+console.log(match.activities)  // ['seo', 'screenshot']
+
+// Enqueue for processing
 await spider.enqueueTarget({
   url: 'https://example.com/products/123',
   activities: ['seo']
 })
 ```
 
-## Features
+---
 
-- **🎯 URL Pattern Matching** - Express-style patterns with parameter extraction
-- **🤖 Robots.txt Compliance** - RFC 9309 compliant parser
-- **🗺️ Sitemap Discovery** - XML, gzip, text, RSS, Atom support
-- **🔗 Link Discovery** - Auto-crawl with filtering
-- **⚙️ Queue Processing** - Priority-based URL processing
-- **🔍 Deep Discovery** - Crawler compatibility analysis (Google, Bing, Yandex, Baidu)
+## Dependencies
 
-## Documentation
+**Zero external dependencies** - built directly into s3db.js core.
 
-📖 **[Complete Documentation →](./spider-full.md)**
+---
 
-### Quick Links
+## Documentation Index
 
-- [URL Pattern Matching](./spider-full.md#url-pattern-matching) - Express patterns, regex, wildcards
-- [Link Discovery](./spider-full.md#link-discovery) - Auto-crawl configuration
-- [Robots.txt Parser](./spider-full.md#robotstxt-parser) - RFC compliance
-- [Sitemap Parser](./spider-full.md#sitemap-parser) - Multi-format support
-- **[🔍 Deep Discovery](./spider/deep-discovery.md)** - **Crawler compatibility analysis** (NEW!)
-- [Configuration](./spider-full.md#configuration) - All options
-- [API Reference](./spider-full.md#api-reference) - Methods and events
-- [Examples](./spider-full.md#examples) - Working code
-- [FAQ](./spider-full.md#faq) - Common questions
+| Guide | Description |
+|-------|-------------|
+| [Configuration](./guides/configuration.md) | All options, pattern types, component options, API reference |
+| [Usage Patterns](./guides/usage-patterns.md) | Crawling, link discovery, robots.txt, sitemaps, real-world examples |
+| [Best Practices](./guides/best-practices.md) | Polite crawling, performance, troubleshooting, FAQ |
+| [Deep Discovery](./deep-discovery.md) | Advanced crawler compatibility analysis (Google, Bing, Yandex, Baidu) |
 
-## Components
+---
 
-### SpiderPlugin
-Main plugin for queue-based URL processing with pattern matching.
+## Quick Reference
 
-### DeepDiscovery ⭐ **NEW**
-Advanced website intelligence with crawler compatibility analysis for Google, Bing, Yandex, Baidu, and DuckDuckGo. Detects 100+ sitemap variants, analyzes robots.txt directives, scores crawler compatibility (0-10), estimates crawl budget, and identifies platform-specific optimizations.
+### Components
 
-**[📖 Full Documentation →](./spider/deep-discovery.md)**
+| Component | Description |
+|-----------|-------------|
+| **SpiderPlugin** | Queue-based URL processing with pattern matching |
+| **LinkDiscoverer** | Extract and filter links from HTML |
+| **RobotsParser** | Parse and respect robots.txt rules |
+| **SitemapParser** | Parse sitemaps (XML, gzip, RSS, Atom) |
+| **DeepDiscovery** | Crawler compatibility analysis |
 
-### LinkDiscoverer
-Extract and filter links from HTML pages with robots.txt and sitemap support.
-
-### RobotsParser
-Parse and respect robots.txt rules (User-agent, Allow, Disallow, Crawl-delay, Sitemap).
-
-### SitemapParser
-Parse sitemaps in multiple formats (XML, gzip, text, RSS, Atom).
-
-## Examples
+### Pattern Types
 
 ```javascript
-// URL Pattern Matching
-const match = spider.matchUrl('https://example.com/products/123')
-console.log(match.params)      // { id: '123' }
-console.log(match.activities)  // ['seo', 'screenshot']
+patterns: {
+  // Named parameters
+  product: { match: '/products/:id' },
 
-// Link Discovery with Robots.txt
-const discoverer = new LinkDiscoverer({ respectRobotsTxt: true })
-const links = await discoverer.extractLinksAsync(html, baseUrl, 0)
+  // Single wildcard
+  category: { match: '/category/*' },
 
-// Sitemap Discovery
-const links = await discoverer.discoverFromSitemaps('https://example.com')
-console.log(links[0].metadata.fromSitemap)  // true
+  // Multi-segment wildcard
+  docs: { match: '/docs/**' },
 
-// Deep Discovery (NEW!)
-import { DeepDiscovery } from 's3db.js/plugins/spider'
-
-const deepDiscovery = new DeepDiscovery()
-const report = await deepDiscovery.discover('https://example.com')
-
-console.log('Google score:', report.crawlerCompatibility.google.score)  // 8.5/10
-console.log('Bing score:', report.crawlerCompatibility.bing.score)      // 7.0/10
-console.log('Crawl time:', report.crawlBudget.estimatedCrawlTime.google) // "43min"
+  // Regex
+  api: { match: /\/api\/v(\d+)\/(.*)/ }
+}
 ```
 
-**Examples:**
-- `docs/examples/e104-spider-pattern-matching.js` - Pattern matching
-- `docs/examples/e105-deep-discovery.js` - Deep discovery (11 examples)
+### Core Methods
+
+```javascript
+// SpiderPlugin
+await spider.enqueueTarget({ url, activities, priority })
+const match = spider.matchUrl(url)
+
+// LinkDiscoverer
+const links = await discoverer.extractLinksAsync(html, baseUrl, depth)
+const sitemapLinks = await discoverer.discoverFromSitemaps(url)
+
+// RobotsParser
+const result = await parser.isAllowed(url)
+const delay = await parser.getCrawlDelay(domain)
+
+// SitemapParser
+const entries = await parser.parse(sitemapUrl)
+
+// DeepDiscovery
+const report = await deepDiscovery.discover(url)
+```
+
+---
+
+## Configuration Examples
+
+### E-commerce Crawler
+
+```javascript
+const spider = new SpiderPlugin({
+  patterns: {
+    product: { match: '/products/:slug', priority: 10 },
+    category: { match: '/collections/:category', priority: 5 }
+  },
+  discovery: {
+    maxDepth: 5,
+    maxUrls: 10000,
+    respectRobotsTxt: true
+  }
+})
+```
+
+### SEO Audit
+
+```javascript
+import { DeepDiscovery } from 's3db.js/plugins/spider'
+
+const discovery = new DeepDiscovery()
+const report = await discovery.discover('https://example.com')
+
+console.log('Google score:', report.crawlerCompatibility.google.score)
+console.log('Bing score:', report.crawlerCompatibility.bing.score)
+console.log('Crawl time:', report.crawlBudget.estimatedCrawlTime.google)
+```
+
+### Polite Crawling
+
+```javascript
+const spider = new SpiderPlugin({
+  discovery: {
+    respectRobotsTxt: true,
+    robotsUserAgent: 'MyBot/1.0 (+https://example.com/bot)'
+  },
+  queue: {
+    concurrency: 3,
+    retryAttempts: 3
+  }
+})
+```
+
+---
 
 ## Performance
 
-- Pattern matching: **~1-5ms per URL**
-- Sitemap parsing: **1,000-10,000 URLs/sec**
-- Robots.txt caching: **1 hour TTL**
+| Operation | Performance |
+|-----------|-------------|
+| Pattern matching | ~1-5ms per URL |
+| Sitemap parsing | 1,000-10,000 URLs/sec |
+| Robots.txt | Cached for 1 hour |
+
+---
 
 ## Tests
 
 **139 tests** covering all components:
 - 26 tests - URL Pattern Matcher
-- 48 tests - Link Discoverer  
+- 48 tests - Link Discoverer
 - 30 tests - Robots.txt Parser
 - 35 tests - Sitemap Parser
 
 ---
 
-📖 **[Read Full Documentation →](./spider-full.md)**
+## See Also
+
+- [Cache Plugin](/plugins/cache/README.md) - Cache crawl results
+- [Queue Consumer Plugin](/plugins/queue-consumer/README.md) - Process URLs from SQS/RabbitMQ
+

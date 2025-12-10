@@ -692,7 +692,7 @@ stateMachine.on('plg:state-machine:transition', (data) => {
 
 ### Complete Example
 
-See the full working example in **[docs/examples/e51-state-machine-event-triggers.js](../examples/e51-state-machine-event-triggers.js)** which demonstrates:
+See the full working example in **[docs/examples/e51-state-machine-event-triggers.js](/examples/e51-state-machine-event-triggers.js)** which demonstrates:
 - Complete order workflow with event-based triggers
 - Multiple trigger conditions
 - Event monitoring

@@ -2,7 +2,7 @@
 
 > **Unified persona generation pipeline combining Cookie Farm, Puppeteer, S3Queue, and TTL.**
 >
-> **Navigation:** [← Plugin Index](../README.md) | [Guides ↓](#-documentation-index) | [FAQ ↓](#-quick-faq)
+> **Navigation:** [← Plugin Index](/plugins/README.md) | [Guides ↓](#-documentation-index) | [FAQ ↓](#-quick-faq)
 
 ---
 
@@ -326,12 +326,12 @@ A: Yes! Each instance uses the same namespace and resources. They automatically 
 
 ## 🔗 Related Plugins
 
-- **[Puppeteer Plugin](../puppeteer/README.md)** - Browser automation details
-- **[S3 Queue Plugin](../s3-queue/README.md)** - Queue infrastructure
-- **[TTL Plugin](../ttl/README.md)** - Auto-cleanup
-- **[Replicator Plugin](../replicator/README.md)** - Sync personas to databases
-- **[Cache Plugin](../cache.md)** - Speed up lookups
-- **[Audit Plugin](../audit.md)** - Compliance tracking
+- **[Puppeteer Plugin](/plugins/puppeteer/README.md)** - Browser automation details
+- **[S3 Queue Plugin](/plugins/s3-queue/README.md)** - Queue infrastructure
+- **[TTL Plugin](/plugins/ttl/README.md)** - Auto-cleanup
+- **[Replicator Plugin](/plugins/replicator/README.md)** - Sync personas to databases
+- **[Cache Plugin](/plugins/cache/README.md)** - Speed up lookups
+- **[Audit Plugin](/plugins/audit/README.md)** - Compliance tracking
 
 ---
 

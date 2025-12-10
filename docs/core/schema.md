@@ -1731,22 +1731,22 @@ console.log(size, 'bytes');  // 30 bytes
 
 Check out these examples for real-world patterns:
 
-- **[e07-create-resource.js](../examples/e07-create-resource.js)** - Basic resource creation
-- **[e12-schema-validation.js](../examples/e12-schema-validation.js)** - Validation patterns
-- **[e08-resource-behaviors.js](../examples/e08-resource-behaviors.js)** - Handling 2KB limits
-- **[e29-arrays-of-strings-and-numbers.js](../examples/e29-arrays-of-strings-and-numbers.js)** - Array handling
-- **[e41-vector-rag-chatbot.js](../examples/e41-vector-rag-chatbot.js)** - Embedding usage
-- **[e39-testing-partial-schema.js](../examples/e39-testing-partial-schema.js)** - Schema testing
+- **[e07-create-resource.js](/examples/e07-create-resource.js)** - Basic resource creation
+- **[e12-schema-validation.js](/examples/e12-schema-validation.js)** - Validation patterns
+- **[e08-resource-behaviors.js](/examples/e08-resource-behaviors.js)** - Handling 2KB limits
+- **[e29-arrays-of-strings-and-numbers.js](/examples/e29-arrays-of-strings-and-numbers.js)** - Array handling
+- **[e41-vector-rag-chatbot.js](/examples/e41-vector-rag-chatbot.js)** - Embedding usage
+- **[e39-testing-partial-schema.js](/examples/e39-testing-partial-schema.js)** - Schema testing
 
 ---
 
 ## Further Reading
 
 - [Fastest Validator Documentation](https://github.com/icebob/fastest-validator)
-- [Vector Plugin Guide](./plugins/vector.md)
-- [Encryption Concerns](../src/concerns/crypto.js)
-- [Base62 Encoding](../src/concerns/base62.js)
-- [Schema Class Source](../src/schema.class.js)
+- [Vector Plugin Guide](/plugins/vector/README.md)
+- Encryption Concerns - see `src/concerns/crypto.ts`
+- Base62 Encoding - see `src/concerns/base62.ts`
+- Schema Class Source - see `src/schema.class.ts`
 
 ---
 

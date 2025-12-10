@@ -505,6 +505,6 @@ node app.js | grep '\[OIDC\] Token'
 
 ## See Also
 
-- [OIDC Auth Documentation](../plugins/api/auth/oidc.md)
-- [Logging Guide](../logging.md)
-- [Troubleshooting Guide](../troubleshooting/oidc.md)
+- [OIDC Auth Documentation](/plugins/api/auth/oidc.md)
+- [Logging Guide](/logging.md)
+- [Troubleshooting Guide](/troubleshooting/oidc.md)

@@ -2,7 +2,7 @@
 
 > **Anti-detection browser automation with pooling, cookie farming, and proxy orchestration.**
 >
-> **Navigation:** [← Plugin Index](../README.md) | [Configuration ↓](#-configuration) | [FAQ ↓](#-faq)
+> **Navigation:** [← Plugin Index](/plugins/README.md) | [Configuration ↓](#-configuration) | [FAQ ↓](#-faq)
 
 ---
 

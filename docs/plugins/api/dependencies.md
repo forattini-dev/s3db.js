@@ -250,6 +250,6 @@ npm install pino-http
 
 ## See Also
 
-- [API Plugin Documentation](./README.md)
-- [Logging Configuration](../../README.md#-logging)
-- [Authentication Guide](./authentication.md)
+- [API Plugin Documentation](/plugins/api/README.md)
+- [Logging Configuration](/README.md#logging)
+- [Authentication Guide](/plugins/api/guides/authentication.md)

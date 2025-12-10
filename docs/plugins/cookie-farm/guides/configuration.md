@@ -2,7 +2,7 @@
 
 **Prev:** [← Getting Started](./getting-started.md)
 **Next:** [Usage Patterns →](./usage-patterns.md)
-**Main:** [← Cookie Farm Plugin](../README.md) | **All guides:** [Index](../README.md#-documentation-guides)
+**Main:** [← Cookie Farm Plugin](/plugins/cookie-farm/README.md) | **All guides:** [Index](/plugins/cookie-farm/README.md#-documentation-guides)
 
 > **In this guide:**
 > - Default configuration object
@@ -613,4 +613,4 @@ const suite = new CookieFarmPlugin(config);
 
 **Prev:** [← Getting Started](./getting-started.md)
 **Next:** [Usage Patterns →](./usage-patterns.md)
-**Main:** [← Cookie Farm Plugin](../README.md)
+**Main:** [← Cookie Farm Plugin](/plugins/cookie-farm/README.md)

@@ -1,8 +1,8 @@
 # 🚀 Getting Started with Identity Plugin
 
-**Prev:** [← README](../README.md)
-**Next:** [Configuration](./configuration.md)
-**Main:** [README](../README.md) | **All guides:** [Index](../README.md#-documentation-guides)
+**Prev:** [← README](/plugins/identity/README.md)
+**Next:** [Configuration](/plugins/identity/guides/configuration.md)
+**Main:** [README](/plugins/identity/README.md) | **All guides:** [Index](/plugins/identity/README.md#-documentation-guides)
 
 > **In this guide:**
 > - Installation and setup (3 steps)
@@ -375,10 +375,10 @@ const db = new Database({
 ## Next Steps
 
 1. **Configure Advanced Options**
-   → See [Configuration Guide](./configuration.md)
+   → See [Configuration Guide](/plugins/identity/guides/configuration.md)
 
 2. **Learn Common Scenarios**
-   → See [Usage Patterns](./usage-patterns.md)
+   → See [Usage Patterns](/plugins/identity/guides/usage-patterns.md)
    - Development SSO
    - Production setup
    - Mobile apps
@@ -386,20 +386,20 @@ const db = new Database({
    - Service-to-service
 
 3. **Integration Details**
-   → See [API Reference](./api-reference.md)
+   → See [API Reference](/plugins/identity/guides/api-reference.md)
 
 4. **Troubleshooting & FAQ**
-   → See [Best Practices & FAQ](./best-practices.md)
+   → See [Best Practices & FAQ](/plugins/identity/guides/best-practices.md)
 
 ---
 
 ## 📚 See Also
 
-- **[Configuration Guide](./configuration.md)** - All configuration options
-- **[Usage Patterns](./usage-patterns.md)** - 5 real-world scenarios
-- **[API Reference](./api-reference.md)** - Complete endpoint documentation
-- **[Best Practices & FAQ](./best-practices.md)** - Troubleshooting and 30+ Q&A
+- **[Configuration Guide](/plugins/identity/guides/configuration.md)** - All configuration options
+- **[Usage Patterns](/plugins/identity/guides/usage-patterns.md)** - 5 real-world scenarios
+- **[API Reference](/plugins/identity/guides/api-reference.md)** - Complete endpoint documentation
+- **[Best Practices & FAQ](/plugins/identity/guides/best-practices.md)** - Troubleshooting and 30+ Q&A
 
 ---
 
-**Ready to dive deeper?** Check [Configuration Guide →](./configuration.md) for production setup options.
+**Ready to dive deeper?** Check [Configuration Guide →](/plugins/identity/guides/configuration.md) for production setup options.

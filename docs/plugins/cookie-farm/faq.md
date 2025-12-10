@@ -2,7 +2,7 @@
 
 > **Comprehensive answers to common questions about CookieFarmPlugin and CookieFarmSuite.**
 >
-> **Navigation:** [← Plugin Index](../README.md) | [Configuration ↓](#configuration) | [Troubleshooting ↓](#troubleshooting)
+> **Navigation:** [← Plugin Index](/plugins/README.md) | [Configuration ↓](#configuration) | [Troubleshooting ↓](#troubleshooting)
 
 ---
 

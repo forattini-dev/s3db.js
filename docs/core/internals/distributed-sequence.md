@@ -273,7 +273,7 @@ try {
 |----------|---------|----------------|
 | Low contention | ~20-50ms | Standard mode |
 | High contention | ~50-200ms | Increase lockTimeout |
-| Bulk operations | ~1ms/ID | Use [Incremental IDs fast mode](../../core/schema.md#incremental-ids) |
+| Bulk operations | ~1ms/ID | Use [Incremental IDs fast mode](/core/schema.md#incremental-ids) |
 
 ## Usage in s3db.js
 
@@ -285,6 +285,6 @@ try {
 
 ## See Also
 
-- [Distributed Lock](distributed-lock.md) - Underlying locking mechanism
-- [Schema](../schema.md) - Incremental ID configuration
-- [Global Coordinator](global-coordinator.md) - Leader election using sequences
+- [Distributed Lock](/core/internals/distributed-lock.md) - Underlying locking mechanism
+- [Schema](/core/schema.md) - Incremental ID configuration
+- [Global Coordinator](/core/internals/global-coordinator.md) - Leader election using sequences

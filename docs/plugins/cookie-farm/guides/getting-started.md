@@ -1,8 +1,8 @@
 # 🚀 Getting Started with Cookie Farm Plugin
 
-**Prev:** [← Cookie Farm Plugin](../README.md)
+**Prev:** [← Cookie Farm Plugin](/plugins/cookie-farm/README.md)
 **Next:** [Configuration →](./configuration.md)
-**Main:** [← Cookie Farm Plugin](../README.md) | **All guides:** [Index](../README.md#-documentation-guides)
+**Main:** [← Cookie Farm Plugin](/plugins/cookie-farm/README.md) | **All guides:** [Index](/plugins/cookie-farm/README.md#-documentation-guides)
 
 > **In this guide:**
 > - What is Cookie Farm Suite
@@ -441,6 +441,6 @@ You can add custom job types in your processor!
 
 ---
 
-**Prev:** [← Cookie Farm Plugin](../README.md)
+**Prev:** [← Cookie Farm Plugin](/plugins/cookie-farm/README.md)
 **Next:** [Configuration →](./configuration.md)
-**Main:** [← Cookie Farm Plugin](../README.md)
+**Main:** [← Cookie Farm Plugin](/plugins/cookie-farm/README.md)

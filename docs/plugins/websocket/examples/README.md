@@ -2,7 +2,7 @@
 
 > Real-world examples and use cases
 
-[← Back to WebSocket Plugin](../README.md)
+[← Back to WebSocket Plugin](/plugins/websocket/README.md)
 
 ---
 
@@ -777,4 +777,4 @@ async function updateLeaderboard(userId, score) {
 
 ---
 
-[← Back to WebSocket Plugin](../README.md)
+[← Back to WebSocket Plugin](/plugins/websocket/README.md)

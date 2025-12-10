@@ -76,7 +76,7 @@ const db = new Database({
 
 ## Connection Strings
 
-See [Connection Strings](../reference/connection-strings.md) for full documentation.
+See [Connection Strings](/reference/connection-strings.md) for full documentation.
 
 | Protocol | Example | Client |
 |----------|---------|--------|
@@ -298,7 +298,7 @@ process.on('SIGTERM', async () => {
 
 ## See Also
 
-- [Resource](./resource.md) - CRUD operations
-- [Schema](./schema.md) - Field types and validation
-- [Behaviors](./behaviors.md) - 2KB metadata strategies
-- [Connection Strings](../reference/connection-strings.md) - Connection formats
+- [Resource](/core/resource.md) - CRUD operations
+- [Schema](/core/schema.md) - Field types and validation
+- [Behaviors](/core/behaviors.md) - 2KB metadata strategies
+- [Connection Strings](/reference/connection-strings.md) - Connection formats

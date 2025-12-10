@@ -1,6 +1,6 @@
 # 🔒 Security
 
-> Navigation: [← Back to API Plugin](../README.md)
+> Navigation: [← Back to API Plugin](/plugins/api/README.md)
 
 This guide summarizes the API plugin’s built‑in security features and how to tune them for production.
 
@@ -24,7 +24,7 @@ await db.usePlugin(new ApiPlugin({
 }));
 ```
 
-See also: [Failban with GeoIP Blocking](../README.md#failban-with-geoip-blocking)
+See also: [Failban with GeoIP Blocking](/plugins/api/README.md#failban-with-geoip-blocking)
 
 —
 

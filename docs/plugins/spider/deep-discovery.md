@@ -899,11 +899,11 @@ if (report.crawlerCompatibility.google.score < 7.0) {
 
 ## Related Documentation
 
-- **[Spider Plugin](../spider.md)** - Main plugin documentation
-- **[Link Discoverer](../spider-full.md#link-discovery)** - HTML link extraction
-- **[Robots Parser](../spider-full.md#robotstxt-parser)** - RFC 9309 compliance
-- **[Sitemap Parser](../spider-full.md#sitemap-parser)** - Multi-format support
-- **[Example: e105-deep-discovery.js](../../examples/e105-deep-discovery.js)** - Complete usage examples
+- **[Spider Plugin](/plugins/spider/README.md)** - Main plugin documentation
+- **[Link Discoverer](/plugins/spider/spider-full.md#link-discovery)** - HTML link extraction
+- **[Robots Parser](/plugins/spider/spider-full.md#robotstxt-parser)** - RFC 9309 compliance
+- **[Sitemap Parser](/plugins/spider/spider-full.md#sitemap-parser)** - Multi-format support
+- **[Example: e105-deep-discovery.js](/examples/e105-deep-discovery.js)** - Complete usage examples
 
 ---
 

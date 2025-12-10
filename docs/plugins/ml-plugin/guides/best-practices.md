@@ -1,7 +1,7 @@
 # ✅ Best Practices & Troubleshooting
 
-**Prev:** [← Usage Patterns](./usage-patterns.md)
-**Main:** [← ML Plugin](../README.md) | **All guides:** [Index](../README.md#-documentation-guides)
+**Prev:** [← Usage Patterns](/plugins/ml-plugin/guides/usage-patterns.md)
+**Main:** [← ML Plugin](/plugins/ml-plugin/README.md) | **All guides:** [Index](/plugins/ml-plugin/README.md#-documentation-guides)
 
 > **In this guide:**
 > - 6 essential best practices
@@ -780,5 +780,5 @@ A: Balance needed:
 
 ---
 
-**Prev:** [← Usage Patterns](./usage-patterns.md)
-**Main:** [← ML Plugin](../README.md)
+**Prev:** [← Usage Patterns](/plugins/ml-plugin/guides/usage-patterns.md)
+**Main:** [← ML Plugin](/plugins/ml-plugin/README.md)

@@ -1,8 +1,8 @@
 # 🎯 ML Plugin Usage Patterns
 
-**Prev:** [← Configuration](./configuration.md)
-**Next:** [Best Practices →](./best-practices.md)
-**Main:** [← ML Plugin](../README.md) | **All guides:** [Index](../README.md#-documentation-guides)
+**Prev:** [← Configuration](/plugins/ml-plugin/guides/configuration.md)
+**Next:** [Best Practices →](/plugins/ml-plugin/guides/best-practices.md)
+**Main:** [← ML Plugin](/plugins/ml-plugin/README.md) | **All guides:** [Index](/plugins/ml-plugin/README.md#-documentation-guides)
 
 > **In this guide:**
 > - 5 progressive patterns (Beginner → Advanced)
@@ -596,6 +596,6 @@ console.log(`\n✅ Best version: v${bestVersion.version}`);
 
 ---
 
-**Prev:** [← Configuration](./configuration.md)
-**Next:** [Best Practices →](./best-practices.md)
-**Main:** [← ML Plugin](../README.md)
+**Prev:** [← Configuration](/plugins/ml-plugin/guides/configuration.md)
+**Next:** [Best Practices →](/plugins/ml-plugin/guides/best-practices.md)
+**Main:** [← ML Plugin](/plugins/ml-plugin/README.md)

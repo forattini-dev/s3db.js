@@ -1,8 +1,8 @@
 # 🚀 Getting Started with ML Plugin
 
-**Prev:** [← ML Plugin](../README.md)
-**Next:** [Configuration →](./configuration.md)
-**Main:** [← ML Plugin](../README.md) | **All guides:** [Index](../README.md#-documentation-guides)
+**Prev:** [← ML Plugin](/plugins/ml-plugin/README.md)
+**Next:** [Configuration →](/plugins/ml-plugin/guides/configuration.md)
+**Main:** [← ML Plugin](/plugins/ml-plugin/README.md) | **All guides:** [Index](/plugins/ml-plugin/README.md#-documentation-guides)
 
 > **In this guide:**
 > - What is ML Plugin
@@ -435,12 +435,12 @@ const { prediction } = await products.ml.predict(
 
 ## Next Steps
 
-1. **Learn configuration options** → [Configuration Guide](./configuration.md)
-2. **See real-world patterns** → [Usage Patterns](./usage-patterns.md)
-3. **Production setup** → [Best Practices](./best-practices.md)
+1. **Learn configuration options** → [Configuration Guide](/plugins/ml-plugin/guides/configuration.md)
+2. **See real-world patterns** → [Usage Patterns](/plugins/ml-plugin/guides/usage-patterns.md)
+3. **Production setup** → [Best Practices](/plugins/ml-plugin/guides/best-practices.md)
 
 ---
 
-**Prev:** [← ML Plugin](../README.md)
-**Next:** [Configuration →](./configuration.md)
-**Main:** [← ML Plugin](../README.md)
+**Prev:** [← ML Plugin](/plugins/ml-plugin/README.md)
+**Next:** [Configuration →](/plugins/ml-plugin/guides/configuration.md)
+**Main:** [← ML Plugin](/plugins/ml-plugin/README.md)

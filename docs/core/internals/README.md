@@ -121,6 +121,6 @@ coordinator.on('leader:changed', ({ newLeader }) => {
 
 ## See Also
 
-- [Core Documentation](../README.md) - Database, Resource, Schema
-- [Plugin System](../../plugins/README.md) - Plugin architecture
-- [Performance Tuning](../../guides/performance-tuning.md) - Optimization tips
+- [Core Documentation](/core/README.md) - Database, Resource, Schema
+- [Plugin System](/plugins/README.md) - Plugin architecture
+- [Performance Tuning](/guides/performance-tuning.md) - Optimization tips
