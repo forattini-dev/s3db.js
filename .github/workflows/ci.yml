@@ -126,8 +126,7 @@ jobs:
         run: |
           node -e "
             const pkg = require('./package.json');
-            // Optional: Rename for GitHub Packages if needed, assuming consistent scope
-            // pkg.name = '@forattini-dev/s3db.js';
+            pkg.name = '@forattini-dev/s3db.js';
             pkg.publishConfig = { registry: 'https://npm.pkg.github.com' };
             require('fs').writeFileSync('package.json', JSON.stringify(pkg, null, 2));
           "
@@ -226,6 +225,7 @@ jobs:
         run: |
           node -e "
             const pkg = require('./package.json');
+            pkg.name = '@forattini-dev/s3db.js';
             pkg.publishConfig = { registry: 'https://npm.pkg.github.com' };
             require('fs').writeFileSync('package.json', JSON.stringify(pkg, null, 2));
           "
