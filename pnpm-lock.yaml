@@ -4,9 +4,6 @@ settings:
   autoInstallPeers: true
   excludeLinksFromLockfile: false
 
-overrides:
-  js-yaml@<4.1.1: '>=4.1.1'
-
 importers:
 
   .:
@@ -230,6 +227,16 @@ importers:
       ws:
         specifier: ^8.0.0
         version: 8.18.3
+    optionalDependencies:
+      '@modelcontextprotocol/sdk':
+        specifier: ^1.24.3
+        version: 1.24.3(zod@4.1.13)
+      dotenv:
+        specifier: ^17.2.3
+        version: 17.2.3
+      glob:
+        specifier: ^13.0.0
+        version: 13.0.0
     devDependencies:
       '@babel/core':
         specifier: ^7.28.5
@@ -366,16 +373,6 @@ importers:
       zod:
         specifier: ^4.1.13
         version: 4.1.13
-    optionalDependencies:
-      '@modelcontextprotocol/sdk':
-        specifier: ^1.24.3
-        version: 1.24.3(zod@4.1.13)
-      dotenv:
-        specifier: ^17.2.3
-        version: 17.2.3
-      glob:
-        specifier: ^13.0.0
-        version: 13.0.0
 
 packages:
 
@@ -4307,7 +4304,6 @@ packages:
 
   libsql@0.4.7:
     resolution: {integrity: sha512-T9eIRCs6b0J1SHKYIvD8+KCJMcWZ900iZyxdnSCdqxN12Z1ijzT+jY5nrk72Jw4B0HGzms2NgpryArlJqvc3Lw==}
-    cpu: [x64, arm64, wasm32]
     os: [darwin, linux, win32]
 
   lines-and-columns@1.2.4:
