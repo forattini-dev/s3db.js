@@ -157,6 +157,15 @@ console.log('Leader:', await coordinator.getLeader());
 console.log('Circuit Breaker:', coordinator.getCircuitBreakerStatus());
 ```
 
+**Resilience Features (etcd-inspired):**
+
+| Feature | Purpose |
+|---------|---------|
+| Circuit Breaker | Protects against S3 outages |
+| Contention Detection | Alerts when heartbeats are slow |
+| Epoch Fencing | Prevents split-brain scenarios |
+| Enhanced Metrics | Latency percentiles (p50/p95/p99) |
+
 **Circuit Breaker:** Protects against repeated S3 failures. Opens after 5 consecutive failures, resets after 30 seconds.
 
 ```javascript
@@ -172,10 +181,62 @@ const coordinator = new GlobalCoordinatorService({
   }
 });
 
-// Listen for circuit breaker events
 coordinator.on('circuitBreaker:open', ({ namespace, failureCount }) => {
   console.warn(`Circuit breaker opened for ${namespace}`);
 });
+```
+
+**Contention Detection:** Emits event when heartbeat takes >2x expected time.
+
+```javascript
+const coordinator = new GlobalCoordinatorService({
+  namespace: 'production',
+  database: db,
+  config: {
+    contention: {
+      enabled: true,
+      threshold: 2.0,      // Alert when >2x expected
+      rateLimitMs: 30000   // Max 1 event per 30s
+    }
+  }
+});
+
+coordinator.on('contention:detected', ({ ratio, duration, expected }) => {
+  console.warn(`Contention: ${ratio.toFixed(1)}x slower (${duration}ms vs ${expected}ms)`);
+});
+```
+
+**Epoch Fencing:** Rejects tasks from stale leaders to prevent split-brain.
+
+```javascript
+class MyQueuePlugin extends CoordinatorPlugin {
+  async processTask(task) {
+    // Validate task epoch before processing
+    if (!this.isEpochValid(task.epoch, task.createdAt)) {
+      this.logger.warn({ taskEpoch: task.epoch }, 'Rejecting stale task');
+      return;
+    }
+    await this.doWork(task);
+  }
+}
+
+// Configuration
+new MyQueuePlugin({
+  epochFencingEnabled: true,   // Enable validation
+  epochGracePeriodMs: 5000     // Accept epoch-1 tasks within 5s
+});
+```
+
+**Enhanced Metrics:** Latency percentiles for observability.
+
+```javascript
+const metrics = coordinator.getMetrics();
+// {
+//   heartbeatCount: 1234,
+//   contentionEvents: 2,
+//   epochDriftEvents: 0,
+//   latency: { count: 100, p50: 15, p95: 45, p99: 120, min: 8, max: 200, avg: 22 }
+// }
 ```
 
 Plugins with coordination: S3QueuePlugin, SchedulerPlugin, TTLPlugin, EventualConsistencyPlugin

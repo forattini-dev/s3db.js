@@ -1,5 +1,6 @@
 import { EventEmitter } from 'events';
 import { PluginStorage } from '../../concerns/plugin-storage.js';
+import { LatencyBuffer, type LatencyStats } from '../../concerns/ring-buffer.js';
 import type { Database } from '../../database.class.js';
 import type { S3DBLogger } from '../../concerns/logger.js';
 import type { S3Client } from '../../clients/s3-client.class.js';
@@ -8,6 +9,11 @@ export interface CircuitBreakerConfig {
     resetTimeout?: number;
     halfOpenMaxAttempts?: number;
 }
+export interface ContentionConfig {
+    enabled?: boolean;
+    threshold?: number;
+    rateLimitMs?: number;
+}
 export interface GlobalCoordinatorConfig {
     heartbeatInterval?: number;
     heartbeatJitter?: number;
@@ -15,6 +21,8 @@ export interface GlobalCoordinatorConfig {
     workerTimeout?: number;
     diagnosticsEnabled?: boolean | string;
     circuitBreaker?: CircuitBreakerConfig;
+    contention?: ContentionConfig;
+    metricsBufferSize?: number;
 }
 export interface GlobalCoordinatorOptions {
     namespace: string;
@@ -32,6 +40,20 @@ export interface CoordinatorMetrics {
     lastHeartbeatTime: number | null;
     circuitBreakerTrips: number;
     circuitBreakerState: CircuitBreakerState;
+    contentionEvents: number;
+    epochDriftEvents: number;
+}
+export interface EnhancedCoordinatorMetrics extends CoordinatorMetrics {
+    latency: LatencyStats;
+    metricsWindowSize: number;
+}
+export interface ContentionEvent {
+    namespace: string;
+    duration: number;
+    expected: number;
+    ratio: number;
+    threshold: number;
+    timestamp: number;
 }
 export type CircuitBreakerState = 'closed' | 'open' | 'half-open';
 export interface CircuitBreakerInternalState {
@@ -86,12 +108,20 @@ export interface SubscribablePlugin {
     workerId?: string;
     onGlobalLeaderChange?(isLeader: boolean, data: LeaderChangeEvent): void;
 }
+export interface ContentionState {
+    lastEventTime: number;
+    rateLimitMs: number;
+}
 export interface NormalizedConfig {
     heartbeatInterval: number;
     heartbeatJitter: number;
     leaseTimeout: number;
     workerTimeout: number;
     diagnosticsEnabled: boolean;
+    contentionEnabled: boolean;
+    contentionThreshold: number;
+    contentionRateLimitMs: number;
+    metricsBufferSize: number;
 }
 export interface ElectionResult {
     leaderId: string | null;
@@ -112,6 +142,8 @@ export declare class GlobalCoordinatorService extends EventEmitter {
     subscribedPlugins: Map<string, SubscribablePlugin>;
     metrics: CoordinatorMetrics;
     protected _circuitBreaker: CircuitBreakerInternalState;
+    protected _contentionState: ContentionState;
+    protected _latencyBuffer: LatencyBuffer;
     storage: CoordinatorPluginStorage | null;
     protected _pluginStorage: CoordinatorPluginStorage | null;
     logger: S3DBLogger;
@@ -125,8 +157,10 @@ export declare class GlobalCoordinatorService extends EventEmitter {
     getLeader(): Promise<string | null>;
     getEpoch(): Promise<number>;
     getActiveWorkers(): Promise<WorkerData[]>;
-    getMetrics(): CoordinatorMetrics;
+    getMetrics(): EnhancedCoordinatorMetrics;
+    incrementEpochDriftEvents(): void;
     protected _heartbeatCycle(): Promise<void>;
+    protected _checkContention(durationMs: number): void;
     protected _conductElection(previousEpoch?: number): Promise<ElectionResult>;
     protected _registerWorker(): Promise<void>;
     protected _registerWorkerEntry(workerId: string, pluginName?: string | null): Promise<void>;

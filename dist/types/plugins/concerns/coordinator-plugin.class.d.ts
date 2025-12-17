@@ -13,6 +13,8 @@ export interface CoordinatorConfig extends PluginConfig {
     leaseTimeout?: number;
     workerTimeout?: number;
     logger?: S3DBLogger;
+    epochFencingEnabled?: boolean;
+    epochGracePeriodMs?: number;
 }
 export interface NormalizedCoordinatorConfig {
     enableCoordinator: boolean;
@@ -25,6 +27,14 @@ export interface NormalizedCoordinatorConfig {
     heartbeatJitter: number;
     leaseTimeout: number;
     workerTimeout: number;
+    epochFencingEnabled: boolean;
+    epochGracePeriodMs: number;
+}
+export interface EpochValidationResult {
+    valid: boolean;
+    reason?: 'stale' | 'grace_period' | 'current';
+    taskEpoch: number;
+    currentEpoch: number;
 }
 export type ColdStartPhase = 'not_started' | 'observing' | 'election' | 'preparation' | 'ready';
 export interface IntervalHandle {
@@ -62,6 +72,8 @@ export declare class CoordinatorPlugin<TOptions extends CoordinatorConfig = Coor
     coldStartCompleted: boolean;
     protected _coordinatorConfig: NormalizedCoordinatorConfig;
     protected _coordinationStarted: boolean;
+    protected _lastKnownEpoch: number;
+    protected _lastEpochChangeTime: number;
     constructor(config?: TOptions);
     protected _normalizeConfig(config: CoordinatorConfig): NormalizedCoordinatorConfig;
     onBecomeCoordinator(): Promise<void>;
@@ -75,6 +87,19 @@ export declare class CoordinatorPlugin<TOptions extends CoordinatorConfig = Coor
     isLeader(): Promise<boolean>;
     getLeader(): Promise<string | null>;
     getActiveWorkers(): Promise<unknown[]>;
+    getCurrentEpoch(): Promise<number>;
+    /**
+     * Validates if a task should be processed based on its epoch.
+     * Inspired by etcd Raft's Term fencing mechanism.
+     *
+     * Returns true if the task should be processed, false if it should be rejected.
+     * Tasks from stale epochs are rejected to prevent split-brain scenarios.
+     */
+    validateEpoch(taskEpoch: number, taskTimestamp?: number): EpochValidationResult;
+    /**
+     * Convenience method that returns boolean only.
+     */
+    isEpochValid(taskEpoch: number, taskTimestamp?: number): boolean;
     protected _initializeGlobalCoordinator(): Promise<void>;
     protected _setupLeaderChangeListener(): void;
     protected _clearLeaderChangeListener(): void;

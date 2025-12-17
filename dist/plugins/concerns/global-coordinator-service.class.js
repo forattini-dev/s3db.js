@@ -1,6 +1,7 @@
 import { EventEmitter } from 'events';
 import { PluginStorage } from '../../concerns/plugin-storage.js';
 import { tryFn } from '../../concerns/try-fn.js';
+import { LatencyBuffer } from '../../concerns/ring-buffer.js';
 let serviceCounter = 0;
 export class GlobalCoordinatorService extends EventEmitter {
     namespace;
@@ -17,6 +18,8 @@ export class GlobalCoordinatorService extends EventEmitter {
     subscribedPlugins;
     metrics;
     _circuitBreaker;
+    _contentionState;
+    _latencyBuffer;
     storage;
     _pluginStorage;
     logger;
@@ -50,8 +53,15 @@ export class GlobalCoordinatorService extends EventEmitter {
             startTime: null,
             lastHeartbeatTime: null,
             circuitBreakerTrips: 0,
-            circuitBreakerState: 'closed'
+            circuitBreakerState: 'closed',
+            contentionEvents: 0,
+            epochDriftEvents: 0
         };
+        this._contentionState = {
+            lastEventTime: 0,
+            rateLimitMs: this.config.contentionRateLimitMs
+        };
+        this._latencyBuffer = new LatencyBuffer(this.config.metricsBufferSize);
         this._circuitBreaker = {
             state: 'closed',
             failureCount: 0,
@@ -170,7 +180,14 @@ export class GlobalCoordinatorService extends EventEmitter {
         return await this.storage.listActiveWorkers(this._getWorkersPrefix(), this.config.workerTimeout);
     }
     getMetrics() {
-        return { ...this.metrics };
+        return {
+            ...this.metrics,
+            latency: this._latencyBuffer.getStats(),
+            metricsWindowSize: this._latencyBuffer.count
+        };
+    }
+    incrementEpochDriftEvents() {
+        this.metrics.epochDriftEvents++;
     }
     async _heartbeatCycle() {
         if (!this.isRunning || !this.storage)
@@ -225,7 +242,9 @@ export class GlobalCoordinatorService extends EventEmitter {
             }
             const durationMs = Date.now() - startMs;
             this.metrics.electionDurationMs = durationMs;
+            this._latencyBuffer.push(durationMs);
             this._circuitBreakerSuccess();
+            this._checkContention(durationMs);
             if (durationMs > 100) {
                 this.logger.warn({ namespace: this.namespace, durationMs }, `[PERF] SLOW HEARTBEAT detected`);
             }
@@ -236,6 +255,34 @@ export class GlobalCoordinatorService extends EventEmitter {
         catch (err) {
             this._circuitBreakerFailure();
             this._logError('Heartbeat cycle failed', err);
+        }
+    }
+    _checkContention(durationMs) {
+        if (!this.config.contentionEnabled)
+            return;
+        const ratio = durationMs / this.config.heartbeatInterval;
+        if (ratio > this.config.contentionThreshold) {
+            this.metrics.contentionEvents++;
+            const now = Date.now();
+            if (now - this._contentionState.lastEventTime > this._contentionState.rateLimitMs) {
+                this._contentionState.lastEventTime = now;
+                const event = {
+                    namespace: this.namespace,
+                    duration: durationMs,
+                    expected: this.config.heartbeatInterval,
+                    ratio,
+                    threshold: this.config.contentionThreshold,
+                    timestamp: now
+                };
+                this.emit('contention:detected', event);
+                this.logger.warn({
+                    namespace: this.namespace,
+                    durationMs,
+                    expectedMs: this.config.heartbeatInterval,
+                    ratio: ratio.toFixed(2),
+                    threshold: this.config.contentionThreshold
+                }, `Contention detected: heartbeat took ${ratio.toFixed(1)}x longer than expected`);
+            }
         }
     }
     async _conductElection(previousEpoch = 0) {
@@ -510,7 +557,11 @@ export class GlobalCoordinatorService extends EventEmitter {
             heartbeatJitter: Math.max(0, config.heartbeatJitter || 1000),
             leaseTimeout: Math.max(5000, config.leaseTimeout || 15000),
             workerTimeout: Math.max(5000, config.workerTimeout || 20000),
-            diagnosticsEnabled: Boolean(config.diagnosticsEnabled ?? false)
+            diagnosticsEnabled: Boolean(config.diagnosticsEnabled ?? false),
+            contentionEnabled: config.contention?.enabled ?? true,
+            contentionThreshold: config.contention?.threshold ?? 2.0,
+            contentionRateLimitMs: config.contention?.rateLimitMs ?? 30000,
+            metricsBufferSize: Math.max(10, config.metricsBufferSize ?? 100)
         };
     }
     _sleep(ms) {

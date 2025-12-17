@@ -17,6 +17,10 @@
 - **Event-driven** - Plugins subscribe to leader changes
 - **Deterministic election** - Lexicographically first worker ID wins
 - **Graceful shutdown** - Clean deregistration on stop
+- **Circuit breaker** - Protects against S3 outages
+- **Contention detection** - Alerts when heartbeats are slow (inspired by etcd)
+- **Epoch fencing** - Prevents split-brain scenarios (inspired by etcd Raft Terms)
+- **Enhanced metrics** - Latency percentiles (p50/p95/p99) for observability
 
 ## Architecture
 
@@ -79,6 +83,8 @@ console.log('Workers:', await coordinator.getActiveWorkers());
 
 ## Configuration
 
+### Core Options
+
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
 | `enableCoordinator` | `boolean` | `false` | Enable coordination for plugin |
@@ -88,6 +94,30 @@ console.log('Workers:', await coordinator.getActiveWorkers());
 | `workerTimeout` | `number` | `20000` | Worker registration TTL in ms |
 | `startupJitterMin` | `number` | `0` | Min startup delay in ms |
 | `startupJitterMax` | `number` | `5000` | Max startup delay in ms |
+| `metricsBufferSize` | `number` | `100` | Rolling window size for latency metrics |
+
+### Contention Detection (etcd-inspired)
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `contention.enabled` | `boolean` | `true` | Enable contention detection |
+| `contention.threshold` | `number` | `2.0` | Emit event when heartbeat takes >Nx expected time |
+| `contention.rateLimitMs` | `number` | `30000` | Min interval between contention events |
+
+### Circuit Breaker
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `circuitBreaker.failureThreshold` | `number` | `5` | Failures before opening circuit |
+| `circuitBreaker.resetTimeout` | `number` | `30000` | Time before trying half-open |
+| `circuitBreaker.halfOpenMaxAttempts` | `number` | `1` | Attempts during half-open |
+
+### Epoch Fencing (Plugin-level)
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `epochFencingEnabled` | `boolean` | `true` | Enable epoch validation |
+| `epochGracePeriodMs` | `number` | `5000` | Grace period for epoch-1 tasks |
 
 ## Storage Structure
 
@@ -143,6 +173,129 @@ Emitted when worker list changes.
 coordinator.on('workers:updated', ({ namespace, workers }) => {
   console.log(`Active workers: ${workers.length}`);
 });
+```
+
+### contention:detected
+
+Emitted when heartbeat takes longer than expected (inspired by etcd).
+
+```javascript
+coordinator.on('contention:detected', (event) => {
+  console.log(`Contention: heartbeat took ${event.ratio.toFixed(1)}x longer`);
+  console.log(`Duration: ${event.duration}ms (expected: ${event.expected}ms)`);
+
+  // Alert ops team
+  alerting.warn({
+    title: 'Coordinator Contention Detected',
+    message: `Heartbeat latency ${event.ratio.toFixed(1)}x above threshold`,
+    namespace: event.namespace
+  });
+});
+```
+
+### circuitBreaker:open
+
+Emitted when circuit breaker opens due to repeated S3 failures.
+
+```javascript
+coordinator.on('circuitBreaker:open', ({ namespace, failureCount }) => {
+  console.log(`Circuit breaker opened after ${failureCount} failures`);
+});
+```
+
+## Resilience Features
+
+### Contention Detection (etcd-inspired)
+
+Monitors heartbeat cycle duration and alerts when coordination is degraded:
+
+```javascript
+const coordinator = await db.getGlobalCoordinator('default', {
+  config: {
+    heartbeatInterval: 5000,
+    contention: {
+      enabled: true,
+      threshold: 2.0,        // Alert when heartbeat takes >2x expected
+      rateLimitMs: 30000     // Max 1 alert per 30s
+    }
+  }
+});
+
+// React to degradation
+coordinator.on('contention:detected', (event) => {
+  metrics.gauge('coordinator.contention_ratio', event.ratio);
+
+  if (event.ratio > 5) {
+    // Severe contention - consider scaling or investigating S3
+    pagerduty.alert('Severe coordinator contention detected');
+  }
+});
+```
+
+### Epoch Fencing (etcd Raft-inspired)
+
+Prevents split-brain scenarios by rejecting tasks from stale leaders:
+
+```javascript
+// In your plugin
+class MyQueuePlugin extends CoordinatorPlugin {
+  async processTask(task) {
+    // Validate task epoch before processing
+    if (!this.isEpochValid(task.epoch, task.createdAt)) {
+      this.logger.warn({ taskEpoch: task.epoch }, 'Rejecting stale task');
+      return; // Skip task from old leader
+    }
+
+    // Safe to process
+    await this.doWork(task);
+  }
+}
+```
+
+**How it works:**
+
+```
+Timeline:
+─────────────────────────────────────────────────────────────────────►
+
+Pod A (Leader, epoch=5)                Pod B (Follower)
+       │                                     │
+       │ dispatch task T1 (epoch=5)          │
+       │ ─────────────────────────────────►  │
+       │                                     │
+       │      ☠️ Pod A crashes               │
+       │                                     │
+       │                              [Election: epoch=6]
+       │                              Pod B becomes leader
+       │                                     │
+       │  T1 arrives late (epoch=5)          │
+       │  ◄───────────────────────────────── │
+       │                                     │
+       │  validateEpoch(5) → REJECTED        │
+       │  (current epoch is 6)               │
+       ▼                                     ▼
+   Split-brain prevented!
+```
+
+**Grace period**: Tasks from `epoch-1` are accepted if they arrive within `epochGracePeriodMs` of the epoch change.
+
+### Circuit Breaker
+
+Protects against cascading failures during S3 outages:
+
+```javascript
+const status = coordinator.getCircuitBreakerStatus();
+// {
+//   state: 'closed' | 'open' | 'half-open',
+//   failureCount: 0,
+//   failureThreshold: 5,
+//   resetTimeout: 30000,
+//   trips: 0
+// }
+
+if (status.state === 'open') {
+  console.log('Circuit breaker open - heartbeats skipped');
+}
 ```
 
 ## API Reference

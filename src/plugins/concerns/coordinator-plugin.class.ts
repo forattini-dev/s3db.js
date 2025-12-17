@@ -18,6 +18,8 @@ export interface CoordinatorConfig extends PluginConfig {
   leaseTimeout?: number;
   workerTimeout?: number;
   logger?: S3DBLogger;
+  epochFencingEnabled?: boolean;
+  epochGracePeriodMs?: number;
 }
 
 export interface NormalizedCoordinatorConfig {
@@ -31,6 +33,15 @@ export interface NormalizedCoordinatorConfig {
   heartbeatJitter: number;
   leaseTimeout: number;
   workerTimeout: number;
+  epochFencingEnabled: boolean;
+  epochGracePeriodMs: number;
+}
+
+export interface EpochValidationResult {
+  valid: boolean;
+  reason?: 'stale' | 'grace_period' | 'current';
+  taskEpoch: number;
+  currentEpoch: number;
 }
 
 export type ColdStartPhase = 'not_started' | 'observing' | 'election' | 'preparation' | 'ready';
@@ -80,6 +91,9 @@ export class CoordinatorPlugin<TOptions extends CoordinatorConfig = CoordinatorC
   protected _coordinatorConfig: NormalizedCoordinatorConfig;
   protected _coordinationStarted: boolean;
 
+  protected _lastKnownEpoch: number;
+  protected _lastEpochChangeTime: number;
+
   constructor(config: TOptions = {} as TOptions) {
     super(config);
 
@@ -107,6 +121,9 @@ export class CoordinatorPlugin<TOptions extends CoordinatorConfig = CoordinatorC
 
     this._coordinationStarted = false;
 
+    this._lastKnownEpoch = 0;
+    this._lastEpochChangeTime = 0;
+
     this._coordinatorConfig = this._normalizeConfig(config);
   }
 
@@ -121,7 +138,9 @@ export class CoordinatorPlugin<TOptions extends CoordinatorConfig = CoordinatorC
       heartbeatInterval = 5000,
       heartbeatJitter = 1000,
       leaseTimeout = 15000,
-      workerTimeout = 20000
+      workerTimeout = 20000,
+      epochFencingEnabled = true,
+      epochGracePeriodMs = 5000
     } = config;
 
     if (startupJitterMin < 0) throw new Error('startupJitterMin must be >= 0');
@@ -137,7 +156,9 @@ export class CoordinatorPlugin<TOptions extends CoordinatorConfig = CoordinatorC
       heartbeatInterval: Math.max(1000, heartbeatInterval),
       heartbeatJitter: Math.max(0, heartbeatJitter),
       leaseTimeout: Math.max(5000, leaseTimeout),
-      workerTimeout: Math.max(5000, workerTimeout)
+      workerTimeout: Math.max(5000, workerTimeout),
+      epochFencingEnabled: Boolean(epochFencingEnabled),
+      epochGracePeriodMs: Math.max(0, epochGracePeriodMs)
     };
   }
 
@@ -244,6 +265,96 @@ export class CoordinatorPlugin<TOptions extends CoordinatorConfig = CoordinatorC
     return await this._globalCoordinator.getActiveWorkers();
   }
 
+  async getCurrentEpoch(): Promise<number> {
+    if (!this._globalCoordinator) return this._lastKnownEpoch;
+    return await this._globalCoordinator.getEpoch();
+  }
+
+  /**
+   * Validates if a task should be processed based on its epoch.
+   * Inspired by etcd Raft's Term fencing mechanism.
+   *
+   * Returns true if the task should be processed, false if it should be rejected.
+   * Tasks from stale epochs are rejected to prevent split-brain scenarios.
+   */
+  validateEpoch(taskEpoch: number, taskTimestamp?: number): EpochValidationResult {
+    if (!this._coordinatorConfig.epochFencingEnabled) {
+      return {
+        valid: true,
+        reason: 'current',
+        taskEpoch,
+        currentEpoch: this._lastKnownEpoch
+      };
+    }
+
+    if (taskEpoch > this._lastKnownEpoch) {
+      this._lastKnownEpoch = taskEpoch;
+      this._lastEpochChangeTime = Date.now();
+      return {
+        valid: true,
+        reason: 'current',
+        taskEpoch,
+        currentEpoch: this._lastKnownEpoch
+      };
+    }
+
+    if (taskEpoch === this._lastKnownEpoch) {
+      return {
+        valid: true,
+        reason: 'current',
+        taskEpoch,
+        currentEpoch: this._lastKnownEpoch
+      };
+    }
+
+    if (taskEpoch === this._lastKnownEpoch - 1) {
+      const now = Date.now();
+      const timeSinceEpochChange = now - this._lastEpochChangeTime;
+      const taskAge = taskTimestamp ? now - taskTimestamp : Infinity;
+
+      if (timeSinceEpochChange < this._coordinatorConfig.epochGracePeriodMs ||
+          taskAge < this._coordinatorConfig.epochGracePeriodMs) {
+        this.logger.warn({
+          taskEpoch,
+          currentEpoch: this._lastKnownEpoch,
+          timeSinceEpochChange,
+          taskAge: taskTimestamp ? taskAge : 'unknown'
+        }, 'Accepting task within grace period (epoch-1)');
+
+        return {
+          valid: true,
+          reason: 'grace_period',
+          taskEpoch,
+          currentEpoch: this._lastKnownEpoch
+        };
+      }
+    }
+
+    this.logger.warn({
+      taskEpoch,
+      currentEpoch: this._lastKnownEpoch,
+      workerId: this.workerId
+    }, 'Rejecting task from stale epoch (split-brain prevention)');
+
+    if (this._globalCoordinator) {
+      this._globalCoordinator.incrementEpochDriftEvents();
+    }
+
+    return {
+      valid: false,
+      reason: 'stale',
+      taskEpoch,
+      currentEpoch: this._lastKnownEpoch
+    };
+  }
+
+  /**
+   * Convenience method that returns boolean only.
+   */
+  isEpochValid(taskEpoch: number, taskTimestamp?: number): boolean {
+    return this.validateEpoch(taskEpoch, taskTimestamp).valid;
+  }
+
   protected async _initializeGlobalCoordinator(): Promise<void> {
     if (!this.database) {
       throw new Error(`[${this.constructor.name}] Database not available - cannot initialize coordinator`);
@@ -290,6 +401,11 @@ export class CoordinatorPlugin<TOptions extends CoordinatorConfig = CoordinatorC
 
       this.isCoordinator = isNowLeader;
       this.currentLeaderId = event.newLeader;
+
+      if (event.epoch > this._lastKnownEpoch) {
+        this._lastKnownEpoch = event.epoch;
+        this._lastEpochChangeTime = Date.now();
+      }
 
       this.logger.debug(
         { previousLeader: event.previousLeader || 'none', newLeader: event.newLeader, epoch: event.epoch },

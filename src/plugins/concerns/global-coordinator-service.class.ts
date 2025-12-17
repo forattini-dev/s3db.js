@@ -1,6 +1,7 @@
 import { EventEmitter } from 'events';
 import { PluginStorage } from '../../concerns/plugin-storage.js';
 import { tryFn } from '../../concerns/try-fn.js';
+import { LatencyBuffer, type LatencyStats } from '../../concerns/ring-buffer.js';
 import type { Database } from '../../database.class.js';
 import type { S3DBLogger } from '../../concerns/logger.js';
 import type { S3Client } from '../../clients/s3-client.class.js';
@@ -13,6 +14,12 @@ export interface CircuitBreakerConfig {
   halfOpenMaxAttempts?: number;
 }
 
+export interface ContentionConfig {
+  enabled?: boolean;
+  threshold?: number;
+  rateLimitMs?: number;
+}
+
 export interface GlobalCoordinatorConfig {
   heartbeatInterval?: number;
   heartbeatJitter?: number;
@@ -20,6 +27,8 @@ export interface GlobalCoordinatorConfig {
   workerTimeout?: number;
   diagnosticsEnabled?: boolean | string;
   circuitBreaker?: CircuitBreakerConfig;
+  contention?: ContentionConfig;
+  metricsBufferSize?: number;
 }
 
 export interface GlobalCoordinatorOptions {
@@ -39,6 +48,22 @@ export interface CoordinatorMetrics {
   lastHeartbeatTime: number | null;
   circuitBreakerTrips: number;
   circuitBreakerState: CircuitBreakerState;
+  contentionEvents: number;
+  epochDriftEvents: number;
+}
+
+export interface EnhancedCoordinatorMetrics extends CoordinatorMetrics {
+  latency: LatencyStats;
+  metricsWindowSize: number;
+}
+
+export interface ContentionEvent {
+  namespace: string;
+  duration: number;
+  expected: number;
+  ratio: number;
+  threshold: number;
+  timestamp: number;
 }
 
 export type CircuitBreakerState = 'closed' | 'open' | 'half-open';
@@ -102,12 +127,21 @@ export interface SubscribablePlugin {
   onGlobalLeaderChange?(isLeader: boolean, data: LeaderChangeEvent): void;
 }
 
+export interface ContentionState {
+  lastEventTime: number;
+  rateLimitMs: number;
+}
+
 export interface NormalizedConfig {
   heartbeatInterval: number;
   heartbeatJitter: number;
   leaseTimeout: number;
   workerTimeout: number;
   diagnosticsEnabled: boolean;
+  contentionEnabled: boolean;
+  contentionThreshold: number;
+  contentionRateLimitMs: number;
+  metricsBufferSize: number;
 }
 
 export interface ElectionResult {
@@ -136,6 +170,8 @@ export class GlobalCoordinatorService extends EventEmitter {
   metrics: CoordinatorMetrics;
 
   protected _circuitBreaker: CircuitBreakerInternalState;
+  protected _contentionState: ContentionState;
+  protected _latencyBuffer: LatencyBuffer;
 
   storage: CoordinatorPluginStorage | null;
   protected _pluginStorage: CoordinatorPluginStorage | null;
@@ -180,8 +216,17 @@ export class GlobalCoordinatorService extends EventEmitter {
       startTime: null,
       lastHeartbeatTime: null,
       circuitBreakerTrips: 0,
-      circuitBreakerState: 'closed'
+      circuitBreakerState: 'closed',
+      contentionEvents: 0,
+      epochDriftEvents: 0
     };
+
+    this._contentionState = {
+      lastEventTime: 0,
+      rateLimitMs: this.config.contentionRateLimitMs
+    };
+
+    this._latencyBuffer = new LatencyBuffer(this.config.metricsBufferSize);
 
     this._circuitBreaker = {
       state: 'closed',
@@ -328,8 +373,16 @@ export class GlobalCoordinatorService extends EventEmitter {
     );
   }
 
-  getMetrics(): CoordinatorMetrics {
-    return { ...this.metrics };
+  getMetrics(): EnhancedCoordinatorMetrics {
+    return {
+      ...this.metrics,
+      latency: this._latencyBuffer.getStats(),
+      metricsWindowSize: this._latencyBuffer.count
+    };
+  }
+
+  incrementEpochDriftEvents(): void {
+    this.metrics.epochDriftEvents++;
   }
 
   protected async _heartbeatCycle(): Promise<void> {
@@ -401,7 +454,11 @@ export class GlobalCoordinatorService extends EventEmitter {
       const durationMs = Date.now() - startMs;
       this.metrics.electionDurationMs = durationMs;
 
+      this._latencyBuffer.push(durationMs);
+
       this._circuitBreakerSuccess();
+
+      this._checkContention(durationMs);
 
       if (durationMs > 100) {
         this.logger.warn({ namespace: this.namespace, durationMs }, `[PERF] SLOW HEARTBEAT detected`);
@@ -412,6 +469,40 @@ export class GlobalCoordinatorService extends EventEmitter {
     } catch (err) {
       this._circuitBreakerFailure();
       this._logError('Heartbeat cycle failed', err as Error);
+    }
+  }
+
+  protected _checkContention(durationMs: number): void {
+    if (!this.config.contentionEnabled) return;
+
+    const ratio = durationMs / this.config.heartbeatInterval;
+
+    if (ratio > this.config.contentionThreshold) {
+      this.metrics.contentionEvents++;
+
+      const now = Date.now();
+      if (now - this._contentionState.lastEventTime > this._contentionState.rateLimitMs) {
+        this._contentionState.lastEventTime = now;
+
+        const event: ContentionEvent = {
+          namespace: this.namespace,
+          duration: durationMs,
+          expected: this.config.heartbeatInterval,
+          ratio,
+          threshold: this.config.contentionThreshold,
+          timestamp: now
+        };
+
+        this.emit('contention:detected', event);
+
+        this.logger.warn({
+          namespace: this.namespace,
+          durationMs,
+          expectedMs: this.config.heartbeatInterval,
+          ratio: ratio.toFixed(2),
+          threshold: this.config.contentionThreshold
+        }, `Contention detected: heartbeat took ${ratio.toFixed(1)}x longer than expected`);
+      }
     }
   }
 
@@ -769,7 +860,11 @@ export class GlobalCoordinatorService extends EventEmitter {
       heartbeatJitter: Math.max(0, config.heartbeatJitter || 1000),
       leaseTimeout: Math.max(5000, config.leaseTimeout || 15000),
       workerTimeout: Math.max(5000, config.workerTimeout || 20000),
-      diagnosticsEnabled: Boolean(config.diagnosticsEnabled ?? false)
+      diagnosticsEnabled: Boolean(config.diagnosticsEnabled ?? false),
+      contentionEnabled: config.contention?.enabled ?? true,
+      contentionThreshold: config.contention?.threshold ?? 2.0,
+      contentionRateLimitMs: config.contention?.rateLimitMs ?? 30000,
+      metricsBufferSize: Math.max(10, config.metricsBufferSize ?? 100)
     };
   }
 

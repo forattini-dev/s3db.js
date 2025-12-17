@@ -34,4 +34,5 @@ export * from './performance-monitor.js';
 export * from './memory-profiler.js';
 export * from './failban-manager.js';
 export * from './typescript-generator.js';
+export * from './ring-buffer.js';
 //# sourceMappingURL=index.js.map
