@@ -269,6 +269,10 @@ export class MockClient extends EventEmitter {
         return this;
       },
 
+      async transformToByteArray() {
+        return new Uint8Array(buffer);
+      },
+
       async *[Symbol.asyncIterator]() {
         if (buffer.length > 0) {
           yield buffer;

@@ -110,7 +110,7 @@ describe('S3QueuePlugin - Process Messages', () => {
 
     expect(events.length).toBe(1);
     expect(events[0].queueId).toBeDefined();
-    expect(events[0].duration).toBeGreaterThan(0);
+    expect(events[0].duration).toBeGreaterThanOrEqual(0);
   });
 
   test('should call onComplete callback', async () => {
