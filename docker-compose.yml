@@ -18,22 +18,26 @@ services:
     volumes:
       - .:/app
       - test_node_modules:/app/node_modules
+      - pnpm_store:/root/.local/share/pnpm/store
     environment:
       - NODE_ENV=test
       - CI=true
       - REDIS_URL=redis://redis:6379
+      - BUCKET_CONNECTION_STRING=http://minioadmin:minioadmin123@minio:9000/s3db
     depends_on:
       redis:
+        condition: service_healthy
+      minio:
         condition: service_healthy
     deploy:
       resources:
         limits:
           cpus: '2'
-          memory: 5G
+          memory: 6G
         reservations:
           cpus: '2'
           memory: 5G
-    command: ["tail", "-f", "/dev/null"]
+    entrypoint: ["/bin/sh", "-c", "npm install -g pnpm && pnpm install --no-frozen-lockfile && tail -f /dev/null"]
     profiles:
       - test
 
@@ -94,3 +98,4 @@ volumes:
   minio_data: {}
   localstack: {}
   test_node_modules: {}
+  pnpm_store: {}

@@ -96,15 +96,15 @@ describe('SchedulerPlugin - Validation & Setup', () => {
     let database;
     let plugin;
 
-    beforeEach(async () => {
-      database = createDatabaseForTest('suite=plugins/scheduler');
+    beforeAll(async () => {
+      database = createDatabaseForTest('suite=plugins/scheduler-validation');
       plugin = createTestPlugin(mockActions);
 
       await database.connect();
       await plugin.install(database);
     });
 
-    afterEach(async () => {
+    afterAll(async () => {
       if (plugin?.stop) {
         await plugin.stop();
       }

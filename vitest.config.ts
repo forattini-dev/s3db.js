@@ -38,6 +38,8 @@ const pluginExclusions = [
   'tests/plugins/cache/memory/**',
   'tests/plugins/cache/partition-aware/**',
   'tests/plugins/cache/plugin-core-behaviour.test.ts',
+  // Redis session store requires Redis running
+  'tests/plugins/api/concerns-session-store.test.ts',
   // Root level plugin tests (need individual investigation - use test:plugins:root to run)
   'tests/plugins/*.test.ts',
 ];

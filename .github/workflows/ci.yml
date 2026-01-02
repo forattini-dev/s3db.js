@@ -8,13 +8,15 @@ on:
     branches: ['main']
 
 jobs:
-  quality:
-    name: Quality Check
+  # ============================================
+  # Stage 1: Build & Lint (runs once per Node version)
+  # ============================================
+  build:
+    name: Build (Node ${{ matrix.node-version }})
     runs-on: ubuntu-latest
     strategy:
       matrix:
         node-version: [20, 22, 23]
-
     steps:
       - name: Checkout
         uses: actions/checkout@v6
@@ -24,7 +26,7 @@ jobs:
         with:
           version: 9
 
-      - name: Setup Node.js ${{ matrix.node-version }}
+      - name: Setup Node.js
         uses: actions/setup-node@v6
         with:
           node-version: ${{ matrix.node-version }}
@@ -34,14 +36,91 @@ jobs:
       - name: Install Dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Lint & Type Check
+      - name: Lint
         run: |
-          # If lint script exists
           if npm run | grep -q "lint"; then pnpm run lint; fi
-          pnpm run build
 
-      - name: Run Tests
-        run: pnpm test
+      - name: Build
+        run: pnpm run build
+
+      - name: Cache build artifacts
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            node_modules
+            dist
+          key: build-${{ github.sha }}-node${{ matrix.node-version }}
+
+  # ============================================
+  # Stage 2: Parallel Test Suites (matrix: suite × node)
+  # ============================================
+  test:
+    name: Test ${{ matrix.suite.name }} (Node ${{ matrix.node-version }})
+    needs: build
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        node-version: [20, 22, 23]
+        suite:
+          - name: core
+            path: tests/core/
+            timeout: 10
+          - name: scheduler
+            path: tests/plugins/scheduler/
+            timeout: 5
+          - name: tfstate
+            path: tests/plugins/tfstate/
+            timeout: 5
+          - name: api
+            path: tests/plugins/api/
+            timeout: 3
+          - name: ttl
+            path: tests/plugins/ttl/
+            timeout: 3
+          - name: state-machine
+            path: tests/plugins/state-machine/
+            timeout: 3
+          - name: s3-queue
+            path: tests/plugins/s3-queue/
+            timeout: 3
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: ${{ matrix.node-version }}
+          cache: 'pnpm'
+
+      - name: Restore build artifacts
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            node_modules
+            dist
+          key: build-${{ github.sha }}-node${{ matrix.node-version }}
+
+      - name: Run ${{ matrix.suite.name }} Tests
+        run: pnpm vitest run ${{ matrix.suite.path }} --reporter=verbose
+        timeout-minutes: ${{ matrix.suite.timeout }}
+
+  # ============================================
+  # Stage 3: Quality Gate (waits for all tests)
+  # ============================================
+  quality:
+    name: Quality Gate
+    needs: [build, test]
+    runs-on: ubuntu-latest
+    steps:
+      - name: All tests passed
+        run: echo "All test suites passed on Node 20, 22, and 23!"
 
   release-next:
     name: Release Next

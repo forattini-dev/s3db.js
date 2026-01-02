@@ -9,7 +9,19 @@ import {
 } from './helpers.js';
 
 describe('SchedulerPlugin - Management & Scheduling', () => {
+  let database;
   let mockActions;
+
+  beforeAll(async () => {
+    database = createDatabaseForTest('suite=plugins/scheduler-management');
+    await database.connect();
+  });
+
+  afterAll(async () => {
+    if (database) {
+      await database.disconnect();
+    }
+  });
 
   beforeEach(() => {
     setupTimerMocks();
@@ -21,23 +33,16 @@ describe('SchedulerPlugin - Management & Scheduling', () => {
   });
 
   describe('Job Management', () => {
-    let database;
     let plugin;
 
     beforeEach(async () => {
-      database = createDatabaseForTest('suite=plugins/scheduler-management');
       plugin = createTestPlugin(mockActions);
-
-      await database.connect();
       await plugin.install(database);
     });
 
     afterEach(async () => {
       if (plugin?.stop) {
         await plugin.stop();
-      }
-      if (database) {
-        await database.disconnect();
       }
     });
 
@@ -83,23 +88,16 @@ describe('SchedulerPlugin - Management & Scheduling', () => {
   });
 
   describe('Job Status and Statistics', () => {
-    let database;
     let plugin;
 
     beforeEach(async () => {
-      database = createDatabaseForTest('suite=plugins/scheduler-status');
       plugin = createTestPlugin(mockActions);
-
-      await database.connect();
       await plugin.install(database);
     });
 
     afterEach(async () => {
       if (plugin?.stop) {
         await plugin.stop();
-      }
-      if (database) {
-        await database.disconnect();
       }
     });
 
@@ -157,24 +155,28 @@ describe('SchedulerPlugin - Management & Scheduling', () => {
   });
 
   describe('Job History', () => {
-    let database;
     let plugin;
 
     beforeEach(async () => {
-      database = createDatabaseForTest('suite=plugins/scheduler-history');
       plugin = createTestPlugin(mockActions);
-
-      await database.connect();
       await plugin.install(database);
+
+      // Clean up history from previous tests
+      const historyResource = database.resources[plugin.config.jobHistoryResource];
+      if (historyResource) {
+        const existingRecords = await historyResource.list();
+        for (const record of existingRecords) {
+          await historyResource.delete(record.id);
+        }
+      }
+
+      // Run once to have history
       await plugin.runJob('test_job');
     });
 
     afterEach(async () => {
       if (plugin?.stop) {
         await plugin.stop();
-      }
-      if (database) {
-        await database.disconnect();
       }
     });
 
@@ -229,23 +231,16 @@ describe('SchedulerPlugin - Management & Scheduling', () => {
   });
 
   describe('Dynamic Job Management', () => {
-    let database;
     let plugin;
 
     beforeEach(async () => {
-      database = createDatabaseForTest('suite=plugins/scheduler-dynamic');
       plugin = createTestPlugin(mockActions);
-
-      await database.connect();
       await plugin.install(database);
     });
 
     afterEach(async () => {
       if (plugin?.stop) {
         await plugin.stop();
-      }
-      if (database) {
-        await database.disconnect();
       }
     });
 
@@ -307,23 +302,16 @@ describe('SchedulerPlugin - Management & Scheduling', () => {
   });
 
   describe('Scheduling', () => {
-    let database;
     let plugin;
 
     beforeEach(async () => {
-      database = createDatabaseForTest('suite=plugins/scheduler-scheduling');
       plugin = createTestPlugin(mockActions);
-
-      await database.connect();
       await plugin.install(database);
     });
 
     afterEach(async () => {
       if (plugin?.stop) {
         await plugin.stop();
-      }
-      if (database) {
-        await database.disconnect();
       }
     });
 
@@ -358,23 +346,16 @@ describe('SchedulerPlugin - Management & Scheduling', () => {
   });
 
   describe('Hook Execution', () => {
-    let database;
     let plugin;
 
     beforeEach(async () => {
-      database = createDatabaseForTest('suite=plugins/scheduler-hooks');
       plugin = createTestPlugin(mockActions);
-
-      await database.connect();
       await plugin.install(database);
     });
 
     afterEach(async () => {
       if (plugin?.stop) {
         await plugin.stop();
-      }
-      if (database) {
-        await database.disconnect();
       }
     });
 

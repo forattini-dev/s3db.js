@@ -8,7 +8,19 @@ import {
 } from './helpers.js';
 
 describe('SchedulerPlugin - Job Execution', () => {
+  let database;
   let mockActions;
+
+  beforeAll(async () => {
+    database = createDatabaseForTest('suite=plugins/scheduler-execution');
+    await database.connect();
+  });
+
+  afterAll(async () => {
+    if (database) {
+      await database.disconnect();
+    }
+  });
 
   beforeEach(() => {
     setupTimerMocks();
@@ -20,23 +32,25 @@ describe('SchedulerPlugin - Job Execution', () => {
   });
 
   describe('Execution Flow', () => {
-    let database;
     let plugin;
 
     beforeEach(async () => {
-      database = createDatabaseForTest('suite=plugins/scheduler-execution');
       plugin = createTestPlugin(mockActions);
-
-      await database.connect();
       await plugin.install(database);
+
+      // Clean up any existing job history from previous tests
+      const historyResource = database.resources[plugin.config.jobHistoryResource];
+      if (historyResource) {
+        const existingRecords = await historyResource.list();
+        for (const record of existingRecords) {
+          await historyResource.delete(record.id);
+        }
+      }
     });
 
     afterEach(async () => {
       if (plugin?.stop) {
         await plugin.stop();
-      }
-      if (database) {
-        await database.disconnect();
       }
     });
 
@@ -139,23 +153,16 @@ describe('SchedulerPlugin - Job Execution', () => {
   });
 
   describe('Error Handling', () => {
-    let database;
     let plugin;
 
     beforeEach(async () => {
-      database = createDatabaseForTest('suite=plugins/scheduler-errors');
       plugin = createTestPlugin(mockActions);
-
-      await database.connect();
       await plugin.install(database);
     });
 
     afterEach(async () => {
       if (plugin?.stop) {
         await plugin.stop();
-      }
-      if (database) {
-        await database.disconnect();
       }
     });
 

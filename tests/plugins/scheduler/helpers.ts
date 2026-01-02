@@ -1,13 +1,18 @@
 import { vi } from 'vitest';
 
 import { SchedulerPlugin } from '../../../src/plugins/scheduler.plugin.js';
+import { FakeTimers } from '../../utils/time-helpers.js';
+
+export { FakeTimers };
 
 export function setupTimerMocks() {
-  // No mocking - use real timers
+  // No-op: Don't install fake timers globally as they block async operations
+  // Use FakeTimers.install() inside specific tests that need it
 }
 
 export function restoreTimerMocks() {
-  // No mocking cleanup needed
+  // Ensure fake timers are cleaned up if test installed them
+  FakeTimers.uninstall();
 }
 
 export function buildMockActions() {

@@ -9,7 +9,19 @@ import {
 } from './helpers.js';
 
 describe('SchedulerPlugin - Lifecycle & Edge Cases', () => {
+  let database;
   let mockActions;
+
+  beforeAll(async () => {
+    database = createDatabaseForTest('suite=plugins/scheduler-lifecycle-edge');
+    await database.connect();
+  });
+
+  afterAll(async () => {
+    if (database) {
+      await database.disconnect();
+    }
+  });
 
   beforeEach(() => {
     setupTimerMocks();
@@ -21,23 +33,16 @@ describe('SchedulerPlugin - Lifecycle & Edge Cases', () => {
   });
 
   describe('Plugin Integration', () => {
-    let database;
     let plugin;
 
     beforeEach(async () => {
-      database = createDatabaseForTest('suite=plugins/scheduler-integration');
       plugin = createTestPlugin(mockActions);
-
-      await database.connect();
       await plugin.install(database);
     });
 
     afterEach(async () => {
       if (plugin?.stop) {
         await plugin.stop();
-      }
-      if (database) {
-        await database.disconnect();
       }
     });
 
@@ -58,23 +63,16 @@ describe('SchedulerPlugin - Lifecycle & Edge Cases', () => {
   });
 
   describe('Plugin Lifecycle', () => {
-    let database;
     let plugin;
 
     beforeEach(async () => {
-      database = createDatabaseForTest('suite=plugins/scheduler-lifecycle');
       plugin = createTestPlugin(mockActions);
-
-      await database.connect();
       await plugin.install(database);
     });
 
     afterEach(async () => {
       if (plugin?.stop) {
         await plugin.stop();
-      }
-      if (database) {
-        await database.disconnect();
       }
     });
 
@@ -120,23 +118,16 @@ describe('SchedulerPlugin - Lifecycle & Edge Cases', () => {
   });
 
   describe('Edge Cases', () => {
-    let database;
     let plugin;
 
     beforeEach(async () => {
-      database = createDatabaseForTest('suite=plugins/scheduler-edge');
       plugin = createTestPlugin(mockActions);
-
-      await database.connect();
       await plugin.install(database);
     });
 
     afterEach(async () => {
       if (plugin?.stop) {
         await plugin.stop();
-      }
-      if (database) {
-        await database.disconnect();
       }
     });
 
@@ -200,23 +191,16 @@ describe('SchedulerPlugin - Lifecycle & Edge Cases', () => {
   });
 
   describe('Complex Scheduling Scenarios', () => {
-    let database;
     let plugin;
 
     beforeEach(async () => {
-      database = createDatabaseForTest('suite=plugins/scheduler-complex');
       plugin = createTestPlugin(mockActions);
-
-      await database.connect();
       await plugin.install(database);
     });
 
     afterEach(async () => {
       if (plugin?.stop) {
         await plugin.stop();
-      }
-      if (database) {
-        await database.disconnect();
       }
     });
 
