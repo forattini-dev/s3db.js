@@ -264,15 +264,16 @@ describe('Resource Pagination - Real Integration Tests', () => {
     expect(singlePage.items).toHaveLength(1);
     expect(singlePage.hasMore).toBe(false);
 
-    // Test with size 0 - should return empty items
+    // Test with size 0 - should default to 100 (defensive behavior)
     const zeroSizePage = await resource.page({ size: 0, offset: 0 });
-    expect(zeroSizePage.items).toHaveLength(0);
-    // hasMore should be true since we didn't get all items
-    expect(zeroSizePage.hasMore).toBe(true);
+    expect(zeroSizePage.items).toHaveLength(1); // Only 1 item exists
+    expect(zeroSizePage.pageSize).toBe(100); // Defaulted to 100
+    expect(zeroSizePage.hasMore).toBe(false);
 
-    // Test with negative size (should return empty array)
+    // Test with negative size - should also default to 100
     const negativeSizePage = await resource.page({ size: -5, offset: 0 });
-    expect(negativeSizePage.items).toHaveLength(0);
+    expect(negativeSizePage.items).toHaveLength(1); // Only 1 item exists
+    expect(negativeSizePage.pageSize).toBe(100); // Defaulted to 100
   });
 
   test('Pagination with Complex Filters', async () => {
