@@ -1,5 +1,6 @@
 import { join } from 'path';
 import { tryFn } from '../concerns/try-fn.js';
+import { validateS3KeySegment } from '../concerns/s3-key.js';
 import { PartitionError, ResourceError } from '../errors.js';
 export class ResourcePartitions {
     resource;
@@ -213,7 +214,11 @@ export class ResourcePartitions {
         return `resource=${this.resource.name}/partition=${partition}`;
     }
     extractValuesFromKey(id, keys, sortedFields) {
-        const keyForId = keys.find(key => key.includes(`id=${id}`));
+        const idSegment = `id=${id}`;
+        const keyForId = keys.find(key => {
+            const segments = key.split('/');
+            return segments.some(segment => segment === idSegment);
+        });
         if (!keyForId) {
             throw new PartitionError(`Partition key not found for ID ${id}`, {
                 resourceName: this.resource.name,
@@ -370,6 +375,12 @@ export class ResourcePartitions {
         }
     }
     async getFromPartition({ id, partitionName, partitionValues = {} }) {
+        validateS3KeySegment(id, 'id');
+        for (const [fieldName, value] of Object.entries(partitionValues)) {
+            if (value !== undefined && value !== null) {
+                validateS3KeySegment(value, `partitionValues.${fieldName}`);
+            }
+        }
         const partitions = this.getPartitions();
         if (!partitions || !partitions[partitionName]) {
             throw new PartitionError(`Partition '${partitionName}' not found`, {
