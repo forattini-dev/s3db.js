@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "recker": {
+      "command": "npx",
+      "args": ["recker@latest", "mcp", "--category=full"]
+    },
+    "tuiuiu": {
+      "command": "npx",
+      "args": ["tuiuiu.js@latest", "mcp"]
+    }
+  }
+}
