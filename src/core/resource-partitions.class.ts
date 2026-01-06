@@ -361,7 +361,11 @@ export class ResourcePartitions {
   }
 
   extractValuesFromKey(id: string, keys: string[], sortedFields: Array<[string, string]>): StringRecord {
-    const keyForId = keys.find(key => key.includes(`id=${id}`));
+    const idSegment = `id=${id}`;
+    const keyForId = keys.find(key => {
+      const segments = key.split('/');
+      return segments.some(segment => segment === idSegment);
+    });
     if (!keyForId) {
       throw new PartitionError(`Partition key not found for ID ${id}`, {
         resourceName: this.resource.name,
