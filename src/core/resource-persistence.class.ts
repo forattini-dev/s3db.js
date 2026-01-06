@@ -2,6 +2,7 @@ import { tryFn } from '../concerns/try-fn.js';
 import { isEmpty, isObject } from 'lodash-es';
 import { getBehavior } from '../behaviors/index.js';
 import { isNotFoundError } from '../concerns/s3-errors.js';
+import { sanitizeDeep } from '../concerns/safe-merge.js';
 import { calculateTotalSize, calculateEffectiveLimit } from '../concerns/calculator.js';
 import { mapAwsError, InvalidResourceItem, ResourceError, ValidationError } from '../errors.js';
 import { streamToString } from '../stream/index.js';
@@ -241,11 +242,11 @@ export class ResourcePersistence {
     }
 
     const attributesWithDefaults = this.validator.applyDefaults(attributes);
-    const completeData: ResourceData = id !== undefined
+    const completeData: ResourceData = sanitizeDeep(id !== undefined
       ? { id, ...attributesWithDefaults }
-      : { ...attributesWithDefaults };
+      : { ...attributesWithDefaults }) as ResourceData;
 
-    const preProcessedData = await this.resource.executeHooks('beforeInsert', completeData) as ResourceData;
+    const preProcessedData = sanitizeDeep(await this.resource.executeHooks('beforeInsert', completeData)) as ResourceData;
 
     const extraProps = Object.keys(preProcessedData).filter(
       k => !(k in completeData) || preProcessedData[k] !== completeData[k]
@@ -735,7 +736,9 @@ export class ResourcePersistence {
       (mergedData.metadata as StringRecord).updatedAt = now;
     }
 
-    const preProcessedData = await this.resource.executeHooks('beforeUpdate', mergedData) as ResourceData;
+    mergedData = sanitizeDeep(mergedData) as ResourceData;
+
+    const preProcessedData = sanitizeDeep(await this.resource.executeHooks('beforeUpdate', mergedData)) as ResourceData;
     const completeData = { ...originalData, ...preProcessedData, id };
 
     const { isValid, errors, data } = await this.resource.validate(completeData, { includeId: true });
@@ -1000,6 +1003,8 @@ export class ResourcePersistence {
       mergedData.updatedAt = new Date().toISOString();
     }
 
+    mergedData = sanitizeDeep(mergedData) as ResourceData;
+
     const { isValid, errors } = await this.validator.validate(mergedData);
     if (!isValid) {
       throw new ValidationError('Validation failed during patch', {
@@ -1072,7 +1077,7 @@ export class ResourcePersistence {
       attributesWithDefaults.updatedAt = new Date().toISOString();
     }
 
-    const completeData: ResourceData = { id, ...attributesWithDefaults };
+    const completeData: ResourceData = sanitizeDeep({ id, ...attributesWithDefaults }) as ResourceData;
 
     const {
       errors,
@@ -1245,7 +1250,9 @@ export class ResourcePersistence {
       (mergedData.metadata as StringRecord).updatedAt = now;
     }
 
-    const preProcessedData = await this.resource.executeHooks('beforeUpdate', mergedData) as ResourceData;
+    mergedData = sanitizeDeep(mergedData) as ResourceData;
+
+    const preProcessedData = sanitizeDeep(await this.resource.executeHooks('beforeUpdate', mergedData)) as ResourceData;
     const completeData = { ...originalData, ...preProcessedData, id };
 
     const { isValid, errors, data } = await this.resource.validate(completeData, { includeId: true });
