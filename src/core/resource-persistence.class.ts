@@ -1,6 +1,7 @@
 import { tryFn } from '../concerns/try-fn.js';
 import { isEmpty, isObject } from 'lodash-es';
 import { getBehavior } from '../behaviors/index.js';
+import { isNotFoundError } from '../concerns/s3-errors.js';
 import { calculateTotalSize, calculateEffectiveLimit } from '../concerns/calculator.js';
 import { mapAwsError, InvalidResourceItem, ResourceError, ValidationError } from '../errors.js';
 import { streamToString } from '../stream/index.js';
@@ -501,7 +502,7 @@ export class ResourcePersistence {
   async getOrNull(id: string): Promise<ResourceData | null> {
     const [ok, err, data] = await tryFn<ResourceData>(() => this.get(id));
 
-    if (!ok && err && ((err as Error & { name?: string }).name === 'NoSuchKey' || (err as Error).message?.includes('NoSuchKey'))) {
+    if (!ok && err && isNotFoundError(err)) {
       return null;
     }
 
@@ -512,7 +513,7 @@ export class ResourcePersistence {
   async getOrThrow(id: string): Promise<ResourceData> {
     const [ok, err, data] = await tryFn<ResourceData>(() => this.get(id));
 
-    if (!ok && err && ((err as Error & { name?: string }).name === 'NoSuchKey' || (err as Error).message?.includes('NoSuchKey'))) {
+    if (!ok && err && isNotFoundError(err)) {
       throw new ResourceError(`Resource '${this.name}' with id '${id}' not found`, {
         resourceName: this.name,
         operation: 'getOrThrow',
@@ -529,7 +530,13 @@ export class ResourcePersistence {
     await this.resource.executeHooks('beforeExists', { id });
 
     const key = this.resource.getResourceKey(id);
-    const [ok] = await tryFn(() => this.client.headObject(key));
+    const [ok, err] = await tryFn(() => this.client.headObject(key));
+
+    if (!ok && err) {
+      if (!isNotFoundError(err)) {
+        throw err;
+      }
+    }
 
     await this.resource.executeHooks('afterExists', { id, exists: ok });
     return ok;
@@ -794,10 +801,6 @@ export class ResourcePersistence {
       if (okParse) finalContentType = 'application/json';
     }
 
-    if (this.versioningEnabled && originalData._v !== this.version) {
-      await this.resource.createHistoricalVersion(id, originalData);
-    }
-
     const [ok, err] = await tryFn(() => this.client.putObject({
       key,
       body: finalBody,
@@ -841,6 +844,18 @@ export class ResourcePersistence {
         operation: 'update',
         id
       });
+    }
+
+    if (this.versioningEnabled && originalData._v !== this.version) {
+      const [okHistory, errHistory] = await tryFn(() => this.resource.createHistoricalVersion(id, originalData));
+      if (!okHistory) {
+        this.resource.emit('historyError', {
+          operation: 'update',
+          id,
+          error: errHistory,
+          message: (errHistory as Error).message
+        });
+      }
     }
 
     const updatedData = await this.resource.composeFullObjectFromWrite({
@@ -1299,6 +1314,18 @@ export class ResourcePersistence {
         success: false,
         error: (err as Error).message || 'Update failed'
       };
+    }
+
+    if (this.versioningEnabled && originalData._v !== this.version) {
+      const [okHistory, errHistory] = await tryFn(() => this.resource.createHistoricalVersion(id, originalData));
+      if (!okHistory) {
+        this.resource.emit('historyError', {
+          operation: 'updateConditional',
+          id,
+          error: errHistory,
+          message: (errHistory as Error).message
+        });
+      }
     }
 
     const updatedData = await this.resource.composeFullObjectFromWrite({
