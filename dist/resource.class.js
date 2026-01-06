@@ -19,6 +19,7 @@ import { ResourcePersistence } from './core/resource-persistence.class.js';
 import tryFn, { tryFnSync } from './concerns/try-fn.js';
 import { getBehavior, DEFAULT_BEHAVIOR } from './behaviors/index.js';
 import { idGenerator as defaultIdGenerator } from './concerns/id.js';
+import { validateS3KeySegment } from './concerns/s3-key.js';
 import { ResourceError, PartitionError } from './errors.js';
 import { createLogger } from './concerns/logger.js';
 import { validateResourceConfig } from './core/resource-config-validator.js';
@@ -407,6 +408,7 @@ export class Resource extends AsyncEventEmitter {
         return this._partitions.applyRule(value, rule);
     }
     getResourceKey(id) {
+        validateS3KeySegment(id, 'id');
         const key = join('resource=' + this.name, 'data', `id=${id}`);
         return key;
     }

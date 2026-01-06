@@ -1,3 +1,4 @@
+import { isValidS3KeySegment } from '../concerns/s3-key.js';
 export function validateResourceConfig(config) {
     const errors = [];
     if (!config.name) {
@@ -8,6 +9,9 @@ export function validateResourceConfig(config) {
     }
     else if (config.name.trim() === '') {
         errors.push("Resource 'name' cannot be empty");
+    }
+    else if (!isValidS3KeySegment(config.name)) {
+        errors.push(`Resource 'name' must be URL-friendly (no /, \\, =, or %). Got: '${config.name}'`);
     }
     if (!config.client) {
         errors.push("S3 'client' is required");
@@ -68,7 +72,10 @@ export function validateResourceConfig(config) {
         }
         else {
             for (const [partitionName, partitionDef] of Object.entries(config.partitions)) {
-                if (typeof partitionDef !== 'object' || Array.isArray(partitionDef)) {
+                if (!isValidS3KeySegment(partitionName)) {
+                    errors.push(`Partition name '${partitionName}' must be URL-friendly (no /, \\, =, or %)`);
+                }
+                else if (typeof partitionDef !== 'object' || Array.isArray(partitionDef)) {
                     errors.push(`Partition '${partitionName}' must be an object`);
                 }
                 else if (!partitionDef.fields) {
@@ -79,7 +86,10 @@ export function validateResourceConfig(config) {
                 }
                 else {
                     for (const [fieldName, fieldType] of Object.entries(partitionDef.fields)) {
-                        if (typeof fieldType !== 'string') {
+                        if (!isValidS3KeySegment(fieldName)) {
+                            errors.push(`Partition field '${fieldName}' must be URL-friendly (no /, \\, =, or %)`);
+                        }
+                        else if (typeof fieldType !== 'string') {
                             errors.push(`Partition '${partitionName}.fields.${fieldName}' must be a string`);
                         }
                     }
