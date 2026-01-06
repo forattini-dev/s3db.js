@@ -31,3 +31,7 @@ subfinder/
 
 # pnpm store
 .pnpm-store/
+
+# OpenSpec (AI planning documents)
+openspec/
+.claude/commands/openspec/
