@@ -242,58 +242,32 @@ export class ResourceQuery {
         return results;
     }
     async page({ offset = 0, size = 100, partition = null, partitionValues = {}, skipCount = false } = {}) {
-        const [ok, err, result] = await tryFn(async () => {
-            let totalItems = null;
-            let totalPages = null;
-            if (!skipCount) {
-                const [okCount, , count] = await tryFn(() => this.count({ partition, partitionValues }));
-                if (okCount && count !== undefined) {
-                    totalItems = count;
-                    totalPages = Math.ceil(totalItems / size);
-                }
-            }
-            const page = Math.floor(offset / size);
-            let items = [];
-            if (size > 0) {
-                const [okList, , listResult] = await tryFn(() => this.list({ partition, partitionValues, limit: size, offset }));
-                items = okList && listResult ? listResult : [];
-            }
-            const pageResult = {
-                items,
-                totalItems,
-                page,
-                pageSize: size,
-                totalPages,
-                hasMore: items.length === size && (offset + size) < (totalItems || Infinity),
-                _debug: {
-                    requestedSize: size,
-                    requestedOffset: offset,
-                    actualItemsReturned: items.length,
-                    skipCount,
-                    hasTotalItems: totalItems !== null
-                }
-            };
-            this.resource._emitStandardized('paginated', pageResult);
-            return pageResult;
-        });
-        if (ok && result)
-            return result;
-        return {
-            items: [],
-            totalItems: null,
-            page: Math.floor(offset / size),
-            pageSize: size,
-            totalPages: null,
-            hasMore: false,
+        const effectiveSize = size > 0 ? size : 100;
+        let totalItems = null;
+        let totalPages = null;
+        if (!skipCount) {
+            totalItems = await this.count({ partition, partitionValues });
+            totalPages = Math.ceil(totalItems / effectiveSize);
+        }
+        const page = Math.floor(offset / effectiveSize);
+        const items = await this.list({ partition, partitionValues, limit: effectiveSize, offset });
+        const pageResult = {
+            items,
+            totalItems,
+            page,
+            pageSize: effectiveSize,
+            totalPages,
+            hasMore: items.length === effectiveSize && (offset + effectiveSize) < (totalItems || Infinity),
             _debug: {
                 requestedSize: size,
                 requestedOffset: offset,
-                actualItemsReturned: 0,
-                skipCount: skipCount,
-                hasTotalItems: false,
-                error: err.message
+                actualItemsReturned: items.length,
+                skipCount,
+                hasTotalItems: totalItems !== null
             }
         };
+        this.resource._emitStandardized('paginated', pageResult);
+        return pageResult;
     }
     async query(filter = {}, { limit = 100, offset = 0, partition = null, partitionValues = {} } = {}) {
         await this.resource.executeHooks('beforeQuery', { filter, limit, offset, partition, partitionValues });
