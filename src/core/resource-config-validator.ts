@@ -1,4 +1,5 @@
 import type { StringRecord } from '../types/common.types.js';
+import { isValidS3KeySegment } from '../concerns/s3-key.js';
 
 export interface PartitionFieldsDef {
   [fieldName: string]: string;
@@ -62,6 +63,8 @@ export function validateResourceConfig(config: ResourceConfigInput): ValidationR
     errors.push("Resource 'name' must be a string");
   } else if (config.name.trim() === '') {
     errors.push("Resource 'name' cannot be empty");
+  } else if (!isValidS3KeySegment(config.name)) {
+    errors.push(`Resource 'name' must be URL-friendly (no /, \\, =, or %). Got: '${config.name}'`);
   }
 
   if (!config.client) {
@@ -128,7 +131,9 @@ export function validateResourceConfig(config: ResourceConfigInput): ValidationR
       errors.push("Resource 'partitions' must be an object");
     } else {
       for (const [partitionName, partitionDef] of Object.entries(config.partitions)) {
-        if (typeof partitionDef !== 'object' || Array.isArray(partitionDef)) {
+        if (!isValidS3KeySegment(partitionName)) {
+          errors.push(`Partition name '${partitionName}' must be URL-friendly (no /, \\, =, or %)`);
+        } else if (typeof partitionDef !== 'object' || Array.isArray(partitionDef)) {
           errors.push(`Partition '${partitionName}' must be an object`);
         } else if (!partitionDef.fields) {
           errors.push(`Partition '${partitionName}' must have a 'fields' property`);
@@ -136,7 +141,9 @@ export function validateResourceConfig(config: ResourceConfigInput): ValidationR
           errors.push(`Partition '${partitionName}.fields' must be an object`);
         } else {
           for (const [fieldName, fieldType] of Object.entries(partitionDef.fields)) {
-            if (typeof fieldType !== 'string') {
+            if (!isValidS3KeySegment(fieldName)) {
+              errors.push(`Partition field '${fieldName}' must be URL-friendly (no /, \\, =, or %)`);
+            } else if (typeof fieldType !== 'string') {
               errors.push(`Partition '${partitionName}.fields.${fieldName}' must be a string`);
             }
           }
