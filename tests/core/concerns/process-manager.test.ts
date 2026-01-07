@@ -2,8 +2,9 @@
  * Tests for ProcessManager - Centralized lifecycle management
  */
 
-
+import { vi, describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { ProcessManager, getProcessManager, resetProcessManager } from '../../../src/concerns/process-manager.js';
+import { FakeTimers } from '../../utils/time-helpers.js';
 
 describe('ProcessManager', () => {
   let pm;
@@ -13,6 +14,10 @@ describe('ProcessManager', () => {
   });
 
   afterEach(async () => {
+    // Ensure fake timers are uninstalled before shutdown
+    if (FakeTimers._installed) {
+      FakeTimers.uninstall();
+    }
     if (pm) {
       await pm.shutdown();
       pm.removeSignalHandlers();
@@ -31,23 +36,26 @@ describe('ProcessManager', () => {
     });
 
     it('should execute interval function repeatedly', async () => {
+      FakeTimers.install();
       const fn = vi.fn();
       pm.setInterval(fn, 50, 'test-interval');
 
-      await new Promise(resolve => setTimeout(resolve, 160));
+      // Advance time: 50ms, 100ms, 150ms = 3 calls
+      await FakeTimers.advance(160);
 
-      expect(fn).toHaveBeenCalledTimes(3); // ~50ms, ~100ms, ~150ms
+      expect(fn).toHaveBeenCalledTimes(3);
     });
 
     it('should clear interval by name', async () => {
+      FakeTimers.install();
       const fn = vi.fn();
       pm.setInterval(fn, 50, 'test-interval');
 
-      await new Promise(resolve => setTimeout(resolve, 60));
+      await FakeTimers.advance(60); // 1 call
       pm.clearInterval('test-interval');
-      await new Promise(resolve => setTimeout(resolve, 60));
+      await FakeTimers.advance(60); // should not add more calls
 
-      expect(fn.mock.calls.length).toBeLessThanOrEqual(2); // Only called before clearing
+      expect(fn.mock.calls.length).toBeLessThanOrEqual(2);
     });
 
     it('should replace existing interval with same name', () => {
@@ -83,30 +91,33 @@ describe('ProcessManager', () => {
     });
 
     it('should execute timeout function once', async () => {
+      FakeTimers.install();
       const fn = vi.fn();
       pm.setTimeout(fn, 50, 'test-timeout');
 
-      await new Promise(resolve => setTimeout(resolve, 100));
+      await FakeTimers.advance(100);
 
       expect(fn).toHaveBeenCalledTimes(1);
     });
 
     it('should auto-remove timeout after execution', async () => {
+      FakeTimers.install();
       const fn = vi.fn();
       pm.setTimeout(fn, 50, 'test-timeout');
 
-      await new Promise(resolve => setTimeout(resolve, 100));
+      await FakeTimers.advance(100);
 
       const status = pm.getStatus();
       expect(status.timeouts).not.toContain('test-timeout');
     });
 
     it('should clear timeout by name', async () => {
+      FakeTimers.install();
       const fn = vi.fn();
       pm.setTimeout(fn, 100, 'test-timeout');
 
       pm.clearTimeout('test-timeout');
-      await new Promise(resolve => setTimeout(resolve, 150));
+      await FakeTimers.advance(150);
 
       expect(fn).not.toHaveBeenCalled();
     });
@@ -159,28 +170,38 @@ describe('ProcessManager', () => {
     });
 
     it('should handle async cleanup functions', async () => {
+      FakeTimers.install();
+      let cleanupCompleted = false;
       const cleanup = vi.fn(async () => {
         await new Promise(resolve => setTimeout(resolve, 50));
+        cleanupCompleted = true;
       });
 
       pm.registerCleanup(cleanup, 'async-cleanup');
-      await pm.shutdown();
+
+      const shutdownPromise = pm.shutdown();
+      await FakeTimers.advance(100);
+      await shutdownPromise;
 
       expect(cleanup).toHaveBeenCalledTimes(1);
+      expect(cleanupCompleted).toBe(true);
     });
 
     it('should timeout long-running cleanup functions', async () => {
+      FakeTimers.install();
       const cleanup = vi.fn(async () => {
         await new Promise(resolve => setTimeout(resolve, 200));
       });
 
       pm.registerCleanup(cleanup, 'slow-cleanup');
 
-      const start = Date.now();
-      await pm.shutdown({ timeout: 100 });
-      const elapsed = Date.now() - start;
+      const shutdownPromise = pm.shutdown({ timeout: 100 });
 
-      expect(elapsed).toBeLessThan(150); // Should timeout around 100ms
+      // Advance time to trigger timeout
+      await FakeTimers.advance(150);
+      await shutdownPromise;
+
+      expect(cleanup).toHaveBeenCalledTimes(1);
     });
 
     it('should unregister cleanup functions', () => {
@@ -325,6 +346,7 @@ describe('ProcessManager', () => {
 
   describe('Real-World Scenario', () => {
     it('should handle complex lifecycle', async () => {
+      FakeTimers.install();
       const healthCheckFn = vi.fn();
       const retryFn = vi.fn();
       const workerCleanup = vi.fn();
@@ -342,13 +364,14 @@ describe('ProcessManager', () => {
       // Register database cleanup
       pm.registerCleanup(dbCleanup, 'database');
 
-      // Let it run
-      await new Promise(resolve => setTimeout(resolve, 160));
+      // Let it run: advance 160ms
+      await FakeTimers.advance(160);
 
-      // Shutdown
+      // Shutdown (uninstall fake timers first to avoid issues)
+      FakeTimers.uninstall();
       await pm.shutdown();
 
-      // Verify health check ran multiple times
+      // Verify health check ran multiple times (50, 100, 150 = 3 times)
       expect(healthCheckFn.mock.calls.length).toBeGreaterThanOrEqual(2);
 
       // Verify retry ran once
