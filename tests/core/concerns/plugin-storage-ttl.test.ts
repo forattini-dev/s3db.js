@@ -1,5 +1,7 @@
+import { vi, describe, test, expect, beforeEach, afterEach } from 'vitest';
 import { createDatabaseForTest } from '../../config.js';
 import { PluginStorage } from '#src/concerns/plugin-storage.js';
+import { FakeTimers, TTLTimers } from '../../utils/time-helpers.js';
 
 describe('PluginStorage - TTL Features', () => {
   let database, storage;
@@ -24,23 +26,34 @@ describe('PluginStorage - TTL Features', () => {
     });
 
     test('should return null for expired data', async () => {
-      await storage.set('session', { user_id: 'user1' }, { ttl: 1 });
+      FakeTimers.install();
+      try {
+        await storage.set('session', { user_id: 'user1' }, { ttl: 1 });
 
-      // Wait for expiration
-      await new Promise(resolve => setTimeout(resolve, 1100));
+        // Advance time past expiration (1 second + 100ms buffer)
+        await TTLTimers.expireTTL(1);
 
-      const data = await storage.get('session');
-      expect(data).toBe(null);
+        const data = await storage.get('session');
+        expect(data).toBe(null);
+      } finally {
+        FakeTimers.uninstall();
+      }
     });
 
     test('should check if data is expired', async () => {
-      await storage.set('session', { user_id: 'user1' }, { ttl: 1 });
+      FakeTimers.install();
+      try {
+        await storage.set('session', { user_id: 'user1' }, { ttl: 1 });
 
-      expect(await storage.isExpired('session')).toBe(false);
+        expect(await storage.isExpired('session')).toBe(false);
 
-      await new Promise(resolve => setTimeout(resolve, 1100));
+        // Advance time past expiration
+        await TTLTimers.expireTTL(1);
 
-      expect(await storage.isExpired('session')).toBe(true);
+        expect(await storage.isExpired('session')).toBe(true);
+      } finally {
+        FakeTimers.uninstall();
+      }
     });
 
     test('should get remaining TTL', async () => {
@@ -52,14 +65,21 @@ describe('PluginStorage - TTL Features', () => {
     });
 
     test('should extend TTL with touch', async () => {
-      await storage.set('session', { user_id: 'user1' }, { ttl: 2 });
+      FakeTimers.install();
+      try {
+        await storage.set('session', { user_id: 'user1' }, { ttl: 2 });
 
-      await new Promise(resolve => setTimeout(resolve, 1000));
+        // Advance 1 second
+        await FakeTimers.advance(1000);
 
-      await storage.touch('session', 10);
+        await storage.touch('session', 10);
 
-      const ttl = await storage.getTTL('session');
-      expect(ttl).toBeGreaterThan(8);
+        const ttl = await storage.getTTL('session');
+        // After 1s of 2s TTL, remaining = 1s. After touch +10s = 11s remaining
+        expect(ttl).toBeGreaterThan(8);
+      } finally {
+        FakeTimers.uninstall();
+      }
     });
 
     test('should check existence with has', async () => {
@@ -94,13 +114,19 @@ describe('PluginStorage - TTL Features', () => {
     });
 
     test('should auto-release locks after TTL', async () => {
-      await storage.acquireLock('task1', { ttl: 1 });
+      FakeTimers.install();
+      try {
+        await storage.acquireLock('task1', { ttl: 1 });
 
-      expect(await storage.isLocked('task1')).toBe(true);
+        expect(await storage.isLocked('task1')).toBe(true);
 
-      await new Promise(resolve => setTimeout(resolve, 1100));
+        // Advance time past TTL expiration
+        await TTLTimers.expireTTL(1);
 
-      expect(await storage.isLocked('task1')).toBe(false);
+        expect(await storage.isLocked('task1')).toBe(false);
+      } finally {
+        FakeTimers.uninstall();
+      }
     });
 
     test('should support custom workerId', async () => {
@@ -170,14 +196,4 @@ describe('PluginStorage - TTL Features', () => {
       expect(ttl).toBeGreaterThan(55);
     });
   });
-
-  // v13: Backward compatibility removed
-  // describe('Backward Compatibility', () => {
-  //   test('should support put() as alias for set()', async () => {
-  //     await storage.put('config', { enabled: true });
-  //
-  //     const data = await storage.get('config');
-  //     expect(data).toEqual({ enabled: true });
-  //   });
-  // });
 });

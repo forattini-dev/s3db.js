@@ -136,13 +136,22 @@ interface SequenceLockOptions {
   timeout?: number;
 }
 
+export interface PluginStorageOptions {
+  /**
+   * Custom time function for testing. Defaults to Date.now.
+   * Inject a mock function to enable time-travel in tests.
+   */
+  now?: () => number;
+}
+
 export class PluginStorage {
   client: PluginClient;
   pluginSlug: string;
   private _lock: DistributedLock;
   private _sequence: DistributedSequence;
+  private _now: () => number;
 
-  constructor(client: PluginClient, pluginSlug: string) {
+  constructor(client: PluginClient, pluginSlug: string, options: PluginStorageOptions = {}) {
     if (!client) {
       throw new PluginStorageError('PluginStorage requires a client instance', {
         operation: 'constructor',
@@ -159,6 +168,8 @@ export class PluginStorage {
 
     this.client = client;
     this.pluginSlug = pluginSlug;
+    // Use arrow function to capture Date.now dynamically (enables FakeTimers mocking)
+    this._now = options.now ?? (() => Date.now());
 
     this._lock = new DistributedLock(this as unknown as StorageAdapter, {
       keyGenerator: (name: string) => this.getPluginKey(null, 'locks', name)
@@ -198,7 +209,7 @@ export class PluginStorage {
     const dataToSave: Record<string, unknown> = { ...data };
 
     if (ttl && typeof ttl === 'number' && ttl > 0) {
-      dataToSave._expiresAt = Date.now() + (ttl * 1000);
+      dataToSave._expiresAt = this._now() + (ttl * 1000);
     }
 
     const { metadata, body } = this._applyBehavior(dataToSave, behavior);
@@ -299,7 +310,7 @@ export class PluginStorage {
 
     const expiresAt = (data._expiresat || data._expiresAt) as number | undefined;
     if (expiresAt) {
-      if (Date.now() > expiresAt) {
+      if (this._now() > expiresAt) {
         await this.delete(key);
         return null;
       }
@@ -463,7 +474,7 @@ export class PluginStorage {
       return false;
     }
 
-    return Date.now() > expiresAt;
+    return this._now() > expiresAt;
   }
 
   async getTTL(key: string): Promise<number | null> {
@@ -500,7 +511,7 @@ export class PluginStorage {
       return null;
     }
 
-    const remaining = Math.max(0, expiresAt - Date.now());
+    const remaining = Math.max(0, expiresAt - this._now());
     return Math.floor(remaining / 1000);
   }
 
@@ -676,7 +687,7 @@ export class PluginStorage {
 
     // Check expiration
     const expiresAt = (data._expiresat || data._expiresAt) as number | undefined;
-    if (expiresAt && Date.now() > expiresAt) {
+    if (expiresAt && this._now() > expiresAt) {
       await this.delete(key);
       return { data: null, version: null };
     }
@@ -770,7 +781,7 @@ export class PluginStorage {
       parsedMetadata.value = newValue;
 
       if (options.ttl) {
-        parsedMetadata._expiresAt = Date.now() + (options.ttl * 1000);
+        parsedMetadata._expiresAt = this._now() + (options.ttl * 1000);
       }
 
       const encodedMetadata: Record<string, string> = {};
@@ -822,7 +833,7 @@ export class PluginStorage {
           value: initialValue + increment,
           name,
           resourceName,
-          createdAt: Date.now()
+          createdAt: this._now()
         }, { behavior: 'body-only' });
         return initialValue;
       }
@@ -831,7 +842,7 @@ export class PluginStorage {
       await this.set(valueKey, {
         ...data,
         value: currentValue + increment,
-        updatedAt: Date.now()
+        updatedAt: this._now()
       }, { behavior: 'body-only' });
 
       return currentValue;
@@ -854,14 +865,14 @@ export class PluginStorage {
   private async _withSequenceLock<T>(lockKey: string, options: SequenceLockOptions, callback: () => Promise<T>): Promise<T | null> {
     const { ttl = 30, timeout = 5000 } = options;
     const token = idGenerator();
-    const startTime = Date.now();
+    const startTime = this._now();
     let attempt = 0;
 
     while (true) {
       const payload = {
         token,
-        acquiredAt: Date.now(),
-        _expiresAt: Date.now() + (ttl * 1000)
+        acquiredAt: this._now(),
+        _expiresAt: this._now() + (ttl * 1000)
       };
 
       const [ok, err] = await tryFn(() => this.set(lockKey, payload, {
@@ -884,14 +895,14 @@ export class PluginStorage {
         throw err;
       }
 
-      if (timeout !== undefined && Date.now() - startTime >= timeout) {
+      if (timeout !== undefined && this._now() - startTime >= timeout) {
         return null;
       }
 
       const current = await this.get(lockKey);
       if (!current) continue;
 
-      if (current._expiresAt && Date.now() > (current._expiresAt as number)) {
+      if (current._expiresAt && this._now() > (current._expiresAt as number)) {
         await tryFn(() => this.delete(lockKey));
         continue;
       }
@@ -922,9 +933,9 @@ export class PluginStorage {
         value,
         name,
         resourceName,
-        createdAt: (data?.createdAt as number) || Date.now(),
-        updatedAt: Date.now(),
-        resetAt: Date.now()
+        createdAt: (data?.createdAt as number) || this._now(),
+        updatedAt: this._now(),
+        resetAt: this._now()
       }, { behavior: 'body-only' });
 
       return true;
