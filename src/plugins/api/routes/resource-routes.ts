@@ -726,7 +726,7 @@ export function createResourceRoutes(resource: ResourceLike, version: string, co
   }
 
   if (methods.includes('HEAD')) {
-    app.on('HEAD', '/', asyncHandler(async (c: Context) => {
+    const headListHandler = asyncHandler(async (c: Context) => {
       const total = await resource.count();
       const resourceVersion = resource.config?.currentVersion || resource.version || 'v1';
 
@@ -735,9 +735,9 @@ export function createResourceRoutes(resource: ResourceLike, version: string, co
       c.header('X-Schema-Fields', Object.keys(resource.config?.attributes || {}).length.toString());
 
       return c.body(null, 200);
-    }));
+    });
 
-    app.on('HEAD', '/:id', asyncHandler(async (c: Context) => {
+    const headItemHandler = asyncHandler(async (c: Context) => {
       const id = c.req.param('id');
       const item = await resource.get(id);
 
@@ -762,7 +762,13 @@ export function createResourceRoutes(resource: ResourceLike, version: string, co
       }
 
       return c.body(null, 200);
-    }));
+    });
+
+    // Use on() for HEAD - fallback gracefully if on() not available (bundling issues)
+    if (typeof (app as any).on === 'function') {
+      (app as any).on('HEAD', '/', headListHandler);
+      (app as any).on('HEAD', '/:id', headItemHandler);
+    }
   }
 
   if (methods.includes('OPTIONS')) {

@@ -1,18 +1,5 @@
+import { TemplateEngine as ReckerTemplateEngine } from 'recker';
 import { TemplateError } from './errors.js';
-// Dynamic import for TemplateEngine since it may not be exported in all recker versions
-let ReckerTemplateEngine = null;
-async function getReckerTemplateEngine() {
-    if (ReckerTemplateEngine === null) {
-        try {
-            const recker = await import('recker');
-            ReckerTemplateEngine = recker.TemplateEngine || null;
-        }
-        catch {
-            ReckerTemplateEngine = undefined;
-        }
-    }
-    return ReckerTemplateEngine;
-}
 export class SMTPTemplateEngine {
     options;
     type;
@@ -57,15 +44,11 @@ export class SMTPTemplateEngine {
             });
         }
     }
-    async _getReckerEngine() {
+    _getReckerEngine() {
         if (this._reckerEngine) {
             return this._reckerEngine;
         }
-        const TemplateEngineClass = await getReckerTemplateEngine();
-        if (!TemplateEngineClass) {
-            throw new TemplateError('TemplateEngine is not available in the installed recker version');
-        }
-        this._reckerEngine = new TemplateEngineClass();
+        this._reckerEngine = new ReckerTemplateEngine();
         for (const [name, fn] of Object.entries(this.helpers)) {
             this._reckerEngine.registerHelper(name, fn);
         }
@@ -236,7 +219,7 @@ export class SMTPTemplateEngine {
     async precompile(templateName) {
         try {
             const source = await this._loadTemplate(templateName);
-            const engine = await this._getReckerEngine();
+            const engine = this._getReckerEngine();
             await engine.render(source, {});
             return true;
         }

@@ -692,7 +692,10 @@ export class Router {
 
         const mountPath = config.path === '/' ? '/*' : `${config.path}/*`;
         app.get(mountPath, handler);
-        app.on('HEAD', mountPath, handler);
+        // Use on() for HEAD - fallback to get() if on() not available (bundling issues)
+        if (typeof (app as any).on === 'function') {
+          (app as any).on('HEAD', mountPath, handler);
+        }
 
         const source = config.driver === 'filesystem' ? config.root : `s3://${config.bucket}/${config.prefix || ''}`;
         this.logger?.debug({ driver: config.driver, path: config.path, source }, `Mounted static files (${config.driver}) at ${config.path} -> ${source}`);

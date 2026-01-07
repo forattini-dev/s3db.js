@@ -527,15 +527,15 @@ export function createResourceRoutes(resource, version, config = {}, Hono) {
         }).delete('/:id', guardMiddleware(guards, 'delete', { globalGuards }), deleteHandler);
     }
     if (methods.includes('HEAD')) {
-        app.on('HEAD', '/', asyncHandler(async (c) => {
+        const headListHandler = asyncHandler(async (c) => {
             const total = await resource.count();
             const resourceVersion = resource.config?.currentVersion || resource.version || 'v1';
             c.header('X-Total-Count', total.toString());
             c.header('X-Resource-Version', resourceVersion);
             c.header('X-Schema-Fields', Object.keys(resource.config?.attributes || {}).length.toString());
             return c.body(null, 200);
-        }));
-        app.on('HEAD', '/:id', asyncHandler(async (c) => {
+        });
+        const headItemHandler = asyncHandler(async (c) => {
             const id = c.req.param('id');
             const item = await resource.get(id);
             if (!item) {
@@ -556,7 +556,12 @@ export function createResourceRoutes(resource, version, config = {}, Hono) {
                 return c.body(null, 304);
             }
             return c.body(null, 200);
-        }));
+        });
+        // Use on() for HEAD - fallback gracefully if on() not available (bundling issues)
+        if (typeof app.on === 'function') {
+            app.on('HEAD', '/', headListHandler);
+            app.on('HEAD', '/:id', headItemHandler);
+        }
     }
     if (methods.includes('OPTIONS')) {
         app.options('/', asyncHandler(async (c) => {
