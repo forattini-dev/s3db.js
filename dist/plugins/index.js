@@ -78,5 +78,5 @@ export { GeoPlugin } from './geo.plugin.js';
 export { ReplicatorPlugin } from './replicator.plugin.js';
 export { QueueConsumerPlugin } from './queue-consumer.plugin.js';
 export { WebSocketPlugin, WebSocketServer } from './websocket/index.js';
-export { OIDCClient, setupTemplateEngine, ejsEngine, pugEngine, jsxEngine, OpenGraphHelper, RouteContext, withContext, errorResponse, successResponse, createContextInjectionMiddleware } from './api/index.js';
+export { OIDCClient, setupTemplateEngine, ejsEngine, pugEngine, jsxEngine, OpenGraphHelper, RouteContext, withContext, errorResponse, successResponse, createContextInjectionMiddleware, getChunkedCookie, setChunkedCookie, deleteChunkedCookie, isChunkedCookie } from './api/index.js';
 //# sourceMappingURL=index.js.map

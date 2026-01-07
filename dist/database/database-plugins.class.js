@@ -1,5 +1,5 @@
 import { isEmpty, isFunction } from 'lodash-es';
-import { PromisePool } from '@supercharge/promise-pool';
+import { TasksPool } from '../tasks/tasks-pool.class.js';
 import { DatabaseError } from '../errors.js';
 export class DatabasePlugins {
     database;
@@ -27,10 +27,7 @@ export class DatabasePlugins {
                 }
             }
             const concurrency = Math.max(1, Number.isFinite(db.executorPool?.concurrency) ? db.executorPool.concurrency : 5);
-            const installResult = await PromisePool
-                .withConcurrency(concurrency)
-                .for(plugins)
-                .process(async (plugin) => {
+            const installResult = await TasksPool.map(plugins, async (plugin) => {
                 const pluginName = this._getPluginName(plugin);
                 if (typeof plugin.setInstanceName === 'function') {
                     plugin.setInstanceName(pluginName);
@@ -46,11 +43,11 @@ export class DatabasePlugins {
                 });
                 db.pluginRegistry[pluginName] = plugin;
                 return pluginName;
-            });
+            }, { concurrency });
             if (installResult.errors.length > 0) {
                 const errorInfo = installResult.errors[0];
                 const failedPlugin = errorInfo.item;
-                const error = errorInfo.raw || errorInfo.error || errorInfo;
+                const error = errorInfo.error;
                 const failedName = this._getPluginName(failedPlugin);
                 throw new DatabaseError(`Failed to install plugin '${failedName}': ${error?.message || error}`, {
                     operation: 'startPlugins.install',
@@ -58,10 +55,7 @@ export class DatabasePlugins {
                     original: error
                 });
             }
-            const startResult = await PromisePool
-                .withConcurrency(concurrency)
-                .for(plugins)
-                .process(async (plugin) => {
+            const startResult = await TasksPool.map(plugins, async (plugin) => {
                 const pluginName = this._getPluginName(plugin);
                 await plugin.start();
                 db.emit('db:plugin:metrics', {
@@ -70,11 +64,11 @@ export class DatabasePlugins {
                     ...this.coordinators.collectMemorySnapshot()
                 });
                 return plugin;
-            });
+            }, { concurrency });
             if (startResult.errors.length > 0) {
                 const errorInfo = startResult.errors[0];
                 const failedPlugin = errorInfo.item;
-                const error = errorInfo.raw || errorInfo.error || errorInfo;
+                const error = errorInfo.error;
                 const failedName = this._getPluginName(failedPlugin);
                 throw new DatabaseError(`Failed to start plugin '${failedName}': ${error?.message || error}`, {
                     operation: 'startPlugins.start',

@@ -59,6 +59,26 @@ const BASE_USER_ATTRIBUTES = {
     lastLoginAt: 'string|optional',
     metadata: 'json|optional'
 };
+const REDOC_CSP_DIRECTIVES = {
+    'script-src': ['https://cdn.redoc.ly'],
+    'style-src': ['https://cdn.redoc.ly', 'https://fonts.googleapis.com'],
+    'font-src': ['https://fonts.gstatic.com']
+};
+const SWAGGER_CSP_DIRECTIVES = {
+    'script-src': ['https://cdn.jsdelivr.net'],
+    'style-src': ['https://cdn.jsdelivr.net']
+};
+function mergeCspDirectives(base, additions) {
+    const result = { ...base };
+    for (const [key, values] of Object.entries(additions)) {
+        if (values && Array.isArray(values)) {
+            const existing = result[key] || [];
+            const merged = [...new Set([...existing, ...values])];
+            result[key] = merged;
+        }
+    }
+    return result;
+}
 export class ApiPlugin extends Plugin {
     _usersResourceDescriptor;
     usersResourceName;
@@ -152,19 +172,29 @@ export class ApiPlugin extends Plugin {
             },
             security: {
                 enabled: options.security?.enabled !== false,
-                contentSecurityPolicy: options.security?.contentSecurityPolicy !== false ? {
-                    enabled: options.security?.contentSecurityPolicy?.enabled !== false,
-                    directives: options.security?.contentSecurityPolicy?.directives || options.csp?.directives || {
+                contentSecurityPolicy: options.security?.contentSecurityPolicy !== false ? (() => {
+                    const docsEnabled = options.docs?.enabled !== false && options.docsEnabled !== false;
+                    const docsUi = options.docs?.ui || 'redoc';
+                    const baseDirectives = options.security?.contentSecurityPolicy?.directives || options.csp?.directives || {
                         'default-src': ["'self'"],
-                        'script-src': ["'self'", "'unsafe-inline'", 'https://cdn.redoc.ly/redoc/v2.5.1/'],
-                        'style-src': ["'self'", "'unsafe-inline'", 'https://cdn.redoc.ly/redoc/v2.5.1/', 'https://fonts.googleapis.com'],
-                        'font-src': ["'self'", 'https://fonts.gstatic.com'],
+                        'script-src': ["'self'", "'unsafe-inline'"],
+                        'style-src': ["'self'", "'unsafe-inline'"],
+                        'font-src': ["'self'"],
                         'img-src': ["'self'", 'data:', 'https:'],
                         'connect-src': ["'self'"]
-                    },
-                    reportOnly: options.security?.contentSecurityPolicy?.reportOnly || options.csp?.reportOnly || false,
-                    reportUri: options.security?.contentSecurityPolicy?.reportUri || options.csp?.reportUri || null
-                } : false,
+                    };
+                    let finalDirectives = baseDirectives;
+                    if (docsEnabled) {
+                        const docsCspAdditions = docsUi === 'swagger' ? SWAGGER_CSP_DIRECTIVES : REDOC_CSP_DIRECTIVES;
+                        finalDirectives = mergeCspDirectives(baseDirectives, docsCspAdditions);
+                    }
+                    return {
+                        enabled: options.security?.contentSecurityPolicy?.enabled !== false,
+                        directives: finalDirectives,
+                        reportOnly: options.security?.contentSecurityPolicy?.reportOnly || options.csp?.reportOnly || false,
+                        reportUri: options.security?.contentSecurityPolicy?.reportUri || options.csp?.reportUri || null
+                    };
+                })() : false,
                 frameguard: options.security?.frameguard !== false ? {
                     action: options.security?.frameguard?.action || 'deny'
                 } : false,
@@ -468,4 +498,5 @@ export { RouteContext, withContext } from './concerns/route-context.js';
 export { errorResponse, successResponse } from './utils/route-helper.js';
 export { createContextInjectionMiddleware } from './middlewares/context-injection.js';
 export { HttpBadRequestError, HttpValidationError, HttpUnauthorizedError, HttpForbiddenError, HttpNotFoundError, HttpMethodNotAllowedError, HttpConflictError, HttpUnprocessableEntityError, HttpTooManyRequestsError, HttpInternalServerError, HttpNotImplementedError, HttpServiceUnavailableError, HTTP_ERRORS, createHttpError } from './errors.js';
+export { getChunkedCookie, setChunkedCookie, deleteChunkedCookie, isChunkedCookie, CookieChunkOverflowError } from './concerns/cookie-chunking.js';
 //# sourceMappingURL=index.js.map

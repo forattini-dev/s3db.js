@@ -126,7 +126,6 @@ const BUILT_IN_SENSITIVE_FIELDS = [
     'certificatekey',
     'certificate_key',
     'certificate-key',
-    'key',
     'credential',
     'credentials',
     'hash',

@@ -1,4 +1,6 @@
 import { Plugin, ResourceLike } from './plugin.class.js';
+import { resolveCacheMemoryLimit, type MemoryLimitResult } from './cache/utils/memory-limits.js';
+export { resolveCacheMemoryLimit, type MemoryLimitResult };
 import { type S3DBLogger } from '../concerns/logger.js';
 interface Resource {
     name: string;
@@ -240,5 +242,4 @@ export declare class CachePlugin extends Plugin {
     private _formatUptime;
     onStop(): Promise<void>;
 }
-export {};
 //# sourceMappingURL=cache.plugin.d.ts.map

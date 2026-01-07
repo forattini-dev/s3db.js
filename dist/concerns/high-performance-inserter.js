@@ -1,17 +1,5 @@
 import { tryFn } from './try-fn.js';
-let PromisePoolCache = null;
-async function loadPromisePool() {
-    if (PromisePoolCache)
-        return PromisePoolCache;
-    try {
-        const module = await import('@supercharge/promise-pool');
-        PromisePoolCache = module;
-        return PromisePoolCache;
-    }
-    catch {
-        throw new Error('Failed to load @supercharge/promise-pool. Please install it: pnpm add @supercharge/promise-pool');
-    }
-}
+import { TasksPool } from '../tasks/tasks-pool.class.js';
 export class HighPerformanceInserter {
     resource;
     batchSize;
@@ -77,13 +65,7 @@ export class HighPerformanceInserter {
         const batch = this.insertBuffer.splice(0, this.batchSize);
         const startTime = Date.now();
         const [ok] = await tryFn(async () => {
-            const { PromisePool } = await loadPromisePool();
-            const { results, errors } = await PromisePool
-                .for(batch)
-                .withConcurrency(this.concurrency)
-                .process(async (item) => {
-                return await this.performInsert(item);
-            });
+            const { results, errors } = await TasksPool.map(batch, async (item) => this.performInsert(item), { concurrency: this.concurrency });
             const duration = Date.now() - startTime;
             this.stats.inserted += results.filter(r => r.success).length;
             this.stats.failed += errors.length;
@@ -135,11 +117,7 @@ export class HighPerformanceInserter {
                 this.partitionProcessor = null;
                 return;
             }
-            const { PromisePool } = await loadPromisePool();
-            await PromisePool
-                .for(batch)
-                .withConcurrency(10)
-                .process(async (item) => {
+            await TasksPool.map(batch, async (item) => {
                 const [ok, err] = await tryFn(() => this.resource.createPartitionReferences(item.data));
                 if (ok) {
                     this.stats.partitionsPending--;
@@ -150,7 +128,7 @@ export class HighPerformanceInserter {
                         error: err
                     });
                 }
-            });
+            }, { concurrency: 10 });
             if (this.partitionQueue.length > 0) {
                 this.processPartitionsAsync();
             }
@@ -213,17 +191,11 @@ export class StreamInserter {
         return { id, inserted: true };
     }
     async bulkInsert(items) {
-        const { PromisePool } = await loadPromisePool();
-        const { results, errors } = await PromisePool
-            .for(items)
-            .withConcurrency(this.concurrency)
-            .process(async (item) => {
-            return await this.fastInsert(item);
-        });
+        const { results, errors } = await TasksPool.map(items, async (item) => this.fastInsert(item), { concurrency: this.concurrency });
         return {
             success: results.length,
             failed: errors.length,
-            errors: errors.slice(0, 10)
+            errors: errors.map(e => e.error).slice(0, 10)
         };
     }
 }

@@ -3,7 +3,7 @@
  * @module eventual-consistency/garbage-collection
  */
 import tryFn from '../../concerns/try-fn.js';
-import { PromisePool } from '@supercharge/promise-pool';
+import { TasksPool } from '../../tasks/tasks-pool.class.js';
 import { getCronManager } from '../../concerns/cron-manager.js';
 /**
  * Start garbage collection timer for a handler
@@ -59,13 +59,10 @@ export async function runGarbageCollection(transactionResource, storage, config,
         if (!oldTransactions || oldTransactions.length === 0) {
             return;
         }
-        const { results, errors } = await PromisePool
-            .for(oldTransactions)
-            .withConcurrency(10)
-            .process(async (txn) => {
+        const { results, errors } = await TasksPool.map(oldTransactions, async (txn) => {
             const [deleted] = await tryFn(() => transactionResource.delete(txn.id));
             return deleted;
-        });
+        }, { concurrency: 10 });
         if (emitFn) {
             emitFn('plg:eventual-consistency:gc-completed', {
                 resource: config.resource,

@@ -432,6 +432,7 @@ export interface AwsHttpRequest {
   hostname: string;
   port?: number;
   path: string;
+  query?: Record<string, string | string[] | null | undefined>;
   method: string;
   headers: Record<string, string | undefined>;
   body?: unknown;

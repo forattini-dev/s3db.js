@@ -1,6 +1,6 @@
 import { Plugin } from './plugin.class.js';
 import { SMTPConnectionManager } from './smtp/connection-manager.js';
-import { SMTPTemplateEngine, defaultHandlebarsHelpers } from './smtp/template-engine.js';
+import { SMTPTemplateEngine } from './smtp/template-engine.js';
 import { WebhookReceiver } from './smtp/webhook-receiver.js';
 import { createDriver, getAvailableDrivers, MultiRelayManager } from './smtp/drivers/index.js';
 import { SMTPError, TemplateError, RateLimitError, RecipientError, AttachmentError } from './smtp/errors.js';
@@ -73,8 +73,7 @@ export class SMTPPlugin extends Plugin {
         this.templateEngine = new SMTPTemplateEngine({
             type: templateEngine,
             templateDir: templateDir ?? undefined,
-            cacheTemplates: true,
-            helpers: defaultHandlebarsHelpers
+            cacheTemplates: true
         });
         this.webhookReceiver = new WebhookReceiver({
             provider: (options.webhookProvider || 'sendgrid'),

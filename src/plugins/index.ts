@@ -112,5 +112,9 @@ export {
   withContext,
   errorResponse,
   successResponse,
-  createContextInjectionMiddleware
+  createContextInjectionMiddleware,
+  getChunkedCookie,
+  setChunkedCookie,
+  deleteChunkedCookie,
+  isChunkedCookie
 } from './api/index.js';

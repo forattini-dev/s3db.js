@@ -1,8 +1,5 @@
 import type { ReckerHttpHandlerOptions, HandlerMetrics, AwsHttpRequest, AwsHttpResponse, HandleOptions } from './types.js';
 export declare class ReckerHttpHandler {
-    metadata: {
-        handlerProtocol: string;
-    };
     private options;
     private client;
     private deduplicator;
@@ -10,6 +7,9 @@ export declare class ReckerHttpHandler {
     private metrics;
     private http2MetricsEnabled;
     constructor(options?: ReckerHttpHandlerOptions);
+    get metadata(): {
+        handlerProtocol: string;
+    };
     handle(request: AwsHttpRequest, { abortSignal, requestTimeout }?: HandleOptions): Promise<{
         response: AwsHttpResponse;
     }>;

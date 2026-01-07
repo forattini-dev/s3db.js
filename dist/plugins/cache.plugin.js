@@ -9,6 +9,7 @@ import { FilesystemCache } from './cache/filesystem-cache.class.js';
 import { PartitionAwareFilesystemCache } from './cache/partition-aware-filesystem-cache.class.js';
 import MultiTierCache from './cache/multi-tier-cache.class.js';
 import { resolveCacheMemoryLimit } from './cache/utils/memory-limits.js';
+export { resolveCacheMemoryLimit };
 import tryFn from '../concerns/try-fn.js';
 import { CacheError } from './cache.errors.js';
 import { createLogger } from '../concerns/logger.js';

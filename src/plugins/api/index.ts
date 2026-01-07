@@ -895,3 +895,14 @@ export {
   HTTP_ERRORS,
   createHttpError
 } from './errors.js';
+
+export {
+  getChunkedCookie,
+  setChunkedCookie,
+  deleteChunkedCookie,
+  isChunkedCookie,
+  CookieChunkOverflowError,
+  type CookieOptions,
+  type ChunkingOptions,
+  type CookieChunkOverflowDetails
+} from './concerns/cookie-chunking.js';

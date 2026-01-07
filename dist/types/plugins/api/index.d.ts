@@ -331,4 +331,5 @@ export { RouteContext, withContext } from './concerns/route-context.js';
 export { errorResponse, successResponse } from './utils/route-helper.js';
 export { createContextInjectionMiddleware } from './middlewares/context-injection.js';
 export { HttpBadRequestError, HttpValidationError, HttpUnauthorizedError, HttpForbiddenError, HttpNotFoundError, HttpMethodNotAllowedError, HttpConflictError, HttpUnprocessableEntityError, HttpTooManyRequestsError, HttpInternalServerError, HttpNotImplementedError, HttpServiceUnavailableError, HTTP_ERRORS, createHttpError } from './errors.js';
+export { getChunkedCookie, setChunkedCookie, deleteChunkedCookie, isChunkedCookie, CookieChunkOverflowError, type CookieOptions, type ChunkingOptions, type CookieChunkOverflowDetails } from './concerns/cookie-chunking.js';
 //# sourceMappingURL=index.d.ts.map

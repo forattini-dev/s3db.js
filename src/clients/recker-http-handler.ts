@@ -6,8 +6,8 @@ import {
   createHttp2MetricsHooks,
   getGlobalHttp2Metrics,
   type HTTP2Preset,
+  type Client,
 } from 'recker';
-import { Readable } from 'node:stream';
 import type {
   ReckerHttpHandlerOptions,
   CircuitStats,
@@ -211,27 +211,9 @@ function parseRetryAfter(headerValue: string | null): number | undefined {
   return undefined;
 }
 
-interface ReckerClient {
-  request(url: string, options: {
-    method: string;
-    headers: Record<string, string>;
-    body?: unknown;
-    signal?: AbortSignal;
-    timeout?: number;
-    http2?: boolean;
-  }): Promise<{
-    status: number;
-    statusText: string;
-    headers: Headers;
-    body: ReadableStream | null;
-  }>;
-}
-
 export class ReckerHttpHandler {
-  metadata = { handlerProtocol: 'h2' };
-
   private options: Required<ReckerHttpHandlerOptions>;
-  private client: ReckerClient | null;
+  private client: Client | null;
   private deduplicator: RequestDeduplicator | null;
   private circuitBreaker: CircuitBreaker | null;
   private metrics: HandlerMetrics;
@@ -298,7 +280,7 @@ export class ReckerHttpHandler {
       },
       hooks,
       observability: this.http2MetricsEnabled,
-    }) as unknown as ReckerClient;
+    });
 
     this.deduplicator = this.options.enableDedup ? new RequestDeduplicator() : null;
 
@@ -315,28 +297,20 @@ export class ReckerHttpHandler {
     };
   }
 
+  get metadata(): { handlerProtocol: string } {
+    return this.client?.metadata ?? { handlerProtocol: 'http/1.1' };
+  }
+
   async handle(
     request: AwsHttpRequest,
     { abortSignal, requestTimeout }: HandleOptions = {}
   ): Promise<{ response: AwsHttpResponse }> {
-    const protocol = request.protocol || 'https:';
-    const defaultPort = protocol === 'https:' ? 443 : 80;
-    const port = request.port || defaultPort;
     const hostname = request.hostname;
-
-    const url = `${protocol}//${hostname}:${port}${request.path}`;
     const method = request.method;
 
     if (this.circuitBreaker && !this.circuitBreaker.canRequest(hostname)) {
       this.metrics.circuitBreakerTrips++;
       throw new Error(`Circuit breaker OPEN for ${hostname}`);
-    }
-
-    const headers: Record<string, string> = {};
-    for (const [key, value] of Object.entries(request.headers)) {
-      if (value !== undefined) {
-        headers[key] = value;
-      }
     }
 
     const doRequest = async (): Promise<{ response: AwsHttpResponse }> => {
@@ -350,22 +324,36 @@ export class ReckerHttpHandler {
         attempt++;
 
         try {
-          const reckerResponse = await this.client!.request(url, {
-            method,
+          const headers: Record<string, string> = {};
+          for (const [key, value] of Object.entries(request.headers)) {
+            if (value !== undefined) {
+              headers[key] = value;
+            }
+          }
+
+          const result = await this.client!.handle({
+            protocol: request.protocol,
+            hostname: request.hostname,
+            port: request.port,
+            path: request.path,
+            query: request.query,
+            method: request.method,
             headers,
             body: request.body,
-            signal: abortSignal,
-            timeout: requestTimeout || this.options.bodyTimeout,
-            http2: this.options.http2,
+          }, {
+            abortSignal,
+            requestTimeout: requestTimeout || this.options.bodyTimeout,
           });
 
+          const statusCode = result.response.statusCode;
+
           if (this.options.enableRetry && attempt < maxAttempts &&
-              isRetryableError(null, reckerResponse.status)) {
+              isRetryableError(null, statusCode)) {
             this.metrics.retries++;
 
             let delay: number;
             if (this.options.respectRetryAfter) {
-              const retryAfter = parseRetryAfter(reckerResponse.headers.get('Retry-After'));
+              const retryAfter = parseRetryAfter(result.response.headers['retry-after'] ?? null);
               delay = retryAfter !== undefined
                 ? Math.min(retryAfter, this.options.maxRetryDelay)
                 : calculateRetryDelay(attempt, this.options.retryDelay, this.options.maxRetryDelay, this.options.retryJitter);
@@ -381,24 +369,7 @@ export class ReckerHttpHandler {
             this.circuitBreaker.recordSuccess(hostname);
           }
 
-          let body: Readable | undefined;
-          if (reckerResponse.body) {
-            body = Readable.fromWeb(reckerResponse.body as Parameters<typeof Readable.fromWeb>[0]);
-          }
-
-          const responseHeaders: Record<string, string> = {};
-          for (const [key, value] of (reckerResponse.headers as any).entries()) {
-            responseHeaders[key] = value;
-          }
-
-          return {
-            response: {
-              statusCode: reckerResponse.status,
-              reason: reckerResponse.statusText,
-              headers: responseHeaders,
-              body
-            }
-          };
+          return result as { response: AwsHttpResponse };
 
         } catch (error) {
           lastError = error as Error;
@@ -410,7 +381,6 @@ export class ReckerHttpHandler {
           if (this.options.enableRetry && attempt < maxAttempts && isRetryableError(error as Error)) {
             this.metrics.retries++;
 
-            // Check for HTTP/2 specific retry delay (e.g., ENHANCE_YOUR_CALM)
             const h2Delay = getHttp2RetryDelay(error as Error);
             const delay = h2Delay !== undefined
               ? Math.min(h2Delay, this.options.maxRetryDelay)
@@ -428,6 +398,8 @@ export class ReckerHttpHandler {
     };
 
     if (this.deduplicator) {
+      const protocol = request.protocol || 'https:';
+      const url = `${protocol}//${hostname}${request.path}`;
       const originalRequests = this.metrics.requests;
       const result = await this.deduplicator.dedupe(method, url, doRequest);
       if (this.metrics.requests === originalRequests) {

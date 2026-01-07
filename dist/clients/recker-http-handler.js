@@ -1,5 +1,4 @@
 import { createClient, expandHTTP2Options, Http2Error, parseHttp2Error, createHttp2MetricsHooks, getGlobalHttp2Metrics, } from 'recker';
-import { Readable } from 'node:stream';
 class CircuitBreaker {
     threshold;
     resetTimeout;
@@ -149,7 +148,6 @@ function parseRetryAfter(headerValue) {
     return undefined;
 }
 export class ReckerHttpHandler {
-    metadata = { handlerProtocol: 'h2' };
     options;
     client;
     deduplicator;
@@ -226,22 +224,15 @@ export class ReckerHttpHandler {
             circuitBreakerTrips: 0,
         };
     }
+    get metadata() {
+        return this.client?.metadata ?? { handlerProtocol: 'http/1.1' };
+    }
     async handle(request, { abortSignal, requestTimeout } = {}) {
-        const protocol = request.protocol || 'https:';
-        const defaultPort = protocol === 'https:' ? 443 : 80;
-        const port = request.port || defaultPort;
         const hostname = request.hostname;
-        const url = `${protocol}//${hostname}:${port}${request.path}`;
         const method = request.method;
         if (this.circuitBreaker && !this.circuitBreaker.canRequest(hostname)) {
             this.metrics.circuitBreakerTrips++;
             throw new Error(`Circuit breaker OPEN for ${hostname}`);
-        }
-        const headers = {};
-        for (const [key, value] of Object.entries(request.headers)) {
-            if (value !== undefined) {
-                headers[key] = value;
-            }
         }
         const doRequest = async () => {
             this.metrics.requests++;
@@ -251,20 +242,32 @@ export class ReckerHttpHandler {
             while (attempt < maxAttempts) {
                 attempt++;
                 try {
-                    const reckerResponse = await this.client.request(url, {
-                        method,
+                    const headers = {};
+                    for (const [key, value] of Object.entries(request.headers)) {
+                        if (value !== undefined) {
+                            headers[key] = value;
+                        }
+                    }
+                    const result = await this.client.handle({
+                        protocol: request.protocol,
+                        hostname: request.hostname,
+                        port: request.port,
+                        path: request.path,
+                        query: request.query,
+                        method: request.method,
                         headers,
                         body: request.body,
-                        signal: abortSignal,
-                        timeout: requestTimeout || this.options.bodyTimeout,
-                        http2: this.options.http2,
+                    }, {
+                        abortSignal,
+                        requestTimeout: requestTimeout || this.options.bodyTimeout,
                     });
+                    const statusCode = result.response.statusCode;
                     if (this.options.enableRetry && attempt < maxAttempts &&
-                        isRetryableError(null, reckerResponse.status)) {
+                        isRetryableError(null, statusCode)) {
                         this.metrics.retries++;
                         let delay;
                         if (this.options.respectRetryAfter) {
-                            const retryAfter = parseRetryAfter(reckerResponse.headers.get('Retry-After'));
+                            const retryAfter = parseRetryAfter(result.response.headers['retry-after'] ?? null);
                             delay = retryAfter !== undefined
                                 ? Math.min(retryAfter, this.options.maxRetryDelay)
                                 : calculateRetryDelay(attempt, this.options.retryDelay, this.options.maxRetryDelay, this.options.retryJitter);
@@ -278,22 +281,7 @@ export class ReckerHttpHandler {
                     if (this.circuitBreaker) {
                         this.circuitBreaker.recordSuccess(hostname);
                     }
-                    let body;
-                    if (reckerResponse.body) {
-                        body = Readable.fromWeb(reckerResponse.body);
-                    }
-                    const responseHeaders = {};
-                    for (const [key, value] of reckerResponse.headers.entries()) {
-                        responseHeaders[key] = value;
-                    }
-                    return {
-                        response: {
-                            statusCode: reckerResponse.status,
-                            reason: reckerResponse.statusText,
-                            headers: responseHeaders,
-                            body
-                        }
-                    };
+                    return result;
                 }
                 catch (error) {
                     lastError = error;
@@ -302,7 +290,6 @@ export class ReckerHttpHandler {
                     }
                     if (this.options.enableRetry && attempt < maxAttempts && isRetryableError(error)) {
                         this.metrics.retries++;
-                        // Check for HTTP/2 specific retry delay (e.g., ENHANCE_YOUR_CALM)
                         const h2Delay = getHttp2RetryDelay(error);
                         const delay = h2Delay !== undefined
                             ? Math.min(h2Delay, this.options.maxRetryDelay)
@@ -316,6 +303,8 @@ export class ReckerHttpHandler {
             throw lastError;
         };
         if (this.deduplicator) {
+            const protocol = request.protocol || 'https:';
+            const url = `${protocol}//${hostname}${request.path}`;
             const originalRequests = this.metrics.requests;
             const result = await this.deduplicator.dedupe(method, url, doRequest);
             if (this.metrics.requests === originalRequests) {

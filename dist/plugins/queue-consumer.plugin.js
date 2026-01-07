@@ -1,4 +1,4 @@
-import { PromisePool } from '@supercharge/promise-pool';
+import { TasksPool } from '../tasks/tasks-pool.class.js';
 import { Plugin } from './plugin.class.js';
 import { createConsumer } from './consumers/index.js';
 import tryFn from '../concerns/try-fn.js';
@@ -51,17 +51,14 @@ export class QueueConsumerPlugin extends Plugin {
         if (startTasks.length === 0) {
             return;
         }
-        const { errors } = await PromisePool
-            .withConcurrency(this.startConcurrency)
-            .for(startTasks)
-            .process(async (task) => {
+        const { errors } = await TasksPool.map(startTasks, async (task) => {
             await task.start();
             return `${task.driver}:${task.resource}`;
-        });
+        }, { concurrency: this.startConcurrency });
         if (errors.length > 0) {
-            const messages = errors.map((error) => {
-                const task = error.item;
-                const reason = error.reason ?? error;
+            const messages = errors.map((errorInfo) => {
+                const task = errorInfo.item;
+                const reason = errorInfo.error;
                 const identifier = task ? `${task.driver || 'unknown'}:${task.resource || 'unknown'}` : 'unknown';
                 return `[${identifier}] ${reason?.message || reason}`;
             });
@@ -84,16 +81,13 @@ export class QueueConsumerPlugin extends Plugin {
             consumer,
             stop: () => consumer.stop()
         }));
-        const { errors } = await PromisePool
-            .withConcurrency(this.stopConcurrency)
-            .for(stopTasks)
-            .process(async (task) => {
+        const { errors } = await TasksPool.map(stopTasks, async (task) => {
             await task.stop();
             return task.consumer;
-        });
+        }, { concurrency: this.stopConcurrency });
         if (errors.length > 0) {
-            errors.forEach((error) => {
-                const reason = error.reason ?? error;
+            errors.forEach((errorInfo) => {
+                const reason = errorInfo.error;
                 this.logger.warn({ error: reason?.message || reason }, `Failed to stop consumer: ${reason?.message || reason}`);
             });
         }
