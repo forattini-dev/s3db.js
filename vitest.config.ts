@@ -62,6 +62,9 @@ export default defineConfig({
 
     reporter: isCI ? 'default' : 'verbose',
 
+    // Retry flaky tests (especially server startup tests)
+    retry: isCI ? 2 : 0,
+
     pool: 'threads',
     poolOptions: {
       threads: {

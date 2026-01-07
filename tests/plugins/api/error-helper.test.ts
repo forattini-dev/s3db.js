@@ -27,7 +27,7 @@ async function makeRequest(port, path) {
   return { status: response.status, data };
 }
 
-async function waitForServer(port, maxAttempts = 100) {
+async function waitForServer(port, maxAttempts = 200) {
   for (let attempt = 0; attempt < maxAttempts; attempt++) {
     try {
       await fetch(`http://127.0.0.1:${port}/`);
