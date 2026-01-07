@@ -350,6 +350,29 @@ const BASE_USER_ATTRIBUTES: Record<string, string> = {
   metadata: 'json|optional'
 };
 
+const REDOC_CSP_DIRECTIVES: CspDirectives = {
+  'script-src': ['https://cdn.redoc.ly'],
+  'style-src': ['https://cdn.redoc.ly', 'https://fonts.googleapis.com'],
+  'font-src': ['https://fonts.gstatic.com']
+};
+
+const SWAGGER_CSP_DIRECTIVES: CspDirectives = {
+  'script-src': ['https://cdn.jsdelivr.net'],
+  'style-src': ['https://cdn.jsdelivr.net']
+};
+
+function mergeCspDirectives(base: CspDirectives, additions: CspDirectives): CspDirectives {
+  const result = { ...base };
+  for (const [key, values] of Object.entries(additions)) {
+    if (values && Array.isArray(values)) {
+      const existing = result[key] || [];
+      const merged = [...new Set([...existing, ...values])];
+      result[key] = merged;
+    }
+  }
+  return result;
+}
+
 export class ApiPlugin extends Plugin {
   declare config: ApiPluginConfig;
   private _usersResourceDescriptor: ResourceDescriptor;
@@ -457,19 +480,32 @@ export class ApiPlugin extends Plugin {
       security: {
         enabled: options.security?.enabled !== false,
 
-        contentSecurityPolicy: options.security?.contentSecurityPolicy !== false ? {
-          enabled: (options.security?.contentSecurityPolicy as Partial<ContentSecurityPolicyConfig> | undefined)?.enabled !== false,
-          directives: (options.security?.contentSecurityPolicy as Partial<ContentSecurityPolicyConfig> | undefined)?.directives || options.csp?.directives || {
+        contentSecurityPolicy: options.security?.contentSecurityPolicy !== false ? (() => {
+          const docsEnabled = options.docs?.enabled !== false && options.docsEnabled !== false;
+          const docsUi = options.docs?.ui || 'redoc';
+
+          const baseDirectives: CspDirectives = (options.security?.contentSecurityPolicy as Partial<ContentSecurityPolicyConfig> | undefined)?.directives || options.csp?.directives || {
             'default-src': ["'self'"],
-            'script-src': ["'self'", "'unsafe-inline'", 'https://cdn.redoc.ly/redoc/v2.5.1/'],
-            'style-src': ["'self'", "'unsafe-inline'", 'https://cdn.redoc.ly/redoc/v2.5.1/', 'https://fonts.googleapis.com'],
-            'font-src': ["'self'", 'https://fonts.gstatic.com'],
+            'script-src': ["'self'", "'unsafe-inline'"],
+            'style-src': ["'self'", "'unsafe-inline'"],
+            'font-src': ["'self'"],
             'img-src': ["'self'", 'data:', 'https:'],
             'connect-src': ["'self'"]
-          },
-          reportOnly: (options.security?.contentSecurityPolicy as Partial<ContentSecurityPolicyConfig> | undefined)?.reportOnly || options.csp?.reportOnly || false,
-          reportUri: (options.security?.contentSecurityPolicy as Partial<ContentSecurityPolicyConfig> | undefined)?.reportUri || options.csp?.reportUri || null
-        } : false,
+          };
+
+          let finalDirectives = baseDirectives;
+          if (docsEnabled) {
+            const docsCspAdditions = docsUi === 'swagger' ? SWAGGER_CSP_DIRECTIVES : REDOC_CSP_DIRECTIVES;
+            finalDirectives = mergeCspDirectives(baseDirectives, docsCspAdditions);
+          }
+
+          return {
+            enabled: (options.security?.contentSecurityPolicy as Partial<ContentSecurityPolicyConfig> | undefined)?.enabled !== false,
+            directives: finalDirectives,
+            reportOnly: (options.security?.contentSecurityPolicy as Partial<ContentSecurityPolicyConfig> | undefined)?.reportOnly || options.csp?.reportOnly || false,
+            reportUri: (options.security?.contentSecurityPolicy as Partial<ContentSecurityPolicyConfig> | undefined)?.reportUri || options.csp?.reportUri || null
+          };
+        })() : false,
 
         frameguard: options.security?.frameguard !== false ? {
           action: (options.security?.frameguard as FrameguardConfig | undefined)?.action || 'deny'

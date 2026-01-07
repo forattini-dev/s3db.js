@@ -106,12 +106,20 @@ interface ListObjectsResponse {
         Key: string;
     }>;
 }
+export interface PluginStorageOptions {
+    /**
+     * Custom time function for testing. Defaults to Date.now.
+     * Inject a mock function to enable time-travel in tests.
+     */
+    now?: () => number;
+}
 export declare class PluginStorage {
     client: PluginClient;
     pluginSlug: string;
     private _lock;
     private _sequence;
-    constructor(client: PluginClient, pluginSlug: string);
+    private _now;
+    constructor(client: PluginClient, pluginSlug: string, options?: PluginStorageOptions);
     getPluginKey(resourceName: string | null, ...parts: string[]): string;
     getSequenceKey(resourceName: string | null, sequenceName: string, suffix: string): string;
     set(key: string, data: Record<string, unknown>, options?: PluginStorageSetOptions): Promise<PutObjectResponse>;

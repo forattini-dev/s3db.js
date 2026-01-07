@@ -295,6 +295,29 @@ export declare class TasksPool extends EventEmitter implements TaskExecutor {
     setTuner(tuner: AdaptiveTuning): void;
     enqueue<T = unknown>(fn: TaskFunction<T>, options?: EnqueueOptions): Promise<T>;
     addBatch<T = unknown>(fns: Array<TaskFunction<T>>, options?: BatchOptions): Promise<BatchResult<T>>;
+    /**
+     * Process an array of items with controlled concurrency.
+     * This is a convenience method that mimics PromisePool.for().process() API.
+     *
+     * @example
+     * const { results, errors } = await TasksPool.map(
+     *   users,
+     *   async (user) => fetchUserData(user.id),
+     *   { concurrency: 10 }
+     * );
+     */
+    static map<T, R>(items: T[], processor: (item: T, index: number) => Promise<R>, options?: {
+        concurrency?: number;
+        onItemComplete?: (result: R, index: number) => void;
+        onItemError?: (error: Error, item: T, index: number) => void;
+    }): Promise<{
+        results: R[];
+        errors: Array<{
+            error: Error;
+            item: T;
+            index: number;
+        }>;
+    }>;
     processNext(): void;
     private _drainQueue;
     private _canProcessNext;
