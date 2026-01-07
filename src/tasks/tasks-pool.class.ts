@@ -761,17 +761,17 @@ export class TasksPool extends EventEmitter implements TaskExecutor {
     const batchOptions: BatchOptions = {
       onItemComplete: onItemComplete as ((result: unknown, index: number) => void) | undefined,
       onItemError: onItemError
-        ? (error: Error, index: number) => onItemError(error, items[index], index)
+        ? (error: Error, index: number) => onItemError(error, items[index]!, index)
         : undefined
     };
 
     const { results, errors } = await pool.addBatch(fns, batchOptions);
 
-    await pool.shutdown();
+    await pool.destroy();
 
     return {
       results: results.filter((r): r is R => r !== null),
-      errors: errors.map(e => ({ error: e.error, item: items[e.index], index: e.index }))
+      errors: errors.map(e => ({ error: e.error, item: items[e.index]!, index: e.index }))
     };
   }
 

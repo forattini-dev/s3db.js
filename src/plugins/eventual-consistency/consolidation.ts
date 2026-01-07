@@ -161,7 +161,7 @@ export async function runConsolidation(
       }
     }
 
-    result.errors = errors;
+    result.errors = errors.map(e => e.error);
     result.success = errors.length === 0;
 
     if (config.enableAnalytics && handler.analyticsResource) {
