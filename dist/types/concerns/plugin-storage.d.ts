@@ -130,6 +130,31 @@ export declare class PluginStorage {
     deleteAll(resourceName?: string | null): Promise<number>;
     batchPut(items: BatchSetItem[]): Promise<BatchSetResult[]>;
     batchGet(keys: string[]): Promise<BatchGetResult[]>;
+    /**
+     * Set data only if the key does not exist (conditional PUT).
+     * Uses ifNoneMatch: '*' to ensure atomicity.
+     * @returns The ETag (version) if set succeeded, null if key already exists.
+     */
+    setIfNotExists(key: string, data: Record<string, unknown>, options?: PluginStorageSetOptions): Promise<string | null>;
+    /**
+     * Get data along with its version (ETag) for conditional updates.
+     * @returns Object with data and version, or { data: null, version: null } if not found.
+     */
+    getWithVersion(key: string): Promise<{
+        data: Record<string, unknown> | null;
+        version: string | null;
+    }>;
+    /**
+     * Set data only if the current version matches (conditional PUT).
+     * Uses ifMatch to ensure no concurrent modifications.
+     * @returns The new ETag (version) if set succeeded, null if version mismatch.
+     */
+    setIfVersion(key: string, data: Record<string, unknown>, version: string, options?: PluginStorageSetOptions): Promise<string | null>;
+    /**
+     * Delete data only if the current version matches (conditional DELETE).
+     * @returns true if deleted, false if version mismatch or key not found.
+     */
+    deleteIfVersion(key: string, version: string): Promise<boolean>;
     acquireLock(lockName: string, options?: AcquireOptions): Promise<LockHandle | null>;
     releaseLock(lock: LockHandle | string, token?: string): Promise<void>;
     withLock<T>(lockName: string, options: AcquireOptions, callback: (lock: LockHandle) => Promise<T>): Promise<T | null>;

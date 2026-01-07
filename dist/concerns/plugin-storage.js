@@ -364,6 +364,120 @@ export class PluginStorage {
         });
         return Promise.all(promises);
     }
+    /**
+     * Set data only if the key does not exist (conditional PUT).
+     * Uses ifNoneMatch: '*' to ensure atomicity.
+     * @returns The ETag (version) if set succeeded, null if key already exists.
+     */
+    async setIfNotExists(key, data, options = {}) {
+        const [ok, err, response] = await tryFn(() => this.set(key, data, { ...options, ifNoneMatch: '*' }));
+        if (!ok) {
+            const error = err;
+            // PreconditionFailed (412) or similar means key already exists
+            if (error?.name === 'PreconditionFailed' ||
+                error?.code === 'PreconditionFailed' ||
+                error?.statusCode === 412) {
+                return null;
+            }
+            throw err;
+        }
+        return response?.ETag ?? null;
+    }
+    /**
+     * Get data along with its version (ETag) for conditional updates.
+     * @returns Object with data and version, or { data: null, version: null } if not found.
+     */
+    async getWithVersion(key) {
+        const [ok, err, response] = await tryFn(() => this.client.getObject(key));
+        if (!ok || !response) {
+            const error = err;
+            if (error?.name === 'NoSuchKey' ||
+                error?.code === 'NoSuchKey' ||
+                error?.Code === 'NoSuchKey' ||
+                error?.statusCode === 404) {
+                return { data: null, version: null };
+            }
+            throw new PluginStorageError(`Failed to retrieve plugin data with version`, {
+                pluginSlug: this.pluginSlug,
+                key,
+                operation: 'getWithVersion',
+                original: err,
+                suggestion: 'Check if the key exists and S3 permissions are correct'
+            });
+        }
+        const metadata = response.Metadata || {};
+        const parsedMetadata = this._parseMetadataValues(metadata);
+        let data = parsedMetadata;
+        if (response.Body) {
+            const [parseOk, parseErr, result] = await tryFn(async () => {
+                const bodyContent = await response.Body.transformToString();
+                if (bodyContent && bodyContent.trim()) {
+                    const body = JSON.parse(bodyContent);
+                    return { ...parsedMetadata, ...body };
+                }
+                return parsedMetadata;
+            });
+            if (!parseOk || !result) {
+                throw new PluginStorageError(`Failed to parse JSON body`, {
+                    pluginSlug: this.pluginSlug,
+                    key,
+                    operation: 'getWithVersion',
+                    original: parseErr,
+                    suggestion: 'Body content may be corrupted'
+                });
+            }
+            data = result;
+        }
+        // Check expiration
+        const expiresAt = (data._expiresat || data._expiresAt);
+        if (expiresAt && Date.now() > expiresAt) {
+            await this.delete(key);
+            return { data: null, version: null };
+        }
+        // Clean up internal fields
+        delete data._expiresat;
+        delete data._expiresAt;
+        // Extract ETag from response - need to get it from headObject since getObject may not return it
+        const [headOk, , headResponse] = await tryFn(() => this.client.headObject(key));
+        const version = headOk && headResponse ? headResponse.ETag ?? null : null;
+        return { data, version };
+    }
+    /**
+     * Set data only if the current version matches (conditional PUT).
+     * Uses ifMatch to ensure no concurrent modifications.
+     * @returns The new ETag (version) if set succeeded, null if version mismatch.
+     */
+    async setIfVersion(key, data, version, options = {}) {
+        const [ok, err, response] = await tryFn(() => this.set(key, data, { ...options, ifMatch: version }));
+        if (!ok) {
+            const error = err;
+            // PreconditionFailed (412) means version mismatch
+            if (error?.name === 'PreconditionFailed' ||
+                error?.code === 'PreconditionFailed' ||
+                error?.statusCode === 412) {
+                return null;
+            }
+            throw err;
+        }
+        return response?.ETag ?? null;
+    }
+    /**
+     * Delete data only if the current version matches (conditional DELETE).
+     * @returns true if deleted, false if version mismatch or key not found.
+     */
+    async deleteIfVersion(key, version) {
+        // First verify the version matches
+        const [headOk, , headResponse] = await tryFn(() => this.client.headObject(key));
+        if (!headOk || !headResponse) {
+            return false;
+        }
+        const currentVersion = headResponse.ETag;
+        if (currentVersion !== version) {
+            return false;
+        }
+        const [deleteOk] = await tryFn(() => this.client.deleteObject(key));
+        return deleteOk;
+    }
     async acquireLock(lockName, options = {}) {
         return this._lock.acquire(lockName, options);
     }
