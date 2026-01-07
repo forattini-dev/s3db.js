@@ -249,5 +249,10 @@
   },
   "funding": [
     "https://github.com/sponsors/forattini-dev"
-  ]
+  ],
+  "pnpm": {
+    "overrides": {
+      "js-yaml@<4.1.1": ">=4.1.1"
+    }
+  }
 }
