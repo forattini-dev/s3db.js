@@ -164,9 +164,6 @@ importers:
       google-auth-library:
         specifier: ^9.0.0 || ^10.0.0
         version: 10.5.0
-      handlebars:
-        specifier: ^4.0.0
-        version: 4.7.8
       hono:
         specifier: ^4.0.0
         version: 4.10.7
@@ -216,8 +213,8 @@ importers:
         specifier: ^2.0.0
         version: 2.11.2(puppeteer-extra@3.3.6(puppeteer-core@24.32.0)(puppeteer@24.32.0(typescript@5.9.3)))
       recker:
-        specifier: ^1.0.54
-        version: 1.0.54(ioredis@5.8.2)
+        specifier: ^1.0.55
+        version: 1.0.55(ioredis@5.8.2)
       user-agents:
         specifier: ^1.0.0
         version: 1.1.669
@@ -4097,11 +4094,6 @@ packages:
   guid-typescript@1.0.9:
     resolution: {integrity: sha512-Y8T4vYhEfwJOTbouREvG+3XDsjr8E3kIr7uf+JZ0BYloFsttiHU0WfvANVsR7TxNUJa/WpCnw/Ino/p+DeBhBQ==}
 
-  handlebars@4.7.8:
-    resolution: {integrity: sha512-vafaFqs8MZkRrSX7sFVUdo3ap/eNiLnb4IakshzvP56X5Nr1iGKAIqdX6tMlm6HcNRIkr6AxO5jFEoJzzpT8aQ==}
-    engines: {node: '>=0.4.7'}
-    hasBin: true
-
   has-flag@3.0.0:
     resolution: {integrity: sha512-sKJf1+ceQBr4SMkvQnBDNDtf4TXpVhVGateu0t918bl30FnbE2m4vNLX+VWe/dpjlb+HugGYzW7uQXH98HPEYw==}
     engines: {node: '>=4'}
@@ -5308,8 +5300,8 @@ packages:
     resolution: {integrity: sha512-/vxpCXddiX8NGfGO/mTafwjq4aFa/71pvamip0++IQk3zG8cbCj0fifNPrjjF1XMXUne91jL9OoxmdykoEtifQ==}
     engines: {node: '>= 10.13.0'}
 
-  recker@1.0.54:
-    resolution: {integrity: sha512-iLN3UcGYBRjOjZhlr36rJZailjU/jakRd/Rk7LJUSC3vptpqkNNgOULrO0lnkJPebzRbtIzv0CRjNdrezDc9Qg==}
+  recker@1.0.55:
+    resolution: {integrity: sha512-Ud4yG+/IsZJpX53Vf+uHi1UZa5vTundD8G8M7VXFpp/kA9Kn378XSg/lGOk1tFC8lgBBN4JVM7E6gNNkBDAPsg==}
     engines: {node: '>=18'}
     hasBin: true
     peerDependencies:
@@ -5909,11 +5901,6 @@ packages:
     engines: {node: '>=14.17'}
     hasBin: true
 
-  uglify-js@3.19.3:
-    resolution: {integrity: sha512-v3Xu+yuwBXisp6QYTcH4UbH+xYJXqnq2m/LtQVWKWzYc1iehYnLixoQDN9FH6/j9/oybfd6W9Ghwkl8+UMKTKQ==}
-    engines: {node: '>=0.8.0'}
-    hasBin: true
-
   undefsafe@2.0.5:
     resolution: {integrity: sha512-WxONCrssBM8TSPRqN5EmsjVrsv4A8X12J4ArBiiayv3DyyG3ZlIg6yysuuSYdZsVz3TKcTg2fd//Ujd4CHV1iA==}
 
@@ -6138,9 +6125,6 @@ packages:
   with@7.0.2:
     resolution: {integrity: sha512-RNGKj82nUPg3g5ygxkQl0R937xLyho1J24ItRCBTr/m1YnZkzJy1hUiHUJrc/VlsDQzsCnInEGSg3bci0Lmd4w==}
     engines: {node: '>= 10.0.0'}
-
-  wordwrap@1.0.0:
-    resolution: {integrity: sha512-gvVzJFlPycKc5dZN4yPkP8w7Dc37BtP1yczEneOb4uq34pXZcvrtRTmWV8W+Ume+XCxKgbjM+nevkyFPMybd4Q==}
 
   wrap-ansi@7.0.0:
     resolution: {integrity: sha512-YVGIj2kamLSTxw6NsZjoBxfSwsn0ycdesmc4p+Q21c5zPuZ1pl+NfxVdxPtdHvmNVOQ6XSYG4AUtyt/Fi7D16Q==}
@@ -12419,15 +12403,6 @@ snapshots:
 
   guid-typescript@1.0.9: {}
 
-  handlebars@4.7.8:
-    dependencies:
-      minimist: 1.2.8
-      neo-async: 2.6.2
-      source-map: 0.6.1
-      wordwrap: 1.0.0
-    optionalDependencies:
-      uglify-js: 3.19.3
-
   has-flag@3.0.0: {}
 
   has-flag@4.0.0: {}
@@ -13660,7 +13635,7 @@ snapshots:
     dependencies:
       resolve: 1.22.11
 
-  recker@1.0.54(ioredis@5.8.2):
+  recker@1.0.55(ioredis@5.8.2):
     dependencies:
       '@maxmind/geoip2-node': 6.3.4
       css-select: 6.0.0
@@ -14363,9 +14338,6 @@ snapshots:
 
   typescript@5.9.3: {}
 
-  uglify-js@3.19.3:
-    optional: true
-
   undefsafe@2.0.5: {}
 
   undici-types@7.16.0: {}
@@ -14586,8 +14558,6 @@ snapshots:
       '@babel/types': 7.28.5
       assert-never: 1.4.0
       babel-walk: 3.0.0-canary-5
-
-  wordwrap@1.0.0: {}
 
   wrap-ansi@7.0.0:
     dependencies:

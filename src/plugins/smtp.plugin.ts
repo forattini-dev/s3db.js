@@ -1,6 +1,6 @@
 import { Plugin } from './plugin.class.js';
 import { SMTPConnectionManager } from './smtp/connection-manager.js';
-import { SMTPTemplateEngine, defaultHandlebarsHelpers, type CustomTemplateFunction } from './smtp/template-engine.js';
+import { SMTPTemplateEngine, type CustomTemplateFunction } from './smtp/template-engine.js';
 import { WebhookReceiver, type WebhookProvider as InternalWebhookProvider } from './smtp/webhook-receiver.js';
 import { createDriver, getAvailableDrivers, MultiRelayManager } from './smtp/drivers/index.js';
 import {
@@ -323,10 +323,9 @@ export class SMTPPlugin extends Plugin {
     this.connectionManager = null;
 
     this.templateEngine = new SMTPTemplateEngine({
-      type: templateEngine as 'handlebars' | CustomTemplateFunction | undefined,
+      type: templateEngine as 'recker' | CustomTemplateFunction | undefined,
       templateDir: templateDir ?? undefined,
-      cacheTemplates: true,
-      helpers: defaultHandlebarsHelpers
+      cacheTemplates: true
     }) as unknown as SMTPTemplateEngineInstance;
 
     this.webhookReceiver = new WebhookReceiver({
