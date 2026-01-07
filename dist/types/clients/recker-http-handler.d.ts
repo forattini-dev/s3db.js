@@ -8,6 +8,7 @@ export declare class ReckerHttpHandler {
     private deduplicator;
     private circuitBreaker;
     private metrics;
+    private http2MetricsEnabled;
     constructor(options?: ReckerHttpHandlerOptions);
     handle(request: AwsHttpRequest, { abortSignal, requestTimeout }?: HandleOptions): Promise<{
         response: AwsHttpResponse;

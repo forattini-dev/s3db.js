@@ -386,6 +386,12 @@ export interface ReckerHttpHandlerOptions {
   pipelining?: number;
   http2?: boolean;
   http2MaxConcurrentStreams?: number;
+  /** HTTP/2 preset: 'balanced' | 'performance' | 'low-latency' | 'low-memory' */
+  http2Preset?: 'balanced' | 'performance' | 'low-latency' | 'low-memory';
+  /** Enable Expect: 100-Continue for large uploads (bytes threshold or boolean) */
+  expectContinue?: boolean | number;
+  /** Enable HTTP/2 observability metrics */
+  enableHttp2Metrics?: boolean;
   enableDedup?: boolean;
   enableCircuitBreaker?: boolean;
   circuitBreakerThreshold?: number;
@@ -411,6 +417,14 @@ export interface HandlerMetrics {
   circuitBreakerTrips: number;
   circuitStates?: Record<string, CircuitStats>;
   pendingDeduped?: number;
+  /** HTTP/2 metrics (when enableHttp2Metrics is true) */
+  http2?: {
+    sessions: number;
+    activeSessions: number;
+    streams: number;
+    activeStreams: number;
+    errors: number;
+  };
 }
 
 export interface AwsHttpRequest {

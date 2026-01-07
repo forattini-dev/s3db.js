@@ -1,4 +1,12 @@
-import { createClient } from 'recker';
+import {
+  createClient,
+  expandHTTP2Options,
+  Http2Error,
+  parseHttp2Error,
+  createHttp2MetricsHooks,
+  getGlobalHttp2Metrics,
+  type HTTP2Preset,
+} from 'recker';
 import { Readable } from 'node:stream';
 import type {
   ReckerHttpHandlerOptions,
@@ -144,6 +152,17 @@ function calculateRetryDelay(
 
 function isRetryableError(error: Error | null, statusCode?: number): boolean {
   if (error) {
+    // Check for HTTP/2 specific errors first
+    const h2Error = parseHttp2Error(error);
+    if (h2Error) {
+      return h2Error.retriable;
+    }
+
+    // Check for native HTTP/2 errors
+    if (error instanceof Http2Error) {
+      return error.retriable;
+    }
+
     const code = (error as NodeJS.ErrnoException).code;
     if (code === 'ECONNRESET' || code === 'ETIMEDOUT' || code === 'ENOTFOUND' ||
         code === 'ECONNREFUSED' || code === 'EPIPE' || code === 'UND_ERR_SOCKET' ||
@@ -161,6 +180,18 @@ function isRetryableError(error: Error | null, statusCode?: number): boolean {
   }
 
   return false;
+}
+
+/**
+ * Get additional retry delay for HTTP/2 errors like ENHANCE_YOUR_CALM
+ */
+function getHttp2RetryDelay(error: Error): number | undefined {
+  const h2Error = parseHttp2Error(error);
+  if (h2Error && h2Error.errorCode === 'ENHANCE_YOUR_CALM') {
+    // Server is rate limiting, wait longer (5-10 seconds)
+    return 5000 + Math.random() * 5000;
+  }
+  return undefined;
 }
 
 function parseRetryAfter(headerValue: string | null): number | undefined {
@@ -204,6 +235,7 @@ export class ReckerHttpHandler {
   private deduplicator: RequestDeduplicator | null;
   private circuitBreaker: CircuitBreaker | null;
   private metrics: HandlerMetrics;
+  private http2MetricsEnabled: boolean;
 
   constructor(options: ReckerHttpHandlerOptions = {}) {
     this.options = {
@@ -216,6 +248,9 @@ export class ReckerHttpHandler {
       pipelining: 10,
       http2: true,
       http2MaxConcurrentStreams: 100,
+      http2Preset: 'performance', // Default to performance preset for S3 workloads
+      expectContinue: 2 * 1024 * 1024, // 2MB threshold for Expect: 100-Continue
+      enableHttp2Metrics: false,
       enableDedup: true,
       enableCircuitBreaker: true,
       circuitBreakerThreshold: 5,
@@ -229,6 +264,18 @@ export class ReckerHttpHandler {
       ...options,
     };
 
+    this.http2MetricsEnabled = this.options.enableHttp2Metrics;
+
+    // Build HTTP/2 configuration using presets
+    const http2Config = this.options.http2
+      ? this.options.http2Preset
+        ? expandHTTP2Options(this.options.http2Preset as HTTP2Preset)
+        : { enabled: true, maxConcurrentStreams: this.options.http2MaxConcurrentStreams }
+      : false;
+
+    // Build hooks for HTTP/2 observability
+    const hooks = this.http2MetricsEnabled ? createHttp2MetricsHooks() : undefined;
+
     this.client = createClient({
       timeout: {
         lookup: 5000,
@@ -237,10 +284,8 @@ export class ReckerHttpHandler {
         response: this.options.headersTimeout,
         request: this.options.bodyTimeout,
       },
-      http2: this.options.http2 ? {
-        enabled: true,
-        maxConcurrentStreams: this.options.http2MaxConcurrentStreams,
-      } : false,
+      http2: http2Config,
+      expectContinue: this.options.expectContinue,
       concurrency: {
         max: this.options.connections * 10,
         agent: {
@@ -251,7 +296,8 @@ export class ReckerHttpHandler {
           keepAliveMaxTimeout: this.options.keepAliveMaxTimeout,
         },
       },
-      observability: false,
+      hooks,
+      observability: this.http2MetricsEnabled,
     }) as unknown as ReckerClient;
 
     this.deduplicator = this.options.enableDedup ? new RequestDeduplicator() : null;
@@ -363,7 +409,13 @@ export class ReckerHttpHandler {
 
           if (this.options.enableRetry && attempt < maxAttempts && isRetryableError(error as Error)) {
             this.metrics.retries++;
-            const delay = calculateRetryDelay(attempt, this.options.retryDelay, this.options.maxRetryDelay, this.options.retryJitter);
+
+            // Check for HTTP/2 specific retry delay (e.g., ENHANCE_YOUR_CALM)
+            const h2Delay = getHttp2RetryDelay(error as Error);
+            const delay = h2Delay !== undefined
+              ? Math.min(h2Delay, this.options.maxRetryDelay)
+              : calculateRetryDelay(attempt, this.options.retryDelay, this.options.maxRetryDelay, this.options.retryJitter);
+
             await new Promise(resolve => setTimeout(resolve, delay));
             continue;
           }
@@ -396,13 +448,27 @@ export class ReckerHttpHandler {
   }
 
   getMetrics(): HandlerMetrics {
-    return {
+    const metrics: HandlerMetrics = {
       ...this.metrics,
       circuitStates: this.circuitBreaker
         ? Object.fromEntries(this.circuitBreaker.circuits)
         : {},
       pendingDeduped: this.deduplicator?.size || 0,
     };
+
+    // Include HTTP/2 metrics if enabled
+    if (this.http2MetricsEnabled) {
+      const h2Summary = getGlobalHttp2Metrics().getSummary();
+      metrics.http2 = {
+        sessions: h2Summary.totals.sessions,
+        activeSessions: h2Summary.totals.activeSessions,
+        streams: h2Summary.totals.streams,
+        activeStreams: h2Summary.totals.activeStreams,
+        errors: h2Summary.totals.errors,
+      };
+    }
+
+    return metrics;
   }
 
   resetMetrics(): void {
