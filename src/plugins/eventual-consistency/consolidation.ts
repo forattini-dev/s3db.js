@@ -4,7 +4,7 @@
  */
 
 import tryFn from '../../concerns/try-fn.js';
-import { PromisePool } from '@supercharge/promise-pool';
+import { TasksPool } from '../../tasks/tasks-pool.class.js';
 import { getCronManager } from '../../concerns/cron-manager.js';
 import { createLogger } from '../../concerns/logger.js';
 import { PluginError } from '../../errors.js';
@@ -141,17 +141,18 @@ export async function runConsolidation(
 
     const byOriginalId = groupByOriginalId(allTransactions);
 
-    const { results, errors } = await PromisePool
-      .for(Object.entries(byOriginalId))
-      .withConcurrency(10)
-      .process(async ([originalId, transactions]) => {
+    const { results, errors } = await TasksPool.map(
+      Object.entries(byOriginalId),
+      async ([originalId, transactions]) => {
         return consolidateRecord(
           handler,
           originalId,
           transactions,
           config
         );
-      });
+      },
+      { concurrency: 10 }
+    );
 
     for (const recordResult of results) {
       if (recordResult) {

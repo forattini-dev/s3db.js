@@ -4,7 +4,7 @@
  */
 
 import tryFn from '../../concerns/try-fn.js';
-import { PromisePool } from '@supercharge/promise-pool';
+import { TasksPool } from '../../tasks/tasks-pool.class.js';
 import { getCronManager } from '../../concerns/cron-manager.js';
 import type { FieldHandler, Transaction } from './utils.js';
 import type { NormalizedConfig } from './config.js';
@@ -105,13 +105,14 @@ export async function runGarbageCollection(
       return;
     }
 
-    const { results, errors } = await PromisePool
-      .for(oldTransactions)
-      .withConcurrency(10)
-      .process(async (txn) => {
+    const { results, errors } = await TasksPool.map(
+      oldTransactions,
+      async (txn) => {
         const [deleted] = await tryFn(() => transactionResource!.delete(txn.id));
         return deleted;
-      });
+      },
+      { concurrency: 10 }
+    );
 
     if (emitFn) {
       emitFn('plg:eventual-consistency:gc-completed', {

@@ -1,6 +1,6 @@
 import EventEmitter from "events";
 import { Writable, WritableOptions } from 'stream';
-import { PromisePool } from '@supercharge/promise-pool';
+import { TasksPool } from '../tasks/tasks-pool.class.js';
 import tryFn from "../concerns/try-fn.js";
 
 interface S3Client {
@@ -81,12 +81,9 @@ export class ResourceWriter extends EventEmitter {
     while (this.buffer.length > 0) {
       const batch = this.buffer.splice(0, this.batchSize);
       const [ok, err] = await tryFn(async () => {
-        await PromisePool.for(batch)
-          .withConcurrency(this.concurrency)
-          .handleError(async (error, content) => {
-            this.emit("error", error, content);
-          })
-          .process(async (item) => {
+        await TasksPool.map(
+          batch,
+          async (item) => {
             const [insertOk, insertErr, result] = await tryFn(async () => {
               const res = await this.resource.insert(item);
               return res;
@@ -96,7 +93,12 @@ export class ResourceWriter extends EventEmitter {
               return null;
             }
             return result;
-          });
+          },
+          {
+            concurrency: this.concurrency,
+            onItemError: (error, item) => this.emit("error", error, item)
+          }
+        );
       });
       if (!ok) {
         this.emit('error', err);

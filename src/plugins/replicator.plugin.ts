@@ -1,4 +1,4 @@
-import { PromisePool } from "@supercharge/promise-pool";
+import { TasksPool } from "../tasks/tasks-pool.class.js";
 import { Plugin, type PluginConfig } from "./plugin.class.js";
 import tryFn from "../concerns/try-fn.js";
 import { createReplicator, validateReplicatorConfig } from "./replicators/index.js";
@@ -764,10 +764,9 @@ export class ReplicatorPlugin extends Plugin {
     const entries = applicableReplicators.map((replicator, index) => ({ replicator, index }));
     const outcomes: PromiseOutcome[] = new Array(entries.length);
 
-    const poolResult = await PromisePool
-      .withConcurrency(this.config.replicatorConcurrency)
-      .for(entries)
-      .process(async ({ replicator, index }) => {
+    const poolResult = await TasksPool.map(
+      entries,
+      async ({ replicator, index }) => {
         const [ok, error, replicationResult] = await tryFn(async () => {
           const result = await this.retryWithBackoff(
             () => replicator.replicate(resourceName, operation, sanitizedData, recordId, sanitizedBefore),
@@ -814,11 +813,13 @@ export class ReplicatorPlugin extends Plugin {
 
         outcomes[index] = { status: 'rejected', reason: error as Error };
         throw error;
-      });
+      },
+      { concurrency: this.config.replicatorConcurrency }
+    );
 
     if (poolResult.errors.length > 0) {
       for (const poolError of poolResult.errors) {
-        const { item, error } = poolError as any;
+        const { item, error } = poolError;
         if (item && typeof item.index === 'number' && !outcomes[item.index]) {
           outcomes[item.index] = { status: 'rejected', reason: error };
         }
@@ -841,10 +842,9 @@ export class ReplicatorPlugin extends Plugin {
     const entries = applicableReplicators.map((replicator, index) => ({ replicator, index }));
     const outcomes: PromiseOutcome[] = new Array(entries.length);
 
-    await PromisePool
-      .withConcurrency(this.config.replicatorConcurrency)
-      .for(entries)
-      .process(async ({ replicator, index }) => {
+    await TasksPool.map(
+      entries,
+      async ({ replicator, index }) => {
         const [wrapperOk, wrapperError] = await tryFn(async () => {
           const preparedData = item.data ? this.filterInternalFields(item.data) : null;
           const preparedBefore = item.beforeData ? this.filterInternalFields(item.beforeData) : null;
@@ -914,7 +914,9 @@ export class ReplicatorPlugin extends Plugin {
         const failure = { success: false, error: (wrapperError as Error).message };
         outcomes[index] = { status: 'fulfilled', value: failure };
         return failure;
-      });
+      },
+      { concurrency: this.config.replicatorConcurrency }
+    );
 
     return outcomes;
   }
@@ -979,10 +981,9 @@ export class ReplicatorPlugin extends Plugin {
     const entries = this.replicators.map((replicator, index) => ({ replicator, index }));
     const replicatorStats: Array<{ id: string; driver: string; config: Record<string, unknown>; status: ReplicatorStatus }> = new Array(entries.length);
 
-    const poolResult = await PromisePool
-      .withConcurrency(this.config.replicatorConcurrency)
-      .for(entries)
-      .process(async ({ replicator, index }) => {
+    const poolResult = await TasksPool.map(
+      entries,
+      async ({ replicator, index }) => {
         const status = await replicator.getStatus();
         const info = {
           id: replicator.id,
@@ -992,10 +993,12 @@ export class ReplicatorPlugin extends Plugin {
         };
         replicatorStats[index] = info;
         return info;
-      });
+      },
+      { concurrency: this.config.replicatorConcurrency }
+    );
 
     if (poolResult.errors.length > 0) {
-      const poolError = poolResult.errors[0] as any;
+      const poolError = poolResult.errors[0]!;
       const { item, error } = poolError;
       const failedReplicator = item?.replicator;
       throw new ReplicationError(`Failed to collect status for replicator ${failedReplicator?.name || failedReplicator?.id || 'unknown'}`, {
@@ -1057,10 +1060,9 @@ export class ReplicatorPlugin extends Plugin {
 
     let retried = 0;
 
-    const processResult = await PromisePool
-      .withConcurrency(this.config.replicatorConcurrency)
-      .for(failedLogs || [])
-      .process(async (log: Record<string, unknown>) => {
+    const processResult = await TasksPool.map(
+      failedLogs || [],
+      async (log: Record<string, unknown>) => {
         const sanitizedData = log.data ? this.filterInternalFields(log.data) : null;
         const sanitizedBefore = (log as { beforeData?: unknown }).beforeData ? this.filterInternalFields((log as { beforeData: unknown }).beforeData) : null;
 
@@ -1121,11 +1123,13 @@ export class ReplicatorPlugin extends Plugin {
           error: failureMessage,
           retryCount: (Number(log.retryCount) || 0) + 1
         });
-      });
+      },
+      { concurrency: this.config.replicatorConcurrency }
+    );
 
     if (processResult.errors.length) {
       for (const poolError of processResult.errors) {
-        const { item, error } = poolError as any;
+        const { item, error } = poolError;
         this.logger.warn({ logId: (item as Record<string, unknown>)?.id ?? 'unknown', error: error.message }, `Failed to retry log ${(item as Record<string, unknown>)?.id ?? 'unknown'}: ${error.message}`);
       }
     }
@@ -1168,10 +1172,9 @@ export class ReplicatorPlugin extends Plugin {
           const records = Array.isArray(page) ? page : ((page as { items?: Array<Record<string, unknown>> }).items || []);
           if (records.length === 0) break;
 
-          const poolResult = await PromisePool
-            .withConcurrency(this.config.replicatorConcurrency)
-            .for(records)
-            .process(async (record: Record<string, unknown>) => {
+          const poolResult = await TasksPool.map(
+            records,
+            async (record: Record<string, unknown>) => {
               const sanitizedRecord = this.filterInternalFields(record);
               const [replicateOk, replicateError, result] = await tryFn(() =>
                 replicator.replicate(resourceName, 'insert', sanitizedRecord, sanitizedRecord.id as string)
@@ -1210,10 +1213,12 @@ export class ReplicatorPlugin extends Plugin {
               });
 
               return result;
-            });
+            },
+            { concurrency: this.config.replicatorConcurrency }
+          );
 
           if (poolResult.errors.length > 0) {
-            const poolError = poolResult.errors[0] as any;
+            const poolError = poolResult.errors[0]!;
             throw poolError.error;
           }
 
@@ -1228,10 +1233,9 @@ export class ReplicatorPlugin extends Plugin {
   override async stop(): Promise<void> {
     const [ok, error] = await tryFn(async () => {
       if (this.replicators && this.replicators.length > 0) {
-        await PromisePool
-          .withConcurrency(this.config.stopConcurrency)
-          .for(this.replicators)
-          .process(async (replicator) => {
+        await TasksPool.map(
+          this.replicators,
+          async (replicator) => {
             const [replicatorOk, replicatorError] = await tryFn(async () => {
               if (replicator && typeof replicator.stop === 'function') {
                 await replicator.stop();
@@ -1249,7 +1253,9 @@ export class ReplicatorPlugin extends Plugin {
                 error: (replicatorError as Error).message
               });
             }
-          });
+          },
+          { concurrency: this.config.stopConcurrency }
+        );
       }
 
       this.removeDatabaseHooks();

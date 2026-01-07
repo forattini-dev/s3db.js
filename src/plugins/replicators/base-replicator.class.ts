@@ -1,5 +1,5 @@
 import EventEmitter from 'events';
-import { PromisePool } from '@supercharge/promise-pool';
+import { TasksPool } from '../../tasks/tasks-pool.class.js';
 import { ReplicationError } from '../replicator.errors.js';
 import { createLogger } from '../../concerns/logger.js';
 
@@ -150,29 +150,23 @@ export class BaseReplicator extends EventEmitter {
     }
 
     const limit = Math.max(1, concurrency ?? this.batchConcurrency ?? 5);
-    const results: R[] = [];
-    const errors: Array<{ record: T; error: Error } | unknown> = [];
 
-    await PromisePool
-      .withConcurrency(limit)
-      .for(records)
-      .process(async record => {
-        try {
-          const result = await handler(record);
-          results.push(result);
-        } catch (error) {
-          if (typeof mapError === 'function') {
-            const mapped = mapError(error as Error, record);
-            if (mapped !== undefined) {
-              errors.push(mapped);
-            }
-          } else {
-            errors.push({ record, error: error as Error });
-          }
-        }
-      });
+    const poolResult = await TasksPool.map(
+      records,
+      async (record) => handler(record),
+      {
+        concurrency: limit,
+        onItemError: mapError
+          ? (error, record) => mapError(error, record)
+          : undefined
+      }
+    );
 
-    return { results, errors };
+    const errors: Array<{ record: T; error: Error } | unknown> = mapError
+      ? poolResult.errors.map(e => mapError(e.error, e.item)).filter(m => m !== undefined)
+      : poolResult.errors.map(e => ({ record: e.item, error: e.error }));
+
+    return { results: poolResult.results, errors };
   }
 
   createError(message: string, details: ErrorDetails = {}): ReplicationError {

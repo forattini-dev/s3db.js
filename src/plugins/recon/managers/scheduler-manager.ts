@@ -7,7 +7,7 @@
  * - Iterates over enabled targets
  */
 
-import { PromisePool } from '@supercharge/promise-pool';
+import { TasksPool } from '../../../tasks/tasks-pool.class.js';
 import { getCronManager } from '../../../concerns/cron-manager.js';
 import type { TargetManager, TargetRecord } from './target-manager.js';
 
@@ -149,9 +149,9 @@ export class SchedulerManager {
       targets: activeTargets.map(t => t.id)
     });
 
-    await PromisePool.withConcurrency(this.plugin.config.concurrency || 1)
-      .for(activeTargets)
-      .process(async (targetEntry) => {
+    await TasksPool.map(
+      activeTargets,
+      async (targetEntry) => {
         try {
           const report = await this.plugin.runDiagnostics(targetEntry.target, {
             behavior: targetEntry.behavior,
@@ -177,7 +177,9 @@ export class SchedulerManager {
             error
           });
         }
-      });
+      },
+      { concurrency: this.plugin.config.concurrency || 1 }
+    );
 
     this.plugin.emit('recon:sweep-completed', {
       reason,

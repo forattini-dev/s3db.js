@@ -1,4 +1,4 @@
-import { PromisePool } from '@supercharge/promise-pool';
+import { TasksPool } from '../tasks/tasks-pool.class.js';
 import Resource from '../resource.class.js';
 import tryFn, { tryFnSync } from '../concerns/try-fn.js';
 import { streamToString } from '../stream/index.js';
@@ -182,16 +182,17 @@ export class DatabaseConnection {
         }
 
         const stopConcurrency = Math.max(1, Number.isFinite(db.executorPool?.concurrency) ? db.executorPool.concurrency! : 5);
-        await PromisePool
-          .withConcurrency(stopConcurrency)
-          .for(db.pluginList)
-          .process(async (plugin) => {
+        await TasksPool.map(
+          db.pluginList,
+          async (plugin) => {
             await tryFn(async () => {
               if (plugin && typeof (plugin as any).stop === 'function') {
                 await (plugin as any).stop();
               }
             });
-          });
+          },
+          { concurrency: stopConcurrency }
+        );
       }
 
       if (db.resources && Object.keys(db.resources).length > 0) {

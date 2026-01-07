@@ -729,6 +729,52 @@ export class TasksPool extends EventEmitter implements TaskExecutor {
     return { results: orderedResults, errors, batchId };
   }
 
+  /**
+   * Process an array of items with controlled concurrency.
+   * This is a convenience method that mimics PromisePool.for().process() API.
+   *
+   * @example
+   * const { results, errors } = await TasksPool.map(
+   *   users,
+   *   async (user) => fetchUserData(user.id),
+   *   { concurrency: 10 }
+   * );
+   */
+  static async map<T, R>(
+    items: T[],
+    processor: (item: T, index: number) => Promise<R>,
+    options: {
+      concurrency?: number;
+      onItemComplete?: (result: R, index: number) => void;
+      onItemError?: (error: Error, item: T, index: number) => void;
+    } = {}
+  ): Promise<{ results: R[]; errors: Array<{ error: Error; item: T; index: number }> }> {
+    const { concurrency = 10, onItemComplete, onItemError } = options;
+
+    const pool = new TasksPool({
+      concurrency,
+      features: { profile: 'bare', emitEvents: false }
+    });
+
+    const fns = items.map((item, index) => async () => processor(item, index));
+
+    const batchOptions: BatchOptions = {
+      onItemComplete: onItemComplete as ((result: unknown, index: number) => void) | undefined,
+      onItemError: onItemError
+        ? (error: Error, index: number) => onItemError(error, items[index], index)
+        : undefined
+    };
+
+    const { results, errors } = await pool.addBatch(fns, batchOptions);
+
+    await pool.shutdown();
+
+    return {
+      results: results.filter((r): r is R => r !== null),
+      errors: errors.map(e => ({ error: e.error, item: items[e.index], index: e.index }))
+    };
+  }
+
   processNext(): void {
     if (this.lightMode) {
       this._processLightQueue();

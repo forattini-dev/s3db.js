@@ -1,8 +1,8 @@
 import EventEmitter from "events";
 import { Transform, TransformCallback } from "stream";
-import { PromisePool } from "@supercharge/promise-pool";
 
 import { ResourceIdsPageReader } from "./resource-ids-page-reader.class.js";
+import { TasksPool } from '../tasks/tasks-pool.class.js';
 import tryFn from "../concerns/try-fn.js";
 import { StreamError } from '../errors.js';
 
@@ -86,16 +86,18 @@ export class ResourceReader extends EventEmitter {
 
   async _transform(chunk: string[], _encoding: BufferEncoding, callback: TransformCallback): Promise<void> {
     const [, err] = await tryFn(async () => {
-      await PromisePool.for(chunk)
-        .withConcurrency(this.concurrency)
-        .handleError(async (error, content) => {
-          this.emit("error", error, content);
-        })
-        .process(async (id) => {
+      await TasksPool.map(
+        chunk,
+        async (id) => {
           const data = await this.resource.get(id);
           this.transform.push(data);
           return data;
-        });
+        },
+        {
+          concurrency: this.concurrency,
+          onItemError: (error, id) => this.emit("error", error, id)
+        }
+      );
     });
     callback(err as Error | null | undefined);
   }

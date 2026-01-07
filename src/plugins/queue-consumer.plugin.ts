@@ -1,4 +1,4 @@
-import { PromisePool } from '@supercharge/promise-pool';
+import { TasksPool } from '../tasks/tasks-pool.class.js';
 import { Plugin } from './plugin.class.js';
 import { createConsumer } from './consumers/index.js';
 import tryFn from '../concerns/try-fn.js';
@@ -124,20 +124,21 @@ export class QueueConsumerPlugin extends Plugin {
       return;
     }
 
-    const { errors } = await PromisePool
-      .withConcurrency(this.startConcurrency)
-      .for(startTasks)
-      .process(async (task: StartTask) => {
+    const { errors } = await TasksPool.map(
+      startTasks,
+      async (task: StartTask) => {
         await task.start();
         return `${task.driver}:${task.resource}`;
-      });
+      },
+      { concurrency: this.startConcurrency }
+    );
 
     if (errors.length > 0) {
-      const messages = errors.map((error) => {
-        const task = error.item as StartTask | undefined;
-        const reason = (error as any).reason ?? error;
+      const messages = errors.map((errorInfo) => {
+        const task = errorInfo.item as StartTask | undefined;
+        const reason = errorInfo.error;
         const identifier = task ? `${task.driver || 'unknown'}:${task.resource || 'unknown'}` : 'unknown';
-        return `[${identifier}] ${(reason as Error)?.message || reason}`;
+        return `[${identifier}] ${reason?.message || reason}`;
       });
 
       throw new QueueError('Failed to start one or more queue consumers', {
@@ -161,20 +162,21 @@ export class QueueConsumerPlugin extends Plugin {
         stop: () => consumer.stop()
       }));
 
-    const { errors } = await PromisePool
-      .withConcurrency(this.stopConcurrency)
-      .for(stopTasks)
-      .process(async (task: StopTask) => {
+    const { errors } = await TasksPool.map(
+      stopTasks,
+      async (task: StopTask) => {
         await task.stop();
         return task.consumer;
-      });
+      },
+      { concurrency: this.stopConcurrency }
+    );
 
     if (errors.length > 0) {
-      errors.forEach((error) => {
-        const reason = (error as any).reason ?? error;
+      errors.forEach((errorInfo) => {
+        const reason = errorInfo.error;
         this.logger.warn(
-          { error: (reason as Error)?.message || reason },
-          `Failed to stop consumer: ${(reason as Error)?.message || reason}`
+          { error: reason?.message || reason },
+          `Failed to stop consumer: ${reason?.message || reason}`
         );
       });
     }

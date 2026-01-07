@@ -1,4 +1,5 @@
 import { tryFn } from './try-fn.js';
+import { TasksPool } from '../tasks/tasks-pool.class.js';
 
 export interface InsertStats {
   inserted: number;
@@ -71,39 +72,6 @@ interface ResourceLike {
       send(command: unknown): Promise<void>;
     };
   };
-}
-
-interface PromisePoolResult<R> {
-  results: R[];
-  errors: Error[];
-}
-
-interface PromisePoolClass {
-  for<T>(items: T[]): {
-    withConcurrency(concurrency: number): {
-      process<R>(fn: (item: T) => Promise<R>): Promise<PromisePoolResult<R>>;
-    };
-  };
-}
-
-interface PromisePoolModule {
-  PromisePool: PromisePoolClass;
-}
-
-let PromisePoolCache: PromisePoolModule | null = null;
-
-async function loadPromisePool(): Promise<PromisePoolModule> {
-  if (PromisePoolCache) return PromisePoolCache;
-
-  try {
-    const module = await import('@supercharge/promise-pool');
-    PromisePoolCache = module as unknown as PromisePoolModule;
-    return PromisePoolCache;
-  } catch {
-    throw new Error(
-      'Failed to load @supercharge/promise-pool. Please install it: pnpm add @supercharge/promise-pool'
-    );
-  }
 }
 
 export class HighPerformanceInserter {
@@ -182,14 +150,11 @@ export class HighPerformanceInserter {
     const startTime = Date.now();
 
     const [ok] = await tryFn(async () => {
-      const { PromisePool } = await loadPromisePool();
-
-      const { results, errors } = await PromisePool
-        .for(batch)
-        .withConcurrency(this.concurrency)
-        .process(async (item) => {
-          return await this.performInsert(item);
-        });
+      const { results, errors } = await TasksPool.map(
+        batch,
+        async (item) => this.performInsert(item),
+        { concurrency: this.concurrency }
+      );
 
       const duration = Date.now() - startTime;
       this.stats.inserted += results.filter(r => r.success).length;
@@ -258,12 +223,9 @@ export class HighPerformanceInserter {
         return;
       }
 
-      const { PromisePool } = await loadPromisePool();
-
-      await PromisePool
-        .for(batch)
-        .withConcurrency(10)
-        .process(async (item) => {
+      await TasksPool.map(
+        batch,
+        async (item) => {
           const [ok, err] = await tryFn(() => this.resource.createPartitionReferences(item.data));
 
           if (ok) {
@@ -274,7 +236,9 @@ export class HighPerformanceInserter {
               error: err
             });
           }
-        });
+        },
+        { concurrency: 10 }
+      );
 
       if (this.partitionQueue.length > 0) {
         this.processPartitionsAsync();
@@ -349,19 +313,16 @@ export class StreamInserter {
   }
 
   async bulkInsert(items: Record<string, unknown>[]): Promise<BulkInsertResult> {
-    const { PromisePool } = await loadPromisePool();
-
-    const { results, errors } = await PromisePool
-      .for(items)
-      .withConcurrency(this.concurrency)
-      .process(async (item) => {
-        return await this.fastInsert(item);
-      });
+    const { results, errors } = await TasksPool.map(
+      items,
+      async (item) => this.fastInsert(item),
+      { concurrency: this.concurrency }
+    );
 
     return {
       success: results.length,
       failed: errors.length,
-      errors: errors.slice(0, 10)
+      errors: errors.map(e => e.error).slice(0, 10)
     };
   }
 }
