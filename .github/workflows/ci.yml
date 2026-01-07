@@ -66,24 +66,31 @@ jobs:
           - name: core
             path: tests/core/
             timeout: 10
+            flags: ''
           - name: scheduler
             path: tests/plugins/scheduler/
             timeout: 5
+            flags: ''
           - name: tfstate
             path: tests/plugins/tfstate/
-            timeout: 5
+            timeout: 3
+            flags: '--no-file-parallelism'
           - name: api
             path: tests/plugins/api/
             timeout: 3
+            flags: ''
           - name: ttl
             path: tests/plugins/ttl/
             timeout: 3
+            flags: ''
           - name: state-machine
             path: tests/plugins/state-machine/
             timeout: 3
+            flags: ''
           - name: s3-queue
             path: tests/plugins/s3-queue/
             timeout: 3
+            flags: ''
     steps:
       - name: Checkout
         uses: actions/checkout@v6
@@ -108,7 +115,7 @@ jobs:
           key: build-${{ github.sha }}-node${{ matrix.node-version }}
 
       - name: Run ${{ matrix.suite.name }} Tests
-        run: pnpm vitest run ${{ matrix.suite.path }} --reporter=verbose
+        run: pnpm vitest run ${{ matrix.suite.path }} --reporter=verbose ${{ matrix.suite.flags }}
         timeout-minutes: ${{ matrix.suite.timeout }}
 
   # ============================================
