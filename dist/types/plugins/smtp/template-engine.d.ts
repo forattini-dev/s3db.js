@@ -1,5 +1,5 @@
 export interface SMTPTemplateEngineOptions {
-    type?: 'handlebars' | CustomTemplateFunction;
+    type?: 'recker' | 'handlebars' | CustomTemplateFunction;
     templateDir?: string | null;
     cacheTemplates?: boolean;
     helpers?: Record<string, HelperFunction>;
@@ -21,31 +21,25 @@ export interface CacheStats {
 }
 export declare class SMTPTemplateEngine {
     options: SMTPTemplateEngineOptions;
-    type: 'handlebars' | CustomTemplateFunction;
+    type: 'recker' | 'handlebars' | CustomTemplateFunction;
     templateDir: string | null;
     cacheTemplates: boolean;
     helpers: Record<string, HelperFunction>;
     partials: Record<string, string>;
     private _templateCache;
-    private _pendingAsyncHelpers;
-    private _asyncPlaceholderIndex;
+    private _reckerEngine;
     constructor(options?: SMTPTemplateEngineOptions);
     render(templateName: string | CustomTemplateFunction, data?: Record<string, unknown>, options?: RenderOptions): Promise<RenderedOutput>;
-    private _renderHandlebars;
+    private _getReckerEngine;
+    private _renderRecker;
     private _renderCustom;
     private _loadTemplate;
     private _parseRenderedOutput;
     private _parseYaml;
-    private _wrapHelper;
-    private _resolveAsyncPlaceholders;
     registerHelper(name: string, fn: HelperFunction): void;
     registerPartial(name: string, template: string): void;
     clearCache(): void;
     getCacheStats(): CacheStats;
     precompile(templateName: string): Promise<boolean>;
 }
-export interface HandlebarsOptions {
-    hash: Record<string, unknown>;
-}
-export declare const defaultHandlebarsHelpers: Record<string, HelperFunction>;
 //# sourceMappingURL=template-engine.d.ts.map
