@@ -215,6 +215,9 @@ importers:
       puppeteer-extra-plugin-stealth:
         specifier: ^2.0.0
         version: 2.11.2(puppeteer-extra@3.3.6(puppeteer-core@24.32.0)(puppeteer@24.32.0(typescript@5.9.3)))
+      recker:
+        specifier: ^1.0.54
+        version: 1.0.54(ioredis@5.8.2)
       user-agents:
         specifier: ^1.0.0
         version: 1.1.669
@@ -313,9 +316,6 @@ importers:
       ora:
         specifier: ^9.0.0
         version: 9.0.0
-      recker:
-        specifier: ^1.0.53
-        version: 1.0.53(ioredis@5.8.2)
       redis:
         specifier: ^5.10.0
         version: 5.10.0
@@ -5308,8 +5308,8 @@ packages:
     resolution: {integrity: sha512-/vxpCXddiX8NGfGO/mTafwjq4aFa/71pvamip0++IQk3zG8cbCj0fifNPrjjF1XMXUne91jL9OoxmdykoEtifQ==}
     engines: {node: '>= 10.13.0'}
 
-  recker@1.0.53:
-    resolution: {integrity: sha512-4mVEDgRPPRxBP0r6XQvBCInZYwAa33zxuPOd9+itifi5/rHlCXWOgrBBDZV9/Z3amPJ2eFJTEJd3g9nT0lCE2g==}
+  recker@1.0.54:
+    resolution: {integrity: sha512-iLN3UcGYBRjOjZhlr36rJZailjU/jakRd/Rk7LJUSC3vptpqkNNgOULrO0lnkJPebzRbtIzv0CRjNdrezDc9Qg==}
     engines: {node: '>=18'}
     hasBin: true
     peerDependencies:
@@ -13660,7 +13660,7 @@ snapshots:
     dependencies:
       resolve: 1.22.11
 
-  recker@1.0.53(ioredis@5.8.2):
+  recker@1.0.54(ioredis@5.8.2):
     dependencies:
       '@maxmind/geoip2-node': 6.3.4
       css-select: 6.0.0
