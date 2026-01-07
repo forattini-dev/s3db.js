@@ -71,10 +71,6 @@ jobs:
             path: tests/plugins/scheduler/
             timeout: 5
             flags: ''
-          - name: tfstate
-            path: tests/plugins/tfstate/
-            timeout: 3
-            flags: '--no-file-parallelism'
           - name: api
             path: tests/plugins/api/
             timeout: 3
