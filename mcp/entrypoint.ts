@@ -1,7 +1,16 @@
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
-import { CallToolRequestSchema, ListToolsRequestSchema } from '@modelcontextprotocol/sdk/types.js';
+import {
+  CallToolRequestSchema,
+  ListToolsRequestSchema,
+  ListResourcesRequestSchema,
+  ListResourceTemplatesRequestSchema,
+  ReadResourceRequestSchema,
+  ListPromptsRequestSchema,
+  GetPromptRequestSchema,
+  CompleteRequestSchema,
+} from '@modelcontextprotocol/sdk/types.js';
 import { S3db, CachePlugin, CostsPlugin } from '../src/index.js';
 import { FilesystemCache } from '../src/plugins/cache/filesystem-cache.class.js';
 import { config } from 'dotenv';
@@ -20,6 +29,11 @@ import { createExportImportHandlers, exportImportTools } from './tools/export-im
 import { createStatsHandlers, statsTools } from './tools/stats.js';
 import { createDocsSearchHandlers, docsSearchTools, preloadSearch } from './tools/docs-search.js';
 import { createDocumentationHandlers, documentationTools } from './tools/documentation.js';
+
+// MCP Resources, Prompts, and Completions
+import { resourceTemplates, listResources, readResource } from './resources.js';
+import { prompts, getPrompt } from './prompts.js';
+import { complete, completeToolArgument } from './completions.js';
 
 import type { TransportArgs } from './types/index.js';
 
@@ -48,12 +62,19 @@ export class S3dbMCPServer {
       },
       {
         capabilities: {
-          tools: {},
+          tools: { listChanged: true },
+          resources: { subscribe: false, listChanged: true },
+          prompts: { listChanged: true },
+          logging: {},
         },
       }
     );
 
     this.allToolHandlers = this.setupToolHandlers();
+    this.setupResourceHandlers();
+    this.setupPromptHandlers();
+    // Note: Completions not supported by current MCP SDK version
+    // this.setupCompletionHandlers();
     this.setupTransport();
   }
 
@@ -128,6 +149,90 @@ export class S3dbMCPServer {
       }
     });
     return handlers;
+  }
+
+  setupResourceHandlers(): void {
+    // List available resource templates
+    this.server.setRequestHandler(ListResourceTemplatesRequestSchema, async () => {
+      return {
+        resourceTemplates: resourceTemplates.map((t) => ({
+          uriTemplate: t.uriTemplate,
+          name: t.name,
+          description: t.description,
+          mimeType: t.mimeType || 'text/plain',
+        })),
+      };
+    });
+
+    // List concrete resources (static resources available without parameters)
+    this.server.setRequestHandler(ListResourcesRequestSchema, async () => {
+      return {
+        resources: listResources(),
+      };
+    });
+
+    // Read a specific resource
+    this.server.setRequestHandler(ReadResourceRequestSchema, async (request) => {
+      const { uri } = request.params;
+
+      const content = readResource(uri);
+      if (!content) {
+        throw new Error(`Resource not found: ${uri}`);
+      }
+
+      return {
+        contents: [content],
+      };
+    });
+  }
+
+  setupPromptHandlers(): void {
+    // List available prompts
+    this.server.setRequestHandler(ListPromptsRequestSchema, async () => {
+      return {
+        prompts: prompts.map((p) => ({
+          name: p.name,
+          description: p.description,
+          arguments: p.arguments?.map((a) => ({
+            name: a.name,
+            description: a.description,
+            required: a.required,
+          })),
+        })),
+      };
+    });
+
+    // Get a specific prompt with arguments
+    this.server.setRequestHandler(GetPromptRequestSchema, async (request) => {
+      const { name, arguments: args } = request.params;
+
+      const result = getPrompt(name, args || {});
+      if (!result) {
+        throw new Error(`Prompt not found: ${name}`);
+      }
+
+      // Return in MCP SDK expected format
+      return {
+        description: result.description,
+        messages: result.messages.map((m) => ({
+          role: m.role,
+          content: m.content,
+        })),
+      };
+    });
+  }
+
+  setupCompletionHandlers(): void {
+    // Handle completion requests for prompts and resources
+    this.server.setRequestHandler(CompleteRequestSchema, async (request) => {
+      const { ref, argument } = request.params;
+
+      const result = complete({ ref, argument });
+
+      return {
+        completion: result,
+      };
+    });
   }
 
   setupTransport(): void {
