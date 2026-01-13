@@ -2,6 +2,7 @@ import { metadataEncode, metadataDecode } from './metadata-encoding.js';
 import { calculateEffectiveLimit, calculateUTF8Bytes } from './calculator.js';
 import { tryFn } from './try-fn.js';
 import { idGenerator } from './id.js';
+import { streamToString } from '../stream/index.js';
 import { PluginStorageError, MetadataLimitError, BehaviorError } from '../errors.js';
 import { DistributedLock, computeBackoff, sleep, isPreconditionFailure, StorageAdapter, LockHandle, AcquireOptions } from './distributed-lock.js';
 import { DistributedSequence } from './distributed-sequence.js';
@@ -85,12 +86,22 @@ export interface PluginClient {
 }
 
 interface GetObjectResponse {
-  Body?: {
-    transformToString(): Promise<string>;
-  };
+  Body?: GetObjectBody;
   Metadata?: Record<string, string>;
   ContentType?: string;
 }
+
+type GetObjectBody =
+  | string
+  | Uint8Array
+  | ArrayBuffer
+  | Buffer
+  | {
+      transformToString?: () => Promise<string>;
+      transformToByteArray?: () => Promise<Uint8Array>;
+      on?: (...args: unknown[]) => void;
+      [Symbol.asyncIterator]?: () => AsyncIterator<Uint8Array | Buffer>;
+    };
 
 interface HeadObjectResponse {
   Metadata?: Record<string, string>;
@@ -286,7 +297,7 @@ export class PluginStorage {
 
     if (response.Body) {
       const [parseOk, parseErr, result] = await tryFn(async () => {
-        const bodyContent = await response.Body!.transformToString();
+        const bodyContent = await this._readBodyAsString(response.Body);
 
         if (bodyContent && bodyContent.trim()) {
           const body = JSON.parse(bodyContent);
@@ -355,6 +366,54 @@ export class PluginStorage {
       parsed[key] = value;
     }
     return parsed;
+  }
+
+  private async _readBodyAsString(body: GetObjectBody | undefined): Promise<string> {
+    if (!body) {
+      return '';
+    }
+
+    const bodyAny = body as {
+      transformToString?: () => Promise<string>;
+      transformToByteArray?: () => Promise<Uint8Array>;
+      on?: (...args: unknown[]) => void;
+      [Symbol.asyncIterator]?: () => AsyncIterator<Uint8Array | Buffer>;
+    };
+
+    if (typeof bodyAny.transformToString === 'function') {
+      return bodyAny.transformToString();
+    }
+
+    if (typeof bodyAny.transformToByteArray === 'function') {
+      const bytes = await bodyAny.transformToByteArray();
+      return Buffer.from(bytes).toString('utf-8');
+    }
+
+    if (typeof body === 'string') {
+      return body;
+    }
+
+    if (body instanceof Uint8Array) {
+      return Buffer.from(body).toString('utf-8');
+    }
+
+    if (body instanceof ArrayBuffer) {
+      return Buffer.from(body).toString('utf-8');
+    }
+
+    if (typeof bodyAny.on === 'function') {
+      return streamToString(bodyAny as any);
+    }
+
+    if (typeof bodyAny[Symbol.asyncIterator] === 'function') {
+      const chunks: Buffer[] = [];
+      for await (const chunk of bodyAny as AsyncIterable<Uint8Array | Buffer>) {
+        chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+      }
+      return Buffer.concat(chunks).toString('utf-8');
+    }
+
+    return String(body);
   }
 
   async list(prefix: string = '', options: PluginStorageListOptions = {}): Promise<string[]> {
@@ -454,7 +513,7 @@ export class PluginStorage {
 
     if (response.Body) {
       const [parseOk, , result] = await tryFn<Record<string, unknown>>(async () => {
-        const bodyContent = await response.Body!.transformToString();
+        const bodyContent = await this._readBodyAsString(response.Body);
         if (bodyContent && bodyContent.trim()) {
           const body = JSON.parse(bodyContent);
           return { ...parsedMetadata, ...body };
@@ -491,7 +550,7 @@ export class PluginStorage {
 
     if (response.Body) {
       const [parseOk, , result] = await tryFn<Record<string, unknown>>(async () => {
-        const bodyContent = await response.Body!.transformToString();
+        const bodyContent = await this._readBodyAsString(response.Body);
         if (bodyContent && bodyContent.trim()) {
           const body = JSON.parse(bodyContent);
           return { ...parsedMetadata, ...body };
@@ -664,7 +723,7 @@ export class PluginStorage {
 
     if (response.Body) {
       const [parseOk, parseErr, result] = await tryFn(async () => {
-        const bodyContent = await response.Body!.transformToString();
+        const bodyContent = await this._readBodyAsString(response.Body);
         if (bodyContent && bodyContent.trim()) {
           const body = JSON.parse(bodyContent);
           return { ...parsedMetadata, ...body };
