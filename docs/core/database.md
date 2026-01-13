@@ -135,6 +135,13 @@ await db.downloadMetadataFile();
 const metadata = db.getMetadata();
 ```
 
+Metadata also stores schema registries used for stable attribute mapping:
+
+- `schemaRegistry` for user attributes
+- `pluginSchemaRegistry` for plugin attributes
+
+These registries prevent attribute order changes from corrupting data when schemas evolve.
+
 ### Plugins
 
 ```javascript
