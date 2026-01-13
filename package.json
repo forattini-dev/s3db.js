@@ -1,6 +1,6 @@
 {
   "name": "s3db.js",
-  "version": "19.1.5",
+  "version": "19.2.0",
   "description": "Use AWS S3, the world's most reliable document storage, as a database with this ORM.",
   "main": "dist/s3db.cjs",
   "module": "dist/s3db.es.js",
@@ -202,67 +202,189 @@
     "ws": "^8.0.0"
   },
   "peerDependenciesMeta": {
-    "@aws-sdk/client-acm": { "optional": true },
-    "@aws-sdk/client-api-gateway": { "optional": true },
-    "@aws-sdk/client-apigatewayv2": { "optional": true },
-    "@aws-sdk/client-backup": { "optional": true },
-    "@aws-sdk/client-cloudfront": { "optional": true },
-    "@aws-sdk/client-cloudtrail": { "optional": true },
-    "@aws-sdk/client-cloudwatch": { "optional": true },
-    "@aws-sdk/client-cloudwatch-logs": { "optional": true },
-    "@aws-sdk/client-cognito-identity-provider": { "optional": true },
-    "@aws-sdk/client-config-service": { "optional": true },
-    "@aws-sdk/client-dynamodb": { "optional": true },
-    "@aws-sdk/client-ec2": { "optional": true },
-    "@aws-sdk/client-ecr": { "optional": true },
-    "@aws-sdk/client-ecs": { "optional": true },
-    "@aws-sdk/client-efs": { "optional": true },
-    "@aws-sdk/client-eks": { "optional": true },
-    "@aws-sdk/client-elastic-load-balancing": { "optional": true },
-    "@aws-sdk/client-elastic-load-balancing-v2": { "optional": true },
-    "@aws-sdk/client-elasticache": { "optional": true },
-    "@aws-sdk/client-eventbridge": { "optional": true },
-    "@aws-sdk/client-iam": { "optional": true },
-    "@aws-sdk/client-kinesis": { "optional": true },
-    "@aws-sdk/client-kms": { "optional": true },
-    "@aws-sdk/client-lambda": { "optional": true },
-    "@aws-sdk/client-rds": { "optional": true },
-    "@aws-sdk/client-route-53": { "optional": true },
-    "@aws-sdk/client-secrets-manager": { "optional": true },
-    "@aws-sdk/client-sfn": { "optional": true },
-    "@aws-sdk/client-sns": { "optional": true },
-    "@aws-sdk/client-sqs": { "optional": true },
-    "@aws-sdk/client-ssm": { "optional": true },
-    "@aws-sdk/client-sts": { "optional": true },
-    "@aws-sdk/client-waf": { "optional": true },
-    "@aws-sdk/client-wafv2": { "optional": true },
-    "@google-cloud/bigquery": { "optional": true },
-    "@hono/node-server": { "optional": true },
-    "@hono/swagger-ui": { "optional": true },
-    "@kubernetes/client-node": { "optional": true },
-    "@libsql/client": { "optional": true },
-    "@planetscale/database": { "optional": true },
-    "@tensorflow/tfjs-node": { "optional": true },
-    "amqplib": { "optional": true },
-    "bcrypt": { "optional": true },
-    "ejs": { "optional": true },
-    "enquirer": { "optional": true },
-    "express": { "optional": true },
-    "ghost-cursor": { "optional": true },
-    "google-auth-library": { "optional": true },
-    "hono": { "optional": true },
-    "ioredis": { "optional": true },
-    "jose": { "optional": true },
-    "node-cron": { "optional": true },
-    "nodemailer": { "optional": true },
-    "pg": { "optional": true },
-    "pino-http": { "optional": true },
-    "pug": { "optional": true },
-    "puppeteer": { "optional": true },
-    "puppeteer-extra": { "optional": true },
-    "puppeteer-extra-plugin-stealth": { "optional": true },
-    "user-agents": { "optional": true },
-    "ws": { "optional": true }
+    "@aws-sdk/client-acm": {
+      "optional": true
+    },
+    "@aws-sdk/client-api-gateway": {
+      "optional": true
+    },
+    "@aws-sdk/client-apigatewayv2": {
+      "optional": true
+    },
+    "@aws-sdk/client-backup": {
+      "optional": true
+    },
+    "@aws-sdk/client-cloudfront": {
+      "optional": true
+    },
+    "@aws-sdk/client-cloudtrail": {
+      "optional": true
+    },
+    "@aws-sdk/client-cloudwatch": {
+      "optional": true
+    },
+    "@aws-sdk/client-cloudwatch-logs": {
+      "optional": true
+    },
+    "@aws-sdk/client-cognito-identity-provider": {
+      "optional": true
+    },
+    "@aws-sdk/client-config-service": {
+      "optional": true
+    },
+    "@aws-sdk/client-dynamodb": {
+      "optional": true
+    },
+    "@aws-sdk/client-ec2": {
+      "optional": true
+    },
+    "@aws-sdk/client-ecr": {
+      "optional": true
+    },
+    "@aws-sdk/client-ecs": {
+      "optional": true
+    },
+    "@aws-sdk/client-efs": {
+      "optional": true
+    },
+    "@aws-sdk/client-eks": {
+      "optional": true
+    },
+    "@aws-sdk/client-elastic-load-balancing": {
+      "optional": true
+    },
+    "@aws-sdk/client-elastic-load-balancing-v2": {
+      "optional": true
+    },
+    "@aws-sdk/client-elasticache": {
+      "optional": true
+    },
+    "@aws-sdk/client-eventbridge": {
+      "optional": true
+    },
+    "@aws-sdk/client-iam": {
+      "optional": true
+    },
+    "@aws-sdk/client-kinesis": {
+      "optional": true
+    },
+    "@aws-sdk/client-kms": {
+      "optional": true
+    },
+    "@aws-sdk/client-lambda": {
+      "optional": true
+    },
+    "@aws-sdk/client-rds": {
+      "optional": true
+    },
+    "@aws-sdk/client-route-53": {
+      "optional": true
+    },
+    "@aws-sdk/client-secrets-manager": {
+      "optional": true
+    },
+    "@aws-sdk/client-sfn": {
+      "optional": true
+    },
+    "@aws-sdk/client-sns": {
+      "optional": true
+    },
+    "@aws-sdk/client-sqs": {
+      "optional": true
+    },
+    "@aws-sdk/client-ssm": {
+      "optional": true
+    },
+    "@aws-sdk/client-sts": {
+      "optional": true
+    },
+    "@aws-sdk/client-waf": {
+      "optional": true
+    },
+    "@aws-sdk/client-wafv2": {
+      "optional": true
+    },
+    "@google-cloud/bigquery": {
+      "optional": true
+    },
+    "@hono/node-server": {
+      "optional": true
+    },
+    "@hono/swagger-ui": {
+      "optional": true
+    },
+    "@kubernetes/client-node": {
+      "optional": true
+    },
+    "@libsql/client": {
+      "optional": true
+    },
+    "@planetscale/database": {
+      "optional": true
+    },
+    "@tensorflow/tfjs-node": {
+      "optional": true
+    },
+    "amqplib": {
+      "optional": true
+    },
+    "bcrypt": {
+      "optional": true
+    },
+    "ejs": {
+      "optional": true
+    },
+    "enquirer": {
+      "optional": true
+    },
+    "express": {
+      "optional": true
+    },
+    "ghost-cursor": {
+      "optional": true
+    },
+    "google-auth-library": {
+      "optional": true
+    },
+    "hono": {
+      "optional": true
+    },
+    "ioredis": {
+      "optional": true
+    },
+    "jose": {
+      "optional": true
+    },
+    "node-cron": {
+      "optional": true
+    },
+    "nodemailer": {
+      "optional": true
+    },
+    "pg": {
+      "optional": true
+    },
+    "pino-http": {
+      "optional": true
+    },
+    "pug": {
+      "optional": true
+    },
+    "puppeteer": {
+      "optional": true
+    },
+    "puppeteer-extra": {
+      "optional": true
+    },
+    "puppeteer-extra-plugin-stealth": {
+      "optional": true
+    },
+    "user-agents": {
+      "optional": true
+    },
+    "ws": {
+      "optional": true
+    }
   },
   "devDependencies": {
     "@babel/core": "^7.28.5",
