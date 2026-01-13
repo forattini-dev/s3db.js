@@ -8,6 +8,7 @@ import type { Logger } from '../concerns/logger.js';
 import type { ProcessManager } from '../concerns/process-manager.js';
 import type { CronManager } from '../concerns/cron-manager.js';
 import type Resource from '../resource.class.js';
+import type { SchemaRegistry, PluginSchemaRegistry } from '../schema.class.js';
 
 export type StringRecord<T = unknown> = CommonStringRecord<T>;
 
@@ -73,6 +74,10 @@ export interface ResourceMetadata {
   partitions: PartitionsConfig;
   createdBy?: string;
   versions: StringRecord<VersionData>;
+  /** Persistent attribute index mapping - prevents data corruption on schema changes */
+  schemaRegistry?: SchemaRegistry;
+  /** Persistent plugin attribute index mapping - per plugin namespace (supports both legacy numeric and new string-based formats) */
+  pluginSchemaRegistry?: StringRecord<PluginSchemaRegistry | SchemaRegistry>;
 }
 
 export interface VersionData {
