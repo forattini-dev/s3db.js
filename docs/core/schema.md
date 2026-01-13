@@ -18,6 +18,7 @@
 - [Validation Engine](#validation-engine-fastest-validator)
 - [Standard Types](#standard-types)
 - [Nested Objects](#nested-objects)
+- [Schema Registry (Stable Attribute Mapping)](#schema-registry-stable-attribute-mapping)
 - [Arrays](#arrays)
 - [Hooks & Transformations](#hooks--transformations)
 - [Advanced Patterns](#advanced-patterns)
@@ -1188,6 +1189,47 @@ await users.insert({
 ```
 
 ---
+
+## Schema Registry (Stable Attribute Mapping)
+
+S3DB stores compact attribute keys in S3 metadata. The schema registry preserves the mapping between attribute paths and storage keys so adding or removing fields does not reorder existing data.
+
+### What is stored
+
+- `schemaRegistry`: numeric index mapping for user attributes (stored as base62 keys in data)
+- `pluginSchemaRegistry`: plugin attribute key mapping (hash-style keys like `p1a2`), stored per plugin
+
+### Behavior
+
+- Existing attributes keep their indices or keys
+- New attributes get the next available index
+- Removed attributes are "burned" and never reused
+- Legacy `map` values are treated as the source of truth and the registry fills in new keys
+
+### Example (s3db.json)
+
+```json
+{
+  "schemaRegistry": {
+    "nextIndex": 3,
+    "mapping": { "a": 0, "c": 1 },
+    "burned": [
+      { "index": 2, "attribute": "b", "burnedAt": "2026-01-01T00:00:00Z", "reason": "removed" }
+    ]
+  },
+  "pluginSchemaRegistry": {
+    "audit": {
+      "mapping": { "_createdAt": "pau0" },
+      "burned": []
+    }
+  }
+}
+```
+
+### Notes
+
+- Registries are persisted automatically in `s3db.json`.
+- Legacy numeric plugin registries are converted to the legacy key format `p{prefix}{base62(index)}` to avoid data corruption.
 
 ## Arrays
 
