@@ -55,7 +55,7 @@ const coreDocsContent = {
     {
       name: 'Schema & Validation',
       path: 'core/schema.md',
-      summary: 'fastest-validator based schema with 30+ field types'
+      summary: 'fastest-validator based schema with 30+ field types and schema registry for stable attribute mapping'
     },
     {
       name: 'Behaviors',

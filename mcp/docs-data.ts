@@ -620,6 +620,12 @@ export const guides: GuideDoc[] = [
     sections: ['Installation', 'Connection', 'Creating Resources', 'CRUD Operations', 'Next Steps'],
   },
   {
+    topic: 'schema-registry',
+    title: 'Schema Registry & Attribute Mapping',
+    description: 'Stable attribute mapping stored in s3db.json to prevent data corruption when schemas change',
+    sections: ['Stable Mapping', 'Burned Indices', 'Plugin Registry Keys', 'Legacy Map Migration'],
+  },
+  {
     topic: 'performance-tuning',
     title: 'Performance Tuning Guide',
     description: 'Optimize s3db.js for your workload with partitions, caching, and batch operations',
