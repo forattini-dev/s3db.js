@@ -68,14 +68,6 @@ export type {
   LatencyResult
 } from './latency-stage.js';
 
-export { MassDNSStage } from './massdns-stage.js';
-export type {
-  MassDNSFeatureConfig,
-  ResolvedSubdomain,
-  MassDNSData,
-  MassDNSResult
-} from './massdns-stage.js';
-
 export { OsintStage } from './osint-stage.js';
 export type {
   OsintFeatureConfig,

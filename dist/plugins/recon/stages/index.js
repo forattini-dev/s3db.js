@@ -12,7 +12,6 @@ export { FingerprintStage } from './fingerprint-stage.js';
 export { GoogleDorksStage } from './google-dorks-stage.js';
 export { HttpStage } from './http-stage.js';
 export { LatencyStage } from './latency-stage.js';
-export { MassDNSStage } from './massdns-stage.js';
 export { OsintStage } from './osint-stage.js';
 export { PortsStage } from './ports-stage.js';
 export { ScreenshotStage } from './screenshot-stage.js';

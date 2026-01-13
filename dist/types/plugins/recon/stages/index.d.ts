@@ -20,8 +20,6 @@ export { HttpStage } from './http-stage.js';
 export type { HttpFeatureConfig, HttpData, HttpResult } from './http-stage.js';
 export { LatencyStage } from './latency-stage.js';
 export type { LatencyFeatureConfig, PingMetrics, PingResult, TracerouteResult, LatencyResult } from './latency-stage.js';
-export { MassDNSStage } from './massdns-stage.js';
-export type { MassDNSFeatureConfig, ResolvedSubdomain, MassDNSData, MassDNSResult } from './massdns-stage.js';
 export { OsintStage } from './osint-stage.js';
 export type { OsintFeatureConfig, EmailsResult, Profile, UsernamesResult, UrlsResult, SocialPlatform, SocialResult, OsintCategories, OsintResult } from './osint-stage.js';
 export { PortsStage } from './ports-stage.js';

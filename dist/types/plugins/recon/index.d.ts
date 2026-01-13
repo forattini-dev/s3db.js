@@ -30,7 +30,6 @@ import { WhoisStage } from './stages/whois-stage.js';
 import { SecretsStage } from './stages/secrets-stage.js';
 import { ASNStage } from './stages/asn-stage.js';
 import { DNSDumpsterStage } from './stages/dnsdumpster-stage.js';
-import { MassDNSStage } from './stages/massdns-stage.js';
 import { GoogleDorksStage } from './stages/google-dorks-stage.js';
 import { CommandRunner } from './concerns/command-runner.js';
 import { ProcessManager } from './concerns/process-manager.js';
@@ -59,7 +58,6 @@ export interface ScanFeatures {
     secrets?: boolean | Record<string, any>;
     asn?: boolean | Record<string, any>;
     dnsdumpster?: boolean | Record<string, any>;
-    massdns?: boolean | Record<string, any>;
     googleDorks?: boolean | Record<string, any>;
 }
 export interface ReconConfig {
@@ -136,7 +134,6 @@ interface Stages {
     secrets: SecretsStage;
     asn: ASNStage;
     dnsdumpster: DNSDumpsterStage;
-    massdns: MassDNSStage;
     googleDorks: GoogleDorksStage;
 }
 export declare class ReconPlugin extends Plugin {

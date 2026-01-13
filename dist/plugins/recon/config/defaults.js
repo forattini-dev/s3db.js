@@ -64,12 +64,6 @@ export const DEFAULT_FEATURES = {
     },
     dnsdumpster: {
         enabled: true
-    },
-    massdns: {
-        enabled: false,
-        wordlist: null,
-        rate: 1000,
-        maxSubdomains: 1000
     }
 };
 export const BEHAVIOR_PRESETS = {
@@ -92,7 +86,6 @@ export const BEHAVIOR_PRESETS = {
             secrets: { enabled: false },
             asn: { enabled: true },
             dnsdumpster: { enabled: true },
-            massdns: { enabled: false, wordlist: null, rate: 1000, maxSubdomains: 1000 }
         },
         concurrency: 2,
         timeout: { default: 30000 },
@@ -117,7 +110,6 @@ export const BEHAVIOR_PRESETS = {
             secrets: { enabled: false },
             asn: { enabled: true },
             dnsdumpster: { enabled: true },
-            massdns: { enabled: false, wordlist: null, rate: 1000, maxSubdomains: 1000 }
         },
         concurrency: 1,
         timeout: { default: 60000 },
@@ -142,7 +134,6 @@ export const BEHAVIOR_PRESETS = {
             secrets: { enabled: false },
             asn: { enabled: true },
             dnsdumpster: { enabled: true },
-            massdns: { enabled: true, wordlist: null, rate: 5000, maxSubdomains: 5000 }
         },
         concurrency: 8,
         timeout: { default: 120000 },

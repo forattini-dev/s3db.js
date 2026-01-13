@@ -74,13 +74,6 @@ export interface DnsdumpsterFeatures {
   enabled: boolean;
 }
 
-export interface MassdnsFeatures {
-  enabled: boolean;
-  wordlist?: string | null;
-  rate?: number;
-  maxSubdomains?: number;
-}
-
 export interface ReconFeatures {
   dns: boolean;
   certificate: boolean;
@@ -99,7 +92,6 @@ export interface ReconFeatures {
   secrets: SecretsFeatures;
   asn: AsnFeatures;
   dnsdumpster: DnsdumpsterFeatures;
-  massdns: MassdnsFeatures;
 }
 
 export interface RateLimitConfig {
@@ -227,12 +219,6 @@ export const DEFAULT_FEATURES: ReconFeatures = {
   },
   dnsdumpster: {
     enabled: true
-  },
-  massdns: {
-    enabled: false,
-    wordlist: null,
-    rate: 1000,
-    maxSubdomains: 1000
   }
 };
 
@@ -256,7 +242,6 @@ export const BEHAVIOR_PRESETS: Record<string, BehaviorPreset> = {
       secrets: { enabled: false },
       asn: { enabled: true },
       dnsdumpster: { enabled: true },
-      massdns: { enabled: false, wordlist: null, rate: 1000, maxSubdomains: 1000 }
     },
     concurrency: 2,
     timeout: { default: 30000 },
@@ -281,7 +266,6 @@ export const BEHAVIOR_PRESETS: Record<string, BehaviorPreset> = {
       secrets: { enabled: false },
       asn: { enabled: true },
       dnsdumpster: { enabled: true },
-      massdns: { enabled: false, wordlist: null, rate: 1000, maxSubdomains: 1000 }
     },
     concurrency: 1,
     timeout: { default: 60000 },
@@ -306,7 +290,6 @@ export const BEHAVIOR_PRESETS: Record<string, BehaviorPreset> = {
       secrets: { enabled: false },
       asn: { enabled: true },
       dnsdumpster: { enabled: true },
-      massdns: { enabled: true, wordlist: null, rate: 5000, maxSubdomains: 5000 }
     },
     concurrency: 8,
     timeout: { default: 120000 },

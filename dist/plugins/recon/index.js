@@ -32,7 +32,6 @@ import { WhoisStage } from './stages/whois-stage.js';
 import { SecretsStage } from './stages/secrets-stage.js';
 import { ASNStage } from './stages/asn-stage.js';
 import { DNSDumpsterStage } from './stages/dnsdumpster-stage.js';
-import { MassDNSStage } from './stages/massdns-stage.js';
 import { GoogleDorksStage } from './stages/google-dorks-stage.js';
 // Concerns
 import { CommandRunner } from './concerns/command-runner.js';
@@ -136,7 +135,6 @@ export class ReconPlugin extends Plugin {
             secrets: new SecretsStage(this),
             asn: new ASNStage(this),
             dnsdumpster: new DNSDumpsterStage(this),
-            massdns: new MassDNSStage(this),
             googleDorks: new GoogleDorksStage(this)
         };
     }
@@ -238,9 +236,6 @@ export class ReconPlugin extends Plugin {
         }
         if (scanConfig.dnsdumpster !== false) {
             results.dnsdumpster = await this.stages.dnsdumpster.execute(normalizedTarget, scanConfig.dnsdumpster);
-        }
-        if (scanConfig.massdns !== false) {
-            results.massdns = await this.stages.massdns.execute(normalizedTarget, scanConfig.massdns);
         }
         if (scanConfig.googleDorks !== false) {
             results.googleDorks = await this.stages.googleDorks.execute(normalizedTarget, scanConfig.googleDorks);

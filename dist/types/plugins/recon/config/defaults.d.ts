@@ -60,12 +60,6 @@ export interface AsnFeatures {
 export interface DnsdumpsterFeatures {
     enabled: boolean;
 }
-export interface MassdnsFeatures {
-    enabled: boolean;
-    wordlist?: string | null;
-    rate?: number;
-    maxSubdomains?: number;
-}
 export interface ReconFeatures {
     dns: boolean;
     certificate: boolean;
@@ -84,7 +78,6 @@ export interface ReconFeatures {
     secrets: SecretsFeatures;
     asn: AsnFeatures;
     dnsdumpster: DnsdumpsterFeatures;
-    massdns: MassdnsFeatures;
 }
 export interface RateLimitConfig {
     enabled: boolean;
