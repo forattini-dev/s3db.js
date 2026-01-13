@@ -29,6 +29,7 @@ import { validateResourceConfig } from './core/resource-config-validator.js';
 
 import type { Client } from './clients/types.js';
 import type { BehaviorType } from './behaviors/types.js';
+import type { SchemaRegistry, PluginSchemaRegistry } from './schema.class.js';
 import type { LogLevel, StringRecord, EventHandler, Disposable } from './types/common.types.js';
 import type {
   HookFunction,
@@ -112,6 +113,10 @@ export interface ResourceConfig {
   disableResourceEvents?: boolean;
   api?: ResourceApiConfig;
   description?: string;
+  /** Schema registry for stable attribute indices - loaded from s3db.json */
+  schemaRegistry?: import('./schema.class.js').SchemaRegistry;
+  /** Plugin schema registries for stable plugin attribute indices */
+  pluginSchemaRegistry?: Record<string, import('./schema.class.js').PluginSchemaRegistry | import('./schema.class.js').SchemaRegistry>;
 }
 
 export interface ResourceApiConfig {
@@ -296,6 +301,8 @@ export class Resource extends AsyncEventEmitter implements Disposable {
   public eventsDisabled: boolean;
   public database?: Database;
   public map?: StringRecord<string>;
+  private _schemaRegistry?: SchemaRegistry;
+  private _pluginSchemaRegistry?: Record<string, PluginSchemaRegistry | SchemaRegistry>;
 
   private _instanceId: string;
   private _idGenerator: ResourceIdGenerator;
@@ -351,7 +358,9 @@ export class Resource extends AsyncEventEmitter implements Disposable {
       asyncPartitions = true,
       strictPartitions = false,
       createdBy = 'user',
-      guard
+      guard,
+      schemaRegistry,
+      pluginSchemaRegistry
     } = config;
 
     this.name = name;
@@ -422,6 +431,9 @@ export class Resource extends AsyncEventEmitter implements Disposable {
     // Fix: parse version to number for Schema
     const parsedVersion = parseInt(version.replace(/v/i, ''), 10) || 1;
 
+    this._schemaRegistry = schemaRegistry;
+    this._pluginSchemaRegistry = pluginSchemaRegistry;
+
     this.schema = new Schema({
       name,
       attributes,
@@ -432,8 +444,12 @@ export class Resource extends AsyncEventEmitter implements Disposable {
         allNestedObjectsOptional,
         autoEncrypt,
         autoDecrypt
-      }
+      },
+      schemaRegistry: this._schemaRegistry,
+      pluginSchemaRegistry: this._pluginSchemaRegistry
     });
+    this._schemaRegistry = this.schema.getSchemaRegistry() || this._schemaRegistry;
+    this._pluginSchemaRegistry = this.schema.getPluginSchemaRegistry() || this._pluginSchemaRegistry;
 
     const { database: _db, observers: _obs, client: _cli, ...cloneableConfig } = config;
     this.$schema = { ...cloneableConfig } as Readonly<Omit<ResourceConfig, 'database' | 'observers' | 'client'>>;
@@ -625,8 +641,12 @@ export class Resource extends AsyncEventEmitter implements Disposable {
         autoDecrypt: this.config.autoDecrypt,
         allNestedObjectsOptional: this.config.allNestedObjectsOptional
       },
-      map: map || this.map
+      map: map || this.map,
+      schemaRegistry: this._schemaRegistry,
+      pluginSchemaRegistry: this._pluginSchemaRegistry
     });
+    this._schemaRegistry = this.schema.getSchemaRegistry() || this._schemaRegistry;
+    this._pluginSchemaRegistry = this.schema.getPluginSchemaRegistry() || this._pluginSchemaRegistry;
 
     if (this.validator) {
       this.validator.updateSchema(this.attributes);
