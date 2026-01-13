@@ -50,6 +50,8 @@ export class Resource extends AsyncEventEmitter {
     eventsDisabled;
     database;
     map;
+    _schemaRegistry;
+    _pluginSchemaRegistry;
     _instanceId;
     _idGenerator;
     _hooksModule;
@@ -72,7 +74,7 @@ export class Resource extends AsyncEventEmitter {
                 validation: validation.errors,
             });
         }
-        const { name, client, version = '1', attributes = {}, behavior = DEFAULT_BEHAVIOR, passphrase = 'secret', bcryptRounds = 10, observers = [], cache = false, autoEncrypt = true, autoDecrypt = true, timestamps = false, partitions = {}, paranoid = true, allNestedObjectsOptional = true, hooks = {}, idGenerator: customIdGenerator, idSize = 22, versioningEnabled = false, strictValidation = true, events = {}, asyncEvents = true, asyncPartitions = true, strictPartitions = false, createdBy = 'user', guard } = config;
+        const { name, client, version = '1', attributes = {}, behavior = DEFAULT_BEHAVIOR, passphrase = 'secret', bcryptRounds = 10, observers = [], cache = false, autoEncrypt = true, autoDecrypt = true, timestamps = false, partitions = {}, paranoid = true, allNestedObjectsOptional = true, hooks = {}, idGenerator: customIdGenerator, idSize = 22, versioningEnabled = false, strictValidation = true, events = {}, asyncEvents = true, asyncPartitions = true, strictPartitions = false, createdBy = 'user', guard, schemaRegistry, pluginSchemaRegistry } = config;
         this.name = name;
         this.client = client;
         this.version = version;
@@ -133,6 +135,8 @@ export class Resource extends AsyncEventEmitter {
         });
         // Fix: parse version to number for Schema
         const parsedVersion = parseInt(version.replace(/v/i, ''), 10) || 1;
+        this._schemaRegistry = schemaRegistry;
+        this._pluginSchemaRegistry = pluginSchemaRegistry;
         this.schema = new Schema({
             name,
             attributes,
@@ -143,8 +147,12 @@ export class Resource extends AsyncEventEmitter {
                 allNestedObjectsOptional,
                 autoEncrypt,
                 autoDecrypt
-            }
+            },
+            schemaRegistry: this._schemaRegistry,
+            pluginSchemaRegistry: this._pluginSchemaRegistry
         });
+        this._schemaRegistry = this.schema.getSchemaRegistry() || this._schemaRegistry;
+        this._pluginSchemaRegistry = this.schema.getPluginSchemaRegistry() || this._pluginSchemaRegistry;
         const { database: _db, observers: _obs, client: _cli, ...cloneableConfig } = config;
         this.$schema = { ...cloneableConfig };
         this.$schema._createdAt = Date.now();
@@ -296,8 +304,12 @@ export class Resource extends AsyncEventEmitter {
                 autoDecrypt: this.config.autoDecrypt,
                 allNestedObjectsOptional: this.config.allNestedObjectsOptional
             },
-            map: map || this.map
+            map: map || this.map,
+            schemaRegistry: this._schemaRegistry,
+            pluginSchemaRegistry: this._pluginSchemaRegistry
         });
+        this._schemaRegistry = this.schema.getSchemaRegistry() || this._schemaRegistry;
+        this._pluginSchemaRegistry = this.schema.getPluginSchemaRegistry() || this._pluginSchemaRegistry;
         if (this.validator) {
             this.validator.updateSchema(this.attributes);
         }

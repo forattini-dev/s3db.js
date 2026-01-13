@@ -44,6 +44,10 @@ export interface SchemaConstructorArgs {
     options?: SchemaOptions;
     _pluginAttributeMetadata?: PluginAttributeMetadata;
     _pluginAttributes?: PluginAttributes;
+    /** Existing schema registry from s3db.json - if provided, indices are preserved */
+    schemaRegistry?: SchemaRegistry;
+    /** Existing plugin schema registry from s3db.json (accepts both legacy numeric and new string-key formats) */
+    pluginSchemaRegistry?: Record<string, PluginSchemaRegistry | SchemaRegistry>;
 }
 export interface SchemaExport {
     version: number;
@@ -63,6 +67,40 @@ export interface ActionContext {
     decimals?: number;
     bitCount?: number | null;
     [key: string]: unknown;
+}
+/**
+ * Schema Registry - Persistent attribute index mapping (Protocol Buffers style).
+ * Prevents data corruption when adding/removing attributes by assigning
+ * permanent indices that never change once assigned.
+ */
+export interface SchemaRegistry {
+    /** Next available index for new attributes */
+    nextIndex: number;
+    /** Permanent mapping of attribute path to numeric index */
+    mapping: Record<string, number>;
+    /** Indices that were used but attribute was removed - never reused */
+    burned: Array<{
+        index: number;
+        attribute: string;
+        burnedAt: string;
+        reason?: string;
+    }>;
+}
+/**
+ * Plugin Schema Registry - Stores actual key strings for plugin attributes.
+ * Unlike user attributes (which use numeric indices → base62), plugin attributes
+ * use SHA256 hash-based keys that must be preserved exactly.
+ */
+export interface PluginSchemaRegistry {
+    /** Permanent mapping of attribute name to full key string (e.g., "_createdAt" → "p1a2") */
+    mapping: Record<string, string>;
+    /** Keys that were used but attribute was removed - never reused */
+    burned: Array<{
+        key: string;
+        attribute: string;
+        burnedAt: string;
+        reason?: string;
+    }>;
 }
 type ValidatorFunction = (data: Record<string, unknown>) => Promise<true | Record<string, unknown>[]> | true | Record<string, unknown>[];
 export declare const SchemaActions: {
@@ -123,8 +161,36 @@ export declare class Schema {
     reversedMap: AttributeMapping;
     pluginMap: AttributeMapping;
     reversedPluginMap: AttributeMapping;
+    /** Updated schema registry - should be persisted to s3db.json */
+    _schemaRegistry?: SchemaRegistry;
+    /** Updated plugin schema registries - should be persisted to s3db.json */
+    _pluginSchemaRegistry?: Record<string, PluginSchemaRegistry>;
+    /** Whether the registry was modified and needs persistence */
+    _registryChanged: boolean;
     constructor(args: SchemaConstructorArgs);
     defaultOptions(): SchemaOptions;
+    private _buildRegistryFromMap;
+    /**
+     * Generate initial schema registry from current mapping.
+     * Used for migrating existing databases that don't have a registry yet.
+     * This "freezes" the current mapping as the source of truth.
+     */
+    generateInitialRegistry(): {
+        schemaRegistry: SchemaRegistry;
+        pluginSchemaRegistry: Record<string, PluginSchemaRegistry>;
+    };
+    /**
+     * Check if the schema registry needs to be persisted.
+     */
+    needsRegistryPersistence(): boolean;
+    /**
+     * Get the updated schema registry for persistence.
+     */
+    getSchemaRegistry(): SchemaRegistry | undefined;
+    /**
+     * Get the updated plugin schema registries for persistence.
+     */
+    getPluginSchemaRegistry(): Record<string, PluginSchemaRegistry> | undefined;
     addHook(hook: keyof SchemaHooks, attribute: string, action: string, params?: Record<string, unknown>): void;
     extractObjectKeys(obj: Record<string, unknown>, prefix?: string): string[];
     _generateHooksFromOriginalAttributes(attributes: Record<string, unknown>, prefix?: string): void;

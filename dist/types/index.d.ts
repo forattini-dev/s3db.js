@@ -2,7 +2,7 @@ export { Database as S3db } from './database.class.js';
 export { Database } from './database.class.js';
 export { S3Client, S3Client as Client } from './clients/s3-client.class.js';
 export { Resource } from './resource.class.js';
-export { Schema } from './schema.class.js';
+export { Schema, type SchemaRegistry } from './schema.class.js';
 export { Validator } from './validator.class.js';
 export { ConnectionString } from './connection-string.class.js';
 export * from './clients/index.js';

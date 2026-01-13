@@ -48,6 +48,10 @@ export interface ResourceConfig {
     disableResourceEvents?: boolean;
     api?: ResourceApiConfig;
     description?: string;
+    /** Schema registry for stable attribute indices - loaded from s3db.json */
+    schemaRegistry?: import('./schema.class.js').SchemaRegistry;
+    /** Plugin schema registries for stable plugin attribute indices */
+    pluginSchemaRegistry?: Record<string, import('./schema.class.js').PluginSchemaRegistry | import('./schema.class.js').SchemaRegistry>;
 }
 export interface ResourceApiConfig {
     enabled?: boolean;
@@ -210,6 +214,8 @@ export declare class Resource extends AsyncEventEmitter implements Disposable {
     eventsDisabled: boolean;
     database?: Database;
     map?: StringRecord<string>;
+    private _schemaRegistry?;
+    private _pluginSchemaRegistry?;
     private _instanceId;
     private _idGenerator;
     private _hooksModule;

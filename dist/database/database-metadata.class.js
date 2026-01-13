@@ -1,13 +1,34 @@
 import { createHash } from 'crypto';
 import jsonStableStringify from 'json-stable-stringify';
+import { encode as toBase62 } from '../concerns/base62.js';
+import { PluginStorage } from '../concerns/plugin-storage.js';
+import { S3Mutex } from '../plugins/concerns/s3-mutex.class.js';
+import { streamToString } from '../stream/index.js';
+import tryFn from '../concerns/try-fn.js';
 export class DatabaseMetadata {
     database;
     _metadataUploadPending;
     _metadataUploadDebounce;
+    _pluginStorage;
+    _mutex;
     constructor(database) {
         this.database = database;
         this._metadataUploadPending = false;
         this._metadataUploadDebounce = null;
+        this._pluginStorage = null;
+        this._mutex = null;
+    }
+    _getPluginStorage() {
+        if (!this._pluginStorage) {
+            this._pluginStorage = new PluginStorage(this.database.client, 's3db-core');
+        }
+        return this._pluginStorage;
+    }
+    _getMutex() {
+        if (!this._mutex) {
+            this._mutex = new S3Mutex(this._getPluginStorage(), 'metadata');
+        }
+        return this._mutex;
     }
     get uploadPending() {
         return this._metadataUploadPending;
@@ -87,39 +108,137 @@ export class DatabaseMetadata {
         }
         return changes;
     }
-    scheduleMetadataUpload() {
-        if (!this.database.deferMetadataWrites) {
-            return this.uploadMetadataFile();
+    _sleep(ms) {
+        return new Promise(resolve => setTimeout(resolve, ms));
+    }
+    async _readFreshMetadata() {
+        const [ok, , response] = await tryFn(async () => {
+            const request = await this.database.client.getObject('s3db.json');
+            return streamToString(request?.Body);
+        });
+        if (!ok || !response) {
+            return null;
         }
-        if (this._metadataUploadDebounce) {
-            clearTimeout(this._metadataUploadDebounce);
+        try {
+            return JSON.parse(response);
         }
-        this._metadataUploadPending = true;
-        this._metadataUploadDebounce = setTimeout(() => {
-            if (this._metadataUploadPending) {
-                this.uploadMetadataFile()
-                    .then(() => {
-                    this._metadataUploadPending = false;
-                })
-                    .catch(err => {
-                    this.database.logger.error({ error: err.message }, 'metadata upload failed');
-                    this._metadataUploadPending = false;
-                });
+        catch {
+            return null;
+        }
+    }
+    _mergeSchemaRegistry(fresh, local) {
+        if (!fresh && !local)
+            return undefined;
+        if (!fresh)
+            return local;
+        if (!local)
+            return fresh;
+        const mergedNextIndex = Math.max(fresh.nextIndex, local.nextIndex);
+        const mergedMapping = { ...fresh.mapping };
+        for (const [attr, index] of Object.entries(local.mapping)) {
+            const existingIndex = mergedMapping[attr];
+            if (existingIndex === undefined) {
+                mergedMapping[attr] = index;
             }
-        }, this.database.metadataWriteDelay);
-        return Promise.resolve();
-    }
-    async flushMetadata() {
-        if (this._metadataUploadDebounce) {
-            clearTimeout(this._metadataUploadDebounce);
-            this._metadataUploadDebounce = null;
+            else if (existingIndex !== index) {
+                mergedMapping[attr] = Math.max(existingIndex, index);
+            }
         }
-        if (this._metadataUploadPending) {
-            await this.uploadMetadataFile();
-            this._metadataUploadPending = false;
+        const burnedByIndex = new Map();
+        for (const entry of fresh.burned) {
+            burnedByIndex.set(entry.index, entry);
         }
+        for (const entry of local.burned) {
+            if (!burnedByIndex.has(entry.index)) {
+                burnedByIndex.set(entry.index, entry);
+            }
+        }
+        return {
+            nextIndex: mergedNextIndex,
+            mapping: mergedMapping,
+            burned: Array.from(burnedByIndex.values())
+        };
     }
-    async uploadMetadataFile() {
+    _mergePluginSchemaRegistry(fresh, local) {
+        if (!fresh && !local)
+            return undefined;
+        if (!fresh)
+            return this._convertToPluginRegistries(local);
+        if (!local)
+            return this._convertToPluginRegistries(fresh);
+        const merged = {};
+        const allPlugins = new Set([...Object.keys(fresh), ...Object.keys(local)]);
+        for (const pluginName of allPlugins) {
+            const freshReg = fresh[pluginName];
+            const localReg = local[pluginName];
+            if (!freshReg && localReg) {
+                merged[pluginName] = this._toPluginRegistry(localReg, pluginName);
+            }
+            else if (freshReg && !localReg) {
+                merged[pluginName] = this._toPluginRegistry(freshReg, pluginName);
+            }
+            else if (freshReg && localReg) {
+                merged[pluginName] = this._mergeSinglePluginRegistry(pluginName, freshReg, localReg);
+            }
+        }
+        return merged;
+    }
+    _convertToPluginRegistries(registries) {
+        if (!registries)
+            return undefined;
+        const result = {};
+        for (const [name, reg] of Object.entries(registries)) {
+            result[name] = this._toPluginRegistry(reg, name);
+        }
+        return result;
+    }
+    _toPluginRegistry(registry, pluginName) {
+        if (!('nextIndex' in registry)) {
+            return registry;
+        }
+        const numericReg = registry;
+        const result = { mapping: {}, burned: [] };
+        for (const [attr, index] of Object.entries(numericReg.mapping)) {
+            result.mapping[attr] = this._legacyPluginKey(pluginName, index);
+        }
+        for (const burned of numericReg.burned) {
+            result.burned.push({
+                key: this._legacyPluginKey(pluginName, burned.index),
+                attribute: burned.attribute,
+                burnedAt: burned.burnedAt,
+                reason: burned.reason
+            });
+        }
+        return result;
+    }
+    _mergeSinglePluginRegistry(pluginName, fresh, local) {
+        const freshPlugin = this._toPluginRegistry(fresh, pluginName);
+        const localPlugin = this._toPluginRegistry(local, pluginName);
+        const mergedMapping = { ...freshPlugin.mapping };
+        for (const [attr, key] of Object.entries(localPlugin.mapping)) {
+            if (!(attr in mergedMapping)) {
+                mergedMapping[attr] = key;
+            }
+        }
+        const burnedByKey = new Map();
+        for (const entry of freshPlugin.burned) {
+            burnedByKey.set(entry.key, entry);
+        }
+        for (const entry of localPlugin.burned) {
+            if (!burnedByKey.has(entry.key)) {
+                burnedByKey.set(entry.key, entry);
+            }
+        }
+        return {
+            mapping: mergedMapping,
+            burned: Array.from(burnedByKey.values())
+        };
+    }
+    _legacyPluginKey(pluginName, index) {
+        const prefix = pluginName.substring(0, 2);
+        return `p${prefix}${toBase62(index)}`;
+    }
+    _buildLocalMetadata() {
         const metadata = {
             version: this.database.version,
             s3dbVersion: this.database.s3dbVersion,
@@ -163,6 +282,22 @@ export class DatabaseMetadata {
                 idGenerator: idGeneratorValue,
                 createdAt: isNewVersion ? new Date().toISOString() : existingVersionData?.createdAt
             };
+            const schema = resource.schema;
+            let schemaRegistry = schema?.getSchemaRegistry?.();
+            let pluginSchemaRegistry = schema?.getPluginSchemaRegistry?.();
+            if (!schemaRegistry && existingResource?.schemaRegistry) {
+                schemaRegistry = existingResource.schemaRegistry;
+            }
+            if (!pluginSchemaRegistry && existingResource?.pluginSchemaRegistry) {
+                pluginSchemaRegistry = existingResource.pluginSchemaRegistry;
+            }
+            if (!schemaRegistry && schema) {
+                const initial = schema.generateInitialRegistry?.();
+                if (initial) {
+                    schemaRegistry = initial.schemaRegistry;
+                    pluginSchemaRegistry = initial.pluginSchemaRegistry;
+                }
+            }
             metadata.resources[name] = {
                 currentVersion: version,
                 partitions: resource.config.partitions || {},
@@ -170,20 +305,105 @@ export class DatabaseMetadata {
                 versions: {
                     ...existingResource?.versions,
                     [version]: newVersionData
-                }
+                },
+                schemaRegistry,
+                pluginSchemaRegistry
             };
             if (resource.version !== version) {
                 resource.version = version;
                 resource.emit('versionUpdated', { oldVersion: currentVersion, newVersion: version });
             }
         });
-        await this.database.client.putObject({
-            key: 's3db.json',
-            body: JSON.stringify(metadata, null, 2),
-            contentType: 'application/json'
-        });
-        this.database.savedMetadata = metadata;
-        this.database.emit('db:metadata-uploaded', metadata);
+        return metadata;
+    }
+    _mergeMetadata(fresh, local) {
+        const merged = {
+            version: local.version,
+            s3dbVersion: local.s3dbVersion,
+            lastUpdated: local.lastUpdated,
+            resources: { ...fresh.resources }
+        };
+        for (const [name, localResource] of Object.entries(local.resources)) {
+            const freshResource = fresh.resources[name];
+            if (!freshResource) {
+                merged.resources[name] = localResource;
+                continue;
+            }
+            merged.resources[name] = {
+                ...localResource,
+                schemaRegistry: this._mergeSchemaRegistry(freshResource.schemaRegistry, localResource.schemaRegistry),
+                pluginSchemaRegistry: this._mergePluginSchemaRegistry(freshResource.pluginSchemaRegistry, localResource.pluginSchemaRegistry)
+            };
+        }
+        return merged;
+    }
+    scheduleMetadataUpload() {
+        if (!this.database.deferMetadataWrites) {
+            return this.uploadMetadataFile();
+        }
+        if (this._metadataUploadDebounce) {
+            clearTimeout(this._metadataUploadDebounce);
+        }
+        this._metadataUploadPending = true;
+        this._metadataUploadDebounce = setTimeout(() => {
+            if (this._metadataUploadPending) {
+                this.uploadMetadataFile()
+                    .then(() => {
+                    this._metadataUploadPending = false;
+                })
+                    .catch(err => {
+                    this.database.logger.error({ error: err.message }, 'metadata upload failed');
+                    this._metadataUploadPending = false;
+                });
+            }
+        }, this.database.metadataWriteDelay);
+        return Promise.resolve();
+    }
+    async flushMetadata() {
+        if (this._metadataUploadDebounce) {
+            clearTimeout(this._metadataUploadDebounce);
+            this._metadataUploadDebounce = null;
+        }
+        if (this._metadataUploadPending) {
+            await this.uploadMetadataFile();
+            this._metadataUploadPending = false;
+        }
+    }
+    async uploadMetadataFile() {
+        const mutex = this._getMutex();
+        const maxRetries = 3;
+        const lockTtl = 30000;
+        let attempt = 0;
+        while (attempt < maxRetries) {
+            const lock = await mutex.tryLock('s3db-metadata', lockTtl);
+            if (!lock.acquired) {
+                attempt++;
+                this.database.logger.debug({ attempt, maxRetries, error: lock.error?.message }, 'failed to acquire metadata lock, retrying');
+                if (attempt >= maxRetries) {
+                    throw new Error(`Failed to acquire metadata lock after ${maxRetries} attempts: ${lock.error?.message}`);
+                }
+                await this._sleep(100 * Math.pow(2, attempt - 1));
+                continue;
+            }
+            try {
+                const freshMetadata = await this._readFreshMetadata();
+                const localMetadata = this._buildLocalMetadata();
+                const finalMetadata = freshMetadata
+                    ? this._mergeMetadata(freshMetadata, localMetadata)
+                    : localMetadata;
+                await this.database.client.putObject({
+                    key: 's3db.json',
+                    body: JSON.stringify(finalMetadata, null, 2),
+                    contentType: 'application/json'
+                });
+                this.database.savedMetadata = finalMetadata;
+                this.database.emit('db:metadata-uploaded', finalMetadata);
+                return;
+            }
+            finally {
+                await mutex.unlock('s3db-metadata', lock.lockId);
+            }
+        }
     }
     _buildMetadataDefinition(resourceDef) {
         const { hooks, ...rest } = resourceDef || {};

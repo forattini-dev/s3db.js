@@ -29,6 +29,10 @@ function generatePluginAttributeHash(pluginName, attributeName) {
     const paddedHash = base62Hash.padStart(3, '0').substring(0, 3);
     return 'p' + paddedHash.toLowerCase();
 }
+function generateLegacyPluginIndexKey(pluginName, index) {
+    const prefix = pluginName.substring(0, 2);
+    return `p${prefix}${toBase62(index)}`;
+}
 function generatePluginMapping(attributes) {
     const mapping = {};
     const reversedMapping = {};
@@ -46,6 +50,162 @@ function generatePluginMapping(attributes) {
         reversedMapping[finalHash] = key;
     }
     return { mapping, reversedMapping };
+}
+/**
+ * Generate attribute mapping from a persistent registry.
+ * This ensures indices are stable across schema changes - new attributes
+ * always get the next available index, existing attributes keep their index.
+ */
+function generateMappingFromRegistry(keys, existingRegistry) {
+    const now = new Date().toISOString();
+    const registry = existingRegistry
+        ? {
+            nextIndex: existingRegistry.nextIndex,
+            mapping: { ...existingRegistry.mapping },
+            burned: [...existingRegistry.burned]
+        }
+        : { nextIndex: 0, mapping: {}, burned: [] };
+    const mapping = {};
+    const reversedMapping = {};
+    let changed = false;
+    const mappedIndices = Object.values(registry.mapping).filter((value) => Number.isFinite(value));
+    const burnedIndices = registry.burned.map(burned => burned.index).filter((value) => Number.isFinite(value));
+    const maxIndex = Math.max(-1, ...mappedIndices, ...burnedIndices);
+    if (registry.nextIndex <= maxIndex) {
+        registry.nextIndex = maxIndex + 1;
+        changed = true;
+    }
+    for (const key of keys) {
+        if (key in registry.mapping && registry.mapping[key] !== undefined) {
+            const index = registry.mapping[key];
+            const base62Key = toBase62(index);
+            mapping[key] = base62Key;
+            reversedMapping[base62Key] = key;
+        }
+        else {
+            const index = registry.nextIndex++;
+            registry.mapping[key] = index;
+            const base62Key = toBase62(index);
+            mapping[key] = base62Key;
+            reversedMapping[base62Key] = key;
+            changed = true;
+        }
+    }
+    const currentKeys = new Set(keys);
+    for (const [attr, index] of Object.entries(registry.mapping)) {
+        if (!currentKeys.has(attr)) {
+            const alreadyBurned = registry.burned.some(b => b.index === index);
+            if (!alreadyBurned) {
+                registry.burned.push({
+                    index,
+                    attribute: attr,
+                    burnedAt: now,
+                    reason: 'removed'
+                });
+                changed = true;
+            }
+            delete registry.mapping[attr];
+        }
+    }
+    return { mapping, reversedMapping, registry, changed };
+}
+/**
+ * Generate plugin attribute mapping from a persistent registry.
+ * Stores actual key strings (hash-based) to preserve compatibility with legacy data.
+ */
+function generatePluginMappingFromRegistry(attributes, existingRegistries) {
+    const now = new Date().toISOString();
+    const registries = {};
+    const mapping = {};
+    const reversedMapping = {};
+    let changed = false;
+    const byPlugin = new Map();
+    for (const { key, pluginName } of attributes) {
+        if (!byPlugin.has(pluginName))
+            byPlugin.set(pluginName, []);
+        byPlugin.get(pluginName).push(key);
+    }
+    const globalUsedKeys = new Set();
+    for (const [pluginName, keys] of byPlugin) {
+        const existing = existingRegistries?.[pluginName];
+        const registry = { mapping: {}, burned: [] };
+        if (existing) {
+            if (isLegacyNumericRegistry(existing)) {
+                for (const [attr, index] of Object.entries(existing.mapping)) {
+                    const legacyKey = generateLegacyPluginIndexKey(pluginName, index);
+                    registry.mapping[attr] = legacyKey;
+                    globalUsedKeys.add(legacyKey);
+                }
+                for (const burned of existing.burned) {
+                    const legacyKey = generateLegacyPluginIndexKey(pluginName, burned.index);
+                    registry.burned.push({
+                        key: legacyKey,
+                        attribute: burned.attribute,
+                        burnedAt: burned.burnedAt,
+                        reason: burned.reason
+                    });
+                    globalUsedKeys.add(legacyKey);
+                }
+                changed = true;
+            }
+            else {
+                registry.mapping = { ...existing.mapping };
+                registry.burned = [...existing.burned];
+                for (const key of Object.values(existing.mapping)) {
+                    globalUsedKeys.add(key);
+                }
+                for (const burned of existing.burned) {
+                    globalUsedKeys.add(burned.key);
+                }
+            }
+        }
+        for (const attrName of keys) {
+            const existingKey = registry.mapping[attrName];
+            if (existingKey) {
+                mapping[attrName] = existingKey;
+                reversedMapping[existingKey] = attrName;
+            }
+            else {
+                let hashKey = generatePluginAttributeHash(pluginName, attrName);
+                let counter = 1;
+                while (globalUsedKeys.has(hashKey)) {
+                    hashKey = `${generatePluginAttributeHash(pluginName, attrName)}${counter}`;
+                    counter++;
+                }
+                globalUsedKeys.add(hashKey);
+                registry.mapping[attrName] = hashKey;
+                mapping[attrName] = hashKey;
+                reversedMapping[hashKey] = attrName;
+                changed = true;
+            }
+        }
+        const currentKeys = new Set(keys);
+        for (const [attr, key] of Object.entries(registry.mapping)) {
+            if (!currentKeys.has(attr)) {
+                const alreadyBurned = registry.burned.some(b => b.key === key);
+                if (!alreadyBurned) {
+                    registry.burned.push({
+                        key,
+                        attribute: attr,
+                        burnedAt: now,
+                        reason: 'removed'
+                    });
+                    changed = true;
+                }
+                delete registry.mapping[attr];
+            }
+        }
+        registries[pluginName] = registry;
+    }
+    return { mapping, reversedMapping, registries, changed };
+}
+function isLegacyNumericRegistry(registry) {
+    if ('nextIndex' in registry)
+        return true;
+    const values = Object.values(registry.mapping);
+    if (values.length === 0)
+        return false;
+    return typeof values[0] === 'number';
 }
 export const SchemaActions = {
     trim: (value) => value == null ? value : String(value).trim(),
@@ -549,8 +709,14 @@ export class Schema {
     reversedMap;
     pluginMap;
     reversedPluginMap;
+    /** Updated schema registry - should be persisted to s3db.json */
+    _schemaRegistry;
+    /** Updated plugin schema registries - should be persisted to s3db.json */
+    _pluginSchemaRegistry;
+    /** Whether the registry was modified and needs persistence */
+    _registryChanged = false;
     constructor(args) {
-        const { map, pluginMap, name, attributes, passphrase, bcryptRounds, version = 1, options = {}, _pluginAttributeMetadata, _pluginAttributes } = args;
+        const { map, pluginMap, name, attributes, passphrase, bcryptRounds, version = 1, options = {}, _pluginAttributeMetadata, _pluginAttributes, schemaRegistry, pluginSchemaRegistry } = args;
         this.name = name;
         this.version = version;
         this.attributes = attributes || {};
@@ -580,43 +746,79 @@ export class Schema {
         }
         if (this.options.generateAutoHooks)
             this.generateAutoHooks();
+        const flatAttrs = flatten(this.attributes, { safe: true });
+        const leafKeys = Object.keys(flatAttrs).filter(k => !k.includes('$$'));
+        const objectKeys = this.extractObjectKeys(this.attributes);
+        const allKeys = [...new Set([...leafKeys, ...objectKeys])];
+        const userKeys = [];
+        const pluginAttributes = [];
+        for (const key of allKeys) {
+            const attrDef = this.getAttributeDefinition(key);
+            if (typeof attrDef === 'object' && attrDef !== null && attrDef.__plugin__) {
+                pluginAttributes.push({ key, pluginName: attrDef.__plugin__ });
+            }
+            else if (typeof attrDef === 'string' && this._pluginAttributeMetadata && this._pluginAttributeMetadata[key]) {
+                const pluginName = this._pluginAttributeMetadata[key].__plugin__;
+                pluginAttributes.push({ key, pluginName });
+            }
+            else {
+                userKeys.push(key);
+            }
+        }
         if (!isEmpty(map)) {
-            this.map = map;
-            this.reversedMap = invert(map);
+            this.map = { ...map };
+            this.reversedMap = invert(this.map);
+            if (schemaRegistry) {
+                const registryFromMap = this._buildRegistryFromMap(map, schemaRegistry);
+                const result = generateMappingFromRegistry(userKeys, registryFromMap);
+                for (const key of userKeys) {
+                    if (!(key in this.map)) {
+                        const mappedKey = result.mapping[key];
+                        if (mappedKey) {
+                            this.map[key] = mappedKey;
+                            this.reversedMap[mappedKey] = key;
+                        }
+                    }
+                }
+                this._schemaRegistry = result.registry;
+                if (result.changed)
+                    this._registryChanged = true;
+            }
         }
         else {
-            const flatAttrs = flatten(this.attributes, { safe: true });
-            const leafKeys = Object.keys(flatAttrs).filter(k => !k.includes('$$'));
-            const objectKeys = this.extractObjectKeys(this.attributes);
-            const allKeys = [...new Set([...leafKeys, ...objectKeys])];
-            const userKeys = [];
-            const pluginAttributes = [];
-            for (const key of allKeys) {
-                const attrDef = this.getAttributeDefinition(key);
-                if (typeof attrDef === 'object' && attrDef !== null && attrDef.__plugin__) {
-                    pluginAttributes.push({ key, pluginName: attrDef.__plugin__ });
-                }
-                else if (typeof attrDef === 'string' && this._pluginAttributeMetadata && this._pluginAttributeMetadata[key]) {
-                    const pluginName = this._pluginAttributeMetadata[key].__plugin__;
-                    pluginAttributes.push({ key, pluginName });
-                }
-                else {
-                    userKeys.push(key);
-                }
+            if (schemaRegistry) {
+                const result = generateMappingFromRegistry(userKeys, schemaRegistry);
+                this.map = result.mapping;
+                this.reversedMap = result.reversedMapping;
+                this._schemaRegistry = result.registry;
+                if (result.changed)
+                    this._registryChanged = true;
             }
-            const { mapping, reversedMapping } = generateBase62Mapping(userKeys);
-            this.map = mapping;
-            this.reversedMap = reversedMapping;
+            else {
+                const { mapping, reversedMapping } = generateBase62Mapping(userKeys);
+                this.map = mapping;
+                this.reversedMap = reversedMapping;
+            }
+        }
+        if (pluginSchemaRegistry) {
+            const result = generatePluginMappingFromRegistry(pluginAttributes, pluginSchemaRegistry);
+            this.pluginMap = result.mapping;
+            this.reversedPluginMap = result.reversedMapping;
+            this._pluginSchemaRegistry = result.registries;
+            if (result.changed)
+                this._registryChanged = true;
+        }
+        else {
             const { mapping: pMapping, reversedMapping: pReversedMapping } = generatePluginMapping(pluginAttributes);
             this.pluginMap = pMapping;
             this.reversedPluginMap = pReversedMapping;
-            this._pluginAttributes = {};
-            for (const { key, pluginName } of pluginAttributes) {
-                if (!this._pluginAttributes[pluginName]) {
-                    this._pluginAttributes[pluginName] = [];
-                }
-                this._pluginAttributes[pluginName].push(key);
+        }
+        this._pluginAttributes = {};
+        for (const { key, pluginName } of pluginAttributes) {
+            if (!this._pluginAttributes[pluginName]) {
+                this._pluginAttributes[pluginName] = [];
             }
+            this._pluginAttributes[pluginName].push(key);
         }
         if (!isEmpty(pluginMap)) {
             this.pluginMap = pluginMap;
@@ -643,6 +845,82 @@ export class Schema {
                 afterUnmap: {},
             }
         };
+    }
+    _buildRegistryFromMap(legacyMap, existingRegistry) {
+        const registry = {
+            nextIndex: existingRegistry?.nextIndex ?? 0,
+            mapping: { ...existingRegistry?.mapping },
+            burned: existingRegistry?.burned ? [...existingRegistry.burned] : []
+        };
+        let maxIndex = registry.nextIndex - 1;
+        for (const [attr, base62Key] of Object.entries(legacyMap)) {
+            const index = fromBase62(base62Key);
+            if (!(attr in registry.mapping)) {
+                registry.mapping[attr] = index;
+            }
+            if (Number.isFinite(index)) {
+                maxIndex = Math.max(maxIndex, index);
+            }
+        }
+        for (const burned of registry.burned) {
+            maxIndex = Math.max(maxIndex, burned.index);
+        }
+        registry.nextIndex = Math.max(registry.nextIndex, maxIndex + 1);
+        return registry;
+    }
+    /**
+     * Generate initial schema registry from current mapping.
+     * Used for migrating existing databases that don't have a registry yet.
+     * This "freezes" the current mapping as the source of truth.
+     */
+    generateInitialRegistry() {
+        const schemaRegistry = {
+            nextIndex: 0,
+            mapping: {},
+            burned: []
+        };
+        let maxIndex = -1;
+        for (const [attr, base62Key] of Object.entries(this.map)) {
+            const index = fromBase62(base62Key);
+            schemaRegistry.mapping[attr] = index;
+            if (Number.isFinite(index)) {
+                maxIndex = Math.max(maxIndex, index);
+            }
+        }
+        schemaRegistry.nextIndex = maxIndex + 1;
+        const pluginSchemaRegistry = {};
+        for (const [pluginName, attrs] of Object.entries(this._pluginAttributes)) {
+            const registry = {
+                mapping: {},
+                burned: []
+            };
+            for (const attr of attrs) {
+                const key = this.pluginMap[attr];
+                if (key) {
+                    registry.mapping[attr] = key;
+                }
+            }
+            pluginSchemaRegistry[pluginName] = registry;
+        }
+        return { schemaRegistry, pluginSchemaRegistry };
+    }
+    /**
+     * Check if the schema registry needs to be persisted.
+     */
+    needsRegistryPersistence() {
+        return this._registryChanged;
+    }
+    /**
+     * Get the updated schema registry for persistence.
+     */
+    getSchemaRegistry() {
+        return this._schemaRegistry;
+    }
+    /**
+     * Get the updated plugin schema registries for persistence.
+     */
+    getPluginSchemaRegistry() {
+        return this._pluginSchemaRegistry;
     }
     addHook(hook, attribute, action, params = {}) {
         if (!this.options.hooks[hook][attribute])
