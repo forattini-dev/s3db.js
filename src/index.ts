@@ -7,7 +7,7 @@ export { Database as S3db } from './database.class.js';
 export { Database } from './database.class.js';
 export { S3Client, S3Client as Client } from './clients/s3-client.class.js'; // Assuming S3Client is converted or has types
 export { Resource } from './resource.class.js'; // Assuming Resource is converted or has types
-export { Schema } from './schema.class.js'; // Assuming Schema is converted or has types
+export { Schema, type SchemaRegistry } from './schema.class.js'; // Assuming Schema is converted or has types
 export { Validator } from './validator.class.js'; // Assuming Validator is converted or has types
 export { ConnectionString } from './connection-string.class.js'; // Assuming ConnectionString is converted or has types
 
