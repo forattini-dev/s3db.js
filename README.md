@@ -57,6 +57,7 @@
 ### 🎯 **Database Operations**
 - **ORM-like Interface** - Familiar CRUD operations
 - **Schema Validation** - Automatic data validation
+- **Schema Registry** - Stable attribute mapping across schema changes
 - **Streaming API** - Handle large datasets efficiently
 - **Event System** - Real-time notifications
 
@@ -115,7 +116,7 @@
 
 ## 📚 Documentation Quick Links
 
-> **Core Concepts:** [Schema Validation](./docs/schema.md) • [Client API](./docs/client.md) • [Fastest Validator](./docs/fastest-validator.md)
+> **Core Concepts:** [Schema & Validation](./docs/core/schema.md) • [Schema Registry](./docs/core/schema.md#schema-registry-stable-attribute-mapping) • [Clients](./docs/clients/README.md) • [Fastest Validator](./docs/fastest-validator.md)
 
 > **Plugins:** [API Plugin](./docs/plugins/api/README.md) • [Identity Plugin](./docs/plugins/identity/README.md) • [All Plugins](#-plugins)
 
