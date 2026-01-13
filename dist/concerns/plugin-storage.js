@@ -2,6 +2,7 @@ import { metadataEncode } from './metadata-encoding.js';
 import { calculateEffectiveLimit, calculateUTF8Bytes } from './calculator.js';
 import { tryFn } from './try-fn.js';
 import { idGenerator } from './id.js';
+import { streamToString } from '../stream/index.js';
 import { PluginStorageError, MetadataLimitError, BehaviorError } from '../errors.js';
 import { DistributedLock, computeBackoff, sleep, isPreconditionFailure } from './distributed-lock.js';
 import { DistributedSequence } from './distributed-sequence.js';
@@ -115,7 +116,7 @@ export class PluginStorage {
         let data = parsedMetadata;
         if (response.Body) {
             const [parseOk, parseErr, result] = await tryFn(async () => {
-                const bodyContent = await response.Body.transformToString();
+                const bodyContent = await this._readBodyAsString(response.Body);
                 if (bodyContent && bodyContent.trim()) {
                     const body = JSON.parse(bodyContent);
                     return { ...parsedMetadata, ...body };
@@ -174,6 +175,39 @@ export class PluginStorage {
             parsed[key] = value;
         }
         return parsed;
+    }
+    async _readBodyAsString(body) {
+        if (!body) {
+            return '';
+        }
+        const bodyAny = body;
+        if (typeof bodyAny.transformToString === 'function') {
+            return bodyAny.transformToString();
+        }
+        if (typeof bodyAny.transformToByteArray === 'function') {
+            const bytes = await bodyAny.transformToByteArray();
+            return Buffer.from(bytes).toString('utf-8');
+        }
+        if (typeof body === 'string') {
+            return body;
+        }
+        if (body instanceof Uint8Array) {
+            return Buffer.from(body).toString('utf-8');
+        }
+        if (body instanceof ArrayBuffer) {
+            return Buffer.from(body).toString('utf-8');
+        }
+        if (typeof bodyAny.on === 'function') {
+            return streamToString(bodyAny);
+        }
+        if (typeof bodyAny[Symbol.asyncIterator] === 'function') {
+            const chunks = [];
+            for await (const chunk of bodyAny) {
+                chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+            }
+            return Buffer.concat(chunks).toString('utf-8');
+        }
+        return String(body);
     }
     async list(prefix = '', options = {}) {
         const { limit } = options;
@@ -248,7 +282,7 @@ export class PluginStorage {
         let data = parsedMetadata;
         if (response.Body) {
             const [parseOk, , result] = await tryFn(async () => {
-                const bodyContent = await response.Body.transformToString();
+                const bodyContent = await this._readBodyAsString(response.Body);
                 if (bodyContent && bodyContent.trim()) {
                     const body = JSON.parse(bodyContent);
                     return { ...parsedMetadata, ...body };
@@ -276,7 +310,7 @@ export class PluginStorage {
         let data = parsedMetadata;
         if (response.Body) {
             const [parseOk, , result] = await tryFn(async () => {
-                const bodyContent = await response.Body.transformToString();
+                const bodyContent = await this._readBodyAsString(response.Body);
                 if (bodyContent && bodyContent.trim()) {
                     const body = JSON.parse(bodyContent);
                     return { ...parsedMetadata, ...body };
@@ -413,7 +447,7 @@ export class PluginStorage {
         let data = parsedMetadata;
         if (response.Body) {
             const [parseOk, parseErr, result] = await tryFn(async () => {
-                const bodyContent = await response.Body.transformToString();
+                const bodyContent = await this._readBodyAsString(response.Body);
                 if (bodyContent && bodyContent.trim()) {
                     const body = JSON.parse(bodyContent);
                     return { ...parsedMetadata, ...body };

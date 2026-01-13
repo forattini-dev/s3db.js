@@ -66,12 +66,16 @@ export interface PluginClient {
     getAllKeys(params: Record<string, unknown>): Promise<string[]>;
 }
 interface GetObjectResponse {
-    Body?: {
-        transformToString(): Promise<string>;
-    };
+    Body?: GetObjectBody;
     Metadata?: Record<string, string>;
     ContentType?: string;
 }
+type GetObjectBody = string | Uint8Array | ArrayBuffer | Buffer | {
+    transformToString?: () => Promise<string>;
+    transformToByteArray?: () => Promise<Uint8Array>;
+    on?: (...args: unknown[]) => void;
+    [Symbol.asyncIterator]?: () => AsyncIterator<Uint8Array | Buffer>;
+};
 interface HeadObjectResponse {
     Metadata?: Record<string, string>;
     ContentType?: string;
@@ -126,6 +130,7 @@ export declare class PluginStorage {
     batchSet(items: BatchSetItem[]): Promise<BatchSetResult[]>;
     get(key: string): Promise<Record<string, unknown> | null>;
     private _parseMetadataValues;
+    private _readBodyAsString;
     list(prefix?: string, options?: PluginStorageListOptions): Promise<string[]>;
     listForResource(resourceName: string, subPrefix?: string, options?: PluginStorageListOptions): Promise<string[]>;
     listWithPrefix(prefix?: string, options?: PluginStorageListOptions): Promise<Record<string, unknown>[]>;
