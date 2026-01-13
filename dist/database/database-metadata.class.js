@@ -24,7 +24,24 @@ export class DatabaseMetadata {
         }
         return this._pluginStorage;
     }
+    _requiresDistributedLock() {
+        const client = this.database.client;
+        if (!client)
+            return false;
+        const connStr = client.connectionString || '';
+        if (connStr.startsWith('file://') || connStr.startsWith('memory://')) {
+            return false;
+        }
+        const endpoint = client.config?.endpoint || '';
+        if (endpoint.startsWith('mock://')) {
+            return false;
+        }
+        return connStr.length > 0;
+    }
     _getMutex() {
+        if (!this._requiresDistributedLock()) {
+            return null;
+        }
         if (!this._mutex) {
             this._mutex = new S3Mutex(this._getPluginStorage(), 'metadata');
         }
@@ -371,6 +388,23 @@ export class DatabaseMetadata {
     }
     async uploadMetadataFile() {
         const mutex = this._getMutex();
+        if (!mutex) {
+            await this._uploadMetadataWithoutLock();
+            return;
+        }
+        await this._uploadMetadataWithLock(mutex);
+    }
+    async _uploadMetadataWithoutLock() {
+        const localMetadata = this._buildLocalMetadata();
+        await this.database.client.putObject({
+            key: 's3db.json',
+            body: JSON.stringify(localMetadata, null, 2),
+            contentType: 'application/json'
+        });
+        this.database.savedMetadata = localMetadata;
+        this.database.emit('db:metadata-uploaded', localMetadata);
+    }
+    async _uploadMetadataWithLock(mutex) {
         const maxRetries = 3;
         const lockTtl = 30000;
         let attempt = 0;

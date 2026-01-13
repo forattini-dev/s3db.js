@@ -9,6 +9,7 @@ export declare class DatabaseMetadata {
     private _mutex;
     constructor(database: DatabaseRef);
     private _getPluginStorage;
+    private _requiresDistributedLock;
     private _getMutex;
     get uploadPending(): boolean;
     blankMetadataStructure(): SavedMetadata;
@@ -28,6 +29,8 @@ export declare class DatabaseMetadata {
     scheduleMetadataUpload(): Promise<void>;
     flushMetadata(): Promise<void>;
     uploadMetadataFile(): Promise<void>;
+    private _uploadMetadataWithoutLock;
+    private _uploadMetadataWithLock;
     private _buildMetadataDefinition;
     private _summarizeHooks;
 }
