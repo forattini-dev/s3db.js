@@ -99,6 +99,8 @@ export class DatabaseConnection {
 
     const definitionChanges = this.metadata.detectDefinitionChanges(metadata!);
 
+    let registryUploadNeeded = false;
+
     for (const [name, resourceMetadata] of Object.entries(metadata!.resources || {})) {
       const currentVersion = resourceMetadata.currentVersion || 'v1';
       const versionData = resourceMetadata.versions?.[currentVersion];
@@ -142,8 +144,14 @@ export class DatabaseConnection {
           strictValidation: db.strictValidation,
           map: versionData.map,
           idGenerator: restoredIdGenerator,
-          idSize: restoredIdSize
+          idSize: restoredIdSize,
+          schemaRegistry: resourceMetadata.schemaRegistry,
+          pluginSchemaRegistry: resourceMetadata.pluginSchemaRegistry as Record<string, import('../schema.class.js').PluginSchemaRegistry | import('../schema.class.js').SchemaRegistry>
         });
+
+        if (db._resourcesMap[name].schema?.needsRegistryPersistence()) {
+          registryUploadNeeded = true;
+        }
       }
     }
 
@@ -152,6 +160,10 @@ export class DatabaseConnection {
         changes: definitionChanges,
         metadata: db.savedMetadata
       });
+    }
+
+    if (registryUploadNeeded) {
+      await this.metadata.scheduleMetadataUpload();
     }
 
     db.logger.info({
