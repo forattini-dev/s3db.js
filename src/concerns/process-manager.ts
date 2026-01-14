@@ -1,4 +1,5 @@
 import { createLogger, S3DBLogger, LogLevel } from './logger.js';
+import { bumpProcessMaxListeners } from './process-max-listeners.js';
 
 export interface ProcessManagerOptions {
   logLevel?: LogLevel;
@@ -183,6 +184,7 @@ export class ProcessManager {
   private _setupSignalHandlers(): void {
     if (this._signalHandlersSetup) return;
 
+    bumpProcessMaxListeners(4);
     process.on('SIGTERM', this._boundSignalHandler as NodeJS.SignalsListener);
     process.on('SIGINT', this._boundSignalHandler as NodeJS.SignalsListener);
     process.on('uncaughtException', (err: Error) => {

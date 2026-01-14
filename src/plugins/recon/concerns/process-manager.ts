@@ -24,6 +24,7 @@ import fs from 'fs/promises';
 import path from 'path';
 import os from 'os';
 import { createLogger } from '../../../concerns/logger.js';
+import { bumpProcessMaxListeners } from '../../../concerns/process-max-listeners.js';
 
 const execAsync = promisify(exec);
 
@@ -114,6 +115,7 @@ export class ProcessManager {
       process.exit(0);
     };
 
+    bumpProcessMaxListeners(6);
     process.on('SIGINT', () => cleanup('SIGINT'));
     process.on('SIGTERM', () => cleanup('SIGTERM'));
     process.on('SIGHUP', () => cleanup('SIGHUP'));

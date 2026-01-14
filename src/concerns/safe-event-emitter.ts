@@ -1,5 +1,6 @@
 import EventEmitter from 'events';
 import { createLogger, S3DBLogger, LogLevel } from './logger.js';
+import { bumpProcessMaxListeners } from './process-max-listeners.js';
 
 export interface SafeEventEmitterOptions {
   logLevel?: LogLevel;
@@ -53,6 +54,7 @@ export class SafeEventEmitter extends EventEmitter {
 
     this._boundCleanupHandler = this._handleCleanup.bind(this);
 
+    bumpProcessMaxListeners(3);
     process.once('SIGTERM', this._boundCleanupHandler);
     process.once('SIGINT', this._boundCleanupHandler);
     process.once('beforeExit', this._boundCleanupHandler);
