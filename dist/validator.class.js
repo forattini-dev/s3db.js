@@ -1,7 +1,7 @@
 import { merge, isString } from 'lodash-es';
 import * as FastestValidatorModule from 'fastest-validator';
 import { encrypt } from './concerns/crypto.js';
-import { hashPasswordSync, compactHash } from './concerns/password-hashing.js';
+import { hashPassword, compactHash } from './concerns/password-hashing.js';
 import tryFn, { tryFnSync } from './concerns/try-fn.js';
 import { ValidationError } from './errors.js';
 const FastestValidator = FastestValidatorModule.default;
@@ -27,7 +27,7 @@ async function secretHandler(actual, errors, _schema, field) {
     }));
     return actual;
 }
-function passwordHandler(actual, errors, _schema, field) {
+async function passwordHandler(actual, errors, _schema, field) {
     if (!this.bcryptRounds) {
         errors.push(new ValidationError('Missing bcrypt rounds configuration.', {
             actual,
@@ -37,7 +37,7 @@ function passwordHandler(actual, errors, _schema, field) {
         }));
         return actual;
     }
-    const [okHash, errHash, hash] = tryFnSync(() => hashPasswordSync(String(actual), this.bcryptRounds));
+    const [okHash, errHash, hash] = await tryFn(() => hashPassword(String(actual), this.bcryptRounds));
     if (!okHash) {
         errors.push(new ValidationError('Problem hashing password.', {
             actual,

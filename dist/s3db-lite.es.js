@@ -61601,37 +61601,6 @@ async function getBcrypt() {
         });
     }
 }
-function getBcryptSync() {
-    if (!bcryptModule) {
-        throw new ValidationError('bcrypt not loaded - call hashPassword() first or use the async version', {
-            field: 'bcrypt',
-            statusCode: 500,
-            retriable: false,
-            suggestion: 'Use hashPassword() (async) instead of hashPasswordSync(), or ensure bcrypt is loaded first.'
-        });
-    }
-    return bcryptModule;
-}
-function hashPasswordSync(password, rounds = 10) {
-    if (!password || typeof password !== 'string') {
-        throw new ValidationError('Password must be a non-empty string', {
-            field: 'password',
-            statusCode: 400,
-            retriable: false,
-            suggestion: 'Provide a non-empty string before calling hashPasswordSync().'
-        });
-    }
-    if (rounds < 4 || rounds > 31) {
-        throw new ValidationError('Bcrypt rounds must be between 4 and 31', {
-            field: 'rounds',
-            statusCode: 400,
-            retriable: false,
-            suggestion: 'Configure bcrypt rounds between 4 and 31 (inclusive).'
-        });
-    }
-    const bcrypt = getBcryptSync();
-    return bcrypt.hashSync(password, rounds);
-}
 async function hashPassword(password, rounds = 10) {
     if (!password || typeof password !== 'string') {
         throw new ValidationError('Password must be a non-empty string', {
@@ -61705,7 +61674,7 @@ async function secretHandler(actual, errors, _schema, field) {
     }));
     return actual;
 }
-function passwordHandler(actual, errors, _schema, field) {
+async function passwordHandler(actual, errors, _schema, field) {
     if (!this.bcryptRounds) {
         errors.push(new ValidationError('Missing bcrypt rounds configuration.', {
             actual,
@@ -61715,7 +61684,7 @@ function passwordHandler(actual, errors, _schema, field) {
         }));
         return actual;
     }
-    const [okHash, errHash, hash] = tryFnSync(() => hashPasswordSync(String(actual), this.bcryptRounds));
+    const [okHash, errHash, hash] = await tryFn$1(() => hashPassword(String(actual), this.bcryptRounds));
     if (!okHash) {
         errors.push(new ValidationError('Problem hashing password.', {
             actual,
@@ -69049,8 +69018,8 @@ class Database extends SafeEventEmitter {
         })();
         this.version = '1';
         this.s3dbVersion = (() => {
-            const [ok, , version] = tryFnSync(() => (typeof globalThis['19.3.1'] !== 'undefined' && globalThis['19.3.1'] !== '19.3.1'
-                ? globalThis['19.3.1']
+            const [ok, , version] = tryFnSync(() => (typeof globalThis['19.3.2'] !== 'undefined' && globalThis['19.3.2'] !== '19.3.2'
+                ? globalThis['19.3.2']
                 : 'latest'));
             return ok ? version : 'latest';
         })();
