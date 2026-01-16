@@ -173,6 +173,38 @@ function isExternal(id) {
   return allExternal.includes(id);
 }
 
+/**
+ * Lite bundle externals - bundles recker to be self-contained for CLI/binaries
+ * This ensures the lite bundle works when installed via npm as a transitive dependency
+ */
+function isExternalLite(id) {
+  // Bundle recker into lite for self-contained CLI/binary usage
+  if (id === 'recker' || id.startsWith('recker/')) {
+    return false;
+  }
+
+  // Cloud inventory drivers (except base-driver)
+  if ((id.includes('/cloud-inventory/drivers/') || id.includes('\\cloud-inventory\\drivers\\')) && !id.includes('base-driver')) {
+    return true;
+  }
+
+  // AWS SDK (except core S3)
+  if (id.startsWith('@aws-sdk/') && !coreDependencies.includes(id)) {
+    return true;
+  }
+
+  // Scoped packages that are always external
+  const externalScopes = ['@google-cloud/', '@azure/', '@planetscale/', '@libsql/', '@tensorflow/', '@xenova/', '@linode/', '@vultr/', '@alicloud/', '@kubernetes/', '@hono/'];
+  if (externalScopes.some(scope => id.startsWith(scope))) {
+    return true;
+  }
+
+  // Check explicit lists (excluding recker which is bundled)
+  const liteDependencies = coreDependencies.filter(dep => dep !== 'recker');
+  const allExternal = [...liteDependencies, ...optionalDependencies, ...allPeerDependencies, ...nodeBuiltins];
+  return allExternal.includes(id);
+}
+
 const fullBundle = {
   input: 'src/index.ts',
 
@@ -220,7 +252,8 @@ const liteBundle = {
 
   plugins: [...sharedPlugins],
 
-  external: isExternal,
+  // Use isExternalLite to bundle recker for self-contained CLI/binary usage
+  external: isExternalLite,
 };
 
 export default [fullBundle, liteBundle];
