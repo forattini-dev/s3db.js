@@ -10,6 +10,7 @@ import * as formatter from '../shared/response-formatter.js';
 import { createOIDCHandler } from './auth/oidc-auth.js';
 import { createSessionStore } from './concerns/session-store-factory.js';
 import { FailbanManager } from '../../concerns/failban-manager.js';
+import { bumpProcessMaxListeners } from '../../concerns/process-max-listeners.js';
 import { validatePathAuth } from './utils/path-matcher.js';
 import { ApiEventEmitter } from './concerns/event-emitter.js';
 import { MetricsCollector } from './concerns/metrics-collector.js';
@@ -304,6 +305,7 @@ export class ApiServer {
                             process.exit(1);
                         }
                     };
+                    bumpProcessMaxListeners(2);
                     process.once('SIGTERM', () => shutdownHandler('SIGTERM'));
                     process.once('SIGINT', () => shutdownHandler('SIGINT'));
                     resolve();

@@ -1,4 +1,5 @@
 import { createLogger } from './logger.js';
+import { bumpProcessMaxListeners } from './process-max-listeners.js';
 function createStepExpression(value) {
     return ['*', '/', String(value)].join('');
 }
@@ -88,6 +89,7 @@ export class CronManager {
             return;
         this._boundShutdownHandler = this._handleShutdown.bind(this);
         this._boundErrorHandler = this._handleError.bind(this);
+        bumpProcessMaxListeners(5);
         process.once('SIGTERM', this._boundShutdownHandler);
         process.once('SIGINT', this._boundShutdownHandler);
         process.once('beforeExit', this._boundShutdownHandler);

@@ -53,6 +53,11 @@
       "import": "./dist/s3db.es.js",
       "require": "./dist/s3db.cjs"
     },
+    "./lite": {
+      "types": "./dist/s3db-lite.d.ts",
+      "import": "./dist/s3db-lite.es.js",
+      "require": "./dist/s3db-lite.cjs"
+    },
     "./typescript-generator": {
       "types": "./src/concerns/typescript-generator.d.ts",
       "import": "./src/concerns/typescript-generator.js",

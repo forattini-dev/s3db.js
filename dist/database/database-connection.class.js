@@ -2,6 +2,7 @@ import { TasksPool } from '../tasks/tasks-pool.class.js';
 import Resource from '../resource.class.js';
 import tryFn, { tryFnSync } from '../concerns/try-fn.js';
 import { streamToString } from '../stream/index.js';
+import { bumpProcessMaxListeners } from '../concerns/process-max-listeners.js';
 export class DatabaseConnection {
     database;
     metadata;
@@ -27,6 +28,7 @@ export class DatabaseConnection {
                     await tryFn(() => this.disconnect());
                 }
             };
+            bumpProcessMaxListeners(1);
             process.on('exit', this._exitListener);
         }
     }

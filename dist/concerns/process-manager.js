@@ -1,4 +1,5 @@
 import { createLogger } from './logger.js';
+import { bumpProcessMaxListeners } from './process-max-listeners.js';
 export class ProcessManager {
     options;
     logger;
@@ -120,6 +121,7 @@ export class ProcessManager {
     _setupSignalHandlers() {
         if (this._signalHandlersSetup)
             return;
+        bumpProcessMaxListeners(4);
         process.on('SIGTERM', this._boundSignalHandler);
         process.on('SIGINT', this._boundSignalHandler);
         process.on('uncaughtException', (err) => {

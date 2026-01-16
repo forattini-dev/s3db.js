@@ -1,5 +1,6 @@
 import EventEmitter from 'events';
 import { createLogger } from './logger.js';
+import { bumpProcessMaxListeners } from './process-max-listeners.js';
 export class SafeEventEmitter extends EventEmitter {
     options;
     logger;
@@ -33,6 +34,7 @@ export class SafeEventEmitter extends EventEmitter {
         if (this._signalHandlersSetup)
             return;
         this._boundCleanupHandler = this._handleCleanup.bind(this);
+        bumpProcessMaxListeners(3);
         process.once('SIGTERM', this._boundCleanupHandler);
         process.once('SIGINT', this._boundCleanupHandler);
         process.once('beforeExit', this._boundCleanupHandler);
