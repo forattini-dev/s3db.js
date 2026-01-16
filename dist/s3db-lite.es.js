@@ -41,7 +41,6 @@ import { Readable as Readable$1, Transform, Writable } from 'stream';
 import { existsSync as existsSync$1 } from 'fs';
 import zlib from 'zlib';
 import jsonStableStringify from 'json-stable-stringify';
-import bcrypt from 'bcrypt';
 import * as FastestValidatorModule from 'fastest-validator';
 import { ReadableStream as ReadableStream$1 } from 'node:stream/web';
 import pino from 'pino';
@@ -61582,7 +61581,37 @@ function unflatten(obj, _options = {}) {
     return result;
 }
 
-// @ts-expect-error bcrypt has no type declarations
+let bcryptModule = null;
+async function getBcrypt() {
+    if (bcryptModule) {
+        return bcryptModule;
+    }
+    try {
+        // @ts-expect-error bcrypt has no type declarations
+        const module = await import('bcrypt');
+        bcryptModule = (module.default || module);
+        return bcryptModule;
+    }
+    catch {
+        throw new ValidationError('bcrypt is not installed', {
+            field: 'bcrypt',
+            statusCode: 500,
+            retriable: false,
+            suggestion: 'Install bcrypt with: pnpm add bcrypt'
+        });
+    }
+}
+function getBcryptSync() {
+    if (!bcryptModule) {
+        throw new ValidationError('bcrypt not loaded - call hashPassword() first or use the async version', {
+            field: 'bcrypt',
+            statusCode: 500,
+            retriable: false,
+            suggestion: 'Use hashPassword() (async) instead of hashPasswordSync(), or ensure bcrypt is loaded first.'
+        });
+    }
+    return bcryptModule;
+}
 function hashPasswordSync(password, rounds = 10) {
     if (!password || typeof password !== 'string') {
         throw new ValidationError('Password must be a non-empty string', {
@@ -61600,6 +61629,7 @@ function hashPasswordSync(password, rounds = 10) {
             suggestion: 'Configure bcrypt rounds between 4 and 31 (inclusive).'
         });
     }
+    const bcrypt = getBcryptSync();
     return bcrypt.hashSync(password, rounds);
 }
 async function hashPassword(password, rounds = 10) {
@@ -61619,6 +61649,7 @@ async function hashPassword(password, rounds = 10) {
             suggestion: 'Configure bcrypt rounds between 4 and 31 (inclusive).'
         });
     }
+    const bcrypt = await getBcrypt();
     const hashed = await bcrypt.hash(password, rounds);
     return hashed;
 }
@@ -69018,8 +69049,8 @@ class Database extends SafeEventEmitter {
         })();
         this.version = '1';
         this.s3dbVersion = (() => {
-            const [ok, , version] = tryFnSync(() => (typeof globalThis['19.3.0'] !== 'undefined' && globalThis['19.3.0'] !== '19.3.0'
-                ? globalThis['19.3.0']
+            const [ok, , version] = tryFnSync(() => (typeof globalThis['19.3.1'] !== 'undefined' && globalThis['19.3.1'] !== '19.3.1'
+                ? globalThis['19.3.1']
                 : 'latest'));
             return ok ? version : 'latest';
         })();

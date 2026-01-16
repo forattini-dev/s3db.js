@@ -1,6 +1,35 @@
-// @ts-expect-error bcrypt has no type declarations
-import bcrypt from 'bcrypt';
 import { ValidationError } from '../errors.js';
+let bcryptModule = null;
+async function getBcrypt() {
+    if (bcryptModule) {
+        return bcryptModule;
+    }
+    try {
+        // @ts-expect-error bcrypt has no type declarations
+        const module = await import('bcrypt');
+        bcryptModule = (module.default || module);
+        return bcryptModule;
+    }
+    catch {
+        throw new ValidationError('bcrypt is not installed', {
+            field: 'bcrypt',
+            statusCode: 500,
+            retriable: false,
+            suggestion: 'Install bcrypt with: pnpm add bcrypt'
+        });
+    }
+}
+function getBcryptSync() {
+    if (!bcryptModule) {
+        throw new ValidationError('bcrypt not loaded - call hashPassword() first or use the async version', {
+            field: 'bcrypt',
+            statusCode: 500,
+            retriable: false,
+            suggestion: 'Use hashPassword() (async) instead of hashPasswordSync(), or ensure bcrypt is loaded first.'
+        });
+    }
+    return bcryptModule;
+}
 export function hashPasswordSync(password, rounds = 10) {
     if (!password || typeof password !== 'string') {
         throw new ValidationError('Password must be a non-empty string', {
@@ -18,6 +47,7 @@ export function hashPasswordSync(password, rounds = 10) {
             suggestion: 'Configure bcrypt rounds between 4 and 31 (inclusive).'
         });
     }
+    const bcrypt = getBcryptSync();
     return bcrypt.hashSync(password, rounds);
 }
 export async function hashPassword(password, rounds = 10) {
@@ -37,6 +67,7 @@ export async function hashPassword(password, rounds = 10) {
             suggestion: 'Configure bcrypt rounds between 4 and 31 (inclusive).'
         });
     }
+    const bcrypt = await getBcrypt();
     const hashed = await bcrypt.hash(password, rounds);
     return hashed;
 }
@@ -48,6 +79,7 @@ export async function verifyPassword(plaintext, hash) {
         return false;
     }
     try {
+        const bcrypt = await getBcrypt();
         const fullHash = hash.startsWith('$') ? hash : expandHash(hash);
         const result = await bcrypt.compare(plaintext, fullHash);
         return result;
