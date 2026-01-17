@@ -224,16 +224,6 @@ importers:
       ws:
         specifier: ^8.0.0
         version: 8.18.3
-    optionalDependencies:
-      '@modelcontextprotocol/sdk':
-        specifier: ^1.25.2
-        version: 1.25.2(hono@4.10.7)(zod@4.3.5)
-      dotenv:
-        specifier: ^17.2.3
-        version: 17.2.3
-      glob:
-        specifier: ^13.0.0
-        version: 13.0.0
     devDependencies:
       '@babel/core':
         specifier: ^7.28.5
@@ -367,6 +357,16 @@ importers:
       zod:
         specifier: ^4.3.5
         version: 4.3.5
+    optionalDependencies:
+      '@modelcontextprotocol/sdk':
+        specifier: ^1.25.2
+        version: 1.25.2(hono@4.10.7)(zod@4.3.5)
+      dotenv:
+        specifier: ^17.2.3
+        version: 17.2.3
+      glob:
+        specifier: ^13.0.0
+        version: 13.0.0
 
 packages:
 
