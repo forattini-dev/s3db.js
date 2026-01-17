@@ -216,14 +216,24 @@ importers:
         specifier: ^2.0.0
         version: 2.11.2(puppeteer-extra@3.3.6(puppeteer-core@24.32.0)(puppeteer@24.32.0(typescript@5.9.3)))
       recker:
-        specifier: 1.0.56
-        version: 1.0.56(ioredis@5.8.2)
+        specifier: 1.0.59
+        version: 1.0.59(ioredis@5.8.2)
       user-agents:
         specifier: ^1.0.0
         version: 1.1.669
       ws:
         specifier: ^8.0.0
         version: 8.18.3
+    optionalDependencies:
+      '@modelcontextprotocol/sdk':
+        specifier: ^1.25.2
+        version: 1.25.2(hono@4.10.7)(zod@4.3.5)
+      dotenv:
+        specifier: ^17.2.3
+        version: 17.2.3
+      glob:
+        specifier: ^13.0.0
+        version: 13.0.0
     devDependencies:
       '@babel/core':
         specifier: ^7.28.5
@@ -357,16 +367,6 @@ importers:
       zod:
         specifier: ^4.3.5
         version: 4.3.5
-    optionalDependencies:
-      '@modelcontextprotocol/sdk':
-        specifier: ^1.25.2
-        version: 1.25.2(hono@4.10.7)(zod@4.3.5)
-      dotenv:
-        specifier: ^17.2.3
-        version: 17.2.3
-      glob:
-        specifier: ^13.0.0
-        version: 13.0.0
 
 packages:
 
@@ -3332,6 +3332,10 @@ packages:
     peerDependencies:
       devtools-protocol: '*'
 
+  cli-args-parser@1.0.3:
+    resolution: {integrity: sha512-KaftJfHmbUzOGezAJGsP8a8gQcUis+zzCUFQJOyrXvhhAxNcH/0thHezNltOD9B6XJOTpk7AVkIDjM/Y1m1nrA==}
+    engines: {node: '>=18.0.0'}
+
   cli-boxes@3.0.0:
     resolution: {integrity: sha512-/lzGpEWL/8PfI0BmBOPRwp0c/wFNX1RdUML3jK/RcSBA9T8mZDdQpqYBKtCFTOfQbwPqWEOpjqW+Fnayc0969g==}
     engines: {node: '>=10'}
@@ -5304,8 +5308,8 @@ packages:
     resolution: {integrity: sha512-/vxpCXddiX8NGfGO/mTafwjq4aFa/71pvamip0++IQk3zG8cbCj0fifNPrjjF1XMXUne91jL9OoxmdykoEtifQ==}
     engines: {node: '>= 10.13.0'}
 
-  recker@1.0.56:
-    resolution: {integrity: sha512-RPfHMxGbTPjUTcWKCGT/Frq6wWheudqO9jMIFqEE8UYuao4UVu8IHvEjQdDPeHxRV3d0SrOsjDO9E2cEzHyj1g==}
+  recker@1.0.59:
+    resolution: {integrity: sha512-k+Twcy2kTDpmxLjhHP7TEN7w0bgF9fS+1pwktKydKTPvizKf17/pT8stt12Qgect+N6FFoMqLnL3epXx2GxW8g==}
     engines: {node: '>=18'}
     hasBin: true
     peerDependencies:
@@ -11533,6 +11537,8 @@ snapshots:
       mitt: 3.0.1
       zod: 3.25.76
 
+  cli-args-parser@1.0.3: {}
+
   cli-boxes@3.0.0: {}
 
   cli-cursor@5.0.0:
@@ -13639,9 +13645,10 @@ snapshots:
     dependencies:
       resolve: 1.22.11
 
-  recker@1.0.56(ioredis@5.8.2):
+  recker@1.0.59(ioredis@5.8.2):
     dependencies:
       '@maxmind/geoip2-node': 6.3.4
+      cli-args-parser: 1.0.3
       css-select: 6.0.0
       fuse.js: 7.1.0
       he: 1.2.0
