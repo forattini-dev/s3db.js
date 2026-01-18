@@ -43,6 +43,15 @@ releases/*
 # Source maps and debug files
 *.map
 *.map.js
+**/*.map
+
+# MCP embeddings (downloaded from GitHub releases when needed)
+mcp/data/
+mcp/data/*
+
+# Backup files
+*.bak
+**/*.bak
 
 # Documentation (keep only essential files)
 ROADMAP.md

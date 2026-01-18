@@ -1,23 +1,62 @@
 /**
- * Embeddings loader with lazy loading and caching.
- * Loads pre-computed embeddings from local files or GitHub Releases.
+ * Lazy loader for embeddings data.
+ *
+ * Downloads embeddings from GitHub Releases only when needed,
+ * caching them locally for subsequent uses.
  */
 
-import { readFile, writeFile, mkdir, stat } from 'fs/promises';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
-import type { EmbeddingsData, EmbeddingEntry } from './types.js'; // Import types from TS version
+import type { EmbeddingsData } from './types.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
-/**
- * Default configuration for embeddings loader.
- */
-const DEFAULT_CONFIG = {
-  cacheDir: join(__dirname, '..', 'data'),
-  githubRepo: 'Forattini-dev/s3db.js',
-  maxCacheAge: 7 * 24 * 60 * 60 * 1000, // 7 days
-};
+function getPackageVersionFromPkg(): string {
+  try {
+    const paths = [
+      join(__dirname, '..', '..', 'package.json'),
+      join(__dirname, '..', '..', '..', 'package.json'),
+      join(process.cwd(), 'package.json'),
+    ];
+
+    for (const pkgPath of paths) {
+      if (existsSync(pkgPath)) {
+        const pkg = JSON.parse(readFileSync(pkgPath, 'utf-8'));
+        if (pkg.name === 's3db.js') {
+          return pkg.version;
+        }
+      }
+    }
+  } catch {
+    // Ignore errors
+  }
+
+  return '19.3.0'; // Fallback version
+}
+
+let _packageVersion: string | null = null;
+function getPackageVersion(): string {
+  if (!_packageVersion) {
+    _packageVersion = getPackageVersionFromPkg();
+  }
+  return _packageVersion;
+}
+
+const GITHUB_RELEASE_URL = 'https://github.com/forattini-dev/s3db.js/releases/download';
+
+function getCacheDir(): string {
+  const homeDir = process.env.HOME || process.env.USERPROFILE || '';
+  if (homeDir) {
+    return join(homeDir, '.cache', 's3db.js');
+  }
+
+  try {
+    return join(__dirname, '..', '..', 'node_modules', '.cache', 's3db.js');
+  } catch {
+    return join(process.cwd(), 'node_modules', '.cache', 's3db.js');
+  }
+}
 
 /**
  * Embedding types available.
@@ -27,136 +66,88 @@ export const EMBEDDING_TYPES = {
   PLUGINS: 'plugins',
 };
 
-/**
- * In-memory cache for loaded embeddings.
- */
 const memoryCache = new Map<string, EmbeddingsData>();
 
-/**
- * Loads embeddings for a specific type.
- * Tries local file first, then falls back to GitHub Releases.
- *
- * @param type - Embedding type ('core' or 'plugins')
- * @param options - Loader options
- * @param options.cacheDir - Cache directory
- * @param options.forceRefresh - Force refresh from remote
- * @returns - Loaded embeddings data
- */
-export async function loadEmbeddings(type: string, options: { cacheDir?: string; forceRefresh?: boolean } = {}): Promise<EmbeddingsData> {
-  const config = { ...DEFAULT_CONFIG, ...options };
-  const cacheKey = `embeddings-${type}`;
-
-  // Check memory cache first
-  if (!config.forceRefresh && memoryCache.has(cacheKey)) {
-    return memoryCache.get(cacheKey)!;
-  }
-
-  const filename = `embeddings-${type}.json`;
-  const localPath = join(config.cacheDir, filename);
-
-  // Try loading from local file
-  try {
-    const localData = await loadFromFile(localPath);
-    if (localData && !config.forceRefresh) {
-      // Check if cache is still valid
-      const cacheAge = Date.now() - new Date(localData.generatedAt).getTime();
-      if (cacheAge < config.maxCacheAge) {
-        memoryCache.set(cacheKey, localData);
-        return localData;
-      }
-    }
-  } catch (err) {
-    // Local file not found, continue to remote
-  }
-
-  // Try loading from GitHub Releases
-  try {
-    const remoteData = await loadFromGitHub(config.githubRepo, filename);
-    if (remoteData) {
-      // Cache locally
-      await cacheToFile(localPath, remoteData);
-      memoryCache.set(cacheKey, remoteData);
-      return remoteData;
-    }
-  } catch (err: any) {
-    console.warn(`[EmbeddingsLoader] Failed to load from GitHub: ${err.message}`);
-  }
-
-  // Return empty embeddings if nothing found
-  const emptyData = createEmptyEmbeddings(type);
-  memoryCache.set(cacheKey, emptyData);
-  return emptyData;
+export function getEmbeddingsCachePath(type: string, version?: string): string {
+  const cacheDir = getCacheDir();
+  const ver = version || getPackageVersion();
+  return join(cacheDir, `embeddings-${type}-${ver}.json`);
 }
 
-/**
- * Loads embeddings from a local file.
- * @param filePath - Path to embeddings file
- * @returns
- */
-async function loadFromFile(filePath: string): Promise<EmbeddingsData | null> {
+export function hasLocalEmbeddings(type: string, version?: string): boolean {
+  return existsSync(getEmbeddingsCachePath(type, version));
+}
+
+export function loadLocalEmbeddings(type: string, version?: string): EmbeddingsData | null {
+  const cachePath = getEmbeddingsCachePath(type, version);
+
+  if (!existsSync(cachePath)) {
+    return null;
+  }
+
   try {
-    const content = await readFile(filePath, 'utf-8');
-    return JSON.parse(content);
-  } catch (err: any) {
-    if (err.code !== 'ENOENT') {
-      console.warn(`[EmbeddingsLoader] Error reading ${filePath}: ${err.message}`);
-    }
+    const data = readFileSync(cachePath, 'utf-8');
+    return JSON.parse(data) as EmbeddingsData;
+  } catch {
     return null;
   }
 }
 
-/**
- * Loads embeddings from GitHub Releases.
- * @param repo - GitHub repository (owner/name)
- * @param filename - Asset filename
- * @returns
- */
-async function loadFromGitHub(repo: string, filename: string): Promise<EmbeddingsData | null> {
-  // Get latest release
-  const releaseUrl = `https://api.github.com/repos/${repo}/releases/latest`;
-  const releaseRes = await fetch(releaseUrl, {
-    headers: { 'Accept': 'application/vnd.github.v3+json' },
-  });
+export function saveLocalEmbeddings(type: string, data: EmbeddingsData, version?: string): void {
+  const cachePath = getEmbeddingsCachePath(type, version);
+  const cacheDir = dirname(cachePath);
 
-  if (!releaseRes.ok) {
-    throw new Error(`Failed to fetch release info: ${releaseRes.status}`);
+  if (!existsSync(cacheDir)) {
+    mkdirSync(cacheDir, { recursive: true });
   }
 
-  const release = await releaseRes.json();
-  const asset = release.assets?.find((a: any) => a.name === filename);
-
-  if (!asset) {
-    throw new Error(`Asset ${filename} not found in release ${release.tag_name}`);
-  }
-
-  // Download asset
-  const assetRes = await fetch(asset.browser_download_url);
-  if (!assetRes.ok) {
-    throw new Error(`Failed to download asset: ${assetRes.status}`);
-  }
-
-  return await assetRes.json();
+  writeFileSync(cachePath, JSON.stringify(data));
 }
 
-/**
- * Caches embeddings to a local file.
- * @param filePath - Path to cache file
- * @param data - Embeddings data to cache
- */
-async function cacheToFile(filePath: string, data: EmbeddingsData): Promise<void> {
+export async function downloadEmbeddings(type: string, version?: string): Promise<EmbeddingsData> {
+  const ver = version || getPackageVersion();
+  const filename = `embeddings-${type}.json`;
+  const url = `${GITHUB_RELEASE_URL}/v${ver}/${filename}`;
+
   try {
-    await mkdir(dirname(filePath), { recursive: true });
-    await writeFile(filePath, JSON.stringify(data, null, 2));
-  } catch (err: any) {
-    console.warn(`[EmbeddingsLoader] Failed to cache to ${filePath}: ${err.message}`);
+    const response = await fetch(url);
+
+    if (!response.ok) {
+      throw new Error(`Failed to download embeddings: ${response.status} ${response.statusText}`);
+    }
+
+    const data = await response.json() as EmbeddingsData;
+    saveLocalEmbeddings(type, data, ver);
+    return data;
+  } catch (error) {
+    throw new Error(`Failed to download embeddings from ${url}: ${error}`);
   }
 }
 
-/**
- * Creates empty embeddings data.
- * @param type - Embedding type
- * @returns
- */
+export async function loadBundledEmbeddings(type: string): Promise<EmbeddingsData | null> {
+  try {
+    const filename = `embeddings-${type}.json`;
+
+    // Try bundled path (mcp/data/)
+    const bundledPath = join(__dirname, '..', 'data', filename);
+    if (existsSync(bundledPath)) {
+      const data = readFileSync(bundledPath, 'utf-8');
+      return JSON.parse(data) as EmbeddingsData;
+    }
+  } catch {
+    // Not available
+  }
+
+  return null;
+}
+
+export interface LoadEmbeddingsOptions {
+  forceDownload?: boolean;
+  version?: string;
+  offline?: boolean;
+  debug?: boolean;
+}
+
 function createEmptyEmbeddings(type: string): EmbeddingsData {
   return {
     version: '1.0.0',
@@ -168,11 +159,67 @@ function createEmptyEmbeddings(type: string): EmbeddingsData {
 }
 
 /**
- * Loads both core and plugins embeddings.
- * @param options - Loader options
- * @returns
+ * Load embeddings with lazy download strategy.
+ *
+ * Priority:
+ * 1. Memory cache
+ * 2. Local file cache (~/.cache/s3db.js/)
+ * 3. Bundled file (development mode)
+ * 4. GitHub Release download (first time or update)
  */
-export async function loadAllEmbeddings(options: { cacheDir?: string; forceRefresh?: boolean } = {}): Promise<{ core: EmbeddingsData; plugins: EmbeddingsData }> {
+export async function loadEmbeddings(type: string, options: LoadEmbeddingsOptions = {}): Promise<EmbeddingsData> {
+  const { forceDownload = false, version, offline = false, debug = false } = options;
+  const cacheKey = `embeddings-${type}`;
+
+  const log = (msg: string) => {
+    if (debug) console.log(`[embeddings-loader] ${msg}`);
+  };
+
+  // 1. Memory cache
+  if (!forceDownload && memoryCache.has(cacheKey)) {
+    log(`Loaded from memory cache: ${cacheKey}`);
+    return memoryCache.get(cacheKey)!;
+  }
+
+  // 2. Local file cache
+  if (!forceDownload) {
+    const cached = loadLocalEmbeddings(type, version);
+    if (cached) {
+      log(`Loaded from file cache: ${getEmbeddingsCachePath(type, version)}`);
+      memoryCache.set(cacheKey, cached);
+      return cached;
+    }
+  }
+
+  // 3. Bundled file (development)
+  const bundled = await loadBundledEmbeddings(type);
+  if (bundled) {
+    log('Loaded bundled embeddings');
+    memoryCache.set(cacheKey, bundled);
+    return bundled;
+  }
+
+  // 4. Download from GitHub Releases
+  if (!offline) {
+    try {
+      log(`Downloading embeddings-${type} v${version || getPackageVersion()}...`);
+      const downloaded = await downloadEmbeddings(type, version);
+      log(`Downloaded and cached: ${downloaded.documents?.length || 0} documents`);
+      memoryCache.set(cacheKey, downloaded);
+      return downloaded;
+    } catch (error) {
+      log(`Download failed: ${error}`);
+    }
+  }
+
+  // Fallback: empty embeddings (graceful degradation)
+  log('No embeddings available, using empty fallback');
+  const empty = createEmptyEmbeddings(type);
+  memoryCache.set(cacheKey, empty);
+  return empty;
+}
+
+export async function loadAllEmbeddings(options: LoadEmbeddingsOptions = {}): Promise<{ core: EmbeddingsData; plugins: EmbeddingsData }> {
   const [core, plugins] = await Promise.all([
     loadEmbeddings(EMBEDDING_TYPES.CORE, options),
     loadEmbeddings(EMBEDDING_TYPES.PLUGINS, options),
@@ -181,17 +228,10 @@ export async function loadAllEmbeddings(options: { cacheDir?: string; forceRefre
   return { core, plugins };
 }
 
-/**
- * Clears the in-memory cache.
- */
 export function clearCache(): void {
   memoryCache.clear();
 }
 
-/**
- * Gets cache statistics.
- * @returns Cache stats
- */
 export function getCacheStats(): any {
   const stats = {
     entriesInMemory: memoryCache.size,
@@ -210,14 +250,30 @@ export function getCacheStats(): any {
   return stats;
 }
 
-/**
- * Preloads embeddings into memory cache.
- * Useful for warming up the cache on startup.
- * @param options - Loader options
- */
-export async function preloadEmbeddings(options: { cacheDir?: string; forceRefresh?: boolean } = {}): Promise<void> {
+export async function preloadEmbeddings(options: LoadEmbeddingsOptions = {}): Promise<void> {
   await loadAllEmbeddings(options);
 }
+
+export function clearEmbeddingsCache(type?: string, version?: string): void {
+  const fs = require('fs');
+
+  if (type) {
+    const cachePath = getEmbeddingsCachePath(type, version);
+    if (fs.existsSync(cachePath)) {
+      fs.unlinkSync(cachePath);
+    }
+  } else {
+    // Clear all types
+    for (const t of Object.values(EMBEDDING_TYPES)) {
+      const cachePath = getEmbeddingsCachePath(t, version);
+      if (fs.existsSync(cachePath)) {
+        fs.unlinkSync(cachePath);
+      }
+    }
+  }
+}
+
+export { getPackageVersion };
 
 export default {
   loadEmbeddings,
