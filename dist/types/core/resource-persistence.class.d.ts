@@ -126,7 +126,7 @@ export interface Resource {
     behavior: string;
     hooks: HooksCollection;
     logger: Logger;
-    idGenerator: () => string | Promise<string>;
+    idGenerator: (data?: unknown) => string | Promise<string>;
     versioningEnabled: boolean;
     observers: Observer[];
     executeHooks(hookName: string, data: unknown): Promise<unknown>;
@@ -202,7 +202,7 @@ export declare class ResourcePersistence {
     get behavior(): string;
     get hooks(): HooksCollection;
     get logger(): Logger;
-    get idGenerator(): () => string | Promise<string>;
+    get idGenerator(): (data?: unknown) => string | Promise<string>;
     get versioningEnabled(): boolean;
     get observers(): Observer[];
     insert({ id, ...attributes }: InsertParams): Promise<ResourceData>;

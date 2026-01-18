@@ -25,7 +25,7 @@ export class ResourceIdGenerator {
     }
     _configureGenerator(customIdGenerator, idSize) {
         if (typeof customIdGenerator === 'function') {
-            return (() => String(customIdGenerator()));
+            return ((data) => String(customIdGenerator(data)));
         }
         const isIncrementalString = typeof customIdGenerator === 'string' &&
             (customIdGenerator === 'incremental' || customIdGenerator.startsWith('incremental:'));
@@ -63,11 +63,11 @@ export class ResourceIdGenerator {
     getGenerator() {
         return this._generator;
     }
-    generate() {
+    generate(data) {
         if (!this._generator) {
             throw new Error('ID generator not initialized. Call initIncremental() first for incremental generators.');
         }
-        return this._generator();
+        return this._generator(data);
     }
     getType(customIdGenerator, idSize) {
         if (typeof customIdGenerator === 'function') {

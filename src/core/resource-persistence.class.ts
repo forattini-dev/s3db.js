@@ -146,7 +146,7 @@ export interface Resource {
   behavior: string;
   hooks: HooksCollection;
   logger: Logger;
-  idGenerator: () => string | Promise<string>;
+  idGenerator: (data?: unknown) => string | Promise<string>;
   versioningEnabled: boolean;
   observers: Observer[];
 
@@ -228,7 +228,7 @@ export class ResourcePersistence {
   get behavior(): string { return this.resource.behavior; }
   get hooks(): HooksCollection { return this.resource.hooks; }
   get logger(): Logger { return this.resource.logger; }
-  get idGenerator(): () => string | Promise<string> { return this.resource.idGenerator; }
+  get idGenerator(): (data?: unknown) => string | Promise<string> { return this.resource.idGenerator; }
   get versioningEnabled(): boolean { return this.resource.versioningEnabled; }
   get observers(): Observer[] { return this.resource.observers; }
 
@@ -273,7 +273,7 @@ export class ResourcePersistence {
 
     let finalId = validatedId || preProcessedData.id || id;
     if (!finalId) {
-      finalId = await Promise.resolve(this.idGenerator());
+      finalId = await Promise.resolve(this.idGenerator(preProcessedData));
       if (!finalId || String(finalId).trim() === '') {
         const { idGenerator } = await import('#src/concerns/id.js');
         finalId = idGenerator();

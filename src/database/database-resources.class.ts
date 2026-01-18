@@ -41,7 +41,7 @@ export interface CreateResourceConfig {
   strictValidation?: boolean;
   passphrase?: string;
   bcryptRounds?: number;
-  idGenerator?: ((size?: number) => string) | number | string;
+  idGenerator?: ((data?: unknown) => string) | number | string;
   idSize?: number;
   map?: StringRecord<string>;
   events?: StringRecord<EventHandler | EventHandler[]>;

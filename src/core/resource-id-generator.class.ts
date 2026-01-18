@@ -53,7 +53,7 @@ export interface BatchStatus {
   [key: string]: unknown;
 }
 
-export type IdGeneratorFunction = (() => string) | (() => Promise<string>);
+export type IdGeneratorFunction = ((data?: unknown) => string) | ((data?: unknown) => Promise<string>);
 
 export type IncrementalGenerator = IdGeneratorFunction & {
   _sequence?: SequenceInterface;
@@ -90,7 +90,7 @@ export class ResourceIdGenerator {
     idSize: number
   ): IncrementalGenerator | null {
     if (typeof customIdGenerator === 'function') {
-      return (() => String(customIdGenerator())) as IncrementalGenerator;
+      return ((data?: unknown) => String(customIdGenerator(data))) as IncrementalGenerator;
     }
 
     const isIncrementalString = typeof customIdGenerator === 'string' &&
@@ -139,11 +139,11 @@ export class ResourceIdGenerator {
     return this._generator;
   }
 
-  generate(): string | Promise<string> {
+  generate(data?: unknown): string | Promise<string> {
     if (!this._generator) {
       throw new Error('ID generator not initialized. Call initIncremental() first for incremental generators.');
     }
-    return this._generator();
+    return this._generator(data);
   }
 
   getType(customIdGenerator?: IdGeneratorConfig, idSize?: number): string {

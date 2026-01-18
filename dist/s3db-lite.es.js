@@ -1,6 +1,3 @@
-import path, { join as join$1 } from 'path';
-import EventEmitter$1, { EventEmitter } from 'events';
-import { chunk, isEmpty, isFunction, merge, isString, invert, uniq, cloneDeep, get, set, isObject } from 'lodash-es';
 import require$$0 from 'node:assert';
 import net from 'node:net';
 import require$$2 from 'node:http';
@@ -11,34 +8,37 @@ import require$$0$3, { channel } from 'node:diagnostics_channel';
 import require$$0$2, { promisify } from 'node:util';
 import require$$4 from 'node:tls';
 import require$$0$4 from 'node:buffer';
-import require$$3, { brotliCompress, deflate, gzip, gunzipSync } from 'node:zlib';
-import require$$5$1 from 'node:perf_hooks';
+import require$$3, { gunzipSync } from 'node:zlib';
+import require$$5$1, { performance as performance$1 } from 'node:perf_hooks';
 import require$$8 from 'node:util/types';
-import require$$2$2, { createHash, createDecipheriv, randomFillSync } from 'node:crypto';
+import require$$2$2, { createDecipheriv, randomFillSync, createHash as createHash$1 } from 'node:crypto';
 import require$$1 from 'node:sqlite';
 import require$$2$1 from 'node:worker_threads';
 import require$$1$1 from 'node:async_hooks';
 import require$$1$2 from 'node:console';
-import require$$0$5, { mkdir, readFile, writeFile, unlink, rm } from 'node:fs/promises';
+import require$$0$5, { mkdir, readFile as readFile$1, writeFile as writeFile$1, unlink as unlink$1, rm } from 'node:fs/promises';
 import require$$1$3, { join, dirname } from 'node:path';
 import require$$2$3 from 'node:timers';
 import require$$1$4, { lookup } from 'node:dns';
-import { pipeline } from 'node:stream/promises';
-import { performance as performance$1 } from 'perf_hooks';
+import { performance as performance$2 } from 'perf_hooks';
 import { AsyncLocalStorage } from 'async_hooks';
-import { spawn } from 'node:child_process';
-import fs, { createWriteStream, promises, existsSync } from 'node:fs';
+import dns$1 from 'node:dns/promises';
 import os, { homedir } from 'node:os';
+import fs, { promises, createWriteStream, existsSync as existsSync$1 } from 'node:fs';
 import v8 from 'node:v8';
-import { createConnection } from 'net';
+import { spawn } from 'node:child_process';
+import 'node:stream/promises';
+import path, { join as join$1 } from 'path';
+import EventEmitter$1, { EventEmitter } from 'events';
+import { chunk, isEmpty, isFunction, merge, isString, invert, uniq, cloneDeep, get, set, isObject } from 'lodash-es';
 import { S3Client as S3Client$1, PutObjectCommand, GetObjectCommand, HeadObjectCommand, CopyObjectCommand, DeleteObjectCommand, DeleteObjectsCommand, ListObjectsV2Command } from '@aws-sdk/client-s3';
-import crypto, { createHash as createHash$1 } from 'crypto';
+import crypto, { createHash } from 'crypto';
 import os$1, { cpus, platform } from 'os';
 import { setTimeout as setTimeout$1 } from 'timers/promises';
 import { nanoid } from 'nanoid';
-import { writeFile as writeFile$1, readFile as readFile$1, mkdir as mkdir$1, rename, unlink as unlink$1, appendFile, copyFile, readdir, stat } from 'fs/promises';
+import { writeFile, readFile, mkdir as mkdir$1, rename, unlink, appendFile, copyFile, readdir, stat } from 'fs/promises';
 import { Readable as Readable$1, Transform, Writable } from 'stream';
-import { existsSync as existsSync$1 } from 'fs';
+import { existsSync } from 'fs';
 import zlib from 'zlib';
 import jsonStableStringify from 'json-stable-stringify';
 import * as FastestValidatorModule from 'fastest-validator';
@@ -1356,6 +1356,9 @@ function quoteField(value, opts) {
     return str;
 }
 
+function isNodeRuntime$5() {
+    return typeof globalThis !== 'undefined' && Boolean(globalThis.process?.versions?.node);
+}
 class RequestPromise {
     promise;
     abortController;
@@ -1411,6 +1414,9 @@ class RequestPromise {
         return response.read();
     }
     async write(path) {
+        if (!isNodeRuntime$5()) {
+            throw new StreamError$1('write() is only supported in Node.js environments.', { streamType: 'response', retriable: false });
+        }
         const response = await this.promise;
         const body = response.read();
         if (!body) {
@@ -1419,6 +1425,11 @@ class RequestPromise {
                 retriable: true,
             });
         }
+        const [{ createWriteStream }, { pipeline }, { Readable }] = await Promise.all([
+            import('node:fs'),
+            import('node:stream/promises'),
+            import('node:stream'),
+        ]);
         const nodeStream = Readable.fromWeb(body);
         const fileStream = createWriteStream(path);
         await pipeline(nodeStream, fileStream);
@@ -1450,7 +1461,7 @@ function getDefaultExportFromCjs (x) {
 	return x && x.__esModule && Object.prototype.hasOwnProperty.call(x, 'default') ? x['default'] : x;
 }
 
-var undici = {exports: {}};
+var undici$1 = {exports: {}};
 
 var symbols;
 var hasRequiredSymbols;
@@ -35867,12 +35878,12 @@ function requireEventsource () {
 	return eventsource;
 }
 
-undici.exports;
+undici$1.exports;
 
 var hasRequiredUndici;
 
 function requireUndici () {
-	if (hasRequiredUndici) return undici.exports;
+	if (hasRequiredUndici) return undici$1.exports;
 	hasRequiredUndici = 1;
 	(function (module) {
 
@@ -36076,8 +36087,8 @@ function requireUndici () {
 		}
 
 		module.exports.install = install; 
-	} (undici));
-	return undici.exports;
+	} (undici$1));
+	return undici$1.exports;
 }
 
 var undiciExports = requireUndici();
@@ -37005,6 +37016,7 @@ function parseLinkHeader(headers) {
     return new LinkHeaderParser(linkHeader);
 }
 
+const NULL_BODY_STATUS = [101, 103, 204, 205, 304];
 class HttpResponse {
     timings;
     connection;
@@ -37016,7 +37028,10 @@ class HttpResponse {
             this.raw = undiciRawResponse;
         }
         else {
-            this.raw = new Response(undiciRawResponse.body, {
+            const body = NULL_BODY_STATUS.includes(undiciRawResponse.statusCode)
+                ? null
+                : undiciRawResponse.body;
+            this.raw = new Response(body, {
                 status: undiciRawResponse.statusCode,
                 statusText: String(undiciRawResponse.statusCode),
                 headers: undiciRawResponse.headers,
@@ -37373,6 +37388,129 @@ function getGlobalProtocolCache() {
     return globalProtocolCache;
 }
 
+const hostTimings = new Map();
+const connectionCounter = new Map();
+let globalConnectionId = 0;
+const sessionCache = new Map();
+function getTimingForHost(hostname) {
+    const timing = hostTimings.get(hostname);
+    if (process.env.DEBUG_TIMING) {
+        console.log(`[TIMING] getTimingForHost(${hostname}):`, timing ? 'found' : 'NOT FOUND', 'map size:', hostTimings.size);
+    }
+    return timing;
+}
+function getConnectionId(hostname) {
+    return connectionCounter.get(hostname) ?? 0;
+}
+function isNewConnection(hostname, previousId) {
+    const currentId = connectionCounter.get(hostname) ?? 0;
+    return currentId > previousId;
+}
+function buildTimingConnector(options = {}) {
+    const timeout = options.timeout ?? 10000;
+    const allowH2 = options.allowH2 ?? false;
+    const keepAliveInitialDelay = options.keepAliveInitialDelay ?? 60000;
+    const maxCachedSessions = options.maxCachedSessions ?? 100;
+    const localAddress = options.localAddress;
+    return function connect(opts, callback) {
+        const { hostname, protocol, port, servername } = opts;
+        const isHttps = protocol === 'https:';
+        const targetPort = Number(port) || (isHttps ? 443 : 80);
+        const timings = {
+            dns: 0,
+            tcp: 0,
+            tls: 0,
+            total: 0
+        };
+        const startTime = performance$1.now();
+        doConnect();
+        async function doConnect() {
+            try {
+                const dnsStart = performance$1.now();
+                let resolvedAddress;
+                try {
+                    const result = await dns$1.lookup(hostname, { family: 4 });
+                    resolvedAddress = result.address;
+                }
+                catch (dnsError) {
+                    try {
+                        const result = await dns$1.lookup(hostname, { family: 6 });
+                        resolvedAddress = result.address;
+                    }
+                    catch {
+                        callback(dnsError, null);
+                        return;
+                    }
+                }
+                timings.dns = performance$1.now() - dnsStart;
+                const tcpStart = performance$1.now();
+                const tcpSocket = net.connect({
+                    host: resolvedAddress,
+                    port: targetPort,
+                    localAddress: localAddress,
+                });
+                tcpSocket.setNoDelay(true);
+                tcpSocket.setKeepAlive(true, keepAliveInitialDelay);
+                const timeoutTimer = setTimeout(() => {
+                    tcpSocket.destroy(new Error(`Connect timeout after ${timeout}ms`));
+                }, timeout);
+                tcpSocket.once('error', (err) => {
+                    clearTimeout(timeoutTimer);
+                    callback(err, null);
+                });
+                tcpSocket.once('connect', () => {
+                    timings.tcp = performance$1.now() - tcpStart;
+                    clearTimeout(timeoutTimer);
+                    if (!isHttps) {
+                        timings.total = performance$1.now() - startTime;
+                        hostTimings.set(hostname, { ...timings });
+                        globalConnectionId++;
+                        connectionCounter.set(hostname, globalConnectionId);
+                        callback(null, tcpSocket);
+                        return;
+                    }
+                    const tlsStart = performance$1.now();
+                    const sn = servername || hostname;
+                    const sessionKey = `${sn}:${targetPort}`;
+                    const session = sessionCache.get(sessionKey);
+                    const tlsSocket = require$$4.connect({
+                        socket: tcpSocket,
+                        servername: sn,
+                        session: session,
+                        ALPNProtocols: allowH2 ? ['h2', 'http/1.1'] : ['http/1.1'],
+                        rejectUnauthorized: true,
+                    });
+                    tlsSocket.on('session', (newSession) => {
+                        if (sessionCache.size >= maxCachedSessions) {
+                            const firstKey = sessionCache.keys().next().value;
+                            if (firstKey)
+                                sessionCache.delete(firstKey);
+                        }
+                        sessionCache.set(sessionKey, newSession);
+                    });
+                    tlsSocket.once('error', (err) => {
+                        callback(err, null);
+                    });
+                    tlsSocket.once('secureConnect', () => {
+                        timings.tls = performance$1.now() - tlsStart;
+                        timings.total = performance$1.now() - startTime;
+                        hostTimings.set(hostname, { ...timings });
+                        globalConnectionId++;
+                        connectionCounter.set(hostname, globalConnectionId);
+                        if (process.env.DEBUG_TIMING) {
+                            console.log(`[TIMING] Stored for ${hostname}:`, timings);
+                        }
+                        callback(null, tlsSocket);
+                    });
+                });
+            }
+            catch (err) {
+                callback(err, null);
+            }
+        }
+    };
+}
+
 class AgentManager {
     globalAgent;
     domainAgents;
@@ -37498,6 +37636,13 @@ class AgentManager {
         });
     }
     createAgent(options) {
+        const timingConnector = buildTimingConnector({
+            timeout: options.connectTimeout,
+            allowH2: options.allowH2,
+            keepAliveInitialDelay: options.keepAliveTimeout,
+            maxCachedSessions: options.maxCachedSessions,
+            localAddress: options.localAddress,
+        });
         return new undiciExports.Agent({
             connections: options.connections,
             pipelining: options.pipelining,
@@ -37512,12 +37657,7 @@ class AgentManager {
             socketPath: undefined,
             allowH2: options.allowH2,
             maxConcurrentStreams: options.maxConcurrentStreams,
-            connect: {
-                timeout: options.connectTimeout,
-                keepAlive: options.keepAlive,
-                keepAliveInitialDelay: options.keepAliveTimeout,
-                localAddress: options.localAddress,
-            },
+            connect: timingConnector,
         });
     }
     getStats() {
@@ -37559,6 +37699,11 @@ class AgentManager {
         await Promise.all(destroyPromises);
     }
 }
+
+var agentManager = /*#__PURE__*/Object.freeze({
+    __proto__: null,
+    AgentManager: AgentManager
+});
 
 function createProgressStream(stream, onProgress, optionsOrTotal) {
     const options = typeof optionsOrTotal === 'number'
@@ -37638,9 +37783,22 @@ const requestStorage = new AsyncLocalStorage();
 undiciRequestChannel.subscribe((message) => {
     const store = requestStorage.getStore();
     if (store) {
-        store.requestStartTime = performance$1.now();
-        store.timings = { queuing: 0, dns: 0, tcp: 0, tls: 0, firstByte: 0, content: 0, total: 0 };
-        store.connection = {};
+        if (store.requestStartTime === 0) {
+            store.requestStartTime = performance$2.now();
+        }
+        const hasConnectionTimings = store.timings.dns || store.timings.tcp || store.timings.tls;
+        if (!hasConnectionTimings) {
+            store.timings = { queuing: 0, dns: 0, tcp: 0, tls: 0, firstByte: 0, content: 0, total: 0 };
+            store.connection = {};
+        }
+        const msg = message;
+        if (msg?.request?.origin && !store.requestCorrelationId) {
+            try {
+                store.requestCorrelationId = new URL(msg.request.origin).hostname;
+            }
+            catch {
+            }
+        }
     }
 });
 undiciBodySentChannel.subscribe((message) => {
@@ -37652,7 +37810,11 @@ undiciBodySentChannel.subscribe((message) => {
 undiciHeadersChannel.subscribe((message) => {
     const payload = message;
     const store = requestStorage.getStore();
-    if (store && payload && payload.timing) {
+    if (!store || !payload)
+        return;
+    const now = performance$2.now();
+    const ttfb = now - store.requestStartTime;
+    if (payload.timing) {
         const { timing } = payload;
         store.timings.queuing = timing.queuing;
         store.timings.dns = timing.dns;
@@ -37661,23 +37823,29 @@ undiciHeadersChannel.subscribe((message) => {
         store.timings.firstByte = timing.response;
         store.timings.content = timing.body;
         store.timings.total = timing.ended;
-        if (store.hooks) {
-            if (store.hooks.onDnsLookup && timing.dns > 0) {
-                store.hooks.onDnsLookup({ domain: payload.request.origin, duration: timing.dns });
+    }
+    else {
+        store.timings.firstByte = ttfb;
+    }
+    if (store.hooks) {
+        const dns = store.timings.dns ?? 0;
+        const tcp = store.timings.tcp ?? 0;
+        const tls = store.timings.tls ?? 0;
+        if (store.hooks.onDnsLookup && dns > 0) {
+            store.hooks.onDnsLookup({ domain: payload.request.origin, duration: dns });
+        }
+        if (store.hooks.onTcpConnect && tcp > 0) {
+            store.hooks.onTcpConnect({ remoteAddress: '', duration: tcp });
+        }
+        if (store.hooks.onTlsHandshake && tls > 0) {
+            store.hooks.onTlsHandshake({ protocol: '', cipher: '', duration: tls });
+        }
+        if (store.hooks.onResponseStart) {
+            const headers = new Headers();
+            for (let i = 0; i < payload.response.headers.length; i += 2) {
+                headers.append(payload.response.headers[i], payload.response.headers[i + 1]);
             }
-            if (store.hooks.onTcpConnect && timing.tcp > 0) {
-                store.hooks.onTcpConnect({ remoteAddress: '', duration: timing.tcp });
-            }
-            if (store.hooks.onTlsHandshake && timing.tls > 0) {
-                store.hooks.onTlsHandshake({ protocol: '', cipher: '', duration: timing.tls });
-            }
-            if (store.hooks.onResponseStart) {
-                const headers = new Headers();
-                for (let i = 0; i < payload.response.headers.length; i += 2) {
-                    headers.append(payload.response.headers[i], payload.response.headers[i + 1]);
-                }
-                store.hooks.onResponseStart({ status: payload.response.statusCode, headers });
-            }
+            store.hooks.onResponseStart({ status: payload.response.statusCode, headers });
         }
     }
 });
@@ -37775,7 +37943,6 @@ function mapTimeoutOptions(requestTimeout, transportDefaults) {
     };
 }
 class UndiciTransport {
-    static requestCounter = 0;
     baseUrl;
     options;
     proxyAgent;
@@ -37922,12 +38089,12 @@ class UndiciTransport {
             timings: {},
             connection: {},
             requestStartTime: 0,
-            requestCorrelationId: `r${++UndiciTransport.requestCounter}`,
+            requestCorrelationId: '',
             hooks: req._hooks
         };
         return requestStorage.run(requestContext, async () => {
             try {
-                const startTime = performance$1.now();
+                const startTime = performance$2.now();
                 if (requestContext.requestStartTime === 0) {
                     requestContext.requestStartTime = startTime;
                 }
@@ -37968,7 +38135,7 @@ class UndiciTransport {
                         bypass: this.proxyBypassList
                     });
                     const bodyWithProgress = redirectCount === 0
-                        ? wrapUploadBody(currentBody, req.onUploadProgress, uploadTotal)
+                        ? wrapUploadBody$1(currentBody, req.onUploadProgress, uploadTotal)
                         : currentBody;
                     let finalBody = bodyWithProgress;
                     if (finalBody instanceof FormData) {
@@ -38033,6 +38200,12 @@ class UndiciTransport {
                         }
                     }
                     let undiciResponse;
+                    let connectionIdBefore = 0;
+                    try {
+                        connectionIdBefore = getConnectionId(new URL(currentUrl).hostname);
+                    }
+                    catch {
+                    }
                     if (this.socketClient) {
                         const urlPath = new URL(currentUrl).pathname + new URL(currentUrl).search;
                         undiciResponse = await this.socketClient.request({
@@ -38074,9 +38247,28 @@ class UndiciTransport {
                                 const hookResult = await req.beforeRedirect(redirectInfo);
                                 if (hookResult === false) {
                                     const finalResponse = req.onDownloadProgress
-                                        ? wrapDownloadResponse(undiciResponse, req.onDownloadProgress)
+                                        ? wrapDownloadResponse$1(undiciResponse, req.onDownloadProgress)
                                         : undiciResponse;
                                     this.updateProtocolCache(currentUrl, requestContext.connection);
+                                    try {
+                                        const urlHostname = new URL(currentUrl).hostname;
+                                        const madeNewConnection = isNewConnection(urlHostname, connectionIdBefore);
+                                        if (madeNewConnection) {
+                                            const connTiming = getTimingForHost(urlHostname);
+                                            if (connTiming && !requestContext.timings.dns && !requestContext.timings.tcp && !requestContext.timings.tls) {
+                                                requestContext.timings.dns = connTiming.dns;
+                                                requestContext.timings.tcp = connTiming.tcp;
+                                                requestContext.timings.tls = connTiming.tls;
+                                            }
+                                        }
+                                        else if (!requestContext.timings.dns && !requestContext.timings.tcp && !requestContext.timings.tls) {
+                                            requestContext.timings.dns = 0;
+                                            requestContext.timings.tcp = 0;
+                                            requestContext.timings.tls = 0;
+                                        }
+                                    }
+                                    catch {
+                                    }
                                     return new HttpResponse(finalResponse, {
                                         timings: requestContext.timings,
                                         connection: requestContext.connection
@@ -38106,10 +38298,10 @@ class UndiciTransport {
                         }
                     }
                     const finalResponse = req.onDownloadProgress
-                        ? wrapDownloadResponse(undiciResponse, req.onDownloadProgress)
+                        ? wrapDownloadResponse$1(undiciResponse, req.onDownloadProgress)
                         : undiciResponse;
-                    const ttfb = performance$1.now() - startTime;
-                    const totalTime = performance$1.now() - requestContext.requestStartTime;
+                    const ttfb = performance$2.now() - startTime;
+                    const totalTime = performance$2.now() - requestContext.requestStartTime;
                     if (!requestContext.timings.firstByte) {
                         requestContext.timings.firstByte = ttfb;
                     }
@@ -38117,6 +38309,29 @@ class UndiciTransport {
                         requestContext.timings.total = totalTime;
                     }
                     this.updateProtocolCache(currentUrl, requestContext.connection);
+                    try {
+                        const urlHostname = new URL(currentUrl).hostname;
+                        const madeNewConnection = isNewConnection(urlHostname, connectionIdBefore);
+                        if (madeNewConnection) {
+                            const connTiming = getTimingForHost(urlHostname);
+                            if (connTiming) {
+                                if (!requestContext.timings.dns && !requestContext.timings.tcp && !requestContext.timings.tls) {
+                                    requestContext.timings.dns = connTiming.dns;
+                                    requestContext.timings.tcp = connTiming.tcp;
+                                    requestContext.timings.tls = connTiming.tls;
+                                }
+                            }
+                        }
+                        else {
+                            if (!requestContext.timings.dns && !requestContext.timings.tcp && !requestContext.timings.tls) {
+                                requestContext.timings.dns = 0;
+                                requestContext.timings.tcp = 0;
+                                requestContext.timings.tls = 0;
+                            }
+                        }
+                    }
+                    catch {
+                    }
                     return new HttpResponse(finalResponse, {
                         timings: requestContext.timings,
                         connection: requestContext.connection
@@ -38208,7 +38423,7 @@ class UndiciTransport {
                     bypass: this.proxyBypassList
                 });
                 const bodyWithProgress = redirectCount === 0
-                    ? wrapUploadBody(currentBody, req.onUploadProgress, uploadTotal)
+                    ? wrapUploadBody$1(currentBody, req.onUploadProgress, uploadTotal)
                     : currentBody;
                 let finalBody = bodyWithProgress;
                 if (finalBody instanceof FormData) {
@@ -38314,7 +38529,7 @@ class UndiciTransport {
                             const hookResult = await req.beforeRedirect(redirectInfo);
                             if (hookResult === false) {
                                 const finalResponse = req.onDownloadProgress
-                                    ? wrapDownloadResponse(undiciResponse, req.onDownloadProgress)
+                                    ? wrapDownloadResponse$1(undiciResponse, req.onDownloadProgress)
                                     : undiciResponse;
                                 return new HttpResponse(finalResponse, {
                                     timings: {},
@@ -38345,7 +38560,7 @@ class UndiciTransport {
                     }
                 }
                 const finalResponse = req.onDownloadProgress
-                    ? wrapDownloadResponse(undiciResponse, req.onDownloadProgress)
+                    ? wrapDownloadResponse$1(undiciResponse, req.onDownloadProgress)
                     : undiciResponse;
                 return new HttpResponse(finalResponse, {
                     timings: {},
@@ -38522,7 +38737,7 @@ function shouldBypassProxy(url, bypass) {
     }
     return false;
 }
-function parseContentLength(headers) {
+function parseContentLength$1(headers) {
     if (!headers)
         return undefined;
     if (typeof headers.get === 'function') {
@@ -38535,13 +38750,13 @@ function parseContentLength(headers) {
     const parsed = parseInt(Array.isArray(raw) ? raw[0] : raw, 10);
     return Number.isFinite(parsed) ? parsed : undefined;
 }
-function wrapDownloadResponse(response, onProgress) {
+function wrapDownloadResponse$1(response, onProgress) {
     if (!onProgress)
         return response;
     if (typeof Response !== 'undefined' && response instanceof Response) {
         if (!response.body)
             return response;
-        const total = parseContentLength(response.headers);
+        const total = parseContentLength$1(response.headers);
         const body = createProgressStream(response.body, onProgress, {
             total,
             direction: 'download'
@@ -38552,7 +38767,7 @@ function wrapDownloadResponse(response, onProgress) {
             headers: response.headers
         });
     }
-    const total = parseContentLength(response.headers);
+    const total = parseContentLength$1(response.headers);
     const nodeBody = response.body;
     if (!nodeBody)
         return response;
@@ -38565,7 +38780,7 @@ function wrapDownloadResponse(response, onProgress) {
         headers: response.headers,
     });
 }
-function wrapUploadBody(body, onProgress, total) {
+function wrapUploadBody$1(body, onProgress, total) {
     if (body instanceof FormData) {
         return body;
     }
@@ -38612,6 +38827,266 @@ function bufferToProgressStream(buffer, onProgress, chunkSize = 64 * 1024) {
 }
 function isNodeReadable(obj) {
     return obj && typeof obj.pipe === 'function' && typeof obj.on === 'function';
+}
+
+var undici = /*#__PURE__*/Object.freeze({
+    __proto__: null,
+    UndiciTransport: UndiciTransport
+});
+
+function parseContentLength(headers) {
+    const raw = headers.get('content-length');
+    if (!raw)
+        return undefined;
+    const parsed = parseInt(raw, 10);
+    return Number.isFinite(parsed) ? parsed : undefined;
+}
+function wrapDownloadResponse(response, onProgress) {
+    if (!onProgress || !response.body)
+        return response;
+    const total = parseContentLength(response.headers);
+    const body = createProgressStream(response.body, onProgress, {
+        total,
+        direction: 'download'
+    });
+    return new Response(body, {
+        status: response.status,
+        statusText: response.statusText,
+        headers: response.headers
+    });
+}
+function bufferToStream(buffer) {
+    return new ReadableStream({
+        start(controller) {
+            controller.enqueue(buffer);
+            controller.close();
+        }
+    });
+}
+function wrapUploadBody(body, onProgress, total) {
+    if (!onProgress || !body)
+        return body;
+    if (typeof FormData !== 'undefined' && body instanceof FormData) {
+        return body;
+    }
+    if (typeof ReadableStream !== 'undefined' && body instanceof ReadableStream) {
+        return createProgressStream(body, onProgress, { total, direction: 'upload' });
+    }
+    if (typeof Blob !== 'undefined' && body instanceof Blob) {
+        return createProgressStream(body.stream(), onProgress, { total: body.size, direction: 'upload' });
+    }
+    if (body instanceof ArrayBuffer || ArrayBuffer.isView(body)) {
+        const view = body instanceof ArrayBuffer
+            ? new Uint8Array(body)
+            : new Uint8Array(body.buffer, body.byteOffset, body.byteLength);
+        return createProgressStream(bufferToStream(view), onProgress, { total: view.byteLength, direction: 'upload' });
+    }
+    if (typeof body === 'string') {
+        const encoder = new TextEncoder();
+        const view = encoder.encode(body);
+        return createProgressStream(bufferToStream(view), onProgress, { total: view.byteLength, direction: 'upload' });
+    }
+    return body;
+}
+class FetchTransport {
+    options;
+    constructor(options = {}) {
+        this.options = options;
+    }
+    async dispatch(req) {
+        const start = performance.now();
+        let timeoutId;
+        let abortController;
+        const timeoutMs = typeof req.timeout === 'number'
+            ? req.timeout
+            : req.timeout?.request;
+        let signal = req.signal;
+        if (timeoutMs && !signal) {
+            abortController = new AbortController();
+            signal = abortController.signal;
+            timeoutId = setTimeout(() => abortController.abort(), timeoutMs);
+        }
+        const followRedirects = req.followRedirects !== false;
+        const maxRedirects = req.maxRedirects ?? 20;
+        const handleRedirectsManually = Boolean(req.beforeRedirect) || req.followRedirects === false || req.maxRedirects !== undefined;
+        let currentUrl = req.url;
+        let currentMethod = req.method;
+        let currentBody = req.body;
+        let currentHeaders = new Headers(req.headers);
+        const uploadTotal = parseContentLength(currentHeaders);
+        let redirectCount = 0;
+        try {
+            while (true) {
+                const bodyWithProgress = redirectCount === 0
+                    ? wrapUploadBody(currentBody, req.onUploadProgress, uploadTotal)
+                    : currentBody;
+                const requestInit = {
+                    method: currentMethod,
+                    headers: currentHeaders,
+                    body: bodyWithProgress,
+                    signal,
+                    credentials: this.options.credentials,
+                    cache: this.options.cache,
+                    keepalive: this.options.keepalive ?? true,
+                    redirect: handleRedirectsManually ? 'manual' : 'follow',
+                    duplex: bodyWithProgress ? 'half' : undefined
+                };
+                const response = await globalThis.fetch(currentUrl, requestInit);
+                if (handleRedirectsManually) {
+                    const status = response.status;
+                    const isRedirect = status >= 300 && status < 400;
+                    if (isRedirect && followRedirects && redirectCount < maxRedirects) {
+                        const location = response.headers.get('location');
+                        if (!location || response.type === 'opaqueredirect') {
+                            const finalResponse = wrapDownloadResponse(response, req.onDownloadProgress);
+                            const totalTime = performance.now() - start;
+                            return new FetchResponseWrapper(finalResponse, { total: totalTime, firstByte: totalTime });
+                        }
+                        const nextUrl = new URL(location, currentUrl).toString();
+                        let resolvedUrl = nextUrl;
+                        if (req.beforeRedirect) {
+                            const redirectInfo = {
+                                from: currentUrl,
+                                to: nextUrl,
+                                status,
+                                headers: response.headers
+                            };
+                            const hookResult = await req.beforeRedirect(redirectInfo);
+                            if (hookResult === false) {
+                                const finalResponse = wrapDownloadResponse(response, req.onDownloadProgress);
+                                const totalTime = performance.now() - start;
+                                return new FetchResponseWrapper(finalResponse, { total: totalTime, firstByte: totalTime });
+                            }
+                            if (typeof hookResult === 'string') {
+                                resolvedUrl = hookResult;
+                            }
+                        }
+                        if (status === 303 || ((status === 301 || status === 302) && currentMethod !== 'GET' && currentMethod !== 'HEAD')) {
+                            currentMethod = 'GET';
+                            currentBody = null;
+                            currentHeaders.delete('content-type');
+                            currentHeaders.delete('content-length');
+                        }
+                        await response.body?.cancel();
+                        currentUrl = resolvedUrl;
+                        redirectCount++;
+                        continue;
+                    }
+                }
+                const finalResponse = wrapDownloadResponse(response, req.onDownloadProgress);
+                const totalTime = performance.now() - start;
+                const timings = {
+                    total: totalTime,
+                    firstByte: totalTime,
+                };
+                return new FetchResponseWrapper(finalResponse, timings);
+            }
+        }
+        catch (error) {
+            if (error.name === 'AbortError' && abortController) {
+                const timeoutError = new Error(`Request timeout after ${timeoutMs}ms`);
+                timeoutError.name = 'TimeoutError';
+                throw timeoutError;
+            }
+            throw error;
+        }
+        finally {
+            if (timeoutId)
+                clearTimeout(timeoutId);
+        }
+    }
+}
+class FetchResponseWrapper {
+    raw;
+    timings;
+    constructor(raw, timings) {
+        this.raw = raw;
+        this.timings = timings;
+    }
+    get status() { return this.raw.status; }
+    get statusText() { return this.raw.statusText; }
+    get headers() { return this.raw.headers; }
+    get ok() { return this.raw.ok; }
+    get url() { return this.raw.url; }
+    get connection() { return {}; }
+    json() { return this.raw.json(); }
+    text() { return this.raw.text(); }
+    blob() { return this.raw.blob(); }
+    async cleanText() { return (await this.text()).replace(/<[^>]*>?/gm, ''); }
+    read() { return this.raw.body; }
+    clone() { return new FetchResponseWrapper(this.raw.clone(), this.timings); }
+    async *sse() {
+        if (!this.raw.body)
+            return;
+        const stream = this.raw.body.pipeThrough(new TextDecoderStream());
+        const reader = stream.getReader();
+        let buffer = '';
+        while (true) {
+            const { done, value } = await reader.read();
+            if (done)
+                break;
+            buffer += value;
+            const events = buffer.split('\n\n');
+            buffer = events.pop() || '';
+            for (const event of events) {
+                if (!event.trim())
+                    continue;
+                let data = '';
+                let eventType;
+                let id;
+                let retry;
+                const lines = event.split('\n');
+                for (const line of lines) {
+                    if (line.startsWith('data: ')) {
+                        data = data ? data + '\n' + line.slice(6) : line.slice(6);
+                    }
+                    else if (line.startsWith('event: ')) {
+                        eventType = line.slice(7);
+                    }
+                    else if (line.startsWith('id: ')) {
+                        id = line.slice(4);
+                    }
+                    else if (line.startsWith('retry: ')) {
+                        retry = parseInt(line.slice(7), 10);
+                    }
+                }
+                if (data) {
+                    yield { data, event: eventType, id, retry };
+                }
+            }
+        }
+    }
+    async *download() {
+        if (!this.raw.body)
+            return;
+        const reader = this.raw.body.getReader();
+        let loaded = 0;
+        const total = Number(this.raw.headers.get('content-length')) || undefined;
+        while (true) {
+            const { done, value } = await reader.read();
+            if (done)
+                break;
+            loaded += value.length;
+            yield {
+                loaded,
+                transferred: loaded,
+                total,
+                percent: total ? (loaded / total) * 100 : undefined,
+                direction: 'download'
+            };
+        }
+    }
+    async *[Symbol.asyncIterator]() {
+        if (!this.raw.body)
+            return;
+        const reader = this.raw.body.getReader();
+        while (true) {
+            const { done, value } = await reader.read();
+            if (done)
+                break;
+            yield value;
+        }
+    }
 }
 
 const consoleLogger = {
@@ -39225,7 +39700,9 @@ class HttpRequest {
     constructor(url, options = {}) {
         this.url = url;
         this.method = options.method || 'GET';
-        this.headers = new Headers(options.headers);
+        this.headers = options.headers instanceof Headers
+            ? options.headers
+            : new Headers(options.headers);
         this.body = options.body || null;
         this.signal = options.signal;
         this.throwHttpErrors = options.throwHttpErrors !== undefined ? options.throwHttpErrors : true;
@@ -39275,121 +39752,6 @@ class HttpRequest {
             followRedirects: this.followRedirects,
             http2: this.http2,
             useCurl: this.useCurl,
-        });
-    }
-}
-
-const BIN_DIR = join(homedir(), '.recker', 'bin');
-function getCurlBinName() {
-    return 'curl-impersonate-chrome';
-}
-function getCurlPath() {
-    return join(BIN_DIR, getCurlBinName());
-}
-async function hasImpersonate() {
-    try {
-        await promises.access(getCurlPath());
-        return true;
-    }
-    catch {
-        return false;
-    }
-}
-
-class CurlTransport {
-    async dispatch(req) {
-        return new Promise(async (resolve, reject) => {
-            const args = [
-                '-X', req.method,
-                req.url,
-                '-i',
-                '-s',
-                '--compressed',
-                '--no-keepalive'
-            ];
-            req.headers.forEach((val, key) => {
-                args.push('-H', `${key}: ${val}`);
-            });
-            if (req.body && typeof req.body === 'string') {
-                args.push('-d', req.body);
-            }
-            let command = process.env.RECKER_CURL_BIN;
-            if (!command) {
-                if (await hasImpersonate()) {
-                    command = getCurlPath();
-                }
-                else {
-                    command = 'curl';
-                }
-            }
-            const child = spawn(command, args);
-            const stdoutChunks = [];
-            const stderrChunks = [];
-            child.stdout.on('data', (chunk) => stdoutChunks.push(chunk));
-            child.stderr.on('data', (chunk) => stderrChunks.push(chunk));
-            child.on('error', (err) => {
-                reject(new NetworkError(`Failed to spawn curl: ${err.message}`, 'ERR_CURL_SPAWN', req));
-            });
-            child.on('close', (code) => {
-                if (code !== 0) {
-                    const stderr = Buffer.concat(stderrChunks).toString();
-                    reject(new NetworkError(`Curl exited with code ${code}: ${stderr}`, 'ERR_CURL_EXIT', req));
-                    return;
-                }
-                const fullOutput = Buffer.concat(stdoutChunks);
-                let headerEndIndex = fullOutput.indexOf('\r\n\r\n');
-                let offset = 4;
-                if (headerEndIndex === -1) {
-                    headerEndIndex = fullOutput.indexOf('\n\n');
-                    offset = 2;
-                }
-                if (headerEndIndex !== -1) {
-                    const firstLine = fullOutput.subarray(0, Math.min(20, headerEndIndex)).toString();
-                    if (firstLine.startsWith('HTTP/1.1 100') || firstLine.startsWith('HTTP/2 100')) {
-                        const nextStart = headerEndIndex + offset;
-                        const secondSplit = fullOutput.indexOf('\r\n\r\n', nextStart);
-                        if (secondSplit !== -1) {
-                            headerEndIndex = secondSplit;
-                            offset = 4;
-                        }
-                    }
-                }
-                if (headerEndIndex === -1) {
-                    const nativeResponse = new Response(fullOutput, { status: 200, statusText: 'OK' });
-                    resolve(new HttpResponse(nativeResponse, { connection: { protocol: 'curl' } }));
-                    return;
-                }
-                const headerBlock = fullOutput.subarray(0, headerEndIndex).toString();
-                const bodyBlock = fullOutput.subarray(headerEndIndex + offset);
-                const headerLines = headerBlock.split(/\r?\n/);
-                const statusLine = headerLines[0];
-                let status = 200;
-                let statusText = 'OK';
-                const statusMatch = statusLine.match(/HTTP\/[\d\.]+ (\d+) ?(.*)/);
-                if (statusMatch) {
-                    status = parseInt(statusMatch[1], 10);
-                    statusText = statusMatch[2] || '';
-                }
-                const headers = new Headers();
-                for (let i = 1; i < headerLines.length; i++) {
-                    const line = headerLines[i];
-                    const colon = line.indexOf(':');
-                    if (colon > 0) {
-                        const key = line.substring(0, colon).trim();
-                        const val = line.substring(colon + 1).trim();
-                        headers.append(key, val);
-                    }
-                }
-                const nativeResponse = new Response(bodyBlock, {
-                    status,
-                    statusText,
-                    headers
-                });
-                resolve(new HttpResponse(nativeResponse, {
-                    timings: {},
-                    connection: { protocol: 'curl' }
-                }));
-            });
         });
     }
 }
@@ -39777,7 +40139,7 @@ function getDefaultUserAgent() {
     return `recker/${VERSION$1}`;
 }
 
-const VERSION = '1.0.55';
+const VERSION = '1.0.64';
 let _version = null;
 async function getVersion() {
     if (_version)
@@ -40023,6 +40385,3125 @@ function retryPlugin(options = {}) {
         };
         client.use(middleware);
     };
+}
+
+class SimpleMemoryStorage {
+    store = new Map();
+    async get(key) {
+        const entry = this.store.get(key);
+        if (!entry)
+            return null;
+        if (entry.expiresAt > 0 && entry.expiresAt <= Date.now()) {
+            this.store.delete(key);
+            return null;
+        }
+        return entry.value;
+    }
+    async set(key, value, ttl) {
+        if (!Number.isFinite(ttl) || ttl <= 0) {
+            this.store.delete(key);
+            return;
+        }
+        this.store.set(key, {
+            value,
+            expiresAt: Date.now() + ttl,
+        });
+    }
+    async delete(key) {
+        this.store.delete(key);
+    }
+}
+
+const textEncoder$1 = typeof TextEncoder !== 'undefined' ? new TextEncoder() : null;
+const BufferCtor$1 = globalThis.Buffer;
+function isNodeRuntime$4() {
+    return typeof globalThis !== 'undefined' && Boolean(globalThis.process?.versions?.node);
+}
+let LazyCacheStorage$1 = class LazyCacheStorage {
+    factory;
+    storage;
+    resolving;
+    constructor(factory) {
+        this.factory = factory;
+    }
+    async getStorage() {
+        if (!this.storage) {
+            if (!this.resolving) {
+                this.resolving = this.factory().then((instance) => {
+                    this.storage = instance;
+                    return instance;
+                });
+            }
+            this.storage = await this.resolving;
+        }
+        return this.storage;
+    }
+    async get(key) {
+        return (await this.getStorage()).get(key);
+    }
+    async set(key, value, ttl) {
+        return (await this.getStorage()).set(key, value, ttl);
+    }
+    async delete(key) {
+        return (await this.getStorage()).delete(key);
+    }
+};
+function createDefaultStorage() {
+    if (!isNodeRuntime$4()) {
+        return new SimpleMemoryStorage();
+    }
+    return new LazyCacheStorage$1(async () => {
+        const { MemoryStorage } = await Promise.resolve().then(function () { return memoryStorage; });
+        return new MemoryStorage();
+    });
+}
+function toBytes$1(value) {
+    if (value === null || value === undefined)
+        return null;
+    if (typeof value === 'string') {
+        if (textEncoder$1)
+            return textEncoder$1.encode(value);
+        if (BufferCtor$1)
+            return BufferCtor$1.from(value, 'utf8');
+        return null;
+    }
+    if (typeof URLSearchParams !== 'undefined' && value instanceof URLSearchParams) {
+        const encoded = value.toString();
+        if (textEncoder$1)
+            return textEncoder$1.encode(encoded);
+        if (BufferCtor$1)
+            return BufferCtor$1.from(encoded, 'utf8');
+        return null;
+    }
+    if (value instanceof ArrayBuffer) {
+        return new Uint8Array(value);
+    }
+    if (ArrayBuffer.isView(value)) {
+        return new Uint8Array(value.buffer, value.byteOffset, value.byteLength);
+    }
+    if (typeof Blob !== 'undefined' && value instanceof Blob) {
+        return null;
+    }
+    if (typeof value === 'object') {
+        try {
+            const json = JSON.stringify(value);
+            if (textEncoder$1)
+                return textEncoder$1.encode(json);
+            if (BufferCtor$1)
+                return BufferCtor$1.from(json, 'utf8');
+            return null;
+        }
+        catch {
+            return null;
+        }
+    }
+    return null;
+}
+function hashBytes(bytes) {
+    let hash = 0xcbf29ce484222325n;
+    const prime = 0x100000001b3n;
+    for (const byte of bytes) {
+        hash ^= BigInt(byte);
+        hash = (hash * prime) & 0xffffffffffffffffn;
+    }
+    return hash.toString(16).padStart(16, '0');
+}
+function isTextContentType(contentType) {
+    if (!contentType)
+        return true;
+    const value = contentType.toLowerCase();
+    if (value.startsWith('text/'))
+        return true;
+    if (value.includes('json') || value.includes('xml'))
+        return true;
+    if (value.includes('yaml') || value.includes('csv'))
+        return true;
+    if (value.includes('javascript') || value.includes('ecmascript'))
+        return true;
+    if (value.includes('x-www-form-urlencoded'))
+        return true;
+    if (value.includes('graphql'))
+        return true;
+    if (value.includes('event-stream'))
+        return true;
+    if (value.includes('+json') || value.includes('+xml'))
+        return true;
+    return false;
+}
+function encodeBase64(bytes) {
+    if (BufferCtor$1) {
+        return BufferCtor$1.from(bytes).toString('base64');
+    }
+    if (typeof btoa !== 'undefined') {
+        let binary = '';
+        const chunkSize = 0x8000;
+        for (let i = 0; i < bytes.length; i += chunkSize) {
+            const chunk = bytes.subarray(i, i + chunkSize);
+            binary += String.fromCharCode(...chunk);
+        }
+        return btoa(binary);
+    }
+    return null;
+}
+function decodeBase64(value) {
+    if (BufferCtor$1) {
+        return BufferCtor$1.from(value, 'base64');
+    }
+    if (typeof atob !== 'undefined') {
+        const binary = atob(value);
+        const bytes = new Uint8Array(binary.length);
+        for (let i = 0; i < binary.length; i++) {
+            bytes[i] = binary.charCodeAt(i);
+        }
+        return bytes;
+    }
+    return null;
+}
+async function readResponseBody(response) {
+    const contentType = response.headers.get('content-type');
+    if (isTextContentType(contentType)) {
+        return { body: await response.text(), bodyEncoding: 'utf8' };
+    }
+    const buffer = await response.arrayBuffer();
+    const bytes = new Uint8Array(buffer);
+    const encoded = encodeBase64(bytes);
+    if (encoded === null)
+        return null;
+    return { body: encoded, bodyEncoding: 'base64' };
+}
+class CacheResponse {
+    raw;
+    timings;
+    constructor(raw, timings) {
+        this.raw = raw;
+        this.timings = timings;
+    }
+    get status() { return this.raw.status; }
+    get statusText() { return this.raw.statusText; }
+    get headers() { return this.raw.headers; }
+    get ok() { return this.raw.ok; }
+    get url() { return this.raw.url; }
+    get connection() { return {}; }
+    get cache() {
+        return parseHeaders(this.headers, this.status).cache;
+    }
+    get rateLimit() {
+        return parseHeaders(this.headers, this.status).rateLimit;
+    }
+    links() {
+        return parseLinkHeader(this.headers);
+    }
+    get headerInfo() {
+        return parseHeaders(this.headers, this.status);
+    }
+    json() {
+        return this.raw.json();
+    }
+    text() {
+        return this.raw.text();
+    }
+    async cleanText() {
+        return cleanHtml(await this.text());
+    }
+    blob() {
+        return this.raw.blob();
+    }
+    read() {
+        return this.raw.body;
+    }
+    clone() {
+        return new CacheResponse(this.raw.clone(), this.timings);
+    }
+    sse() {
+        return parseSSE(this.raw);
+    }
+    async *download() {
+        if (!this.raw.body)
+            return;
+        const reader = this.raw.body.getReader();
+        let loaded = 0;
+        const total = Number(this.raw.headers.get('content-length')) || undefined;
+        while (true) {
+            const { done, value } = await reader.read();
+            if (done)
+                break;
+            loaded += value.length;
+            yield {
+                loaded,
+                transferred: loaded,
+                total,
+                percent: total ? (loaded / total) * 100 : undefined,
+                direction: 'download'
+            };
+        }
+    }
+    async *[Symbol.asyncIterator]() {
+        if (!this.raw.body)
+            return;
+        const reader = this.raw.body.getReader();
+        while (true) {
+            const { done, value } = await reader.read();
+            if (done)
+                break;
+            yield value;
+        }
+    }
+}
+function parseRequestCacheControl(header) {
+    if (!header)
+        return {};
+    const result = {};
+    const directives = header.toLowerCase().split(',').map(d => d.trim());
+    for (const directive of directives) {
+        if (directive.startsWith('max-age=')) {
+            result.maxAge = parseInt(directive.slice(8), 10);
+        }
+        else if (directive.startsWith('min-fresh=')) {
+            result.minFresh = parseInt(directive.slice(10), 10);
+        }
+        else if (directive.startsWith('max-stale')) {
+            const equals = directive.indexOf('=');
+            if (equals !== -1) {
+                result.maxStale = parseInt(directive.slice(equals + 1), 10);
+            }
+            else {
+                result.maxStale = Infinity;
+            }
+        }
+        else if (directive === 'only-if-cached') {
+            result.onlyIfCached = true;
+        }
+        else if (directive === 'no-cache') {
+            result.noCache = true;
+        }
+        else if (directive === 'no-store') {
+            result.noStore = true;
+        }
+    }
+    return result;
+}
+function parseCacheControl(header) {
+    if (!header)
+        return {};
+    const result = {};
+    const directives = header.toLowerCase().split(',').map(d => d.trim());
+    for (const directive of directives) {
+        if (directive.startsWith('max-age=')) {
+            result.maxAge = parseInt(directive.slice(8), 10);
+        }
+        else if (directive.startsWith('s-maxage=')) {
+            result.sMaxAge = parseInt(directive.slice(9), 10);
+        }
+        else if (directive.startsWith('stale-while-revalidate=')) {
+            result.staleWhileRevalidate = parseInt(directive.slice(23), 10);
+        }
+        else if (directive.startsWith('stale-if-error=')) {
+            result.staleIfError = parseInt(directive.slice(15), 10);
+        }
+        else if (directive === 'no-cache') {
+            result.noCache = true;
+        }
+        else if (directive === 'no-store') {
+            result.noStore = true;
+        }
+        else if (directive === 'must-revalidate') {
+            result.mustRevalidate = true;
+        }
+        else if (directive === 'private') {
+            result.isPrivate = true;
+        }
+        else if (directive === 'public') {
+            result.isPublic = true;
+        }
+    }
+    return result;
+}
+function isFresh(entry, now) {
+    const age = (now - entry.timestamp) / 1000;
+    if (entry.sMaxAge !== undefined) {
+        return age < entry.sMaxAge;
+    }
+    if (entry.maxAge !== undefined) {
+        return age < entry.maxAge;
+    }
+    if (entry.expires !== undefined) {
+        return now < entry.expires;
+    }
+    if (entry.lastModified) {
+        const lastModifiedTime = new Date(entry.lastModified).getTime();
+        if (!isNaN(lastModifiedTime)) {
+            const dateTime = entry.headers['date']
+                ? new Date(entry.headers['date']).getTime()
+                : entry.timestamp;
+            if (!isNaN(dateTime) && dateTime > lastModifiedTime) {
+                const timeSinceModified = (dateTime - lastModifiedTime) / 1000;
+                const heuristicFreshness = timeSinceModified * 0.1;
+                return age < heuristicFreshness;
+            }
+        }
+    }
+    return false;
+}
+function satisfiesRequestDirectives(entry, now, reqDirectives) {
+    const age = (now - entry.timestamp) / 1000;
+    const responseMaxAge = entry.sMaxAge ?? entry.maxAge ?? Infinity;
+    const currentFreshness = responseMaxAge - age;
+    const fresh = isFresh(entry, now);
+    if (reqDirectives.maxAge !== undefined && age > reqDirectives.maxAge) {
+        return { allowed: false, reason: 'exceeds-request-max-age' };
+    }
+    if (reqDirectives.minFresh !== undefined) {
+        if (!fresh || currentFreshness < reqDirectives.minFresh) {
+            return { allowed: false, reason: 'insufficient-freshness' };
+        }
+    }
+    if (reqDirectives.onlyIfCached) {
+        return { allowed: true };
+    }
+    if (!fresh && reqDirectives.maxStale === undefined) {
+        return { allowed: false, reason: 'stale-not-acceptable' };
+    }
+    if (!fresh && reqDirectives.maxStale !== undefined) {
+        const staleness = age - responseMaxAge;
+        if (reqDirectives.maxStale !== Infinity && staleness > reqDirectives.maxStale) {
+            return { allowed: false, reason: 'exceeds-max-stale' };
+        }
+    }
+    return { allowed: true };
+}
+function canServeStale(entry, now) {
+    if (!entry.staleWhileRevalidate)
+        return false;
+    const age = (now - entry.timestamp) / 1000;
+    const maxAge = entry.sMaxAge ?? entry.maxAge ?? 0;
+    const staleTime = age - maxAge;
+    return staleTime < entry.staleWhileRevalidate;
+}
+function createConditionalRequest(req, entry) {
+    const conditionalHeaders = new Headers(req.headers);
+    if (entry.etag) {
+        conditionalHeaders.set('If-None-Match', entry.etag);
+    }
+    if (entry.lastModified) {
+        conditionalHeaders.set('If-Modified-Since', entry.lastModified);
+    }
+    return new HttpRequest(req.url, {
+        method: req.method,
+        headers: conditionalHeaders,
+        body: req.body,
+        signal: req.signal,
+        throwHttpErrors: false,
+        timeout: req.timeout,
+        onUploadProgress: req.onUploadProgress,
+        onDownloadProgress: req.onDownloadProgress,
+        maxResponseSize: req.maxResponseSize
+    });
+}
+async function storeCacheEntry(storage, baseKey, req, entry, ttl, keyGenerator) {
+    if (entry.vary) {
+        const varyKey = keyGenerator(req, entry.vary);
+        await storage.set(varyKey, entry, ttl);
+        const varyMarker = {
+            ...entry,
+            body: '',
+        };
+        await storage.set(baseKey, varyMarker, ttl);
+    }
+    else {
+        await storage.set(baseKey, entry, ttl);
+    }
+}
+async function createCacheEntry(response, cachedBody, now) {
+    const headers = {};
+    response.headers.forEach((v, k) => { headers[k] = v; });
+    const cacheControl = parseCacheControl(response.headers.get('Cache-Control'));
+    let expires;
+    const expiresHeader = response.headers.get('Expires');
+    if (expiresHeader) {
+        const expiresDate = new Date(expiresHeader);
+        if (!isNaN(expiresDate.getTime())) {
+            expires = expiresDate.getTime();
+        }
+    }
+    return {
+        status: response.status,
+        statusText: response.statusText,
+        headers,
+        body: cachedBody.body,
+        bodyEncoding: cachedBody.bodyEncoding,
+        timestamp: now,
+        etag: response.headers.get('ETag') || undefined,
+        lastModified: response.headers.get('Last-Modified') || undefined,
+        vary: response.headers.get('Vary') || undefined,
+        expires,
+        ...cacheControl
+    };
+}
+function createCachedResponse(entry, cacheStatus) {
+    const headers = new Headers(entry.headers);
+    headers.set('X-Cache', cacheStatus);
+    headers.set('X-Cache-Age', String(Math.floor((Date.now() - entry.timestamp) / 1000)));
+    if (cacheStatus === 'stale' || cacheStatus === 'stale-error') {
+        const warningCode = cacheStatus === 'stale' ? 110 : 111;
+        const warningText = cacheStatus === 'stale' ? 'Response is Stale' : 'Revalidation Failed';
+        const existingWarning = headers.get('Warning');
+        if (existingWarning) {
+            headers.set('Warning', `${existingWarning}, ${warningCode} - "${warningText}"`);
+        }
+        else {
+            headers.set('Warning', `${warningCode} - "${warningText}"`);
+        }
+    }
+    const responseBody = entry.bodyEncoding === 'base64'
+        ? decodeBase64(entry.body) ?? entry.body
+        : entry.body;
+    const response = new Response(responseBody, {
+        status: entry.status,
+        statusText: entry.statusText,
+        headers
+    });
+    return new CacheResponse(response);
+}
+function cachePlugin(options = {}) {
+    const storage = options.storage || createDefaultStorage();
+    const strategy = options.strategy || 'cache-first';
+    const ttl = options.ttl || 60 * 1000;
+    const methods = options.methods || ['GET'];
+    const respectCacheControl = options.respectCacheControl !== false;
+    const forceRevalidate = options.forceRevalidate === true;
+    const generateKey = options.keyGenerator || ((req, varyHeaders) => {
+        let key = `${req.method}:${req.url}`;
+        if (req.method !== 'GET' && req.method !== 'HEAD' && req.body) {
+            try {
+                const bytes = toBytes$1(req.body);
+                if (bytes && bytes.length > 0) {
+                    key += `:${hashBytes(bytes)}`;
+                }
+            }
+            catch {
+            }
+        }
+        if (varyHeaders && options.respectVary !== false) {
+            const varyHeaderNames = varyHeaders.split(',').map(h => h.trim().toLowerCase());
+            const varyParts = [];
+            for (const headerName of varyHeaderNames) {
+                if (headerName === '*') {
+                    return `${key}:vary-*:${Date.now()}`;
+                }
+                const headerValue = req.headers.get(headerName);
+                if (headerValue) {
+                    varyParts.push(`${headerName}=${headerValue}`);
+                }
+            }
+            if (varyParts.length > 0) {
+                key += `:vary:${varyParts.join('|')}`;
+            }
+        }
+        return key;
+    });
+    const cacheMiddleware = async (req, next) => {
+        const unsafeMethods = [
+            'POST', 'PUT', 'PATCH', 'DELETE',
+            'PROPPATCH', 'MKCOL', 'COPY', 'MOVE', 'LOCK', 'UNLOCK',
+            'LINK', 'UNLINK', 'PURGE'
+        ];
+        if (unsafeMethods.includes(req.method)) {
+            const response = await next(req);
+            if (response.ok) {
+                await storage.delete(`GET:${req.url}`);
+                await storage.delete(`HEAD:${req.url}`);
+            }
+            return response;
+        }
+        if (!methods.includes(req.method)) {
+            return next(req);
+        }
+        const reqCacheControl = respectCacheControl
+            ? parseRequestCacheControl(req.headers.get('Cache-Control'))
+            : {};
+        if (respectCacheControl && reqCacheControl.noStore) {
+            return next(req);
+        }
+        if (respectCacheControl) {
+            const reqPragma = req.headers.get('Pragma');
+            if (reqPragma?.includes('no-cache')) {
+                return next(req);
+            }
+        }
+        const baseKey = generateKey(req);
+        let key = baseKey;
+        const now = Date.now();
+        let cachedEntry;
+        if (options.respectVary !== false) {
+            const baseEntry = await storage.get(baseKey);
+            if (baseEntry?.vary) {
+                key = generateKey(req, baseEntry.vary);
+                cachedEntry = await storage.get(key);
+            }
+            else if (baseEntry?.body) {
+                cachedEntry = baseEntry;
+            }
+            else {
+                cachedEntry = undefined;
+            }
+        }
+        else {
+            cachedEntry = await storage.get(key);
+        }
+        if (reqCacheControl.onlyIfCached) {
+            if (!cachedEntry) {
+                const response = new Response(null, {
+                    status: 504,
+                    statusText: 'Gateway Timeout'
+                });
+                return new CacheResponse(response);
+            }
+            const satisfaction = satisfiesRequestDirectives(cachedEntry, now, reqCacheControl);
+            if (!satisfaction.allowed) {
+                const response = new Response(null, {
+                    status: 504,
+                    statusText: 'Gateway Timeout'
+                });
+                return new CacheResponse(response);
+            }
+            return createCachedResponse(cachedEntry, isFresh(cachedEntry, now) ? 'hit' : 'stale');
+        }
+        const hasRequestDirectives = Object.keys(reqCacheControl).length > 0;
+        if (cachedEntry && respectCacheControl && hasRequestDirectives && strategy === 'network-first') {
+            const satisfaction = satisfiesRequestDirectives(cachedEntry, now, reqCacheControl);
+            if (!satisfaction.allowed) {
+                cachedEntry = undefined;
+            }
+        }
+        if (strategy === 'network-only') {
+            const response = await next(req);
+            if (response.ok && respectCacheControl) {
+                const cacheControl = parseCacheControl(response.headers.get('Cache-Control'));
+                if (!cacheControl.noStore) {
+                    const clonedResponse = response.raw.clone();
+                    const cachedBody = await readResponseBody(clonedResponse);
+                    if (!cachedBody) {
+                        return response;
+                    }
+                    const entry = await createCacheEntry(response, cachedBody, now);
+                    const entryTtl = (entry.sMaxAge ?? entry.maxAge ?? ttl / 1000) * 1000;
+                    await storeCacheEntry(storage, baseKey, req, entry, entryTtl, generateKey);
+                }
+            }
+            return response;
+        }
+        if (strategy === 'rfc-compliant' || strategy === 'revalidate') {
+            if (cachedEntry) {
+                const fresh = isFresh(cachedEntry, now);
+                const satisfaction = satisfiesRequestDirectives(cachedEntry, now, reqCacheControl);
+                const hasValidators = cachedEntry.etag || cachedEntry.lastModified;
+                if (!satisfaction.allowed && !hasValidators) {
+                    cachedEntry = undefined;
+                }
+                else if (fresh && !forceRevalidate && !cachedEntry.noCache && !reqCacheControl.noCache) {
+                    return createCachedResponse(cachedEntry, 'hit');
+                }
+                else if (!fresh && reqCacheControl.maxStale !== undefined && !forceRevalidate && !reqCacheControl.noCache) {
+                    return createCachedResponse(cachedEntry, 'stale');
+                }
+            }
+            if (cachedEntry) {
+                const conditionalReq = createConditionalRequest(req, cachedEntry);
+                try {
+                    const response = await next(conditionalReq);
+                    if (response.status === 304) {
+                        const updatedEntry = {
+                            ...cachedEntry,
+                            timestamp: now,
+                            etag: response.headers.get('ETag') || cachedEntry.etag,
+                            lastModified: response.headers.get('Last-Modified') || cachedEntry.lastModified,
+                        };
+                        const freshnessTtl = (updatedEntry.sMaxAge ?? updatedEntry.maxAge ?? ttl / 1000) * 1000;
+                        const storageTtl = Math.max(freshnessTtl, ttl);
+                        await storage.set(key, updatedEntry, storageTtl);
+                        return createCachedResponse(updatedEntry, 'revalidated');
+                    }
+                    if (response.ok) {
+                        const cacheControl = parseCacheControl(response.headers.get('Cache-Control'));
+                        if (!cacheControl.noStore) {
+                            const clonedResponse = response.raw.clone();
+                            const cachedBody = await readResponseBody(clonedResponse);
+                            if (!cachedBody) {
+                                return response;
+                            }
+                            const entry = await createCacheEntry(response, cachedBody, now);
+                            const freshnessTtl = (entry.sMaxAge ?? entry.maxAge ?? ttl / 1000) * 1000;
+                            const storageTtl = Math.max(freshnessTtl, ttl);
+                            await storeCacheEntry(storage, baseKey, req, entry, storageTtl, generateKey);
+                        }
+                    }
+                    return response;
+                }
+                catch (error) {
+                    if (cachedEntry.staleIfError && canServeStale(cachedEntry, now)) {
+                        return createCachedResponse(cachedEntry, 'stale-error');
+                    }
+                    throw error;
+                }
+            }
+            const response = await next(req);
+            if (response.ok) {
+                const cacheControl = parseCacheControl(response.headers.get('Cache-Control'));
+                if (!cacheControl.noStore) {
+                    const clonedResponse = response.raw.clone();
+                    const cachedBody = await readResponseBody(clonedResponse);
+                    if (!cachedBody) {
+                        return response;
+                    }
+                    const entry = await createCacheEntry(response, cachedBody, now);
+                    const freshnessTtl = (entry.sMaxAge ?? entry.maxAge ?? ttl / 1000) * 1000;
+                    const storageTtl = Math.max(freshnessTtl, ttl);
+                    await storeCacheEntry(storage, baseKey, req, entry, storageTtl, generateKey);
+                }
+            }
+            return response;
+        }
+        if (strategy === 'cache-first') {
+            if (cachedEntry) {
+                return createCachedResponse(cachedEntry, 'hit');
+            }
+            const response = await next(req);
+            if (response.ok) {
+                const clonedResponse = response.raw.clone();
+                const cachedBody = await readResponseBody(clonedResponse);
+                if (!cachedBody) {
+                    return response;
+                }
+                const entry = await createCacheEntry(response, cachedBody, now);
+                await storeCacheEntry(storage, baseKey, req, entry, ttl, generateKey);
+            }
+            return response;
+        }
+        if (strategy === 'stale-while-revalidate') {
+            if (cachedEntry) {
+                const cachedResponse = createCachedResponse(cachedEntry, 'stale');
+                (async () => {
+                    try {
+                        const conditionalReq = createConditionalRequest(req, cachedEntry);
+                        const freshResponse = await next(conditionalReq);
+                        if (freshResponse.status === 304) {
+                            const updatedEntry = {
+                                ...cachedEntry,
+                                timestamp: Date.now()
+                            };
+                            await storage.set(key, updatedEntry, ttl);
+                        }
+                        else if (freshResponse.ok) {
+                            const clonedResponse = freshResponse.raw.clone();
+                            const cachedBody = await readResponseBody(clonedResponse);
+                            if (!cachedBody) {
+                                return;
+                            }
+                            const entry = await createCacheEntry(freshResponse, cachedBody, Date.now());
+                            const freshnessTtl = (entry.sMaxAge ?? entry.maxAge ?? ttl / 1000) * 1000;
+                            const storageTtl = Math.max(freshnessTtl, ttl);
+                            await storeCacheEntry(storage, baseKey, req, entry, storageTtl, generateKey);
+                        }
+                    }
+                    catch {
+                    }
+                })();
+                return cachedResponse;
+            }
+            const response = await next(req);
+            if (response.ok) {
+                const clonedResponse = response.raw.clone();
+                const cachedBody = await readResponseBody(clonedResponse);
+                if (!cachedBody) {
+                    return response;
+                }
+                const entry = await createCacheEntry(response, cachedBody, now);
+                await storeCacheEntry(storage, baseKey, req, entry, ttl, generateKey);
+            }
+            return response;
+        }
+        if (strategy === 'network-first') {
+            try {
+                const response = await next(req);
+                if (response.ok) {
+                    const clonedResponse = response.raw.clone();
+                    const cachedBody = await readResponseBody(clonedResponse);
+                    if (!cachedBody) {
+                        return response;
+                    }
+                    const entry = await createCacheEntry(response, cachedBody, now);
+                    const freshnessTtl = (entry.sMaxAge ?? entry.maxAge ?? ttl / 1000) * 1000;
+                    const storageTtl = Math.max(freshnessTtl, ttl);
+                    await storeCacheEntry(storage, baseKey, req, entry, storageTtl, generateKey);
+                }
+                return response;
+            }
+            catch (error) {
+                if (cachedEntry) {
+                    return createCachedResponse(cachedEntry, 'stale-error');
+                }
+                throw error;
+            }
+        }
+        return next(req);
+    };
+    return (client) => {
+        client.use(cacheMiddleware);
+    };
+}
+
+function dedupPlugin(options = {}) {
+    const pendingRequests = new Map();
+    const generateKey = options.keyGenerator || ((req) => {
+        return req.method + ':' + req.url;
+    });
+    const dedupMiddleware = async (req, next) => {
+        if (req.method !== 'GET' && req.method !== 'HEAD') {
+            return next(req);
+        }
+        const key = generateKey(req);
+        if (pendingRequests.has(key)) {
+            const response = await pendingRequests.get(key);
+            return response.clone();
+        }
+        const promise = next(req)
+            .then((res) => {
+            return res;
+        })
+            .finally(() => {
+            pendingRequests.delete(key);
+        });
+        pendingRequests.set(key, promise);
+        try {
+            const response = await promise;
+            return response.clone ? response.clone() : response;
+        }
+        catch (err) {
+            throw err;
+        }
+    };
+    return (client) => {
+        client.use(dedupMiddleware);
+    };
+}
+
+function parseCookies(cookieString) {
+    const cookies = {};
+    if (!cookieString) {
+        return cookies;
+    }
+    const pairs = cookieString.split(';');
+    for (const pair of pairs) {
+        const [key, ...valueParts] = pair.split('=');
+        const trimmedKey = key?.trim();
+        const value = valueParts.join('=').trim();
+        if (trimmedKey) {
+            cookies[trimmedKey] = decodeURIComponent(value || '');
+        }
+    }
+    return cookies;
+}
+function getXSRFToken(cookieName, cookies) {
+    if (cookies) {
+        const parsed = parseCookies(cookies);
+        return parsed[cookieName] || null;
+    }
+    if (typeof document !== 'undefined' && document.cookie) {
+        const parsed = parseCookies(document.cookie);
+        return parsed[cookieName] || null;
+    }
+    return null;
+}
+function xsrfPlugin(options = {}) {
+    const { cookieName = 'XSRF-TOKEN', headerName = 'X-XSRF-TOKEN', token: manualToken, cookies } = options;
+    return async (req, next) => {
+        const token = manualToken || getXSRFToken(cookieName, cookies);
+        if (token) {
+            if (!req.headers.has(headerName)) {
+                req.headers.set(headerName, token);
+            }
+        }
+        return next(req);
+    };
+}
+function createXSRFMiddleware(config) {
+    if (!config) {
+        return null;
+    }
+    if (config === true) {
+        return xsrfPlugin();
+    }
+    return xsrfPlugin(config);
+}
+
+const textEncoder = typeof TextEncoder !== 'undefined' ? new TextEncoder() : null;
+const BufferCtor = globalThis.Buffer;
+function isNodeRuntime$3() {
+    return typeof globalThis !== 'undefined' && Boolean(globalThis.process?.versions?.node);
+}
+let nodeCompressorsPromise = null;
+async function loadNodeCompressors() {
+    if (!nodeCompressorsPromise) {
+        nodeCompressorsPromise = (async () => {
+            const zlibModuleName = 'node:zlib';
+            const utilModuleName = 'node:util';
+            const zlibModule = await import(zlibModuleName);
+            const utilModule = await import(utilModuleName);
+            const gzipAsync = utilModule.promisify(zlibModule.gzip);
+            const deflateAsync = utilModule.promisify(zlibModule.deflate);
+            const brotliAsync = utilModule.promisify(zlibModule.brotliCompress);
+            return {
+                gzip: async (input) => gzipAsync(BufferCtor ? BufferCtor.from(input) : input),
+                deflate: async (input) => deflateAsync(BufferCtor ? BufferCtor.from(input) : input),
+                brotli: async (input) => brotliAsync(BufferCtor ? BufferCtor.from(input) : input)
+            };
+        })();
+    }
+    return nodeCompressorsPromise;
+}
+function isCompressible(contentType) {
+    if (!contentType)
+        return true;
+    const compressibleTypes = [
+        'text/',
+        'application/json',
+        'application/xml',
+        'application/javascript',
+        'application/x-www-form-urlencoded'
+    ];
+    return compressibleTypes.some(type => contentType.includes(type));
+}
+function getBodySize(body) {
+    if (!body)
+        return 0;
+    if (typeof body === 'string') {
+        if (textEncoder)
+            return textEncoder.encode(body).length;
+        if (BufferCtor)
+            return BufferCtor.from(body, 'utf8').length;
+        return body.length;
+    }
+    if (body instanceof ArrayBuffer) {
+        return body.byteLength;
+    }
+    if (ArrayBuffer.isView(body)) {
+        return body.byteLength;
+    }
+    if (typeof Blob !== 'undefined' && body instanceof Blob) {
+        return body.size;
+    }
+    if (typeof body === 'object') {
+        try {
+            const json = JSON.stringify(body);
+            if (textEncoder)
+                return textEncoder.encode(json).length;
+            if (BufferCtor)
+                return BufferCtor.from(json, 'utf8').length;
+            return json.length;
+        }
+        catch {
+            return 0;
+        }
+    }
+    return 0;
+}
+function toBytes(body) {
+    if (!body)
+        return null;
+    if (typeof body === 'string') {
+        if (textEncoder)
+            return textEncoder.encode(body);
+        if (BufferCtor)
+            return BufferCtor.from(body, 'utf8');
+        return null;
+    }
+    if (typeof URLSearchParams !== 'undefined' && body instanceof URLSearchParams) {
+        const encoded = body.toString();
+        if (textEncoder)
+            return textEncoder.encode(encoded);
+        if (BufferCtor)
+            return BufferCtor.from(encoded, 'utf8');
+        return null;
+    }
+    if (body instanceof ArrayBuffer) {
+        return new Uint8Array(body);
+    }
+    if (ArrayBuffer.isView(body)) {
+        return new Uint8Array(body.buffer, body.byteOffset, body.byteLength);
+    }
+    if (typeof Blob !== 'undefined' && body instanceof Blob) {
+        return null;
+    }
+    if (typeof body === 'object') {
+        try {
+            const json = JSON.stringify(body);
+            if (textEncoder)
+                return textEncoder.encode(json);
+            if (BufferCtor)
+                return BufferCtor.from(json, 'utf8');
+            return null;
+        }
+        catch {
+            return null;
+        }
+    }
+    return null;
+}
+async function compress(data, algorithm) {
+    if (isNodeRuntime$3()) {
+        const compressors = await loadNodeCompressors();
+        switch (algorithm) {
+            case 'gzip':
+                return compressors.gzip(data);
+            case 'deflate':
+                return compressors.deflate(data);
+            case 'br':
+                return compressors.brotli(data);
+        }
+    }
+    if (typeof CompressionStream !== 'undefined') {
+        if (algorithm === 'br') {
+            throw new UnsupportedError('Brotli compression is not available in browser environments.', { feature: algorithm });
+        }
+        const stream = new CompressionStream(algorithm);
+        const writer = stream.writable.getWriter();
+        const payload = data.buffer instanceof ArrayBuffer ? data : new Uint8Array(data);
+        await writer.write(payload);
+        await writer.close();
+        const buffer = await new Response(stream.readable).arrayBuffer();
+        return new Uint8Array(buffer);
+    }
+    throw new UnsupportedError(`Unsupported compression algorithm: ${algorithm}`, {
+        feature: algorithm,
+    });
+}
+function compression(options = {}) {
+    const { algorithm = 'gzip', threshold = 1024, force = false, methods = ['POST', 'PUT', 'PATCH'] } = options;
+    return async (req, next) => {
+        const shouldCompress = methods.includes(req.method);
+        if (!shouldCompress || !req.body) {
+            return next(req);
+        }
+        if (req.headers.has('Content-Encoding')) {
+            return next(req);
+        }
+        const contentType = req.headers.get('Content-Type');
+        if (!isCompressible(contentType)) {
+            return next(req);
+        }
+        const bodySize = getBodySize(req.body);
+        if (!force && bodySize < threshold) {
+            return next(req);
+        }
+        const bytes = toBytes(req.body);
+        if (!bytes) {
+            return next(req);
+        }
+        try {
+            const compressed = await compress(bytes, algorithm);
+            if (!force && compressed.length >= bytes.length) {
+                return next(req);
+            }
+            const newHeaders = new Headers(req.headers);
+            newHeaders.set('Content-Encoding', algorithm);
+            newHeaders.set('Content-Length', compressed.length.toString());
+            const compressedReq = {
+                ...req,
+                body: compressed,
+                headers: newHeaders
+            };
+            return next(compressedReq);
+        }
+        catch {
+            return next(req);
+        }
+    };
+}
+function createCompressionMiddleware(config) {
+    if (!config) {
+        return null;
+    }
+    if (config === true) {
+        return compression();
+    }
+    return compression(config);
+}
+
+function serializeXML(obj, rootName) {
+    if (obj === null || obj === undefined) {
+        return rootName ? `<${rootName}/>` : '';
+    }
+    if (typeof obj !== 'object') {
+        return rootName ? `<${rootName}>${encodeXMLEntities(String(obj))}</${rootName}>` : encodeXMLEntities(String(obj));
+    }
+    const keys = Object.keys(obj);
+    if (keys.length === 1 && !rootName) {
+        const key = keys[0];
+        return serializeXML(obj[key], key);
+    }
+    let xml = '';
+    let attributes = '';
+    let textContent = '';
+    for (const key of keys) {
+        const value = obj[key];
+        if (key === '@attributes') {
+            for (const [attrName, attrValue] of Object.entries(value)) {
+                attributes += ` ${attrName}="${encodeXMLEntities(String(attrValue))}"`;
+            }
+        }
+        else if (key === '#text') {
+            textContent = encodeXMLEntities(String(value));
+        }
+        else if (Array.isArray(value)) {
+            for (const item of value) {
+                xml += serializeXML(item, key);
+            }
+        }
+        else {
+            xml += serializeXML(value, key);
+        }
+    }
+    if (rootName) {
+        if (xml || textContent) {
+            return `<${rootName}${attributes}>${textContent}${xml}</${rootName}>`;
+        }
+        return `<${rootName}${attributes}/>`;
+    }
+    return xml;
+}
+function encodeXMLEntities(str) {
+    return str
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&apos;');
+}
+
+let SimpleEmitter$1 = class SimpleEmitter {
+    listeners = new Map();
+    on(event, listener) {
+        const set = this.listeners.get(event) ?? new Set();
+        set.add(listener);
+        this.listeners.set(event, set);
+        return this;
+    }
+    once(event, listener) {
+        const wrapped = (...args) => {
+            this.off(event, wrapped);
+            listener(...args);
+        };
+        return this.on(event, wrapped);
+    }
+    off(event, listener) {
+        const set = this.listeners.get(event);
+        if (set) {
+            set.delete(listener);
+            if (set.size === 0) {
+                this.listeners.delete(event);
+            }
+        }
+        return this;
+    }
+    removeListener(event, listener) {
+        return this.off(event, listener);
+    }
+    emit(event, ...args) {
+        const set = this.listeners.get(event);
+        if (!set)
+            return false;
+        for (const listener of [...set]) {
+            listener(...args);
+        }
+        return true;
+    }
+};
+class RequestRunner extends SimpleEmitter$1 {
+    concurrency;
+    retries;
+    retryDelay;
+    queue = [];
+    activeCount = 0;
+    paused = false;
+    results = new Map();
+    stats = { total: 0, successful: 0, failed: 0 };
+    startTime = 0;
+    pendingRetries = 0;
+    constructor(options = {}) {
+        super();
+        this.concurrency = options.concurrency || 5;
+        this.retries = options.retries ?? 0;
+        this.retryDelay = options.retryDelay ?? 0;
+    }
+    add(fn, options = {}) {
+        this.queueTask({
+            id: options.id || Math.random().toString(36).slice(2),
+            fn,
+            priority: options.priority || 0,
+            retries: options.retries ?? this.retries,
+            resolve: options.resolve,
+        });
+        if (options.trackTotal !== false) {
+            this.stats.total++;
+        }
+        this.processNext();
+    }
+    async run(items, processor, options = {}) {
+        this.startTime = Date.now();
+        this.stats = { total: items.length, successful: 0, failed: 0 };
+        this.results.clear();
+        const promises = items.map((item, index) => {
+            return new Promise((resolve) => {
+                this.add(() => processor(item, index), {
+                    priority: options.priority,
+                    id: String(index),
+                    retries: options.retries,
+                    resolve,
+                    trackTotal: false
+                });
+            });
+        });
+        const results = await Promise.all(promises);
+        return {
+            results,
+            stats: {
+                ...this.stats,
+                duration: Date.now() - this.startTime
+            }
+        };
+    }
+    queueTask(task) {
+        this.queue.push(task);
+        this.queue.sort((a, b) => b.priority - a.priority);
+    }
+    scheduleRetry(task, delay) {
+        this.pendingRetries++;
+        if (delay > 0) {
+            setTimeout(() => {
+                this.pendingRetries--;
+                this.queueTask(task);
+                this.processNext();
+            }, delay);
+            return;
+        }
+        this.pendingRetries--;
+        this.queueTask(task);
+        this.processNext();
+    }
+    async processNext() {
+        if (this.paused || this.activeCount >= this.concurrency || this.queue.length === 0) {
+            return;
+        }
+        const task = this.queue.shift();
+        if (!task)
+            return;
+        this.activeCount++;
+        this.emit('taskStart', task);
+        try {
+            const result = await task.fn();
+            this.stats.successful++;
+            task.resolve?.(result);
+            this.emit('taskComplete', { task, result });
+        }
+        catch (error) {
+            const remaining = task.retries ?? 0;
+            if (remaining > 0) {
+                task.retries = remaining - 1;
+                this.emit('taskRetry', { task, error, remaining: task.retries, delay: this.retryDelay });
+                this.scheduleRetry(task, this.retryDelay);
+            }
+            else {
+                this.stats.failed++;
+                task.resolve?.(error);
+                this.emit('taskError', { task, error });
+            }
+        }
+        finally {
+            this.activeCount--;
+            this.emit('progress', this.getProgress());
+            if (this.activeCount === 0 && this.queue.length === 0 && this.pendingRetries === 0) {
+                this.emit('drained');
+            }
+            this.processNext();
+        }
+    }
+    getProgress() {
+        const completed = this.stats.successful + this.stats.failed;
+        return {
+            total: this.stats.total,
+            completed,
+            pending: this.queue.length,
+            active: this.activeCount,
+            percent: this.stats.total > 0 ? (completed / this.stats.total) * 100 : 0
+        };
+    }
+}
+
+class SimpleEmitter {
+    listeners = new Map();
+    on(event, listener) {
+        const set = this.listeners.get(event) ?? new Set();
+        set.add(listener);
+        this.listeners.set(event, set);
+        return this;
+    }
+    once(event, listener) {
+        const wrapped = (...args) => {
+            this.off(event, wrapped);
+            listener(...args);
+        };
+        return this.on(event, wrapped);
+    }
+    off(event, listener) {
+        const set = this.listeners.get(event);
+        if (set) {
+            set.delete(listener);
+            if (set.size === 0) {
+                this.listeners.delete(event);
+            }
+        }
+        return this;
+    }
+    removeListener(event, listener) {
+        return this.off(event, listener);
+    }
+    emit(event, ...args) {
+        const set = this.listeners.get(event);
+        if (!set)
+            return false;
+        for (const listener of [...set]) {
+            listener(...args);
+        }
+        return true;
+    }
+}
+const READY_STATE = {
+    OPEN: 1,
+    CLOSED: 3
+};
+function isNodeRuntime$2() {
+    return typeof globalThis !== 'undefined' && Boolean(globalThis.process?.versions?.node);
+}
+let undiciModulePromise = null;
+async function loadUndici() {
+    if (!undiciModulePromise) {
+        const moduleName = 'undici';
+        undiciModulePromise = import(moduleName);
+    }
+    return undiciModulePromise;
+}
+async function getWebSocketConstructor() {
+    if (isNodeRuntime$2()) {
+        const undici = await loadUndici();
+        return undici.WebSocket;
+    }
+    const ws = globalThis.WebSocket;
+    if (!ws) {
+        throw new UnsupportedError('WebSocket is not available in this environment.', { feature: 'websocket' });
+    }
+    return ws;
+}
+function isReadableStream(value) {
+    return Boolean(value && typeof value.getReader === 'function');
+}
+class ReckerWebSocket extends SimpleEmitter {
+    ws = null;
+    url;
+    options;
+    reconnectAttempts = 0;
+    reconnectTimer;
+    heartbeatTimer;
+    isClosed = false;
+    isReconnecting = false;
+    pongWatchdog;
+    backoff;
+    closedByUser = false;
+    constructor(url, options = {}) {
+        super();
+        this.url = url;
+        this.options = {
+            protocols: options.protocols || [],
+            headers: options.headers || {},
+            reconnect: options.reconnect ?? false,
+            reconnectDelay: options.reconnectDelay ?? 1000,
+            maxReconnectAttempts: options.maxReconnectAttempts ?? 5,
+            heartbeatInterval: options.heartbeatInterval ?? 30000,
+            heartbeatTimeout: options.heartbeatTimeout ?? 10000,
+            dispatcher: options.dispatcher,
+            proxy: options.proxy,
+            tls: options.tls,
+            perMessageDeflate: options.perMessageDeflate ?? false
+        };
+        this.backoff = {
+            base: this.options.reconnectDelay,
+            factor: 2,
+            jitter: true,
+            max: 30000
+        };
+    }
+    async connect() {
+        const WebSocketCtor = await getWebSocketConstructor();
+        const nodeEnv = isNodeRuntime$2();
+        const wsOptions = nodeEnv
+            ? {
+                headers: this.options.headers,
+                dispatcher: this.options.dispatcher,
+                perMessageDeflate: this.options.perMessageDeflate,
+            }
+            : undefined;
+        if (nodeEnv && this.options.proxy) {
+            const proxyConfig = typeof this.options.proxy === 'string'
+                ? { url: this.options.proxy }
+                : this.options.proxy;
+            const undici = await loadUndici();
+            wsOptions.dispatcher = new undici.ProxyAgent(proxyConfig.url);
+        }
+        if (nodeEnv && this.options.tls) {
+            wsOptions.tls = this.options.tls;
+        }
+        return new Promise((resolve, reject) => {
+            try {
+                this.ws = nodeEnv
+                    ? new WebSocketCtor(this.url, this.options.protocols, wsOptions)
+                    : new WebSocketCtor(this.url, this.options.protocols);
+                this.ws.addEventListener('open', () => {
+                    this.reconnectAttempts = 0;
+                    this.isReconnecting = false;
+                    this.startHeartbeat();
+                    this.emit('open');
+                    resolve();
+                });
+                this.ws.addEventListener('message', (event) => {
+                    const data = event.data;
+                    const message = {
+                        data,
+                        isBinary: typeof data !== 'string'
+                    };
+                    this.emit('message', message);
+                    this.stopPongWatchdog();
+                });
+                this.ws.addEventListener('close', (event) => {
+                    this.stopHeartbeat();
+                    this.stopPongWatchdog();
+                    this.emit('close', event.code, event.reason);
+                    if (!this.closedByUser && !this.isClosed && this.options.reconnect) {
+                        this.attemptReconnect();
+                    }
+                });
+                this.ws.addEventListener('error', (event) => {
+                    const err = event?.error instanceof Error
+                        ? event.error
+                        : new ConnectionError('WebSocket connection error', {
+                            host: this.url,
+                            retriable: true,
+                        });
+                    this.emit('error', err);
+                    reject(err);
+                });
+            }
+            catch (error) {
+                reject(error);
+            }
+        });
+    }
+    async send(data, options) {
+        if (!this.ws || this.ws.readyState !== READY_STATE.OPEN) {
+            throw new StateError('WebSocket is not connected', {
+                expectedState: 'open',
+                actualState: this.ws ? 'closed' : 'not-created',
+            });
+        }
+        const awaitDrain = options?.awaitDrain ?? false;
+        const highWaterMark = options?.highWaterMark ?? 16 * 1024;
+        this.ws.send(data);
+        if (awaitDrain) {
+            await this.waitForDrain(highWaterMark);
+        }
+    }
+    async sendStream(stream, options) {
+        if (isReadableStream(stream)) {
+            const reader = stream.getReader();
+            while (true) {
+                const { done, value } = await reader.read();
+                if (done)
+                    break;
+                await this.send(value, options);
+            }
+            return;
+        }
+        for await (const chunk of stream) {
+            await this.send(chunk, options);
+        }
+    }
+    sendJSON(data) {
+        void this.send(JSON.stringify(data));
+    }
+    close(code = 1000, reason = '') {
+        this.isClosed = true;
+        this.closedByUser = true;
+        this.stopHeartbeat();
+        this.clearReconnectTimer();
+        if (this.ws) {
+            this.ws.close(code, reason);
+            this.ws = null;
+        }
+    }
+    ping() {
+        if (!this.ws || this.ws.readyState !== READY_STATE.OPEN)
+            return;
+        const anyWs = this.ws;
+        if (typeof anyWs.ping === 'function') {
+            try {
+                anyWs.ping();
+                return;
+            }
+            catch {
+            }
+        }
+        try {
+            this.ws.send('__heartbeat__');
+        }
+        catch {
+        }
+    }
+    get readyState() {
+        return this.ws?.readyState ?? READY_STATE.CLOSED;
+    }
+    get isConnected() {
+        return this.ws?.readyState === READY_STATE.OPEN;
+    }
+    toReadable() {
+        if (!this.ws)
+            return null;
+        const wsAny = this.ws;
+        if (wsAny.readable && typeof wsAny.readable.getReader === 'function') {
+            return wsAny.readable;
+        }
+        return null;
+    }
+    async pipeFrom(source, options) {
+        await this.sendStream(source, options);
+    }
+    async pipeTo(destination) {
+        const readable = this.toReadable();
+        if (!readable) {
+            throw new StreamError$1('WebSocket has no readable stream', {
+                streamType: 'websocket',
+                retriable: false,
+            });
+        }
+        if (destination && typeof destination.getWriter === 'function') {
+            await readable.pipeTo(destination);
+            return;
+        }
+        if (isNodeRuntime$2()) {
+            const streamModuleName = 'node:stream';
+            const pipelineModuleName = 'node:stream/promises';
+            const streamModule = await import(streamModuleName);
+            const pipelineModule = await import(pipelineModuleName);
+            const nodeReadable = typeof streamModule.Readable?.fromWeb === 'function'
+                ? streamModule.Readable.fromWeb(readable)
+                : streamModule.Readable.from(readable);
+            await pipelineModule.pipeline(nodeReadable, destination);
+            return;
+        }
+        throw new StreamError$1('Destination stream is not supported in this environment', {
+            streamType: 'websocket',
+            retriable: false,
+        });
+    }
+    async *[Symbol.asyncIterator]() {
+        const queue = [];
+        let resolveNext = null;
+        let closed = false;
+        const messageHandler = (msg) => {
+            if (resolveNext) {
+                resolveNext(msg);
+                resolveNext = null;
+            }
+            else {
+                queue.push(msg);
+            }
+        };
+        const closeHandler = () => {
+            closed = true;
+            if (resolveNext) {
+                resolveNext(null);
+                resolveNext = null;
+            }
+        };
+        this.on('message', messageHandler);
+        this.on('close', closeHandler);
+        try {
+            while (true) {
+                if (queue.length > 0) {
+                    yield queue.shift();
+                }
+                else {
+                    if (closed)
+                        break;
+                    const msg = await new Promise((resolve) => {
+                        resolveNext = resolve;
+                    });
+                    if (msg) {
+                        yield msg;
+                    }
+                    else {
+                        break;
+                    }
+                }
+            }
+        }
+        finally {
+            this.off('message', messageHandler);
+            this.off('close', closeHandler);
+        }
+    }
+    attemptReconnect() {
+        if (this.isReconnecting)
+            return;
+        if (this.options.maxReconnectAttempts > 0 &&
+            this.reconnectAttempts >= this.options.maxReconnectAttempts) {
+            this.emit('max-reconnect-attempts');
+            return;
+        }
+        this.isReconnecting = true;
+        this.reconnectAttempts++;
+        const baseDelay = this.backoff.base * Math.pow(this.backoff.factor, this.reconnectAttempts - 1);
+        const capped = this.backoff.max ? Math.min(baseDelay, this.backoff.max) : baseDelay;
+        const jittered = this.backoff.jitter ? randomJitter(capped) : capped;
+        this.emit('reconnecting', this.reconnectAttempts, jittered);
+        this.reconnectTimer = setTimeout(() => {
+            this.connect().catch((error) => {
+                this.emit('reconnect-error', error);
+            });
+        }, jittered);
+    }
+    clearReconnectTimer() {
+        if (this.reconnectTimer) {
+            clearTimeout(this.reconnectTimer);
+            this.reconnectTimer = undefined;
+        }
+    }
+    startHeartbeat() {
+        if (this.options.heartbeatInterval <= 0)
+            return;
+        this.heartbeatTimer = setInterval(() => {
+            if (this.isConnected) {
+                this.ping();
+                this.startPongWatchdog();
+            }
+        }, this.options.heartbeatInterval);
+    }
+    stopHeartbeat() {
+        if (this.heartbeatTimer) {
+            clearInterval(this.heartbeatTimer);
+            this.heartbeatTimer = undefined;
+        }
+        this.stopPongWatchdog();
+    }
+    startPongWatchdog() {
+        this.stopPongWatchdog();
+        if (this.options.heartbeatTimeout <= 0)
+            return;
+        this.pongWatchdog = setTimeout(() => {
+            this.emit('heartbeat-timeout');
+            if (!this.closedByUser && this.options.reconnect) {
+                this.ws?.close(4000, 'heartbeat timeout');
+            }
+        }, this.options.heartbeatTimeout);
+    }
+    stopPongWatchdog() {
+        if (this.pongWatchdog) {
+            clearTimeout(this.pongWatchdog);
+            this.pongWatchdog = undefined;
+        }
+    }
+    getBufferedAmount() {
+        return this.ws?.bufferedAmount ?? 0;
+    }
+    async waitForDrain(highWaterMark) {
+        const buffered = this.getBufferedAmount();
+        if (buffered <= highWaterMark)
+            return;
+        await new Promise((resolve) => {
+            const check = () => {
+                if (this.getBufferedAmount() <= highWaterMark || !this.isConnected) {
+                    resolve();
+                }
+                else {
+                    setTimeout(check, 10);
+                }
+            };
+            setTimeout(check, 10);
+        });
+    }
+}
+function randomJitter(value) {
+    const jitter = 0.2 * value;
+    return value - jitter + Math.random() * (2 * jitter);
+}
+
+function isNodeRuntime$1() {
+    return typeof globalThis !== 'undefined' && Boolean(globalThis.process?.versions?.node);
+}
+let netModulePromise = null;
+async function getNetModule() {
+    if (!isNodeRuntime$1()) {
+        throw new UnsupportedError('WHOIS is only available in Node.js environments.', { feature: 'whois' });
+    }
+    if (!netModulePromise) {
+        const moduleName = 'node:net';
+        netModulePromise = import(moduleName);
+    }
+    return netModulePromise;
+}
+const DEFAULT_SERVERS = {
+    'com': 'whois.verisign-grs.com',
+    'net': 'whois.verisign-grs.com',
+    'org': 'whois.pir.org',
+    'info': 'whois.afilias.net',
+    'biz': 'whois.biz',
+    'us': 'whois.nic.us',
+    'uk': 'whois.nic.uk',
+    'ca': 'whois.cira.ca',
+    'de': 'whois.denic.de',
+    'fr': 'whois.afnic.fr',
+    'au': 'whois.aunic.net',
+    'jp': 'whois.jprs.jp',
+    'cn': 'whois.cnnic.cn',
+    'ru': 'whois.tcinet.ru',
+    'br': 'whois.registro.br',
+    'eu': 'whois.eu',
+    'io': 'whois.nic.io',
+    'co': 'whois.nic.co',
+    'me': 'whois.nic.me',
+    'tv': 'whois.nic.tv',
+    'cc': 'whois.nic.cc',
+    'ws': 'whois.website.ws',
+    'mobi': 'whois.dotmobiregistry.net',
+    'asia': 'whois.nic.asia',
+    'tel': 'whois.nic.tel',
+    'pro': 'whois.registrypro.pro',
+    'aero': 'whois.aero',
+    'cat': 'whois.cat',
+    'coop': 'whois.nic.coop',
+    'jobs': 'whois.nic.jobs',
+    'museum': 'whois.museum',
+    'travel': 'whois.nic.travel',
+    'xxx': 'whois.nic.xxx',
+    'app': 'whois.nic.google',
+    'dev': 'whois.nic.google',
+    'ai': 'whois.nic.ai',
+};
+function extractTLD(domain) {
+    const parts = domain.toLowerCase().split('.');
+    return parts[parts.length - 1];
+}
+function getWhoisServer(query, customServer) {
+    if (customServer) {
+        return customServer;
+    }
+    const ipv4Pattern = /^(\d{1,3}\.){3}\d{1,3}$/;
+    const ipv6Pattern = /^([0-9a-fA-F]{0,4}:){2,7}[0-9a-fA-F]{0,4}$/;
+    if (ipv4Pattern.test(query) || ipv6Pattern.test(query)) {
+        return 'whois.arin.net';
+    }
+    const tld = extractTLD(query);
+    return DEFAULT_SERVERS[tld] || 'whois.iana.org';
+}
+function parseWhoisData(raw) {
+    const data = {};
+    const lines = raw.split('\n');
+    for (const line of lines) {
+        if (line.startsWith('%') || line.startsWith('#') || !line.trim()) {
+            continue;
+        }
+        const colonIndex = line.indexOf(':');
+        if (colonIndex === -1) {
+            continue;
+        }
+        const key = line.substring(0, colonIndex).trim().toLowerCase();
+        const value = line.substring(colonIndex + 1).trim();
+        if (!key || !value) {
+            continue;
+        }
+        if (data[key]) {
+            if (Array.isArray(data[key])) {
+                data[key].push(value);
+            }
+            else {
+                data[key] = [data[key], value];
+            }
+        }
+        else {
+            data[key] = value;
+        }
+    }
+    return data;
+}
+function extractReferralServer(raw) {
+    const lines = raw.toLowerCase().split('\n');
+    for (const line of lines) {
+        if (line.includes('whois server:') || line.includes('referral url:')) {
+            const match = line.match(/whois\.[\w.-]+/);
+            if (match) {
+                return match[0];
+            }
+        }
+    }
+    return null;
+}
+async function queryWhoisServer(server, query, port, timeout) {
+    const { createConnection } = await getNetModule();
+    return new Promise((resolve, reject) => {
+        let response = '';
+        let socket = null;
+        const timeoutId = setTimeout(() => {
+            socket?.destroy();
+            reject(new ReckerError(`WHOIS query timed out after ${timeout}ms`, undefined, undefined, [
+                'Increase the WHOIS timeout for slower registries.',
+                'Check network connectivity to the WHOIS server.',
+                'Retry the query; some registries respond slowly under load.'
+            ]));
+        }, timeout);
+        socket = createConnection({ host: server, port }, () => {
+            socket.write(query + '\r\n');
+        });
+        socket.on('data', (chunk) => {
+            response += chunk.toString('utf-8');
+        });
+        socket.on('end', () => {
+            clearTimeout(timeoutId);
+            resolve(response);
+        });
+        socket.on('error', (error) => {
+            clearTimeout(timeoutId);
+            const errorDetail = error?.message || error?.code || 'Connection failed';
+            const err = new ReckerError(`WHOIS query failed: ${errorDetail}`, undefined, undefined, [
+                'Verify the WHOIS server is reachable and correct.',
+                'Check network/firewall settings blocking WHOIS port 43.',
+                'Retry the query; transient network issues can occur.'
+            ]);
+            err.code = error?.code;
+            reject(err);
+        });
+        socket.on('close', (hadError) => {
+            clearTimeout(timeoutId);
+            if (hadError && !response) {
+                const err = new ReckerError('WHOIS connection closed unexpectedly', undefined, undefined, [
+                    'The WHOIS server may be rate limiting requests.',
+                    'Try again in a few seconds.',
+                    'Some TLDs have unreliable WHOIS servers.'
+                ]);
+                err.code = 'ECONNRESET';
+                reject(err);
+            }
+        });
+    });
+}
+async function whois(query, options = {}) {
+    const { server: customServer, port = 43, timeout = 10000, follow = true, } = options;
+    const cleanQuery = query.trim().toLowerCase();
+    let server = getWhoisServer(cleanQuery, customServer);
+    let raw = await queryWhoisServer(server, cleanQuery, port, timeout);
+    if (follow && !customServer) {
+        const referralServer = extractReferralServer(raw);
+        if (referralServer && referralServer !== server) {
+            server = referralServer;
+            raw = await queryWhoisServer(server, cleanQuery, port, timeout);
+        }
+    }
+    const data = parseWhoisData(raw);
+    return {
+        raw,
+        query: cleanQuery,
+        server,
+        data,
+    };
+}
+async function isDomainAvailable(domain, options) {
+    try {
+        const result = await whois(domain, options);
+        const rawLower = result.raw.toLowerCase();
+        const notFoundIndicators = [
+            'no match',
+            'not found',
+            'no entries found',
+            'no data found',
+            'status: available',
+            'status: free',
+        ];
+        return notFoundIndicators.some(indicator => rawLower.includes(indicator));
+    }
+    catch (error) {
+        return false;
+    }
+}
+
+const domainValueRegExp = /^([.]?[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)([.][a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)*$/i;
+const pathValueRegExp = /^[\u0020-\u003A\u003D-\u007E]*$/;
+class MemoryCookieJar {
+    cookies = new Map();
+    getCookieString(url) {
+        const parsedUrl = new URL(url);
+        const hostname = parsedUrl.hostname;
+        const pathname = parsedUrl.pathname || '/';
+        const isSecure = parsedUrl.protocol === 'https:';
+        const now = Date.now();
+        const matchingCookies = [];
+        for (const [domain, pathMap] of this.cookies.entries()) {
+            if (!this.domainMatches(hostname, domain))
+                continue;
+            for (const [path, nameMap] of pathMap.entries()) {
+                if (!this.pathMatches(pathname, path))
+                    continue;
+                for (const cookie of nameMap.values()) {
+                    if (this.isExpired(cookie, now)) {
+                        nameMap.delete(cookie.name);
+                        continue;
+                    }
+                    if (cookie.secure && !isSecure)
+                        continue;
+                    matchingCookies.push(cookie);
+                }
+            }
+        }
+        matchingCookies.sort((a, b) => {
+            const pathDiff = b.path.length - a.path.length;
+            if (pathDiff !== 0)
+                return pathDiff;
+            return a.createdAt - b.createdAt;
+        });
+        return matchingCookies.map(c => `${c.name}=${c.value}`).join('; ');
+    }
+    setCookie(rawCookie, url) {
+        const parsedUrl = new URL(url);
+        const hostname = parsedUrl.hostname;
+        const pathname = parsedUrl.pathname || '/';
+        const cookie = this.parseCookie(rawCookie, hostname, pathname);
+        if (!cookie)
+            return;
+        if (!this.domainMatches(hostname, cookie.domain)) {
+            return;
+        }
+        if (!this.cookies.has(cookie.domain)) {
+            this.cookies.set(cookie.domain, new Map());
+        }
+        const domainMap = this.cookies.get(cookie.domain);
+        if (!domainMap.has(cookie.path)) {
+            domainMap.set(cookie.path, new Map());
+        }
+        const pathMap = domainMap.get(cookie.path);
+        pathMap.set(cookie.name, cookie);
+    }
+    clear() {
+        this.cookies.clear();
+    }
+    clearDomain(domain) {
+        this.cookies.delete(domain);
+    }
+    getAllCookies() {
+        const all = [];
+        for (const domainMap of this.cookies.values()) {
+            for (const pathMap of domainMap.values()) {
+                for (const cookie of pathMap.values()) {
+                    all.push(cookie);
+                }
+            }
+        }
+        return all;
+    }
+    parseCookie(setCookieStr, requestDomain, requestPath) {
+        const parts = setCookieStr.split(';').map(p => p.trim());
+        if (parts.length === 0 || !parts[0])
+            return null;
+        const [nameValue, ...attributes] = parts;
+        const eqIndex = nameValue.indexOf('=');
+        if (eqIndex === -1)
+            return null;
+        const name = nameValue.substring(0, eqIndex).trim();
+        const rawValue = nameValue.substring(eqIndex + 1).trim();
+        if (!name)
+            return null;
+        const value = this.decode(rawValue);
+        const cookie = {
+            name,
+            value,
+            domain: requestDomain,
+            path: this.defaultPath(requestPath),
+            secure: false,
+            httpOnly: false,
+            createdAt: Date.now()
+        };
+        for (const attr of attributes) {
+            const lowerAttr = attr.toLowerCase();
+            if (lowerAttr === 'secure') {
+                cookie.secure = true;
+            }
+            else if (lowerAttr === 'httponly') {
+                cookie.httpOnly = true;
+            }
+            else if (lowerAttr === 'partitioned') {
+                cookie.partitioned = true;
+            }
+            else if (lowerAttr.startsWith('domain=')) {
+                let domain = attr.substring(7).trim();
+                if (domain.startsWith('.')) {
+                    domain = domain.substring(1);
+                }
+                if (domainValueRegExp.test(domain)) {
+                    cookie.domain = domain.toLowerCase();
+                }
+            }
+            else if (lowerAttr.startsWith('path=')) {
+                const path = attr.substring(5).trim();
+                if (!path || pathValueRegExp.test(path)) {
+                    cookie.path = path || '/';
+                }
+            }
+            else if (lowerAttr.startsWith('expires=')) {
+                const expiresStr = attr.substring(8).trim();
+                const expires = new Date(expiresStr);
+                if (Number.isFinite(expires.valueOf())) {
+                    cookie.expires = expires;
+                }
+            }
+            else if (lowerAttr.startsWith('max-age=')) {
+                const maxAgeStr = attr.substring(8).trim();
+                if (/^-?\d+$/.test(maxAgeStr)) {
+                    cookie.maxAge = parseInt(maxAgeStr, 10);
+                }
+            }
+            else if (lowerAttr.startsWith('samesite=')) {
+                const samesite = attr.substring(9).trim().toLowerCase();
+                if (samesite === 'strict')
+                    cookie.sameSite = 'Strict';
+                else if (samesite === 'lax')
+                    cookie.sameSite = 'Lax';
+                else if (samesite === 'none')
+                    cookie.sameSite = 'None';
+            }
+            else if (lowerAttr.startsWith('priority=')) {
+                const priority = attr.substring(9).trim().toLowerCase();
+                if (priority === 'low')
+                    cookie.priority = 'Low';
+                else if (priority === 'medium')
+                    cookie.priority = 'Medium';
+                else if (priority === 'high')
+                    cookie.priority = 'High';
+            }
+        }
+        return cookie;
+    }
+    decode(str) {
+        if (str.indexOf('%') === -1)
+            return str;
+        try {
+            return decodeURIComponent(str);
+        }
+        catch {
+            return str;
+        }
+    }
+    domainMatches(requestDomain, cookieDomain) {
+        const reqLower = requestDomain.toLowerCase();
+        const cookieLower = cookieDomain.toLowerCase();
+        if (reqLower === cookieLower)
+            return true;
+        if (reqLower.endsWith('.' + cookieLower))
+            return true;
+        return false;
+    }
+    pathMatches(requestPath, cookiePath) {
+        if (requestPath === cookiePath)
+            return true;
+        if (requestPath.startsWith(cookiePath)) {
+            if (cookiePath.endsWith('/'))
+                return true;
+            if (requestPath[cookiePath.length] === '/')
+                return true;
+        }
+        return false;
+    }
+    defaultPath(requestPath) {
+        if (!requestPath || !requestPath.startsWith('/')) {
+            return '/';
+        }
+        const lastSlash = requestPath.lastIndexOf('/');
+        if (lastSlash === 0) {
+            return '/';
+        }
+        return requestPath.substring(0, lastSlash);
+    }
+    isExpired(cookie, now) {
+        if (cookie.maxAge !== undefined) {
+            if (cookie.maxAge <= 0)
+                return true;
+            const expiresAt = cookie.createdAt + (cookie.maxAge * 1000);
+            return now >= expiresAt;
+        }
+        if (cookie.expires) {
+            return now >= cookie.expires.getTime();
+        }
+        return false;
+    }
+}
+
+let ScrapeDocumentClass = null;
+async function getScrapeDocumentClass() {
+    if (!ScrapeDocumentClass) {
+        const module = await Promise.resolve().then(function () { return document$1; });
+        ScrapeDocumentClass = module.ScrapeDocument;
+    }
+    return ScrapeDocumentClass;
+}
+function scrape(promise) {
+    const basePromise = Promise.resolve(promise);
+    const getDocument = async (options) => {
+        const ScrapeDoc = await getScrapeDocumentClass();
+        const response = await basePromise;
+        const html = await response.text();
+        return ScrapeDoc.create(html, {
+            baseUrl: options?.baseUrl || response.url,
+            ...options,
+        });
+    };
+    const enhanced = basePromise;
+    enhanced.scrape = async (options) => {
+        return getDocument(options);
+    };
+    enhanced.links = async (options) => {
+        const doc = await getDocument();
+        return doc.links(options);
+    };
+    enhanced.images = async (options) => {
+        const doc = await getDocument();
+        return doc.images(options);
+    };
+    enhanced.meta = async () => {
+        const doc = await getDocument();
+        return doc.meta();
+    };
+    enhanced.openGraph = async () => {
+        const doc = await getDocument();
+        return doc.openGraph();
+    };
+    enhanced.twitterCard = async () => {
+        const doc = await getDocument();
+        return doc.twitterCard();
+    };
+    enhanced.jsonLd = async () => {
+        const doc = await getDocument();
+        return doc.jsonLd();
+    };
+    enhanced.forms = async (selector) => {
+        const doc = await getDocument();
+        return doc.forms(selector);
+    };
+    enhanced.tables = async (selector) => {
+        const doc = await getDocument();
+        return doc.tables(selector);
+    };
+    enhanced.scripts = async () => {
+        const doc = await getDocument();
+        return doc.scripts();
+    };
+    enhanced.styles = async () => {
+        const doc = await getDocument();
+        return doc.styles();
+    };
+    enhanced.extract = async (schema) => {
+        const doc = await getDocument();
+        return doc.extract(schema);
+    };
+    return enhanced;
+}
+
+function isNodeRuntime() {
+    return typeof globalThis !== 'undefined' && Boolean(globalThis.process?.versions?.node);
+}
+class LazyTransport {
+    factory;
+    transport;
+    resolving;
+    dispatchFn;
+    constructor(factory) {
+        this.factory = factory;
+        this.dispatchFn = this.initialDispatch.bind(this);
+    }
+    async initialDispatch(req) {
+        if (!this.transport) {
+            if (!this.resolving) {
+                this.resolving = this.factory().then((instance) => {
+                    this.transport = instance;
+                    this.dispatchFn = (r) => this.transport.dispatch(r);
+                    return instance;
+                });
+            }
+            this.transport = await this.resolving;
+        }
+        return this.transport.dispatch(req);
+    }
+    dispatch(req) {
+        return this.dispatchFn(req);
+    }
+    async warmup() {
+        if (!this.transport && !this.resolving) {
+            this.resolving = this.factory().then((instance) => {
+                this.transport = instance;
+                this.dispatchFn = (r) => this.transport.dispatch(r);
+                return instance;
+            });
+        }
+        await this.resolving;
+    }
+}
+function createLazyCurlTransport() {
+    if (!isNodeRuntime()) {
+        return {
+            async dispatch(req) {
+                throw new ConfigurationError('Curl transport is only available in Node.js environments.', { configKey: 'useCurl', request: req });
+            }
+        };
+    }
+    return new LazyTransport(async () => {
+        const { CurlTransport } = await Promise.resolve().then(function () { return curl; });
+        return new CurlTransport();
+    });
+}
+class LazyCacheStorage {
+    factory;
+    storage;
+    resolving;
+    constructor(factory) {
+        this.factory = factory;
+    }
+    async getStorage() {
+        if (!this.storage) {
+            if (!this.resolving) {
+                this.resolving = this.factory().then((instance) => {
+                    this.storage = instance;
+                    return instance;
+                });
+            }
+            this.storage = await this.resolving;
+        }
+        return this.storage;
+    }
+    async get(key) {
+        return (await this.getStorage()).get(key);
+    }
+    async set(key, value, ttl) {
+        return (await this.getStorage()).set(key, value, ttl);
+    }
+    async delete(key) {
+        return (await this.getStorage()).delete(key);
+    }
+}
+function createLazyFileStorage(path) {
+    if (!isNodeRuntime()) {
+        throw new ConfigurationError('File cache storage is only available in Node.js environments.', { configKey: 'cache.driver' });
+    }
+    return new LazyCacheStorage(async () => {
+        const { FileStorage } = await Promise.resolve().then(function () { return basicFileStorage; });
+        return new FileStorage(path);
+    });
+}
+function createDefaultCacheStorage() {
+    if (!isNodeRuntime()) {
+        return new SimpleMemoryStorage();
+    }
+    return new LazyCacheStorage(async () => {
+        const { MemoryStorage } = await Promise.resolve().then(function () { return memoryStorage; });
+        return new MemoryStorage();
+    });
+}
+class LazyHlsPromise {
+    instancePromise;
+    constructor(factory) {
+        this.instancePromise = factory();
+    }
+    get [Symbol.toStringTag]() {
+        return 'HlsPromise';
+    }
+    then(onfulfilled, onrejected) {
+        return this.instancePromise.then(({ instance }) => instance.then(onfulfilled, onrejected));
+    }
+    catch(onrejected) {
+        return this.then(null, onrejected);
+    }
+    finally(onfinally) {
+        return this.instancePromise.then(({ instance }) => instance.finally(onfinally));
+    }
+    cancel() {
+        this.instancePromise.then(({ instance }) => instance.cancel()).catch(() => { });
+    }
+    async download(dest) {
+        const { instance } = await this.instancePromise;
+        return instance.download(dest);
+    }
+    async *stream() {
+        const { instance } = await this.instancePromise;
+        yield* instance.stream();
+    }
+    async pipe(writable) {
+        const { instance } = await this.instancePromise;
+        return instance.pipe(writable);
+    }
+    async info() {
+        const { instance } = await this.instancePromise;
+        return instance.info();
+    }
+}
+class Client {
+    static get version() {
+        return getVersionSync();
+    }
+    static getVersion() {
+        return getVersion();
+    }
+    static getVersionInfo() {
+        return getVersionInfo();
+    }
+    baseUrl;
+    middlewares;
+    hooks;
+    transport;
+    curlTransport;
+    defaultHeaders;
+    defaultHeadersObj;
+    defaultParams;
+    paginationConfig;
+    handler;
+    fastHandler;
+    logger;
+    debugEnabled;
+    agentManager;
+    concurrencyConfig;
+    requestPool;
+    maxResponseSize;
+    cookieJar;
+    cookieIgnoreInvalid = false;
+    defaultTimeout;
+    http2Enabled = false;
+    transportKind = 'custom';
+    canFastPath = false;
+    _aiConfig;
+    _ai;
+    constructor(options = {}) {
+        this.baseUrl = options.baseUrl || '';
+        this.middlewares = options.middlewares || [];
+        this.defaultTimeout = options.timeout;
+        this.hooks = {
+            beforeRequest: options.hooks?.beforeRequest || [],
+            afterResponse: options.hooks?.afterResponse || [],
+            onError: options.hooks?.onError || [],
+            onRetry: options.hooks?.onRetry || [],
+            onUrlResolved: options.hooks?.onUrlResolved || [],
+        };
+        this.defaultHeaders = {
+            'User-Agent': getDefaultUserAgent(),
+            ...(options.headers || {})
+        };
+        this.defaultHeadersObj = new Headers(this.defaultHeaders);
+        this.defaultParams = options.defaults?.params || {};
+        this.paginationConfig = options.pagination;
+        this.maxResponseSize = options.maxResponseSize;
+        this.debugEnabled = options.debug === true;
+        if (this.debugEnabled) {
+            this.logger = options.logger ?? consoleLogger;
+        }
+        else if (options.logger) {
+            this.logger = options.logger;
+        }
+        this.concurrencyConfig = normalizeConcurrency({
+            concurrency: options.concurrency,
+            http2: options.http2
+        });
+        const expandedHttp2 = expandHTTP2Options(options.http2);
+        this.http2Enabled = expandedHttp2.enabled ?? false;
+        if (options.transport) {
+            this.transport = options.transport;
+            this.transportKind = 'custom';
+        }
+        else if (options.useCurl) {
+            if (this.debugEnabled)
+                console.log('[DEBUG] Using Curl Transport');
+            this.transport = createLazyCurlTransport();
+            this.transportKind = 'curl';
+        }
+        else if (isNodeRuntime()) {
+            if (this.debugEnabled)
+                console.log('[DEBUG] Using Undici Transport');
+            const agentOptions = {
+                ...this.concurrencyConfig.agent,
+                allowH2: expandedHttp2.enabled,
+                maxConcurrentStreams: expandedHttp2.resolvedSettings?.maxConcurrentStreams,
+            };
+            const transportOptions = {
+                proxy: options.proxy,
+                http2: expandedHttp2.enabled ? expandedHttp2 : undefined,
+                dns: options.dns,
+                socketPath: options.socketPath,
+                tls: options.tls,
+                observability: options.observability,
+                expectContinue: options.expectContinue,
+                protocolCache: true,
+            };
+            this.transport = new LazyTransport(async () => {
+                if (!this.agentManager) {
+                    const protocolCache = getGlobalProtocolCache();
+                    const { AgentManager } = await Promise.resolve().then(function () { return agentManager; });
+                    this.agentManager = new AgentManager(agentOptions, protocolCache);
+                }
+                const { UndiciTransport } = await Promise.resolve().then(function () { return undici; });
+                return new UndiciTransport(this.baseUrl || undefined, {
+                    ...transportOptions,
+                    agent: this.agentManager
+                });
+            });
+            this.transportKind = 'undici';
+        }
+        else {
+            if (this.debugEnabled)
+                console.log('[DEBUG] Using Fetch Transport');
+            this.transport = new FetchTransport();
+            this.transportKind = 'fetch';
+        }
+        if (options.retry) {
+            retryPlugin(options.retry)(this);
+        }
+        if (this.concurrencyConfig.max < Infinity || this.concurrencyConfig.requestsPerInterval < Infinity) {
+            this.requestPool = new RequestPool({
+                concurrency: this.concurrencyConfig.max,
+                requestsPerInterval: this.concurrencyConfig.requestsPerInterval,
+                interval: this.concurrencyConfig.interval
+            });
+            this.middlewares.unshift(this.requestPool.asMiddleware());
+            if (this.debugEnabled && this.logger) {
+                this.logger.debug(`Global concurrency limit: ${this.concurrencyConfig.max} concurrent requests`);
+            }
+        }
+        else {
+            if (this.debugEnabled && this.logger) {
+                this.logger.debug('No global concurrency limit (allows unlimited parallel batches)');
+            }
+        }
+        if (options.dedup) {
+            dedupPlugin(options.dedup)(this);
+        }
+        if (options.cache) {
+            let storage;
+            if (options.cache.storage) {
+                storage = options.cache.storage;
+            }
+            else if (options.cache.driver === 'file') {
+                storage = createLazyFileStorage(options.cache.fileStoragePath);
+            }
+            else {
+                storage = createDefaultCacheStorage();
+            }
+            cachePlugin({
+                ...options.cache,
+                storage
+            })(this);
+        }
+        if (options.plugins) {
+            options.plugins.forEach((plugin) => plugin(this));
+        }
+        if (options.compression) {
+            const compressionMiddleware = createCompressionMiddleware(options.compression);
+            if (compressionMiddleware) {
+                this.middlewares.push(compressionMiddleware);
+            }
+        }
+        if (options.xsrf) {
+            const xsrfMiddleware = createXSRFMiddleware(options.xsrf);
+            if (xsrfMiddleware) {
+                this.middlewares.push(xsrfMiddleware);
+            }
+        }
+        if (options.cookies) {
+            this.setupCookieJar(options.cookies);
+        }
+        if (options._aiConfig) {
+            this._aiConfig = options._aiConfig;
+        }
+        if (this.maxResponseSize !== undefined) {
+            this.middlewares.push(this.createMaxSizeMiddleware(this.maxResponseSize));
+        }
+        if (this.debugEnabled && this.logger) {
+            this.middlewares.unshift(this.createLoggingMiddleware(this.logger));
+        }
+        this.handler = this.composeMiddlewares();
+        this.fastHandler = this.composeFastHandler();
+        const hasHooks = (this.hooks.beforeRequest?.length ?? 0) > 0 ||
+            (this.hooks.afterResponse?.length ?? 0) > 0 ||
+            (this.hooks.onError?.length ?? 0) > 0;
+        const hasComplexConfig = !!this.cookieJar ||
+            !!this.defaultTimeout ||
+            this.maxResponseSize !== undefined ||
+            this.debugEnabled;
+        const hasUserMiddlewares = this.middlewares.length > 0;
+        this.canFastPath = !hasHooks && !hasComplexConfig && !hasUserMiddlewares;
+    }
+    createLoggingMiddleware(logger) {
+        return async (req, next) => {
+            const startTime = Date.now();
+            logger.debug({ type: 'request', method: req.method, url: req.url }, `→ ${req.method} ${req.url}`);
+            try {
+                const response = await next(req);
+                const duration = Date.now() - startTime;
+                logger.debug({
+                    type: 'response',
+                    method: req.method,
+                    url: req.url,
+                    status: response.status,
+                    duration,
+                    timings: response.timings,
+                }, `← ${response.status} ${req.method} ${req.url} (${duration}ms)`);
+                return response;
+            }
+            catch (error) {
+                const duration = Date.now() - startTime;
+                const err = error;
+                logger.error({
+                    type: 'error',
+                    method: req.method,
+                    url: req.url,
+                    error: err.message,
+                    errorName: err.name,
+                    duration,
+                }, `✖ ${req.method} ${req.url} - ${err.message}`);
+                throw error;
+            }
+        };
+    }
+    createMaxSizeMiddleware(globalMaxSize) {
+        return async (req, next) => {
+            const response = await next(req);
+            const limit = req.maxResponseSize ?? globalMaxSize;
+            if (limit === undefined)
+                return response;
+            const contentLength = response.headers.get('Content-Length');
+            if (contentLength) {
+                const size = parseInt(contentLength, 10);
+                if (!isNaN(size) && size > limit) {
+                    throw new MaxSizeExceededError(limit, size, req);
+                }
+            }
+            return response;
+        };
+    }
+    setupCookieJar(options) {
+        if (options === true) {
+            this.cookieJar = new MemoryCookieJar();
+        }
+        else if (typeof options === 'object') {
+            if (options.jar === true) {
+                this.cookieJar = new MemoryCookieJar();
+            }
+            else if (options.jar && typeof options.jar === 'object') {
+                this.cookieJar = options.jar;
+            }
+            this.cookieIgnoreInvalid = options.ignoreInvalid ?? false;
+        }
+        if (this.cookieJar) {
+            this.middlewares.push(this.createCookieMiddleware());
+        }
+    }
+    createCookieMiddleware() {
+        return async (req, next) => {
+            const jar = this.cookieJar;
+            try {
+                const cookieString = await jar.getCookieString(req.url);
+                if (cookieString) {
+                    const existingCookie = req.headers.get('cookie');
+                    const newCookie = existingCookie
+                        ? `${existingCookie}; ${cookieString}`
+                        : cookieString;
+                    req.headers.set('cookie', newCookie);
+                }
+            }
+            catch (error) {
+                if (!this.cookieIgnoreInvalid) {
+                    throw error;
+                }
+            }
+            const response = await next(req);
+            const setCookieHeader = response.headers.get('set-cookie');
+            if (setCookieHeader) {
+                const cookies = this.splitSetCookieHeader(setCookieHeader);
+                for (const cookie of cookies) {
+                    try {
+                        await jar.setCookie(cookie, req.url);
+                    }
+                    catch (error) {
+                        if (!this.cookieIgnoreInvalid) {
+                            throw error;
+                        }
+                    }
+                }
+            }
+            return response;
+        };
+    }
+    splitSetCookieHeader(header) {
+        return header.split(/,(?=\s*[a-zA-Z0-9_-]+=)/g).map(s => s.trim());
+    }
+    async dispatch(req) {
+        if (req.useCurl && this.transportKind !== 'curl') {
+            if (!this.curlTransport) {
+                this.curlTransport = createLazyCurlTransport();
+            }
+            return this.curlTransport.dispatch(req);
+        }
+        return this.transport.dispatch(req);
+    }
+    composeMiddlewares() {
+        const chain = [...this.middlewares];
+        const self = this;
+        const transportWithErrorCheck = async (req) => {
+            const response = await self.dispatch(req);
+            if (req.throwHttpErrors !== false && !response.ok && response.status !== 304) {
+                throw new HttpError(response, req);
+            }
+            return response;
+        };
+        if (this.hooks.beforeRequest?.length || this.hooks.afterResponse?.length) {
+            chain.unshift(this.hooksMiddleware);
+        }
+        if (chain.length === 0) {
+            return transportWithErrorCheck;
+        }
+        return chain.reduceRight((next, middleware) => {
+            return (req) => middleware(req, next);
+        }, transportWithErrorCheck);
+    }
+    composeFastHandler() {
+        const self = this;
+        return async (req) => {
+            const response = await self.dispatch(req);
+            if (req.throwHttpErrors !== false && !response.ok && response.status !== 304) {
+                throw new HttpError(response, req);
+            }
+            return response;
+        };
+    }
+    hooksMiddleware = async (req, next) => {
+        let modifiedReq = req;
+        if (this.hooks.beforeRequest && this.hooks.beforeRequest.length > 0) {
+            for (const hook of this.hooks.beforeRequest) {
+                const result = await hook(modifiedReq);
+                if (result) {
+                    modifiedReq = result;
+                }
+            }
+        }
+        try {
+            let response = await next(modifiedReq);
+            if (this.hooks.afterResponse && this.hooks.afterResponse.length > 0) {
+                for (const hook of this.hooks.afterResponse) {
+                    const result = await hook(modifiedReq, response);
+                    if (result) {
+                        response = result;
+                    }
+                }
+            }
+            return response;
+        }
+        catch (error) {
+            if (this.hooks.onError && this.hooks.onError.length > 0) {
+                for (const hook of this.hooks.onError) {
+                    const result = await hook(error, modifiedReq);
+                    if (result) {
+                        return result;
+                    }
+                }
+            }
+            throw error;
+        }
+    };
+    use(middleware) {
+        this.middlewares.push(middleware);
+        this.handler = this.composeMiddlewares();
+        this.canFastPath = false;
+        return this;
+    }
+    beforeRequest(hook) {
+        if (!this.hooks.beforeRequest) {
+            this.hooks.beforeRequest = [];
+        }
+        this.hooks.beforeRequest.push(hook);
+        this.handler = this.composeMiddlewares();
+        this.canFastPath = false;
+        return this;
+    }
+    afterResponse(hook) {
+        if (!this.hooks.afterResponse) {
+            this.hooks.afterResponse = [];
+        }
+        this.hooks.afterResponse.push(hook);
+        this.handler = this.composeMiddlewares();
+        this.canFastPath = false;
+        return this;
+    }
+    onError(hook) {
+        if (!this.hooks.onError) {
+            this.hooks.onError = [];
+        }
+        this.hooks.onError.push(hook);
+        this.handler = this.composeMiddlewares();
+        this.canFastPath = false;
+        return this;
+    }
+    buildUrl(path, requestParams) {
+        const hasRequestParams = requestParams && Object.keys(requestParams).length > 0;
+        const hasDefaultParams = Object.keys(this.defaultParams).length > 0;
+        if (!hasRequestParams && !hasDefaultParams) {
+            if (path.startsWith('http://') || path.startsWith('https://')) {
+                return path;
+            }
+            if (this.baseUrl) {
+                const base = this.baseUrl.endsWith('/') ? this.baseUrl.slice(0, -1) : this.baseUrl;
+                const p = path.startsWith('/') ? path : '/' + path;
+                return base + p;
+            }
+            return path;
+        }
+        let finalPath = path;
+        const mergedParams = { ...this.defaultParams, ...requestParams };
+        const usedParams = new Set();
+        if (finalPath.includes(':')) {
+            finalPath = finalPath.replace(/:([a-zA-Z0-9_]+)/g, (match, paramName) => {
+                if (mergedParams && paramName in mergedParams) {
+                    usedParams.add(paramName);
+                    return encodeURIComponent(String(mergedParams[paramName]));
+                }
+                throw new ValidationError$1(`Missing required path parameter: ${paramName}`, {
+                    field: paramName,
+                    value: undefined,
+                });
+            });
+        }
+        let finalUrl;
+        if (finalPath.startsWith('http://') || finalPath.startsWith('https://')) {
+            finalUrl = finalPath;
+        }
+        else if (this.baseUrl) {
+            const base = this.baseUrl.endsWith('/') ? this.baseUrl.slice(0, -1) : this.baseUrl;
+            const p = finalPath.startsWith('/') ? finalPath : '/' + finalPath;
+            finalUrl = base + p;
+        }
+        else {
+            throw new ConfigurationError('Relative path provided without a baseUrl or explicit transport.', {
+                configKey: 'baseUrl',
+            });
+        }
+        const remainingKeys = Object.keys(mergedParams).filter((k) => !usedParams.has(k));
+        if (remainingKeys.length > 0) {
+            const queryParts = remainingKeys.map(key => `${encodeURIComponent(key)}=${encodeURIComponent(String(mergedParams[key]))}`);
+            const separator = finalUrl.includes('?') ? '&' : '?';
+            return finalUrl + separator + queryParts.join('&');
+        }
+        return finalUrl;
+    }
+    request(path, options = {}) {
+        const url = this.buildUrl(path, options.params);
+        const usesFastPath = this.canFastPath &&
+            !options.headers &&
+            !options.timeout &&
+            !options.signal &&
+            options.maxResponseSize === undefined;
+        if (usesFastPath) {
+            const req = new HttpRequest(url, {
+                method: options.method || 'GET',
+                body: options.body,
+                headers: this.defaultHeadersObj,
+                throwHttpErrors: options.throwHttpErrors,
+            });
+            const responsePromise = this.fastHandler(req);
+            return new RequestPromise(responsePromise);
+        }
+        let mergedHeaders;
+        if (options.headers) {
+            mergedHeaders = new Headers(this.defaultHeadersObj);
+            const optHeaders = options.headers instanceof Headers
+                ? options.headers
+                : new Headers(options.headers);
+            optHeaders.forEach((value, key) => mergedHeaders.set(key, value));
+        }
+        else {
+            mergedHeaders = this.defaultHeadersObj;
+        }
+        const needsController = options.timeout || options.signal || this.defaultTimeout;
+        let controller;
+        let signal = options.signal;
+        let timeoutId;
+        let externalAbortCleanup;
+        if (needsController) {
+            controller = new AbortController();
+            signal = controller.signal;
+            if (options.signal) {
+                const externalSignal = options.signal;
+                const abortHandler = () => controller.abort(externalSignal.reason);
+                if (externalSignal.aborted) {
+                    abortHandler();
+                }
+                else {
+                    externalSignal.addEventListener('abort', abortHandler, { once: true });
+                    externalAbortCleanup = () => externalSignal.removeEventListener('abort', abortHandler);
+                }
+            }
+            const timeout = options.timeout ?? this.defaultTimeout;
+            if (timeout) {
+                const totalTimeout = typeof timeout === 'number' ? timeout : timeout.request;
+                if (totalTimeout) {
+                    timeoutId = setTimeout(() => controller.abort(new TimeoutError(req, {
+                        phase: 'request',
+                        timeout: totalTimeout,
+                    })), totalTimeout);
+                }
+            }
+        }
+        const req = new HttpRequest(url, {
+            ...options,
+            headers: mergedHeaders,
+            signal,
+            maxResponseSize: options.maxResponseSize ?? this.maxResponseSize
+        });
+        const responsePromise = this.handler(req);
+        if (timeoutId || externalAbortCleanup) {
+            responsePromise.finally(() => {
+                if (timeoutId)
+                    clearTimeout(timeoutId);
+                externalAbortCleanup?.();
+            }).catch(() => {
+            });
+        }
+        return new RequestPromise(responsePromise, controller);
+    }
+    get(path, options = {}) {
+        return this.request(path, { ...options, method: 'GET' });
+    }
+    async warmup() {
+        if (this.transport && 'warmup' in this.transport && typeof this.transport.warmup === 'function') {
+            await this.transport.warmup();
+        }
+    }
+    async batch(requests, options = {}) {
+        const mapResponse = options.mapResponse ?? ((res) => res);
+        const batchConcurrency = options.concurrency ?? this.concurrencyConfig.runner.concurrency;
+        const runner = new RequestRunner({
+            concurrency: batchConcurrency,
+            retries: this.concurrencyConfig.runner.retries,
+            retryDelay: this.concurrencyConfig.runner.retryDelay
+        });
+        const runnerResult = await runner.run(requests, async (item) => {
+            const res = await this.request(item.path, item.options);
+            return mapResponse(res);
+        });
+        return runnerResult;
+    }
+    multi(requests, options = {}) {
+        return this.batch(requests, options);
+    }
+    requestWithBody(method, path, bodyOrOptions, options) {
+        let actualBody = bodyOrOptions;
+        let actualOptions = options;
+        const isOptionsEmpty = actualOptions === undefined ||
+            (typeof actualOptions === 'object' && actualOptions !== null && Object.keys(actualOptions).length === 0);
+        if (isOptionsEmpty && isPlainObject(bodyOrOptions)) {
+            const potentialOptions = bodyOrOptions;
+            if (potentialOptions.json !== undefined ||
+                potentialOptions.form !== undefined ||
+                potentialOptions.xml !== undefined ||
+                potentialOptions.yaml !== undefined ||
+                potentialOptions.csv !== undefined ||
+                potentialOptions.body !== undefined ||
+                potentialOptions.headers !== undefined ||
+                potentialOptions.timeout !== undefined ||
+                potentialOptions.retry !== undefined ||
+                potentialOptions.hooks !== undefined ||
+                potentialOptions.searchParams !== undefined ||
+                potentialOptions.params !== undefined) {
+                actualOptions = bodyOrOptions;
+                actualBody = undefined;
+            }
+        }
+        actualOptions = actualOptions || {};
+        const { json, form, xml, yaml, csv, ...restOptions } = actualOptions;
+        let finalBody = actualBody;
+        let explicitContentType;
+        if (form !== undefined) {
+            finalBody = createFormData(form);
+            explicitContentType = undefined;
+        }
+        else if (json !== undefined) {
+            finalBody = JSON.stringify(json);
+            explicitContentType = 'application/json';
+        }
+        else if (xml !== undefined) {
+            finalBody = '<?xml version="1.0" encoding="UTF-8"?>\n' + serializeXML(xml);
+            explicitContentType = 'application/xml';
+        }
+        else if (yaml !== undefined) {
+            finalBody = serializeYaml(yaml);
+            explicitContentType = 'application/yaml';
+        }
+        else if (csv !== undefined) {
+            finalBody = serializeCsv(csv);
+            explicitContentType = 'text/csv';
+        }
+        else if (restOptions.body !== undefined) {
+            finalBody = restOptions.body;
+        }
+        const { body: processedBody, contentType } = processBody(finalBody);
+        const headers = new Headers(restOptions.headers);
+        const finalContentType = explicitContentType ?? contentType;
+        if (finalContentType && !headers.has('Content-Type')) {
+            headers.set('Content-Type', finalContentType);
+        }
+        return this.request(path, { ...restOptions, method, body: processedBody, headers });
+    }
+    post(path, body, options = {}) {
+        return this.requestWithBody('POST', path, body, options);
+    }
+    put(path, body, options = {}) {
+        return this.requestWithBody('PUT', path, body, options);
+    }
+    patch(path, body, options = {}) {
+        return this.requestWithBody('PATCH', path, body, options);
+    }
+    delete(path, options = {}) {
+        return this.request(path, { ...options, method: 'DELETE' });
+    }
+    head(path, options = {}) {
+        return this.request(path, { ...options, method: 'HEAD' });
+    }
+    options(path, options = {}) {
+        return this.request(path, { ...options, method: 'OPTIONS' });
+    }
+    trace(path, options = {}) {
+        return this.request(path, { ...options, method: 'TRACE' });
+    }
+    connect(path, options = {}) {
+        return this.request(path, { ...options, method: 'CONNECT' });
+    }
+    purge(path, options = {}) {
+        return this.request(path, { ...options, method: 'PURGE' });
+    }
+    propfind(path, body, options = {}) {
+        return this.requestWithBody('PROPFIND', path, body, options);
+    }
+    proppatch(path, body, options = {}) {
+        return this.requestWithBody('PROPPATCH', path, body, options);
+    }
+    mkcol(path, options = {}) {
+        return this.request(path, { ...options, method: 'MKCOL' });
+    }
+    copy(path, options = {}) {
+        return this.request(path, { ...options, method: 'COPY' });
+    }
+    move(path, options = {}) {
+        return this.request(path, { ...options, method: 'MOVE' });
+    }
+    lock(path, body, options = {}) {
+        return this.requestWithBody('LOCK', path, body, options);
+    }
+    unlock(path, options = {}) {
+        return this.request(path, { ...options, method: 'UNLOCK' });
+    }
+    link(path, body, options = {}) {
+        return this.requestWithBody('LINK', path, body, options);
+    }
+    unlink(path, body, options = {}) {
+        return this.requestWithBody('UNLINK', path, body, options);
+    }
+    scrape(path, options = {}) {
+        const method = options.method || 'GET';
+        const requestPromise = this.request(path, { ...options, method });
+        return scrape(requestPromise);
+    }
+    paginate(path, options = {}) {
+        const { getItems, getNextUrl, maxPages, pageParam, limitParam, resultsPath, nextCursorPath, ...reqOptions } = options;
+        const paginationOpts = {
+            getItems,
+            getNextUrl,
+            maxPages,
+            pageParam: pageParam || this.paginationConfig?.pageParam,
+            limitParam: limitParam || this.paginationConfig?.limitParam,
+            resultsPath: resultsPath || this.paginationConfig?.resultsPath,
+            nextCursorPath: nextCursorPath || this.paginationConfig?.nextCursorPath,
+        };
+        return paginate(this, path, reqOptions, paginationOpts);
+    }
+    pages(path, options = {}) {
+        const { getNextUrl, maxPages, pageParam, limitParam, resultsPath, nextCursorPath, ...reqOptions } = options;
+        const paginationOpts = {
+            getNextUrl,
+            maxPages,
+            pageParam: pageParam || this.paginationConfig?.pageParam,
+            limitParam: limitParam || this.paginationConfig?.limitParam,
+            nextCursorPath: nextCursorPath || this.paginationConfig?.nextCursorPath,
+        };
+        return streamPages(this, path, reqOptions, paginationOpts);
+    }
+    page(path, pageNumber, options = {}) {
+        const pageParam = options.pageParam || this.paginationConfig?.pageParam || 'page';
+        new URL(path.startsWith('http') ? path : `http://base${path}`);
+        const params = { ...options.params, [pageParam]: pageNumber };
+        return this.request(path, { ...options, params });
+    }
+    async getAll(path, options = {}) {
+        const items = [];
+        for await (const item of this.paginate(path, options)) {
+            items.push(item);
+        }
+        return items;
+    }
+    websocket(path, options = {}) {
+        let wsUrl;
+        if (path.startsWith('ws://') || path.startsWith('wss://')) {
+            wsUrl = path;
+        }
+        else if (this.baseUrl) {
+            const base = this.baseUrl.replace(/^http/, 'ws');
+            wsUrl = new URL(path, base).toString();
+        }
+        else {
+            throw new ConfigurationError('WebSocket requires either a full ws:// URL or a baseUrl', {
+                configKey: 'baseUrl',
+            });
+        }
+        const headersObj = {};
+        if (this.defaultHeaders) {
+            const headers = new Headers(this.defaultHeaders);
+            headers.forEach((value, key) => {
+                headersObj[key] = value;
+            });
+        }
+        const finalHeaders = { ...headersObj, ...options.headers };
+        return new ReckerWebSocket(wsUrl, { ...options, headers: finalHeaders });
+    }
+    ws(path, options = {}) {
+        return this.websocket(path, options);
+    }
+    async whois(query, options) {
+        return whois(query, options);
+    }
+    async isDomainAvailable(domain, options) {
+        return isDomainAvailable(domain, options);
+    }
+    hls(manifestUrl, options = {}) {
+        if (!isNodeRuntime()) {
+            throw new UnsupportedError('HLS is only available in Node.js environments.', { feature: 'hls' });
+        }
+        const factory = async () => {
+            const { HlsPromise } = await Promise.resolve().then(function () { return hls; });
+            return { instance: new HlsPromise(this, manifestUrl, options) };
+        };
+        return new LazyHlsPromise(factory);
+    }
+    get metadata() {
+        return { handlerProtocol: 'http/1.1' };
+    }
+    async handle(request, options) {
+        const protocol = request.protocol || 'https:';
+        const hostname = request.hostname;
+        const port = request.port;
+        const path = request.path || '/';
+        let url = `${protocol}//${hostname}`;
+        if (port && !((protocol === 'https:' && port === 443) || (protocol === 'http:' && port === 80))) {
+            url += `:${port}`;
+        }
+        url += path;
+        if (request.query) {
+            const searchParams = new URLSearchParams();
+            for (const [key, value] of Object.entries(request.query)) {
+                if (value === null || value === undefined)
+                    continue;
+                if (Array.isArray(value)) {
+                    for (const v of value) {
+                        searchParams.append(key, v);
+                    }
+                }
+                else {
+                    searchParams.set(key, value);
+                }
+            }
+            const qs = searchParams.toString();
+            if (qs) {
+                url += (url.includes('?') ? '&' : '?') + qs;
+            }
+        }
+        const headers = {};
+        if (request.headers) {
+            for (const [key, value] of Object.entries(request.headers)) {
+                if (value === undefined)
+                    continue;
+                if (key.startsWith(':'))
+                    continue;
+                headers[key] = Array.isArray(value) ? value.join(', ') : value;
+            }
+        }
+        const response = await this.request(url, {
+            method: (request.method || 'GET'),
+            headers,
+            body: request.body,
+            signal: options?.abortSignal,
+            timeout: options?.requestTimeout,
+            throwHttpErrors: false,
+        });
+        const responseHeaders = {};
+        response.headers.forEach((value, key) => {
+            responseHeaders[key] = value;
+        });
+        let body;
+        if (response.raw.body) {
+            const { Readable } = await import('stream');
+            body = Readable.fromWeb(response.raw.body);
+        }
+        return {
+            response: {
+                statusCode: response.status,
+                reason: response.statusText,
+                headers: responseHeaders,
+                body,
+            },
+        };
+    }
+    updateHttpClientConfig(_key, _value) {
+    }
+    httpHandlerConfigs() {
+        return {
+            http2: this.http2Enabled,
+            maxSockets: this.concurrencyConfig.agent.connections,
+            keepAlive: true,
+        };
+    }
+    async destroy() {
+        if (this.agentManager) {
+            await this.agentManager.destroy();
+        }
+        this.requestPool = undefined;
+    }
+    get ai() {
+        if (!this._ai) {
+            if (!this._aiConfig) {
+                throw new ConfigurationError('AI features require an AI-enabled preset. Use createClient(openai({...})), createClient(anthropic({...})), etc.', { configKey: '_aiConfig' });
+            }
+            this._ai = new ClientAIImpl(this, this._aiConfig);
+        }
+        return this._ai;
+    }
+    get hasAI() {
+        return this._aiConfig !== undefined;
+    }
+}
+function createClient(options = {}) {
+    return new Client(options);
 }
 
 const DEFAULT_TOTAL_PERCENT = 0.5;
@@ -40570,3114 +44051,10 @@ let MemoryStorage$1 = class MemoryStorage {
     }
 };
 
-function parseRequestCacheControl(header) {
-    if (!header)
-        return {};
-    const result = {};
-    const directives = header.toLowerCase().split(',').map(d => d.trim());
-    for (const directive of directives) {
-        if (directive.startsWith('max-age=')) {
-            result.maxAge = parseInt(directive.slice(8), 10);
-        }
-        else if (directive.startsWith('min-fresh=')) {
-            result.minFresh = parseInt(directive.slice(10), 10);
-        }
-        else if (directive.startsWith('max-stale')) {
-            const equals = directive.indexOf('=');
-            if (equals !== -1) {
-                result.maxStale = parseInt(directive.slice(equals + 1), 10);
-            }
-            else {
-                result.maxStale = Infinity;
-            }
-        }
-        else if (directive === 'only-if-cached') {
-            result.onlyIfCached = true;
-        }
-        else if (directive === 'no-cache') {
-            result.noCache = true;
-        }
-        else if (directive === 'no-store') {
-            result.noStore = true;
-        }
-    }
-    return result;
-}
-function parseCacheControl(header) {
-    if (!header)
-        return {};
-    const result = {};
-    const directives = header.toLowerCase().split(',').map(d => d.trim());
-    for (const directive of directives) {
-        if (directive.startsWith('max-age=')) {
-            result.maxAge = parseInt(directive.slice(8), 10);
-        }
-        else if (directive.startsWith('s-maxage=')) {
-            result.sMaxAge = parseInt(directive.slice(9), 10);
-        }
-        else if (directive.startsWith('stale-while-revalidate=')) {
-            result.staleWhileRevalidate = parseInt(directive.slice(23), 10);
-        }
-        else if (directive.startsWith('stale-if-error=')) {
-            result.staleIfError = parseInt(directive.slice(15), 10);
-        }
-        else if (directive === 'no-cache') {
-            result.noCache = true;
-        }
-        else if (directive === 'no-store') {
-            result.noStore = true;
-        }
-        else if (directive === 'must-revalidate') {
-            result.mustRevalidate = true;
-        }
-        else if (directive === 'private') {
-            result.isPrivate = true;
-        }
-        else if (directive === 'public') {
-            result.isPublic = true;
-        }
-    }
-    return result;
-}
-function isFresh(entry, now) {
-    const age = (now - entry.timestamp) / 1000;
-    if (entry.sMaxAge !== undefined) {
-        return age < entry.sMaxAge;
-    }
-    if (entry.maxAge !== undefined) {
-        return age < entry.maxAge;
-    }
-    if (entry.expires !== undefined) {
-        return now < entry.expires;
-    }
-    if (entry.lastModified) {
-        const lastModifiedTime = new Date(entry.lastModified).getTime();
-        if (!isNaN(lastModifiedTime)) {
-            const dateTime = entry.headers['date']
-                ? new Date(entry.headers['date']).getTime()
-                : entry.timestamp;
-            if (!isNaN(dateTime) && dateTime > lastModifiedTime) {
-                const timeSinceModified = (dateTime - lastModifiedTime) / 1000;
-                const heuristicFreshness = timeSinceModified * 0.1;
-                return age < heuristicFreshness;
-            }
-        }
-    }
-    return false;
-}
-function satisfiesRequestDirectives(entry, now, reqDirectives) {
-    const age = (now - entry.timestamp) / 1000;
-    const responseMaxAge = entry.sMaxAge ?? entry.maxAge ?? Infinity;
-    const currentFreshness = responseMaxAge - age;
-    const fresh = isFresh(entry, now);
-    if (reqDirectives.maxAge !== undefined && age > reqDirectives.maxAge) {
-        return { allowed: false, reason: 'exceeds-request-max-age' };
-    }
-    if (reqDirectives.minFresh !== undefined) {
-        if (!fresh || currentFreshness < reqDirectives.minFresh) {
-            return { allowed: false, reason: 'insufficient-freshness' };
-        }
-    }
-    if (reqDirectives.onlyIfCached) {
-        return { allowed: true };
-    }
-    if (!fresh && reqDirectives.maxStale === undefined) {
-        return { allowed: false, reason: 'stale-not-acceptable' };
-    }
-    if (!fresh && reqDirectives.maxStale !== undefined) {
-        const staleness = age - responseMaxAge;
-        if (reqDirectives.maxStale !== Infinity && staleness > reqDirectives.maxStale) {
-            return { allowed: false, reason: 'exceeds-max-stale' };
-        }
-    }
-    return { allowed: true };
-}
-function canServeStale(entry, now) {
-    if (!entry.staleWhileRevalidate)
-        return false;
-    const age = (now - entry.timestamp) / 1000;
-    const maxAge = entry.sMaxAge ?? entry.maxAge ?? 0;
-    const staleTime = age - maxAge;
-    return staleTime < entry.staleWhileRevalidate;
-}
-function createConditionalRequest(req, entry) {
-    const conditionalHeaders = new Headers(req.headers);
-    if (entry.etag) {
-        conditionalHeaders.set('If-None-Match', entry.etag);
-    }
-    if (entry.lastModified) {
-        conditionalHeaders.set('If-Modified-Since', entry.lastModified);
-    }
-    return new HttpRequest(req.url, {
-        method: req.method,
-        headers: conditionalHeaders,
-        body: req.body,
-        signal: req.signal,
-        throwHttpErrors: false,
-        timeout: req.timeout,
-        onUploadProgress: req.onUploadProgress,
-        onDownloadProgress: req.onDownloadProgress,
-        maxResponseSize: req.maxResponseSize
-    });
-}
-async function storeCacheEntry(storage, baseKey, req, entry, ttl, keyGenerator) {
-    if (entry.vary) {
-        const varyKey = keyGenerator(req, entry.vary);
-        await storage.set(varyKey, entry, ttl);
-        const varyMarker = {
-            ...entry,
-            body: '',
-        };
-        await storage.set(baseKey, varyMarker, ttl);
-    }
-    else {
-        await storage.set(baseKey, entry, ttl);
-    }
-}
-async function createCacheEntry(response, body, now) {
-    const headers = {};
-    response.headers.forEach((v, k) => { headers[k] = v; });
-    const cacheControl = parseCacheControl(response.headers.get('Cache-Control'));
-    let expires;
-    const expiresHeader = response.headers.get('Expires');
-    if (expiresHeader) {
-        const expiresDate = new Date(expiresHeader);
-        if (!isNaN(expiresDate.getTime())) {
-            expires = expiresDate.getTime();
-        }
-    }
-    return {
-        status: response.status,
-        statusText: response.statusText,
-        headers,
-        body,
-        timestamp: now,
-        etag: response.headers.get('ETag') || undefined,
-        lastModified: response.headers.get('Last-Modified') || undefined,
-        vary: response.headers.get('Vary') || undefined,
-        expires,
-        ...cacheControl
-    };
-}
-function createCachedResponse(entry, cacheStatus) {
-    const headers = new Headers(entry.headers);
-    headers.set('X-Cache', cacheStatus);
-    headers.set('X-Cache-Age', String(Math.floor((Date.now() - entry.timestamp) / 1000)));
-    if (cacheStatus === 'stale' || cacheStatus === 'stale-error') {
-        const warningCode = cacheStatus === 'stale' ? 110 : 111;
-        const warningText = cacheStatus === 'stale' ? 'Response is Stale' : 'Revalidation Failed';
-        const existingWarning = headers.get('Warning');
-        if (existingWarning) {
-            headers.set('Warning', `${existingWarning}, ${warningCode} - "${warningText}"`);
-        }
-        else {
-            headers.set('Warning', `${warningCode} - "${warningText}"`);
-        }
-    }
-    const response = new Response(entry.body, {
-        status: entry.status,
-        statusText: entry.statusText,
-        headers
-    });
-    const httpResponse = new HttpResponse(response);
-    return httpResponse;
-}
-function cachePlugin(options = {}) {
-    const storage = options.storage || new MemoryStorage$1();
-    const strategy = options.strategy || 'cache-first';
-    const ttl = options.ttl || 60 * 1000;
-    const methods = options.methods || ['GET'];
-    const respectCacheControl = options.respectCacheControl !== false;
-    const forceRevalidate = options.forceRevalidate === true;
-    const generateKey = options.keyGenerator || ((req, varyHeaders) => {
-        let key = `${req.method}:${req.url}`;
-        if (req.method !== 'GET' && req.method !== 'HEAD' && req.body) {
-            try {
-                const bodyStr = typeof req.body === 'string'
-                    ? req.body
-                    : (req.body instanceof Buffer ? req.body.toString() : JSON.stringify(req.body));
-                if (bodyStr) {
-                    const hash = createHash('sha256').update(bodyStr).digest('hex').substring(0, 16);
-                    key += `:${hash}`;
-                }
-            }
-            catch {
-            }
-        }
-        if (varyHeaders && options.respectVary !== false) {
-            const varyHeaderNames = varyHeaders.split(',').map(h => h.trim().toLowerCase());
-            const varyParts = [];
-            for (const headerName of varyHeaderNames) {
-                if (headerName === '*') {
-                    return `${key}:vary-*:${Date.now()}`;
-                }
-                const headerValue = req.headers.get(headerName);
-                if (headerValue) {
-                    varyParts.push(`${headerName}=${headerValue}`);
-                }
-            }
-            if (varyParts.length > 0) {
-                key += `:vary:${varyParts.join('|')}`;
-            }
-        }
-        return key;
-    });
-    const cacheMiddleware = async (req, next) => {
-        const unsafeMethods = [
-            'POST', 'PUT', 'PATCH', 'DELETE',
-            'PROPPATCH', 'MKCOL', 'COPY', 'MOVE', 'LOCK', 'UNLOCK',
-            'LINK', 'UNLINK', 'PURGE'
-        ];
-        if (unsafeMethods.includes(req.method)) {
-            const response = await next(req);
-            if (response.ok) {
-                await storage.delete(`GET:${req.url}`);
-                await storage.delete(`HEAD:${req.url}`);
-            }
-            return response;
-        }
-        if (!methods.includes(req.method)) {
-            return next(req);
-        }
-        const reqCacheControl = respectCacheControl
-            ? parseRequestCacheControl(req.headers.get('Cache-Control'))
-            : {};
-        if (respectCacheControl && reqCacheControl.noStore) {
-            return next(req);
-        }
-        if (respectCacheControl) {
-            const reqPragma = req.headers.get('Pragma');
-            if (reqPragma?.includes('no-cache')) {
-                return next(req);
-            }
-        }
-        const baseKey = generateKey(req);
-        let key = baseKey;
-        const now = Date.now();
-        let cachedEntry;
-        if (options.respectVary !== false) {
-            const baseEntry = await storage.get(baseKey);
-            if (baseEntry?.vary) {
-                key = generateKey(req, baseEntry.vary);
-                cachedEntry = await storage.get(key);
-            }
-            else if (baseEntry?.body) {
-                cachedEntry = baseEntry;
-            }
-            else {
-                cachedEntry = undefined;
-            }
-        }
-        else {
-            cachedEntry = await storage.get(key);
-        }
-        if (reqCacheControl.onlyIfCached) {
-            if (!cachedEntry) {
-                const response = new Response(null, {
-                    status: 504,
-                    statusText: 'Gateway Timeout'
-                });
-                return new HttpResponse(response);
-            }
-            const satisfaction = satisfiesRequestDirectives(cachedEntry, now, reqCacheControl);
-            if (!satisfaction.allowed) {
-                const response = new Response(null, {
-                    status: 504,
-                    statusText: 'Gateway Timeout'
-                });
-                return new HttpResponse(response);
-            }
-            return createCachedResponse(cachedEntry, isFresh(cachedEntry, now) ? 'hit' : 'stale');
-        }
-        const hasRequestDirectives = Object.keys(reqCacheControl).length > 0;
-        if (cachedEntry && respectCacheControl && hasRequestDirectives && strategy === 'network-first') {
-            const satisfaction = satisfiesRequestDirectives(cachedEntry, now, reqCacheControl);
-            if (!satisfaction.allowed) {
-                cachedEntry = undefined;
-            }
-        }
-        if (strategy === 'network-only') {
-            const response = await next(req);
-            if (response.ok && respectCacheControl) {
-                const cacheControl = parseCacheControl(response.headers.get('Cache-Control'));
-                if (!cacheControl.noStore) {
-                    const clonedResponse = response.raw.clone();
-                    const body = await clonedResponse.text();
-                    const entry = await createCacheEntry(response, body, now);
-                    const entryTtl = (entry.sMaxAge ?? entry.maxAge ?? ttl / 1000) * 1000;
-                    await storeCacheEntry(storage, baseKey, req, entry, entryTtl, generateKey);
-                }
-            }
-            return response;
-        }
-        if (strategy === 'rfc-compliant' || strategy === 'revalidate') {
-            if (cachedEntry) {
-                const fresh = isFresh(cachedEntry, now);
-                const satisfaction = satisfiesRequestDirectives(cachedEntry, now, reqCacheControl);
-                const hasValidators = cachedEntry.etag || cachedEntry.lastModified;
-                if (!satisfaction.allowed && !hasValidators) {
-                    cachedEntry = undefined;
-                }
-                else if (fresh && !forceRevalidate && !cachedEntry.noCache && !reqCacheControl.noCache) {
-                    return createCachedResponse(cachedEntry, 'hit');
-                }
-                else if (!fresh && reqCacheControl.maxStale !== undefined && !forceRevalidate && !reqCacheControl.noCache) {
-                    return createCachedResponse(cachedEntry, 'stale');
-                }
-            }
-            if (cachedEntry) {
-                const conditionalReq = createConditionalRequest(req, cachedEntry);
-                try {
-                    const response = await next(conditionalReq);
-                    if (response.status === 304) {
-                        const updatedEntry = {
-                            ...cachedEntry,
-                            timestamp: now,
-                            etag: response.headers.get('ETag') || cachedEntry.etag,
-                            lastModified: response.headers.get('Last-Modified') || cachedEntry.lastModified,
-                        };
-                        const freshnessTtl = (updatedEntry.sMaxAge ?? updatedEntry.maxAge ?? ttl / 1000) * 1000;
-                        const storageTtl = Math.max(freshnessTtl, ttl);
-                        await storage.set(key, updatedEntry, storageTtl);
-                        return createCachedResponse(updatedEntry, 'revalidated');
-                    }
-                    if (response.ok) {
-                        const cacheControl = parseCacheControl(response.headers.get('Cache-Control'));
-                        if (!cacheControl.noStore) {
-                            const clonedResponse = response.raw.clone();
-                            const body = await clonedResponse.text();
-                            const entry = await createCacheEntry(response, body, now);
-                            const freshnessTtl = (entry.sMaxAge ?? entry.maxAge ?? ttl / 1000) * 1000;
-                            const storageTtl = Math.max(freshnessTtl, ttl);
-                            await storeCacheEntry(storage, baseKey, req, entry, storageTtl, generateKey);
-                        }
-                    }
-                    return response;
-                }
-                catch (error) {
-                    if (cachedEntry.staleIfError && canServeStale(cachedEntry, now)) {
-                        return createCachedResponse(cachedEntry, 'stale-error');
-                    }
-                    throw error;
-                }
-            }
-            const response = await next(req);
-            if (response.ok) {
-                const cacheControl = parseCacheControl(response.headers.get('Cache-Control'));
-                if (!cacheControl.noStore) {
-                    const clonedResponse = response.raw.clone();
-                    const body = await clonedResponse.text();
-                    const entry = await createCacheEntry(response, body, now);
-                    const freshnessTtl = (entry.sMaxAge ?? entry.maxAge ?? ttl / 1000) * 1000;
-                    const storageTtl = Math.max(freshnessTtl, ttl);
-                    await storeCacheEntry(storage, baseKey, req, entry, storageTtl, generateKey);
-                }
-            }
-            return response;
-        }
-        if (strategy === 'cache-first') {
-            if (cachedEntry) {
-                return createCachedResponse(cachedEntry, 'hit');
-            }
-            const response = await next(req);
-            if (response.ok) {
-                const clonedResponse = response.raw.clone();
-                const body = await clonedResponse.text();
-                const entry = await createCacheEntry(response, body, now);
-                await storeCacheEntry(storage, baseKey, req, entry, ttl, generateKey);
-            }
-            return response;
-        }
-        if (strategy === 'stale-while-revalidate') {
-            if (cachedEntry) {
-                const cachedResponse = createCachedResponse(cachedEntry, 'stale');
-                (async () => {
-                    try {
-                        const conditionalReq = createConditionalRequest(req, cachedEntry);
-                        const freshResponse = await next(conditionalReq);
-                        if (freshResponse.status === 304) {
-                            const updatedEntry = {
-                                ...cachedEntry,
-                                timestamp: Date.now()
-                            };
-                            await storage.set(key, updatedEntry, ttl);
-                        }
-                        else if (freshResponse.ok) {
-                            const clonedResponse = freshResponse.raw.clone();
-                            const body = await clonedResponse.text();
-                            const entry = await createCacheEntry(freshResponse, body, Date.now());
-                            const freshnessTtl = (entry.sMaxAge ?? entry.maxAge ?? ttl / 1000) * 1000;
-                            const storageTtl = Math.max(freshnessTtl, ttl);
-                            await storeCacheEntry(storage, baseKey, req, entry, storageTtl, generateKey);
-                        }
-                    }
-                    catch {
-                    }
-                })();
-                return cachedResponse;
-            }
-            const response = await next(req);
-            if (response.ok) {
-                const clonedResponse = response.raw.clone();
-                const body = await clonedResponse.text();
-                const entry = await createCacheEntry(response, body, now);
-                await storeCacheEntry(storage, baseKey, req, entry, ttl, generateKey);
-            }
-            return response;
-        }
-        if (strategy === 'network-first') {
-            try {
-                const response = await next(req);
-                if (response.ok) {
-                    const clonedResponse = response.raw.clone();
-                    const body = await clonedResponse.text();
-                    const entry = await createCacheEntry(response, body, now);
-                    const freshnessTtl = (entry.sMaxAge ?? entry.maxAge ?? ttl / 1000) * 1000;
-                    const storageTtl = Math.max(freshnessTtl, ttl);
-                    await storeCacheEntry(storage, baseKey, req, entry, storageTtl, generateKey);
-                }
-                return response;
-            }
-            catch (error) {
-                if (cachedEntry) {
-                    return createCachedResponse(cachedEntry, 'stale-error');
-                }
-                throw error;
-            }
-        }
-        return next(req);
-    };
-    return (client) => {
-        client.use(cacheMiddleware);
-    };
-}
-
-function dedupPlugin(options = {}) {
-    const pendingRequests = new Map();
-    const generateKey = options.keyGenerator || ((req) => {
-        return req.method + ':' + req.url;
-    });
-    const dedupMiddleware = async (req, next) => {
-        if (req.method !== 'GET' && req.method !== 'HEAD') {
-            return next(req);
-        }
-        const key = generateKey(req);
-        if (pendingRequests.has(key)) {
-            const response = await pendingRequests.get(key);
-            return response.clone();
-        }
-        const promise = next(req)
-            .then((res) => {
-            return res;
-        })
-            .finally(() => {
-            pendingRequests.delete(key);
-        });
-        pendingRequests.set(key, promise);
-        try {
-            const response = await promise;
-            return response.clone ? response.clone() : response;
-        }
-        catch (err) {
-            throw err;
-        }
-    };
-    return (client) => {
-        client.use(dedupMiddleware);
-    };
-}
-
-function parseCookies(cookieString) {
-    const cookies = {};
-    if (!cookieString) {
-        return cookies;
-    }
-    const pairs = cookieString.split(';');
-    for (const pair of pairs) {
-        const [key, ...valueParts] = pair.split('=');
-        const trimmedKey = key?.trim();
-        const value = valueParts.join('=').trim();
-        if (trimmedKey) {
-            cookies[trimmedKey] = decodeURIComponent(value || '');
-        }
-    }
-    return cookies;
-}
-function getXSRFToken(cookieName, cookies) {
-    if (cookies) {
-        const parsed = parseCookies(cookies);
-        return parsed[cookieName] || null;
-    }
-    if (typeof document !== 'undefined' && document.cookie) {
-        const parsed = parseCookies(document.cookie);
-        return parsed[cookieName] || null;
-    }
-    return null;
-}
-function xsrfPlugin(options = {}) {
-    const { cookieName = 'XSRF-TOKEN', headerName = 'X-XSRF-TOKEN', token: manualToken, cookies } = options;
-    return async (req, next) => {
-        const token = manualToken || getXSRFToken(cookieName, cookies);
-        if (token) {
-            if (!req.headers.has(headerName)) {
-                req.headers.set(headerName, token);
-            }
-        }
-        return next(req);
-    };
-}
-function createXSRFMiddleware(config) {
-    if (!config) {
-        return null;
-    }
-    if (config === true) {
-        return xsrfPlugin();
-    }
-    return xsrfPlugin(config);
-}
-
-const gzipAsync = promisify(gzip);
-const deflateAsync = promisify(deflate);
-const brotliAsync = promisify(brotliCompress);
-function isCompressible(contentType) {
-    if (!contentType)
-        return true;
-    const compressibleTypes = [
-        'text/',
-        'application/json',
-        'application/xml',
-        'application/javascript',
-        'application/x-www-form-urlencoded'
-    ];
-    return compressibleTypes.some(type => contentType.includes(type));
-}
-function getBodySize(body) {
-    if (!body)
-        return 0;
-    if (typeof body === 'string') {
-        return Buffer.byteLength(body, 'utf8');
-    }
-    if (body instanceof Buffer) {
-        return body.length;
-    }
-    if (body instanceof ArrayBuffer) {
-        return body.byteLength;
-    }
-    if (body instanceof Blob) {
-        return body.size;
-    }
-    if (typeof body === 'object') {
-        try {
-            return Buffer.byteLength(JSON.stringify(body), 'utf8');
-        }
-        catch {
-            return 0;
-        }
-    }
-    return 0;
-}
-function toBuffer(body) {
-    if (!body)
-        return null;
-    if (Buffer.isBuffer(body)) {
-        return body;
-    }
-    if (typeof body === 'string') {
-        return Buffer.from(body, 'utf8');
-    }
-    if (body instanceof ArrayBuffer) {
-        return Buffer.from(body);
-    }
-    if (typeof body === 'object') {
-        try {
-            return Buffer.from(JSON.stringify(body), 'utf8');
-        }
-        catch {
-            return null;
-        }
-    }
-    return null;
-}
-async function compress(data, algorithm) {
-    switch (algorithm) {
-        case 'gzip':
-            return await gzipAsync(data);
-        case 'deflate':
-            return await deflateAsync(data);
-        case 'br':
-            return await brotliAsync(data);
-        default:
-            throw new UnsupportedError(`Unsupported compression algorithm: ${algorithm}`, {
-                feature: algorithm,
-            });
-    }
-}
-function compression(options = {}) {
-    const { algorithm = 'gzip', threshold = 1024, force = false, methods = ['POST', 'PUT', 'PATCH'] } = options;
-    return async (req, next) => {
-        const shouldCompress = methods.includes(req.method);
-        if (!shouldCompress || !req.body) {
-            return next(req);
-        }
-        if (req.headers.has('Content-Encoding')) {
-            return next(req);
-        }
-        const contentType = req.headers.get('Content-Type');
-        if (!isCompressible(contentType)) {
-            return next(req);
-        }
-        const bodySize = getBodySize(req.body);
-        if (!force && bodySize < threshold) {
-            return next(req);
-        }
-        const buffer = toBuffer(req.body);
-        if (!buffer) {
-            return next(req);
-        }
-        try {
-            const compressed = await compress(buffer, algorithm);
-            if (!force && compressed.length >= buffer.length) {
-                return next(req);
-            }
-            const newHeaders = new Headers(req.headers);
-            newHeaders.set('Content-Encoding', algorithm);
-            newHeaders.set('Content-Length', compressed.length.toString());
-            const compressedReq = {
-                ...req,
-                body: compressed,
-                headers: newHeaders
-            };
-            return next(compressedReq);
-        }
-        catch {
-            return next(req);
-        }
-    };
-}
-function createCompressionMiddleware(config) {
-    if (!config) {
-        return null;
-    }
-    if (config === true) {
-        return compression();
-    }
-    return compression(config);
-}
-
-function serializeXML(obj, rootName) {
-    if (obj === null || obj === undefined) {
-        return rootName ? `<${rootName}/>` : '';
-    }
-    if (typeof obj !== 'object') {
-        return rootName ? `<${rootName}>${encodeXMLEntities(String(obj))}</${rootName}>` : encodeXMLEntities(String(obj));
-    }
-    const keys = Object.keys(obj);
-    if (keys.length === 1 && !rootName) {
-        const key = keys[0];
-        return serializeXML(obj[key], key);
-    }
-    let xml = '';
-    let attributes = '';
-    let textContent = '';
-    for (const key of keys) {
-        const value = obj[key];
-        if (key === '@attributes') {
-            for (const [attrName, attrValue] of Object.entries(value)) {
-                attributes += ` ${attrName}="${encodeXMLEntities(String(attrValue))}"`;
-            }
-        }
-        else if (key === '#text') {
-            textContent = encodeXMLEntities(String(value));
-        }
-        else if (Array.isArray(value)) {
-            for (const item of value) {
-                xml += serializeXML(item, key);
-            }
-        }
-        else {
-            xml += serializeXML(value, key);
-        }
-    }
-    if (rootName) {
-        if (xml || textContent) {
-            return `<${rootName}${attributes}>${textContent}${xml}</${rootName}>`;
-        }
-        return `<${rootName}${attributes}/>`;
-    }
-    return xml;
-}
-function encodeXMLEntities(str) {
-    return str
-        .replace(/&/g, '&amp;')
-        .replace(/</g, '&lt;')
-        .replace(/>/g, '&gt;')
-        .replace(/"/g, '&quot;')
-        .replace(/'/g, '&apos;');
-}
-
-class FileStorage {
-    dir;
-    constructor(baseDir = '.recker/cache') {
-        this.dir = baseDir;
-    }
-    getHash(key) {
-        return createHash('md5').update(key).digest('hex');
-    }
-    getPath(key) {
-        return join(this.dir, `${this.getHash(key)}.json`);
-    }
-    async ensureDir() {
-        if (!existsSync(this.dir)) {
-            await mkdir(this.dir, { recursive: true });
-        }
-    }
-    async get(key) {
-        try {
-            const path = this.getPath(key);
-            if (!existsSync(path))
-                return undefined;
-            const content = await readFile(path, 'utf-8');
-            const data = JSON.parse(content);
-            return data;
-        }
-        catch (error) {
-            return undefined;
-        }
-    }
-    async set(key, entry, ttl) {
-        await this.ensureDir();
-        const path = this.getPath(key);
-        await writeFile(path, JSON.stringify(entry), 'utf-8');
-    }
-    async delete(key) {
-        const path = this.getPath(key);
-        if (existsSync(path)) {
-            await unlink(path);
-        }
-    }
-    async clear() {
-        if (existsSync(this.dir)) {
-            await rm(this.dir, { recursive: true, force: true });
-        }
-    }
-}
-
-class RequestRunner extends EventEmitter {
-    concurrency;
-    queue = [];
-    activeCount = 0;
-    paused = false;
-    results = new Map();
-    stats = { total: 0, successful: 0, failed: 0 };
-    startTime = 0;
-    constructor(options = {}) {
-        super();
-        this.concurrency = options.concurrency || 5;
-    }
-    add(fn, options = {}) {
-        this.queue.push({
-            id: options.id || Math.random().toString(36).slice(2),
-            fn,
-            priority: options.priority || 0,
-        });
-        this.queue.sort((a, b) => b.priority - a.priority);
-        this.stats.total++;
-        this.processNext();
-    }
-    async run(items, processor, options = {}) {
-        this.startTime = Date.now();
-        this.stats = { total: items.length, successful: 0, failed: 0 };
-        this.results.clear();
-        const promises = items.map((item, index) => {
-            return new Promise((resolve) => {
-                this.add(async () => {
-                    try {
-                        const res = await processor(item, index);
-                        resolve(res);
-                        return res;
-                    }
-                    catch (err) {
-                        resolve(err);
-                        throw err;
-                    }
-                }, { priority: options.priority, id: String(index) });
-            });
-        });
-        const results = await Promise.all(promises);
-        return {
-            results,
-            stats: {
-                ...this.stats,
-                duration: Date.now() - this.startTime
-            }
-        };
-    }
-    async processNext() {
-        if (this.paused || this.activeCount >= this.concurrency || this.queue.length === 0) {
-            return;
-        }
-        const task = this.queue.shift();
-        if (!task)
-            return;
-        this.activeCount++;
-        this.emit('taskStart', task);
-        try {
-            const result = await task.fn();
-            this.stats.successful++;
-            this.emit('taskComplete', { task, result });
-        }
-        catch (error) {
-            this.stats.failed++;
-            this.emit('taskError', { task, error });
-        }
-        finally {
-            this.activeCount--;
-            this.emit('progress', this.getProgress());
-            if (this.activeCount === 0 && this.queue.length === 0) {
-                this.emit('drained');
-            }
-            this.processNext();
-        }
-    }
-    getProgress() {
-        const completed = this.stats.successful + this.stats.failed;
-        return {
-            total: this.stats.total,
-            completed,
-            pending: this.queue.length,
-            active: this.activeCount,
-            percent: this.stats.total > 0 ? (completed / this.stats.total) * 100 : 0
-        };
-    }
-}
-
-class ReckerWebSocket extends EventEmitter {
-    ws = null;
-    url;
-    options;
-    reconnectAttempts = 0;
-    reconnectTimer;
-    heartbeatTimer;
-    isClosed = false;
-    isReconnecting = false;
-    pongWatchdog;
-    backoff;
-    closedByUser = false;
-    constructor(url, options = {}) {
-        super();
-        this.url = url;
-        this.options = {
-            protocols: options.protocols || [],
-            headers: options.headers || {},
-            reconnect: options.reconnect ?? false,
-            reconnectDelay: options.reconnectDelay ?? 1000,
-            maxReconnectAttempts: options.maxReconnectAttempts ?? 5,
-            heartbeatInterval: options.heartbeatInterval ?? 30000,
-            heartbeatTimeout: options.heartbeatTimeout ?? 10000,
-            dispatcher: options.dispatcher,
-            proxy: options.proxy,
-            tls: options.tls,
-            perMessageDeflate: options.perMessageDeflate ?? false
-        };
-        this.backoff = {
-            base: this.options.reconnectDelay,
-            factor: 2,
-            jitter: true,
-            max: 30000
-        };
-    }
-    async connect() {
-        return new Promise((resolve, reject) => {
-            try {
-                const wsOptions = {
-                    headers: this.options.headers,
-                    dispatcher: this.options.dispatcher,
-                    perMessageDeflate: this.options.perMessageDeflate,
-                };
-                if (this.options.proxy) {
-                    const proxyConfig = typeof this.options.proxy === 'string'
-                        ? { url: this.options.proxy }
-                        : this.options.proxy;
-                    const { ProxyAgent } = require('undici');
-                    wsOptions.dispatcher = new ProxyAgent(proxyConfig.url);
-                }
-                if (this.options.tls) {
-                    wsOptions.tls = this.options.tls;
-                }
-                this.ws = new undiciExports.WebSocket(this.url, this.options.protocols, wsOptions);
-                this.ws.addEventListener('open', () => {
-                    this.reconnectAttempts = 0;
-                    this.isReconnecting = false;
-                    this.startHeartbeat();
-                    this.emit('open');
-                    resolve();
-                });
-                this.ws.addEventListener('message', (event) => {
-                    const message = {
-                        data: event.data,
-                        isBinary: event.data instanceof Buffer
-                    };
-                    this.emit('message', message);
-                    this.stopPongWatchdog();
-                });
-                this.ws.addEventListener('close', (event) => {
-                    this.stopHeartbeat();
-                    this.stopPongWatchdog();
-                    this.emit('close', event.code, event.reason);
-                    if (!this.closedByUser && !this.isClosed && this.options.reconnect) {
-                        this.attemptReconnect();
-                    }
-                });
-                this.ws.addEventListener('error', (event) => {
-                    const err = event.error instanceof Error
-                        ? event.error
-                        : new ConnectionError('WebSocket connection error', {
-                            host: this.url,
-                            retriable: true,
-                        });
-                    this.emit('error', err);
-                    reject(err);
-                });
-            }
-            catch (error) {
-                reject(error);
-            }
-        });
-    }
-    async send(data, options) {
-        if (!this.ws || this.ws.readyState !== undiciExports.WebSocket.OPEN) {
-            throw new StateError('WebSocket is not connected', {
-                expectedState: 'open',
-                actualState: this.ws ? 'closed' : 'not-created',
-            });
-        }
-        const awaitDrain = options?.awaitDrain ?? false;
-        const highWaterMark = options?.highWaterMark ?? 16 * 1024;
-        this.ws.send(data);
-        if (awaitDrain) {
-            await this.waitForDrain(highWaterMark);
-        }
-    }
-    async sendStream(stream, options) {
-        for await (const chunk of stream) {
-            await this.send(chunk, options);
-        }
-    }
-    sendJSON(data) {
-        void this.send(JSON.stringify(data));
-    }
-    close(code = 1000, reason = '') {
-        this.isClosed = true;
-        this.closedByUser = true;
-        this.stopHeartbeat();
-        this.clearReconnectTimer();
-        if (this.ws) {
-            this.ws.close(code, reason);
-            this.ws = null;
-        }
-    }
-    ping() {
-        if (!this.ws || this.ws.readyState !== undiciExports.WebSocket.OPEN)
-            return;
-        const anyWs = this.ws;
-        if (typeof anyWs.ping === 'function') {
-            try {
-                anyWs.ping();
-                return;
-            }
-            catch {
-            }
-        }
-        try {
-            this.ws.send('__heartbeat__');
-        }
-        catch {
-        }
-    }
-    get readyState() {
-        return this.ws?.readyState ?? undiciExports.WebSocket.CLOSED;
-    }
-    get isConnected() {
-        return this.ws?.readyState === undiciExports.WebSocket.OPEN;
-    }
-    toReadable() {
-        if (!this.ws)
-            return null;
-        const wsAny = this.ws;
-        if (wsAny.readable) {
-            return webToNodeStream(wsAny.readable);
-        }
-        return null;
-    }
-    async pipeFrom(source, options) {
-        await this.sendStream(source, options);
-    }
-    async pipeTo(destination) {
-        const readable = this.toReadable();
-        if (!readable) {
-            throw new StreamError$1('WebSocket has no readable stream', {
-                streamType: 'websocket',
-                retriable: false,
-            });
-        }
-        await pipeline(readable, destination);
-    }
-    async *[Symbol.asyncIterator]() {
-        const queue = [];
-        let resolveNext = null;
-        let closed = false;
-        const messageHandler = (msg) => {
-            if (resolveNext) {
-                resolveNext(msg);
-                resolveNext = null;
-            }
-            else {
-                queue.push(msg);
-            }
-        };
-        const closeHandler = () => {
-            closed = true;
-            if (resolveNext) {
-                resolveNext(null);
-                resolveNext = null;
-            }
-        };
-        this.on('message', messageHandler);
-        this.on('close', closeHandler);
-        try {
-            while (true) {
-                if (queue.length > 0) {
-                    yield queue.shift();
-                }
-                else {
-                    if (closed)
-                        break;
-                    const msg = await new Promise((resolve) => {
-                        resolveNext = resolve;
-                    });
-                    if (msg) {
-                        yield msg;
-                    }
-                    else {
-                        break;
-                    }
-                }
-            }
-        }
-        finally {
-            this.off('message', messageHandler);
-            this.off('close', closeHandler);
-        }
-    }
-    attemptReconnect() {
-        if (this.isReconnecting)
-            return;
-        if (this.options.maxReconnectAttempts > 0 &&
-            this.reconnectAttempts >= this.options.maxReconnectAttempts) {
-            this.emit('max-reconnect-attempts');
-            return;
-        }
-        this.isReconnecting = true;
-        this.reconnectAttempts++;
-        const baseDelay = this.backoff.base * Math.pow(this.backoff.factor, this.reconnectAttempts - 1);
-        const capped = this.backoff.max ? Math.min(baseDelay, this.backoff.max) : baseDelay;
-        const jittered = this.backoff.jitter ? randomJitter(capped) : capped;
-        this.emit('reconnecting', this.reconnectAttempts, jittered);
-        this.reconnectTimer = setTimeout(() => {
-            this.connect().catch((error) => {
-                this.emit('reconnect-error', error);
-            });
-        }, jittered);
-    }
-    clearReconnectTimer() {
-        if (this.reconnectTimer) {
-            clearTimeout(this.reconnectTimer);
-            this.reconnectTimer = undefined;
-        }
-    }
-    startHeartbeat() {
-        if (this.options.heartbeatInterval <= 0)
-            return;
-        this.heartbeatTimer = setInterval(() => {
-            if (this.isConnected) {
-                this.ping();
-                this.startPongWatchdog();
-            }
-        }, this.options.heartbeatInterval);
-    }
-    stopHeartbeat() {
-        if (this.heartbeatTimer) {
-            clearInterval(this.heartbeatTimer);
-            this.heartbeatTimer = undefined;
-        }
-        this.stopPongWatchdog();
-    }
-    startPongWatchdog() {
-        this.stopPongWatchdog();
-        if (this.options.heartbeatTimeout <= 0)
-            return;
-        this.pongWatchdog = setTimeout(() => {
-            this.emit('heartbeat-timeout');
-            if (!this.closedByUser && this.options.reconnect) {
-                this.ws?.close(4000, 'heartbeat timeout');
-            }
-        }, this.options.heartbeatTimeout);
-    }
-    stopPongWatchdog() {
-        if (this.pongWatchdog) {
-            clearTimeout(this.pongWatchdog);
-            this.pongWatchdog = undefined;
-        }
-    }
-    getBufferedAmount() {
-        return this.ws?.bufferedAmount ?? 0;
-    }
-    async waitForDrain(highWaterMark) {
-        const buffered = this.getBufferedAmount();
-        if (buffered <= highWaterMark)
-            return;
-        await new Promise((resolve) => {
-            const check = () => {
-                if (this.getBufferedAmount() <= highWaterMark || !this.isConnected) {
-                    resolve();
-                }
-                else {
-                    setTimeout(check, 10);
-                }
-            };
-            setTimeout(check, 10);
-        });
-    }
-}
-function randomJitter(value) {
-    const jitter = 0.2 * value;
-    return value - jitter + Math.random() * (2 * jitter);
-}
-
-const DEFAULT_SERVERS = {
-    'com': 'whois.verisign-grs.com',
-    'net': 'whois.verisign-grs.com',
-    'org': 'whois.pir.org',
-    'info': 'whois.afilias.net',
-    'biz': 'whois.biz',
-    'us': 'whois.nic.us',
-    'uk': 'whois.nic.uk',
-    'ca': 'whois.cira.ca',
-    'de': 'whois.denic.de',
-    'fr': 'whois.afnic.fr',
-    'au': 'whois.aunic.net',
-    'jp': 'whois.jprs.jp',
-    'cn': 'whois.cnnic.cn',
-    'ru': 'whois.tcinet.ru',
-    'br': 'whois.registro.br',
-    'eu': 'whois.eu',
-    'io': 'whois.nic.io',
-    'co': 'whois.nic.co',
-    'me': 'whois.nic.me',
-    'tv': 'whois.nic.tv',
-    'cc': 'whois.nic.cc',
-    'ws': 'whois.website.ws',
-    'mobi': 'whois.dotmobiregistry.net',
-    'asia': 'whois.nic.asia',
-    'tel': 'whois.nic.tel',
-    'pro': 'whois.registrypro.pro',
-    'aero': 'whois.aero',
-    'cat': 'whois.cat',
-    'coop': 'whois.nic.coop',
-    'jobs': 'whois.nic.jobs',
-    'museum': 'whois.museum',
-    'travel': 'whois.nic.travel',
-    'xxx': 'whois.nic.xxx',
-    'app': 'whois.nic.google',
-    'dev': 'whois.nic.google',
-    'ai': 'whois.nic.ai',
-};
-function extractTLD(domain) {
-    const parts = domain.toLowerCase().split('.');
-    return parts[parts.length - 1];
-}
-function getWhoisServer(query, customServer) {
-    if (customServer) {
-        return customServer;
-    }
-    const ipv4Pattern = /^(\d{1,3}\.){3}\d{1,3}$/;
-    const ipv6Pattern = /^([0-9a-fA-F]{0,4}:){2,7}[0-9a-fA-F]{0,4}$/;
-    if (ipv4Pattern.test(query) || ipv6Pattern.test(query)) {
-        return 'whois.arin.net';
-    }
-    const tld = extractTLD(query);
-    return DEFAULT_SERVERS[tld] || 'whois.iana.org';
-}
-function parseWhoisData(raw) {
-    const data = {};
-    const lines = raw.split('\n');
-    for (const line of lines) {
-        if (line.startsWith('%') || line.startsWith('#') || !line.trim()) {
-            continue;
-        }
-        const colonIndex = line.indexOf(':');
-        if (colonIndex === -1) {
-            continue;
-        }
-        const key = line.substring(0, colonIndex).trim().toLowerCase();
-        const value = line.substring(colonIndex + 1).trim();
-        if (!key || !value) {
-            continue;
-        }
-        if (data[key]) {
-            if (Array.isArray(data[key])) {
-                data[key].push(value);
-            }
-            else {
-                data[key] = [data[key], value];
-            }
-        }
-        else {
-            data[key] = value;
-        }
-    }
-    return data;
-}
-function extractReferralServer(raw) {
-    const lines = raw.toLowerCase().split('\n');
-    for (const line of lines) {
-        if (line.includes('whois server:') || line.includes('referral url:')) {
-            const match = line.match(/whois\.[\w.-]+/);
-            if (match) {
-                return match[0];
-            }
-        }
-    }
-    return null;
-}
-async function queryWhoisServer(server, query, port, timeout) {
-    return new Promise((resolve, reject) => {
-        let response = '';
-        let socket = null;
-        const timeoutId = setTimeout(() => {
-            socket?.destroy();
-            reject(new ReckerError(`WHOIS query timed out after ${timeout}ms`, undefined, undefined, [
-                'Increase the WHOIS timeout for slower registries.',
-                'Check network connectivity to the WHOIS server.',
-                'Retry the query; some registries respond slowly under load.'
-            ]));
-        }, timeout);
-        socket = createConnection({ host: server, port }, () => {
-            socket.write(query + '\r\n');
-        });
-        socket.on('data', (chunk) => {
-            response += chunk.toString('utf-8');
-        });
-        socket.on('end', () => {
-            clearTimeout(timeoutId);
-            resolve(response);
-        });
-        socket.on('error', (error) => {
-            clearTimeout(timeoutId);
-            const errorDetail = error.message || error.code || 'Connection failed';
-            const err = new ReckerError(`WHOIS query failed: ${errorDetail}`, undefined, undefined, [
-                'Verify the WHOIS server is reachable and correct.',
-                'Check network/firewall settings blocking WHOIS port 43.',
-                'Retry the query; transient network issues can occur.'
-            ]);
-            err.code = error.code;
-            reject(err);
-        });
-        socket.on('close', (hadError) => {
-            clearTimeout(timeoutId);
-            if (hadError && !response) {
-                const err = new ReckerError('WHOIS connection closed unexpectedly', undefined, undefined, [
-                    'The WHOIS server may be rate limiting requests.',
-                    'Try again in a few seconds.',
-                    'Some TLDs have unreliable WHOIS servers.'
-                ]);
-                err.code = 'ECONNRESET';
-                reject(err);
-            }
-        });
-    });
-}
-async function whois(query, options = {}) {
-    const { server: customServer, port = 43, timeout = 10000, follow = true, } = options;
-    const cleanQuery = query.trim().toLowerCase();
-    let server = getWhoisServer(cleanQuery, customServer);
-    let raw = await queryWhoisServer(server, cleanQuery, port, timeout);
-    if (follow && !customServer) {
-        const referralServer = extractReferralServer(raw);
-        if (referralServer && referralServer !== server) {
-            server = referralServer;
-            raw = await queryWhoisServer(server, cleanQuery, port, timeout);
-        }
-    }
-    const data = parseWhoisData(raw);
-    return {
-        raw,
-        query: cleanQuery,
-        server,
-        data,
-    };
-}
-async function isDomainAvailable(domain, options) {
-    try {
-        const result = await whois(domain, options);
-        const rawLower = result.raw.toLowerCase();
-        const notFoundIndicators = [
-            'no match',
-            'not found',
-            'no entries found',
-            'no data found',
-            'status: available',
-            'status: free',
-        ];
-        return notFoundIndicators.some(indicator => rawLower.includes(indicator));
-    }
-    catch (error) {
-        return false;
-    }
-}
-
-const domainValueRegExp = /^([.]?[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)([.][a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)*$/i;
-const pathValueRegExp = /^[\u0020-\u003A\u003D-\u007E]*$/;
-class MemoryCookieJar {
-    cookies = new Map();
-    getCookieString(url) {
-        const parsedUrl = new URL(url);
-        const hostname = parsedUrl.hostname;
-        const pathname = parsedUrl.pathname || '/';
-        const isSecure = parsedUrl.protocol === 'https:';
-        const now = Date.now();
-        const matchingCookies = [];
-        for (const [domain, pathMap] of this.cookies.entries()) {
-            if (!this.domainMatches(hostname, domain))
-                continue;
-            for (const [path, nameMap] of pathMap.entries()) {
-                if (!this.pathMatches(pathname, path))
-                    continue;
-                for (const cookie of nameMap.values()) {
-                    if (this.isExpired(cookie, now)) {
-                        nameMap.delete(cookie.name);
-                        continue;
-                    }
-                    if (cookie.secure && !isSecure)
-                        continue;
-                    matchingCookies.push(cookie);
-                }
-            }
-        }
-        matchingCookies.sort((a, b) => {
-            const pathDiff = b.path.length - a.path.length;
-            if (pathDiff !== 0)
-                return pathDiff;
-            return a.createdAt - b.createdAt;
-        });
-        return matchingCookies.map(c => `${c.name}=${c.value}`).join('; ');
-    }
-    setCookie(rawCookie, url) {
-        const parsedUrl = new URL(url);
-        const hostname = parsedUrl.hostname;
-        const pathname = parsedUrl.pathname || '/';
-        const cookie = this.parseCookie(rawCookie, hostname, pathname);
-        if (!cookie)
-            return;
-        if (!this.domainMatches(hostname, cookie.domain)) {
-            return;
-        }
-        if (!this.cookies.has(cookie.domain)) {
-            this.cookies.set(cookie.domain, new Map());
-        }
-        const domainMap = this.cookies.get(cookie.domain);
-        if (!domainMap.has(cookie.path)) {
-            domainMap.set(cookie.path, new Map());
-        }
-        const pathMap = domainMap.get(cookie.path);
-        pathMap.set(cookie.name, cookie);
-    }
-    clear() {
-        this.cookies.clear();
-    }
-    clearDomain(domain) {
-        this.cookies.delete(domain);
-    }
-    getAllCookies() {
-        const all = [];
-        for (const domainMap of this.cookies.values()) {
-            for (const pathMap of domainMap.values()) {
-                for (const cookie of pathMap.values()) {
-                    all.push(cookie);
-                }
-            }
-        }
-        return all;
-    }
-    parseCookie(setCookieStr, requestDomain, requestPath) {
-        const parts = setCookieStr.split(';').map(p => p.trim());
-        if (parts.length === 0 || !parts[0])
-            return null;
-        const [nameValue, ...attributes] = parts;
-        const eqIndex = nameValue.indexOf('=');
-        if (eqIndex === -1)
-            return null;
-        const name = nameValue.substring(0, eqIndex).trim();
-        const rawValue = nameValue.substring(eqIndex + 1).trim();
-        if (!name)
-            return null;
-        const value = this.decode(rawValue);
-        const cookie = {
-            name,
-            value,
-            domain: requestDomain,
-            path: this.defaultPath(requestPath),
-            secure: false,
-            httpOnly: false,
-            createdAt: Date.now()
-        };
-        for (const attr of attributes) {
-            const lowerAttr = attr.toLowerCase();
-            if (lowerAttr === 'secure') {
-                cookie.secure = true;
-            }
-            else if (lowerAttr === 'httponly') {
-                cookie.httpOnly = true;
-            }
-            else if (lowerAttr === 'partitioned') {
-                cookie.partitioned = true;
-            }
-            else if (lowerAttr.startsWith('domain=')) {
-                let domain = attr.substring(7).trim();
-                if (domain.startsWith('.')) {
-                    domain = domain.substring(1);
-                }
-                if (domainValueRegExp.test(domain)) {
-                    cookie.domain = domain.toLowerCase();
-                }
-            }
-            else if (lowerAttr.startsWith('path=')) {
-                const path = attr.substring(5).trim();
-                if (!path || pathValueRegExp.test(path)) {
-                    cookie.path = path || '/';
-                }
-            }
-            else if (lowerAttr.startsWith('expires=')) {
-                const expiresStr = attr.substring(8).trim();
-                const expires = new Date(expiresStr);
-                if (Number.isFinite(expires.valueOf())) {
-                    cookie.expires = expires;
-                }
-            }
-            else if (lowerAttr.startsWith('max-age=')) {
-                const maxAgeStr = attr.substring(8).trim();
-                if (/^-?\d+$/.test(maxAgeStr)) {
-                    cookie.maxAge = parseInt(maxAgeStr, 10);
-                }
-            }
-            else if (lowerAttr.startsWith('samesite=')) {
-                const samesite = attr.substring(9).trim().toLowerCase();
-                if (samesite === 'strict')
-                    cookie.sameSite = 'Strict';
-                else if (samesite === 'lax')
-                    cookie.sameSite = 'Lax';
-                else if (samesite === 'none')
-                    cookie.sameSite = 'None';
-            }
-            else if (lowerAttr.startsWith('priority=')) {
-                const priority = attr.substring(9).trim().toLowerCase();
-                if (priority === 'low')
-                    cookie.priority = 'Low';
-                else if (priority === 'medium')
-                    cookie.priority = 'Medium';
-                else if (priority === 'high')
-                    cookie.priority = 'High';
-            }
-        }
-        return cookie;
-    }
-    decode(str) {
-        if (str.indexOf('%') === -1)
-            return str;
-        try {
-            return decodeURIComponent(str);
-        }
-        catch {
-            return str;
-        }
-    }
-    domainMatches(requestDomain, cookieDomain) {
-        const reqLower = requestDomain.toLowerCase();
-        const cookieLower = cookieDomain.toLowerCase();
-        if (reqLower === cookieLower)
-            return true;
-        if (reqLower.endsWith('.' + cookieLower))
-            return true;
-        return false;
-    }
-    pathMatches(requestPath, cookiePath) {
-        if (requestPath === cookiePath)
-            return true;
-        if (requestPath.startsWith(cookiePath)) {
-            if (cookiePath.endsWith('/'))
-                return true;
-            if (requestPath[cookiePath.length] === '/')
-                return true;
-        }
-        return false;
-    }
-    defaultPath(requestPath) {
-        if (!requestPath || !requestPath.startsWith('/')) {
-            return '/';
-        }
-        const lastSlash = requestPath.lastIndexOf('/');
-        if (lastSlash === 0) {
-            return '/';
-        }
-        return requestPath.substring(0, lastSlash);
-    }
-    isExpired(cookie, now) {
-        if (cookie.maxAge !== undefined) {
-            if (cookie.maxAge <= 0)
-                return true;
-            const expiresAt = cookie.createdAt + (cookie.maxAge * 1000);
-            return now >= expiresAt;
-        }
-        if (cookie.expires) {
-            return now >= cookie.expires.getTime();
-        }
-        return false;
-    }
-}
-
-let ScrapeDocumentClass = null;
-async function getScrapeDocumentClass() {
-    if (!ScrapeDocumentClass) {
-        const module = await Promise.resolve().then(function () { return document$1; });
-        ScrapeDocumentClass = module.ScrapeDocument;
-    }
-    return ScrapeDocumentClass;
-}
-function scrape(promise) {
-    const basePromise = Promise.resolve(promise);
-    const getDocument = async (options) => {
-        const ScrapeDoc = await getScrapeDocumentClass();
-        const response = await basePromise;
-        const html = await response.text();
-        return ScrapeDoc.create(html, {
-            baseUrl: options?.baseUrl || response.url,
-            ...options,
-        });
-    };
-    const enhanced = basePromise;
-    enhanced.scrape = async (options) => {
-        return getDocument(options);
-    };
-    enhanced.links = async (options) => {
-        const doc = await getDocument();
-        return doc.links(options);
-    };
-    enhanced.images = async (options) => {
-        const doc = await getDocument();
-        return doc.images(options);
-    };
-    enhanced.meta = async () => {
-        const doc = await getDocument();
-        return doc.meta();
-    };
-    enhanced.openGraph = async () => {
-        const doc = await getDocument();
-        return doc.openGraph();
-    };
-    enhanced.twitterCard = async () => {
-        const doc = await getDocument();
-        return doc.twitterCard();
-    };
-    enhanced.jsonLd = async () => {
-        const doc = await getDocument();
-        return doc.jsonLd();
-    };
-    enhanced.forms = async (selector) => {
-        const doc = await getDocument();
-        return doc.forms(selector);
-    };
-    enhanced.tables = async (selector) => {
-        const doc = await getDocument();
-        return doc.tables(selector);
-    };
-    enhanced.scripts = async () => {
-        const doc = await getDocument();
-        return doc.scripts();
-    };
-    enhanced.styles = async () => {
-        const doc = await getDocument();
-        return doc.styles();
-    };
-    enhanced.extract = async (schema) => {
-        const doc = await getDocument();
-        return doc.extract(schema);
-    };
-    return enhanced;
-}
-
-async function fetchText(client, url, options) {
-    const response = await client.get(url, {
-        signal: options.signal,
-        headers: options.headers,
-        useCurl: options.useCurl,
-    });
-    const blob = await response.blob();
-    const buffer = Buffer.from(await blob.arrayBuffer());
-    if (buffer.length >= 2 && buffer[0] === 0x1f && buffer[1] === 0x8b) {
-        try {
-            const decompressed = gunzipSync(buffer);
-            return decompressed.toString('utf-8');
-        }
-        catch {
-        }
-    }
-    return buffer.toString('utf-8');
-}
-function parseAttributes(line, prefix) {
-    const attrs = {};
-    const content = line.substring(prefix.length);
-    const regex = /([A-Z0-9-]+)=(?:"([^"]*)"|([^,]*))/g;
-    let match;
-    while ((match = regex.exec(content)) !== null) {
-        attrs[match[1]] = match[2] ?? match[3];
-    }
-    return attrs;
-}
-function resolveUrl$1(url, baseUrl) {
-    if (url.startsWith('http://') || url.startsWith('https://')) {
-        return url;
-    }
-    try {
-        const base = new URL(baseUrl);
-        const basePath = base.pathname.substring(0, base.pathname.lastIndexOf('/') + 1);
-        return new URL(url, base.origin + basePath).toString();
-    }
-    catch {
-        return url;
-    }
-}
-function parseMasterPlaylist(content, baseUrl) {
-    const lines = content.split('\n');
-    const variants = [];
-    let pendingVariant = {};
-    for (const rawLine of lines) {
-        const line = rawLine.trim();
-        if (!line)
-            continue;
-        if (line.startsWith('#EXT-X-STREAM-INF:')) {
-            const attrs = parseAttributes(line, '#EXT-X-STREAM-INF:');
-            pendingVariant = {
-                bandwidth: attrs.BANDWIDTH ? parseInt(attrs.BANDWIDTH, 10) : undefined,
-                resolution: attrs.RESOLUTION,
-                codecs: attrs.CODECS,
-                name: attrs.NAME,
-            };
-        }
-        else if (!line.startsWith('#') && pendingVariant.bandwidth !== undefined) {
-            variants.push({
-                ...pendingVariant,
-                url: resolveUrl$1(line, baseUrl),
-            });
-            pendingVariant = {};
-        }
-    }
-    return { variants, isMaster: true };
-}
-function parseByteRange(value, lastEnd = 0) {
-    const parts = value.split('@');
-    const length = parseInt(parts[0], 10);
-    const offset = parts[1] ? parseInt(parts[1], 10) : lastEnd;
-    return { length, offset };
-}
-function parseMediaPlaylist(content, baseUrl) {
-    const lines = content.split('\n');
-    const segments = [];
-    let targetDuration = 5;
-    let mediaSequence = 0;
-    let discontinuitySequence = 0;
-    let endList = false;
-    let playlistType;
-    let currentDuration = 0;
-    let currentKey;
-    let currentDiscontinuity = false;
-    let currentProgramDateTime;
-    let currentByteRange;
-    let currentInitSegment;
-    let lastByteEnd = 0;
-    let segmentIndex = 0;
-    for (const rawLine of lines) {
-        const line = rawLine.trim();
-        if (!line)
-            continue;
-        if (line.startsWith('#EXT-X-TARGETDURATION:')) {
-            targetDuration = parseInt(line.split(':')[1], 10);
-        }
-        else if (line.startsWith('#EXT-X-MEDIA-SEQUENCE:')) {
-            mediaSequence = parseInt(line.split(':')[1], 10);
-        }
-        else if (line.startsWith('#EXT-X-DISCONTINUITY-SEQUENCE:')) {
-            discontinuitySequence = parseInt(line.split(':')[1], 10);
-        }
-        else if (line.startsWith('#EXT-X-PLAYLIST-TYPE:')) {
-            playlistType = line.split(':')[1];
-        }
-        else if (line === '#EXT-X-ENDLIST') {
-            endList = true;
-        }
-        else if (line === '#EXT-X-DISCONTINUITY') {
-            currentDiscontinuity = true;
-        }
-        else if (line.startsWith('#EXT-X-PROGRAM-DATE-TIME:')) {
-            currentProgramDateTime = new Date(line.split(':').slice(1).join(':'));
-        }
-        else if (line.startsWith('#EXT-X-KEY:')) {
-            const attrs = parseAttributes(line, '#EXT-X-KEY:');
-            if (attrs.METHOD === 'NONE') {
-                currentKey = undefined;
-            }
-            else {
-                currentKey = {
-                    method: attrs.METHOD,
-                    uri: attrs.URI ? resolveUrl$1(attrs.URI, baseUrl) : undefined,
-                    iv: attrs.IV,
-                };
-            }
-        }
-        else if (line.startsWith('#EXT-X-BYTERANGE:')) {
-            const value = line.substring(17);
-            currentByteRange = parseByteRange(value, lastByteEnd);
-            lastByteEnd = currentByteRange.offset + currentByteRange.length;
-        }
-        else if (line.startsWith('#EXT-X-MAP:')) {
-            const attrs = parseAttributes(line, '#EXT-X-MAP:');
-            currentInitSegment = {
-                url: resolveUrl$1(attrs.URI, baseUrl),
-                byteRange: attrs.BYTERANGE ? parseByteRange(attrs.BYTERANGE) : undefined,
-            };
-        }
-        else if (line.startsWith('#EXTINF:')) {
-            const durationStr = line.substring(8).split(',')[0];
-            currentDuration = parseFloat(durationStr);
-        }
-        else if (!line.startsWith('#')) {
-            segments.push({
-                url: resolveUrl$1(line, baseUrl),
-                duration: currentDuration,
-                sequence: mediaSequence + segmentIndex,
-                key: currentKey,
-                discontinuity: currentDiscontinuity,
-                programDateTime: currentProgramDateTime,
-                byteRange: currentByteRange,
-                initSegment: currentInitSegment,
-            });
-            if (currentByteRange) {
-                lastByteEnd = currentByteRange.offset + currentByteRange.length;
-            }
-            segmentIndex++;
-            currentDiscontinuity = false;
-            currentProgramDateTime = undefined;
-            currentByteRange = undefined;
-        }
-    }
-    return {
-        segments,
-        targetDuration,
-        mediaSequence,
-        endList,
-        playlistType,
-        discontinuitySequence,
-    };
-}
-function isMasterPlaylist(content) {
-    return content.includes('#EXT-X-STREAM-INF');
-}
-function selectVariant(variants, quality) {
-    if (!variants.length) {
-        throw new Error('No variants found in master playlist');
-    }
-    const sorted = [...variants].sort((a, b) => (a.bandwidth ?? 0) - (b.bandwidth ?? 0));
-    if (quality === 'lowest') {
-        return sorted[0];
-    }
-    if (quality === 'highest' || quality === undefined) {
-        return sorted[sorted.length - 1];
-    }
-    if (quality.resolution) {
-        const match = variants.find((v) => v.resolution === quality.resolution);
-        if (match)
-            return match;
-    }
-    if (quality.bandwidth) {
-        const target = quality.bandwidth;
-        return sorted.reduce((prev, curr) => {
-            const prevDiff = Math.abs((prev.bandwidth ?? 0) - target);
-            const currDiff = Math.abs((curr.bandwidth ?? 0) - target);
-            return currDiff < prevDiff ? curr : prev;
-        });
-    }
-    return sorted[sorted.length - 1];
-}
-class HlsPromise {
-    client;
-    manifestUrl;
-    options;
-    seenSequences = new Set();
-    downloadedBytes = 0;
-    downloadedSegments = 0;
-    startTime = 0;
-    aborted = false;
-    abortController = new AbortController();
-    keyCache = new Map();
-    initSegmentCache = new Map();
-    initSegmentPrepended = new Set();
-    defaultRetryStatusCodes = [403, 404, 408, 429, 500, 502, 503, 504];
-    consecutiveErrors = 0;
-    constructor(client, manifestUrl, options = {}) {
-        this.client = client;
-        this.manifestUrl = manifestUrl;
-        this.options = {
-            mode: 'merge',
-            format: 'ts',
-            concurrency: 5,
-            ...options,
-        };
-        if (this.options.format !== 'ts') {
-            throw new Error(`Format '${this.options.format}' requires ffmpeg. Use format: 'ts' or install ffmpeg.`);
-        }
-    }
-    get [Symbol.toStringTag]() {
-        return 'HlsPromise';
-    }
-    then(onfulfilled, onrejected) {
-        return Promise.reject(new Error('HlsPromise requires .download(), .stream(), or .pipe() to execute')).then(onfulfilled, onrejected);
-    }
-    catch(onrejected) {
-        return this.then(null, onrejected);
-    }
-    finally(onfinally) {
-        return this.then(() => {
-            onfinally?.();
-        }, () => {
-            onfinally?.();
-        });
-    }
-    cancel() {
-        this.aborted = true;
-        this.abortController.abort();
-    }
-    async download(dest) {
-        this.startTime = Date.now();
-        const mediaPlaylistUrl = await this.resolveMediaPlaylist();
-        if (this.options.mode === 'chunks') {
-            await this.downloadChunks(mediaPlaylistUrl, dest);
-        }
-        else {
-            if (typeof dest !== 'string') {
-                throw new Error('Merge mode requires a string path, not a function');
-            }
-            await this.downloadMerged(mediaPlaylistUrl, dest);
-        }
-    }
-    async *stream() {
-        this.startTime = Date.now();
-        const mediaPlaylistUrl = await this.resolveMediaPlaylist();
-        const isLive = this.isLiveMode();
-        const maxDuration = this.getMaxDuration();
-        const concurrency = this.options.concurrency ?? 5;
-        let pollInterval = 2000;
-        while (!this.aborted) {
-            if (this.consecutiveErrors >= this.getMaxConsecutiveErrors()) {
-                throw new Error(`Too many consecutive errors (${this.consecutiveErrors}). ` +
-                    `Limit: ${this.getMaxConsecutiveErrors()}. Stopping download.`);
-            }
-            let playlist;
-            try {
-                playlist = await this.fetchMediaPlaylist(mediaPlaylistUrl);
-            }
-            catch (err) {
-                if (isLive && this.consecutiveErrors < this.getMaxConsecutiveErrors()) {
-                    if (this.options.onError) {
-                        this.options.onError(new Error(`Playlist fetch failed: ${err.message}. Retrying...`));
-                    }
-                    await this.sleep(pollInterval);
-                    continue;
-                }
-                throw err;
-            }
-            pollInterval = Math.max(1000, (playlist.targetDuration * 1000) / 2);
-            const newSegments = playlist.segments.filter((s) => !this.seenSequences.has(s.sequence));
-            for (const segment of newSegments) {
-                this.seenSequences.add(segment.sequence);
-            }
-            if (newSegments.length > 0) {
-                yield* this.downloadSegmentsConcurrent(newSegments, concurrency, playlist, isLive, maxDuration);
-            }
-            if (!isLive || playlist.endList) {
-                break;
-            }
-            if (maxDuration && Date.now() - this.startTime > maxDuration) {
-                break;
-            }
-            await this.sleep(pollInterval);
-        }
-    }
-    async *downloadSegmentsConcurrent(segments, concurrency, playlist, isLive, maxDuration) {
-        const results = new Map();
-        const pending = new Map();
-        let nextToYield = 0;
-        let nextToStart = 0;
-        const startDownload = (index) => {
-            const segment = segments[index];
-            const promise = this.downloadSegment(segment).then((data) => ({
-                index,
-                data: data ? {
-                    sequence: segment.sequence,
-                    duration: segment.duration,
-                    data,
-                    url: segment.url,
-                    downloadedAt: new Date(),
-                } : null,
-            }));
-            pending.set(index, promise);
-        };
-        while (nextToStart < segments.length && pending.size < concurrency) {
-            startDownload(nextToStart++);
-        }
-        while (nextToYield < segments.length) {
-            if (this.aborted)
-                break;
-            if (maxDuration && Date.now() - this.startTime > maxDuration) {
-                break;
-            }
-            if (this.consecutiveErrors >= this.getMaxConsecutiveErrors()) {
-                throw new Error(`Too many consecutive errors (${this.consecutiveErrors}). ` +
-                    `Limit: ${this.getMaxConsecutiveErrors()}. Stopping download.`);
-            }
-            if (pending.size > 0) {
-                const completed = await Promise.race(pending.values());
-                pending.delete(completed.index);
-                results.set(completed.index, completed.data);
-                if (nextToStart < segments.length && pending.size < concurrency) {
-                    startDownload(nextToStart++);
-                }
-            }
-            while (results.has(nextToYield)) {
-                const segmentData = results.get(nextToYield);
-                results.delete(nextToYield);
-                nextToYield++;
-                if (!segmentData) {
-                    continue;
-                }
-                this.downloadedSegments++;
-                this.downloadedBytes += segmentData.data.byteLength;
-                this.emitProgress(playlist, isLive);
-                if (this.options.onSegment) {
-                    await this.options.onSegment(segmentData);
-                }
-                yield segmentData;
-            }
-        }
-    }
-    async pipe(writable) {
-        try {
-            for await (const segment of this.stream()) {
-                const canContinue = writable.write(segment.data);
-                if (!canContinue) {
-                    await new Promise((resolve) => writable.once('drain', resolve));
-                }
-            }
-        }
-        finally {
-            if ('end' in writable && typeof writable.end === 'function') {
-                writable.end();
-            }
-        }
-    }
-    async info() {
-        const content = await fetchText(this.client, this.manifestUrl, {
-            signal: this.abortController.signal,
-            headers: this.options.headers,
-            useCurl: this.options.useCurl,
-        });
-        if (isMasterPlaylist(content)) {
-            const master = parseMasterPlaylist(content, this.manifestUrl);
-            const selectedVariant = selectVariant(master.variants, this.options.quality);
-            const playlistContent = await fetchText(this.client, selectedVariant.url, {
-                signal: this.abortController.signal,
-                headers: this.options.headers,
-                useCurl: this.options.useCurl,
-            });
-            const playlist = parseMediaPlaylist(playlistContent, selectedVariant.url);
-            const totalDuration = playlist.endList
-                ? playlist.segments.reduce((sum, s) => sum + s.duration, 0)
-                : undefined;
-            return {
-                master,
-                playlist,
-                selectedVariant,
-                isLive: !playlist.endList,
-                totalDuration,
-            };
-        }
-        const playlist = parseMediaPlaylist(content, this.manifestUrl);
-        const totalDuration = playlist.endList
-            ? playlist.segments.reduce((sum, s) => sum + s.duration, 0)
-            : undefined;
-        return {
-            playlist,
-            isLive: !playlist.endList,
-            totalDuration,
-        };
-    }
-    async resolveMediaPlaylist() {
-        const headers = {
-            ...this.options.headers,
-        };
-        const content = await fetchText(this.client, this.manifestUrl, {
-            signal: this.abortController.signal,
-            headers,
-            useCurl: this.options.useCurl,
-        });
-        if (!isMasterPlaylist(content)) {
-            return this.manifestUrl;
-        }
-        const master = parseMasterPlaylist(content, this.manifestUrl);
-        const variant = selectVariant(master.variants, this.options.quality);
-        return variant.url;
-    }
-    async fetchMediaPlaylist(url) {
-        const content = await this.withRetry(async () => {
-            return fetchText(this.client, url, {
-                signal: this.abortController.signal,
-                headers: this.options.headers,
-                useCurl: this.options.useCurl,
-            });
-        }, 'Fetch playlist', false);
-        if (!content) {
-            throw new Error('Failed to fetch media playlist');
-        }
-        return parseMediaPlaylist(content, url);
-    }
-    async getKey(uri) {
-        if (this.keyCache.has(uri)) {
-            return this.keyCache.get(uri);
-        }
-        const response = await this.client.get(uri, {
-            headers: this.options.headers,
-            signal: this.abortController.signal,
-            useCurl: this.options.useCurl,
-        });
-        const blob = await response.blob();
-        const arrayBuffer = await blob.arrayBuffer();
-        const key = Buffer.from(arrayBuffer);
-        if (key.length !== 16) {
-            throw new Error(`Invalid AES-128 key length: ${key.length} bytes (expected 16)`);
-        }
-        this.keyCache.set(uri, key);
-        return key;
-    }
-    generateIV(mediaSequence) {
-        const iv = Buffer.alloc(16);
-        iv.writeBigUInt64BE(BigInt(mediaSequence), 8);
-        return iv;
-    }
-    parseIV(ivString) {
-        const hex = ivString.startsWith('0x') || ivString.startsWith('0X')
-            ? ivString.slice(2)
-            : ivString;
-        return Buffer.from(hex.padStart(32, '0'), 'hex');
-    }
-    decryptSegment(data, key, iv) {
-        const decipher = createDecipheriv('aes-128-cbc', key, iv);
-        decipher.setAutoPadding(true);
-        return Buffer.concat([decipher.update(data), decipher.final()]);
-    }
-    async getInitSegment(init) {
-        const cacheKey = `${init.url}:${init.byteRange?.offset ?? 0}:${init.byteRange?.length ?? 0}`;
-        if (this.initSegmentCache.has(cacheKey)) {
-            return this.initSegmentCache.get(cacheKey);
-        }
-        const headers = { ...this.options.headers };
-        if (init.byteRange) {
-            const { offset, length } = init.byteRange;
-            headers['Range'] = `bytes=${offset}-${offset + length - 1}`;
-        }
-        const response = await this.client.get(init.url, {
-            headers,
-            signal: this.abortController.signal,
-            useCurl: this.options.useCurl,
-        });
-        const blob = await response.blob();
-        const arrayBuffer = await blob.arrayBuffer();
-        const data = Buffer.from(arrayBuffer);
-        this.initSegmentCache.set(cacheKey, data);
-        return data;
-    }
-    async downloadSegment(segment) {
-        const result = await this.withRetry(async () => {
-            const headers = { ...this.options.headers };
-            if (segment.byteRange) {
-                const { offset, length } = segment.byteRange;
-                headers['Range'] = `bytes=${offset}-${offset + length - 1}`;
-            }
-            const response = await this.client.get(segment.url, {
-                headers,
-                signal: this.abortController.signal,
-                useCurl: this.options.useCurl,
-            });
-            const blob = await response.blob();
-            const arrayBuffer = await blob.arrayBuffer();
-            let data = Buffer.from(arrayBuffer);
-            if (segment.key && segment.key.method === 'AES-128') {
-                if (!segment.key.uri) {
-                    throw new Error('AES-128 encryption specified but no key URI provided');
-                }
-                const key = await this.getKey(segment.key.uri);
-                const iv = segment.key.iv
-                    ? this.parseIV(segment.key.iv)
-                    : this.generateIV(segment.sequence);
-                data = this.decryptSegment(data, key, iv);
-            }
-            else if (segment.key && segment.key.method === 'SAMPLE-AES') {
-                throw new Error('SAMPLE-AES encryption is not supported. This typically requires DRM handling.');
-            }
-            if (segment.initSegment) {
-                const initKey = `${segment.initSegment.url}:${segment.initSegment.byteRange?.offset ?? 0}`;
-                if (!this.initSegmentPrepended.has(initKey)) {
-                    const initData = await this.getInitSegment(segment.initSegment);
-                    data = Buffer.concat([initData, data]);
-                    this.initSegmentPrepended.add(initKey);
-                }
-            }
-            return new Uint8Array(data);
-        }, `Segment ${segment.sequence}`, true);
-        return result;
-    }
-    async downloadMerged(playlistUrl, outputPath) {
-        await mkdir(dirname(outputPath), { recursive: true });
-        const output = createWriteStream(outputPath, { flags: 'a' });
-        try {
-            await this.pipe(output);
-        }
-        catch (error) {
-            output.destroy();
-            throw error;
-        }
-    }
-    async downloadChunks(playlistUrl, dest) {
-        const getPath = typeof dest === 'string'
-            ? (seg) => join(dest, `segment-${seg.sequence}.ts`)
-            : dest;
-        const baseDir = typeof dest === 'string' ? dest : dirname(getPath({ sequence: 0, duration: 0, url: '' }));
-        await mkdir(baseDir, { recursive: true });
-        for await (const segment of this.stream()) {
-            const filePath = getPath({
-                sequence: segment.sequence,
-                duration: segment.duration,
-                url: segment.url,
-            });
-            await mkdir(dirname(filePath), { recursive: true });
-            const output = createWriteStream(filePath);
-            await new Promise((resolve, reject) => {
-                output.write(segment.data, (err) => {
-                    if (err)
-                        reject(err);
-                    else {
-                        output.end();
-                        resolve();
-                    }
-                });
-            });
-        }
-    }
-    isLiveMode() {
-        return this.options.live === true || typeof this.options.live === 'object';
-    }
-    getMaxDuration() {
-        if (typeof this.options.live === 'object' && this.options.live.duration) {
-            return this.options.live.duration;
-        }
-        return undefined;
-    }
-    emitProgress(playlist, isLive) {
-        if (!this.options.onProgress)
-            return;
-        this.options.onProgress({
-            downloadedSegments: this.downloadedSegments,
-            totalSegments: isLive ? undefined : playlist.segments.length,
-            downloadedBytes: this.downloadedBytes,
-            currentSegment: Math.max(...this.seenSequences),
-            isLive,
-            elapsed: Date.now() - this.startTime,
-        });
-    }
-    sleep(ms) {
-        return new Promise((resolve) => {
-            const timeout = setTimeout(resolve, ms);
-            this.abortController.signal.addEventListener('abort', () => {
-                clearTimeout(timeout);
-                resolve();
-            }, { once: true });
-        });
-    }
-    getRetryConfig() {
-        const isLive = this.isLiveMode();
-        const userConfig = this.options.retry || {};
-        return {
-            maxAttempts: userConfig.maxAttempts ?? (isLive ? 5 : 3),
-            delay: userConfig.delay ?? 1000,
-            maxDelay: userConfig.maxDelay ?? 30000,
-            backoff: userConfig.backoff ?? 2,
-            jitter: userConfig.jitter ?? true,
-            statusCodes: userConfig.statusCodes ?? this.defaultRetryStatusCodes,
-        };
-    }
-    getMaxConsecutiveErrors() {
-        const isLive = this.isLiveMode();
-        return this.options.maxConsecutiveErrors ?? (isLive ? 10 : 3);
-    }
-    calculateRetryDelay(attempt, config) {
-        let delay = config.delay * Math.pow(config.backoff, attempt);
-        delay = Math.min(delay, config.maxDelay);
-        if (config.jitter) {
-            const jitterRange = delay * 0.25;
-            delay = delay - jitterRange + (Math.random() * jitterRange * 2);
-        }
-        return Math.round(delay);
-    }
-    isRetryableError(error, config) {
-        if (error.code === 'ECONNRESET' || error.code === 'ETIMEDOUT' || error.code === 'ENOTFOUND') {
-            return true;
-        }
-        const status = error.status || error.statusCode || (error.response?.status);
-        if (status && config.statusCodes.includes(status)) {
-            return true;
-        }
-        return false;
-    }
-    async withRetry(fn, context, skipOnFail = false) {
-        const config = this.getRetryConfig();
-        const isLive = this.isLiveMode();
-        let lastError = null;
-        for (let attempt = 0; attempt <= config.maxAttempts; attempt++) {
-            if (this.aborted) {
-                throw new Error('Aborted');
-            }
-            try {
-                const result = await fn();
-                this.consecutiveErrors = 0;
-                return result;
-            }
-            catch (error) {
-                lastError = error;
-                if (!this.isRetryableError(error, config)) {
-                    if (this.options.onError) {
-                        this.options.onError(error);
-                    }
-                    if (skipOnFail && isLive) {
-                        this.consecutiveErrors++;
-                        return null;
-                    }
-                    throw error;
-                }
-                if (attempt < config.maxAttempts) {
-                    const delay = this.calculateRetryDelay(attempt, config);
-                    if (this.options.onError) {
-                        const retryError = new Error(`${context}: ${error.message}. Retrying in ${delay}ms (attempt ${attempt + 1}/${config.maxAttempts})`);
-                        retryError.cause = error;
-                        retryError.isRetry = true;
-                        this.options.onError(retryError);
-                    }
-                    await this.sleep(delay);
-                }
-            }
-        }
-        this.consecutiveErrors++;
-        if (this.options.onError && lastError) {
-            this.options.onError(lastError);
-        }
-        if (skipOnFail && isLive) {
-            return null;
-        }
-        throw lastError || new Error(`${context}: All retry attempts failed`);
-    }
-}
-
-class Client {
-    static get version() {
-        return getVersionSync();
-    }
-    static getVersion() {
-        return getVersion();
-    }
-    static getVersionInfo() {
-        return getVersionInfo();
-    }
-    baseUrl;
-    middlewares;
-    hooks;
-    transport;
-    curlTransport;
-    defaultHeaders;
-    defaultParams;
-    paginationConfig;
-    handler;
-    logger;
-    debugEnabled;
-    agentManager;
-    concurrencyConfig;
-    requestPool;
-    maxResponseSize;
-    cookieJar;
-    cookieIgnoreInvalid = false;
-    defaultTimeout;
-    http2Enabled = false;
-    _aiConfig;
-    _ai;
-    constructor(options = {}) {
-        this.baseUrl = options.baseUrl || '';
-        this.middlewares = options.middlewares || [];
-        this.defaultTimeout = options.timeout;
-        this.hooks = {
-            beforeRequest: options.hooks?.beforeRequest || [],
-            afterResponse: options.hooks?.afterResponse || [],
-            onError: options.hooks?.onError || [],
-            onRetry: options.hooks?.onRetry || [],
-            onUrlResolved: options.hooks?.onUrlResolved || [],
-        };
-        this.defaultHeaders = {
-            'User-Agent': getDefaultUserAgent(),
-            ...(options.headers || {})
-        };
-        this.defaultParams = options.defaults?.params || {};
-        this.paginationConfig = options.pagination;
-        this.maxResponseSize = options.maxResponseSize;
-        this.debugEnabled = options.debug === true;
-        if (this.debugEnabled) {
-            this.logger = options.logger ?? consoleLogger;
-        }
-        else if (options.logger) {
-            this.logger = options.logger;
-        }
-        this.concurrencyConfig = normalizeConcurrency({
-            concurrency: options.concurrency,
-            http2: options.http2
-        });
-        const expandedHttp2 = expandHTTP2Options(options.http2);
-        this.http2Enabled = expandedHttp2.enabled ?? false;
-        if (options.transport) {
-            this.transport = options.transport;
-        }
-        else if (options.useCurl) {
-            if (this.debugEnabled)
-                console.log('[DEBUG] Using Curl Transport');
-            this.transport = new CurlTransport();
-        }
-        else {
-            if (this.debugEnabled)
-                console.log('[DEBUG] Using Undici Transport');
-            const protocolCache = getGlobalProtocolCache();
-            const agentOptions = {
-                ...this.concurrencyConfig.agent,
-                allowH2: expandedHttp2.enabled,
-                maxConcurrentStreams: expandedHttp2.resolvedSettings?.maxConcurrentStreams,
-            };
-            this.agentManager = new AgentManager(agentOptions, protocolCache);
-            this.transport = new UndiciTransport(this.baseUrl || undefined, {
-                proxy: options.proxy,
-                http2: expandedHttp2.enabled ? expandedHttp2 : undefined,
-                dns: options.dns,
-                agent: this.agentManager,
-                socketPath: options.socketPath,
-                tls: options.tls,
-                observability: options.observability,
-                expectContinue: options.expectContinue,
-                protocolCache: true,
-            });
-        }
-        if (options.retry) {
-            retryPlugin(options.retry)(this);
-        }
-        if (this.concurrencyConfig.max < Infinity || this.concurrencyConfig.requestsPerInterval < Infinity) {
-            this.requestPool = new RequestPool({
-                concurrency: this.concurrencyConfig.max,
-                requestsPerInterval: this.concurrencyConfig.requestsPerInterval,
-                interval: this.concurrencyConfig.interval
-            });
-            this.middlewares.unshift(this.requestPool.asMiddleware());
-            if (this.debugEnabled && this.logger) {
-                this.logger.debug(`Global concurrency limit: ${this.concurrencyConfig.max} concurrent requests`);
-            }
-        }
-        else {
-            if (this.debugEnabled && this.logger) {
-                this.logger.debug('No global concurrency limit (allows unlimited parallel batches)');
-            }
-        }
-        if (options.dedup) {
-            dedupPlugin(options.dedup)(this);
-        }
-        if (options.cache) {
-            let storage;
-            if (options.cache.storage) {
-                storage = options.cache.storage;
-            }
-            else if (options.cache.driver === 'file') {
-                storage = new FileStorage(options.cache.fileStoragePath);
-            }
-            else {
-                storage = new MemoryStorage$1();
-            }
-            cachePlugin({
-                ...options.cache,
-                storage
-            })(this);
-        }
-        if (options.plugins) {
-            options.plugins.forEach((plugin) => plugin(this));
-        }
-        if (options.compression) {
-            const compressionMiddleware = createCompressionMiddleware(options.compression);
-            if (compressionMiddleware) {
-                this.middlewares.push(compressionMiddleware);
-            }
-        }
-        if (options.xsrf) {
-            const xsrfMiddleware = createXSRFMiddleware(options.xsrf);
-            if (xsrfMiddleware) {
-                this.middlewares.push(xsrfMiddleware);
-            }
-        }
-        if (options.cookies) {
-            this.setupCookieJar(options.cookies);
-        }
-        if (options._aiConfig) {
-            this._aiConfig = options._aiConfig;
-        }
-        if (this.maxResponseSize !== undefined) {
-            this.middlewares.push(this.createMaxSizeMiddleware(this.maxResponseSize));
-        }
-        if (this.debugEnabled && this.logger) {
-            this.middlewares.unshift(this.createLoggingMiddleware(this.logger));
-        }
-        this.middlewares.push(this.httpErrorMiddleware);
-        this.handler = this.composeMiddlewares();
-    }
-    createLoggingMiddleware(logger) {
-        return async (req, next) => {
-            const startTime = Date.now();
-            logger.debug({ type: 'request', method: req.method, url: req.url }, `→ ${req.method} ${req.url}`);
-            try {
-                const response = await next(req);
-                const duration = Date.now() - startTime;
-                logger.debug({
-                    type: 'response',
-                    method: req.method,
-                    url: req.url,
-                    status: response.status,
-                    duration,
-                    timings: response.timings,
-                }, `← ${response.status} ${req.method} ${req.url} (${duration}ms)`);
-                return response;
-            }
-            catch (error) {
-                const duration = Date.now() - startTime;
-                const err = error;
-                logger.error({
-                    type: 'error',
-                    method: req.method,
-                    url: req.url,
-                    error: err.message,
-                    errorName: err.name,
-                    duration,
-                }, `✖ ${req.method} ${req.url} - ${err.message}`);
-                throw error;
-            }
-        };
-    }
-    createMaxSizeMiddleware(globalMaxSize) {
-        return async (req, next) => {
-            const response = await next(req);
-            const limit = req.maxResponseSize ?? globalMaxSize;
-            if (limit === undefined)
-                return response;
-            const contentLength = response.headers.get('Content-Length');
-            if (contentLength) {
-                const size = parseInt(contentLength, 10);
-                if (!isNaN(size) && size > limit) {
-                    throw new MaxSizeExceededError(limit, size, req);
-                }
-            }
-            return response;
-        };
-    }
-    setupCookieJar(options) {
-        if (options === true) {
-            this.cookieJar = new MemoryCookieJar();
-        }
-        else if (typeof options === 'object') {
-            if (options.jar === true) {
-                this.cookieJar = new MemoryCookieJar();
-            }
-            else if (options.jar && typeof options.jar === 'object') {
-                this.cookieJar = options.jar;
-            }
-            this.cookieIgnoreInvalid = options.ignoreInvalid ?? false;
-        }
-        if (this.cookieJar) {
-            this.middlewares.push(this.createCookieMiddleware());
-        }
-    }
-    createCookieMiddleware() {
-        return async (req, next) => {
-            const jar = this.cookieJar;
-            try {
-                const cookieString = await jar.getCookieString(req.url);
-                if (cookieString) {
-                    const existingCookie = req.headers.get('cookie');
-                    const newCookie = existingCookie
-                        ? `${existingCookie}; ${cookieString}`
-                        : cookieString;
-                    req.headers.set('cookie', newCookie);
-                }
-            }
-            catch (error) {
-                if (!this.cookieIgnoreInvalid) {
-                    throw error;
-                }
-            }
-            const response = await next(req);
-            const setCookieHeader = response.headers.get('set-cookie');
-            if (setCookieHeader) {
-                const cookies = this.splitSetCookieHeader(setCookieHeader);
-                for (const cookie of cookies) {
-                    try {
-                        await jar.setCookie(cookie, req.url);
-                    }
-                    catch (error) {
-                        if (!this.cookieIgnoreInvalid) {
-                            throw error;
-                        }
-                    }
-                }
-            }
-            return response;
-        };
-    }
-    splitSetCookieHeader(header) {
-        return header.split(/,(?=\s*[a-zA-Z0-9_-]+=)/g).map(s => s.trim());
-    }
-    async dispatch(req) {
-        if (req.useCurl && !(this.transport instanceof CurlTransport)) {
-            if (!this.curlTransport) {
-                this.curlTransport = new CurlTransport();
-            }
-            return this.curlTransport.dispatch(req);
-        }
-        return this.transport.dispatch(req);
-    }
-    composeMiddlewares() {
-        const chain = [...this.middlewares];
-        const transportDispatch = this.dispatch.bind(this);
-        if (this.hooks.beforeRequest?.length || this.hooks.afterResponse?.length) {
-            chain.unshift(this.hooksMiddleware);
-        }
-        if (chain.length === 0) {
-            return transportDispatch;
-        }
-        return chain.reduceRight((next, middleware) => {
-            return (req) => middleware(req, next);
-        }, transportDispatch);
-    }
-    hooksMiddleware = async (req, next) => {
-        let modifiedReq = req;
-        if (this.hooks.beforeRequest && this.hooks.beforeRequest.length > 0) {
-            for (const hook of this.hooks.beforeRequest) {
-                const result = await hook(modifiedReq);
-                if (result) {
-                    modifiedReq = result;
-                }
-            }
-        }
-        try {
-            let response = await next(modifiedReq);
-            if (this.hooks.afterResponse && this.hooks.afterResponse.length > 0) {
-                for (const hook of this.hooks.afterResponse) {
-                    const result = await hook(modifiedReq, response);
-                    if (result) {
-                        response = result;
-                    }
-                }
-            }
-            return response;
-        }
-        catch (error) {
-            if (this.hooks.onError && this.hooks.onError.length > 0) {
-                for (const hook of this.hooks.onError) {
-                    const result = await hook(error, modifiedReq);
-                    if (result) {
-                        return result;
-                    }
-                }
-            }
-            throw error;
-        }
-    };
-    httpErrorMiddleware = async (req, next) => {
-        const response = await next(req);
-        if (req.throwHttpErrors !== false && !response.ok && response.status !== 304) {
-            throw new HttpError(response, req);
-        }
-        return response;
-    };
-    use(middleware) {
-        this.middlewares.push(middleware);
-        this.handler = this.composeMiddlewares();
-        return this;
-    }
-    beforeRequest(hook) {
-        if (!this.hooks.beforeRequest) {
-            this.hooks.beforeRequest = [];
-        }
-        this.hooks.beforeRequest.push(hook);
-        this.handler = this.composeMiddlewares();
-        return this;
-    }
-    afterResponse(hook) {
-        if (!this.hooks.afterResponse) {
-            this.hooks.afterResponse = [];
-        }
-        this.hooks.afterResponse.push(hook);
-        this.handler = this.composeMiddlewares();
-        return this;
-    }
-    onError(hook) {
-        if (!this.hooks.onError) {
-            this.hooks.onError = [];
-        }
-        this.hooks.onError.push(hook);
-        this.handler = this.composeMiddlewares();
-        return this;
-    }
-    buildUrl(path, requestParams) {
-        const hasRequestParams = requestParams && Object.keys(requestParams).length > 0;
-        const hasDefaultParams = Object.keys(this.defaultParams).length > 0;
-        if (!hasRequestParams && !hasDefaultParams) {
-            if (path.startsWith('http://') || path.startsWith('https://')) {
-                return path;
-            }
-            if (this.baseUrl) {
-                const base = this.baseUrl.endsWith('/') ? this.baseUrl.slice(0, -1) : this.baseUrl;
-                const p = path.startsWith('/') ? path : '/' + path;
-                return base + p;
-            }
-            return path;
-        }
-        let finalPath = path;
-        const mergedParams = { ...this.defaultParams, ...requestParams };
-        const usedParams = new Set();
-        if (finalPath.includes(':')) {
-            finalPath = finalPath.replace(/:([a-zA-Z0-9_]+)/g, (match, paramName) => {
-                if (mergedParams && paramName in mergedParams) {
-                    usedParams.add(paramName);
-                    return encodeURIComponent(String(mergedParams[paramName]));
-                }
-                throw new ValidationError$1(`Missing required path parameter: ${paramName}`, {
-                    field: paramName,
-                    value: undefined,
-                });
-            });
-        }
-        let finalUrl;
-        if (finalPath.startsWith('http://') || finalPath.startsWith('https://')) {
-            finalUrl = finalPath;
-        }
-        else if (this.baseUrl) {
-            const base = this.baseUrl.endsWith('/') ? this.baseUrl.slice(0, -1) : this.baseUrl;
-            const p = finalPath.startsWith('/') ? finalPath : '/' + finalPath;
-            finalUrl = base + p;
-        }
-        else {
-            throw new ConfigurationError('Relative path provided without a baseUrl or explicit transport.', {
-                configKey: 'baseUrl',
-            });
-        }
-        const remainingKeys = Object.keys(mergedParams).filter((k) => !usedParams.has(k));
-        if (remainingKeys.length > 0) {
-            const queryParts = remainingKeys.map(key => `${encodeURIComponent(key)}=${encodeURIComponent(String(mergedParams[key]))}`);
-            const separator = finalUrl.includes('?') ? '&' : '?';
-            return finalUrl + separator + queryParts.join('&');
-        }
-        return finalUrl;
-    }
-    request(path, options = {}) {
-        const url = this.buildUrl(path, options.params);
-        let mergedHeaders;
-        if (options.headers) {
-            mergedHeaders = this.defaultHeaders instanceof Headers
-                ? new Headers(this.defaultHeaders)
-                : new Headers(this.defaultHeaders);
-            const optHeaders = options.headers instanceof Headers
-                ? options.headers
-                : new Headers(options.headers);
-            optHeaders.forEach((value, key) => mergedHeaders.append(key, value));
-        }
-        else {
-            mergedHeaders = this.defaultHeaders instanceof Headers
-                ? this.defaultHeaders
-                : new Headers(this.defaultHeaders);
-        }
-        const needsController = options.timeout || options.signal || this.defaultTimeout;
-        let controller;
-        let signal = options.signal;
-        let timeoutId;
-        let externalAbortCleanup;
-        if (needsController) {
-            controller = new AbortController();
-            signal = controller.signal;
-            if (options.signal) {
-                const externalSignal = options.signal;
-                const abortHandler = () => controller.abort(externalSignal.reason);
-                if (externalSignal.aborted) {
-                    abortHandler();
-                }
-                else {
-                    externalSignal.addEventListener('abort', abortHandler, { once: true });
-                    externalAbortCleanup = () => externalSignal.removeEventListener('abort', abortHandler);
-                }
-            }
-            const timeout = options.timeout ?? this.defaultTimeout;
-            if (timeout) {
-                const totalTimeout = typeof timeout === 'number' ? timeout : timeout.request;
-                if (totalTimeout) {
-                    timeoutId = setTimeout(() => controller.abort(new TimeoutError(req, {
-                        phase: 'request',
-                        timeout: totalTimeout,
-                    })), totalTimeout);
-                }
-            }
-        }
-        const req = new HttpRequest(url, {
-            ...options,
-            headers: mergedHeaders,
-            signal,
-            maxResponseSize: options.maxResponseSize ?? this.maxResponseSize
-        });
-        const responsePromise = this.handler(req);
-        if (timeoutId || externalAbortCleanup) {
-            responsePromise.finally(() => {
-                if (timeoutId)
-                    clearTimeout(timeoutId);
-                externalAbortCleanup?.();
-            }).catch(() => {
-            });
-        }
-        return new RequestPromise(responsePromise, controller);
-    }
-    get(path, options = {}) {
-        return this.request(path, { ...options, method: 'GET' });
-    }
-    async batch(requests, options = {}) {
-        const mapResponse = options.mapResponse ?? ((res) => res);
-        const batchConcurrency = options.concurrency ?? this.concurrencyConfig.runner.concurrency;
-        const runner = new RequestRunner({
-            concurrency: batchConcurrency,
-            retries: this.concurrencyConfig.runner.retries,
-            retryDelay: this.concurrencyConfig.runner.retryDelay
-        });
-        const runnerResult = await runner.run(requests, async (item) => {
-            const res = await this.request(item.path, item.options);
-            return mapResponse(res);
-        });
-        return runnerResult;
-    }
-    multi(requests, options = {}) {
-        return this.batch(requests, options);
-    }
-    requestWithBody(method, path, bodyOrOptions, options) {
-        let actualBody = bodyOrOptions;
-        let actualOptions = options;
-        const isOptionsEmpty = actualOptions === undefined ||
-            (typeof actualOptions === 'object' && actualOptions !== null && Object.keys(actualOptions).length === 0);
-        if (isOptionsEmpty && isPlainObject(bodyOrOptions)) {
-            const potentialOptions = bodyOrOptions;
-            if (potentialOptions.json !== undefined ||
-                potentialOptions.form !== undefined ||
-                potentialOptions.xml !== undefined ||
-                potentialOptions.body !== undefined ||
-                potentialOptions.headers !== undefined ||
-                potentialOptions.timeout !== undefined ||
-                potentialOptions.retry !== undefined ||
-                potentialOptions.hooks !== undefined ||
-                potentialOptions.searchParams !== undefined ||
-                potentialOptions.params !== undefined) {
-                actualOptions = bodyOrOptions;
-                actualBody = undefined;
-            }
-        }
-        actualOptions = actualOptions || {};
-        const { json, form, xml, yaml, csv, ...restOptions } = actualOptions;
-        let finalBody = actualBody;
-        let explicitContentType;
-        if (form !== undefined) {
-            finalBody = createFormData(form);
-            explicitContentType = undefined;
-        }
-        else if (json !== undefined) {
-            finalBody = JSON.stringify(json);
-            explicitContentType = 'application/json';
-        }
-        else if (xml !== undefined) {
-            finalBody = '<?xml version="1.0" encoding="UTF-8"?>\n' + serializeXML(xml);
-            explicitContentType = 'application/xml';
-        }
-        else if (yaml !== undefined) {
-            finalBody = serializeYaml(yaml);
-            explicitContentType = 'application/yaml';
-        }
-        else if (csv !== undefined) {
-            finalBody = serializeCsv(csv);
-            explicitContentType = 'text/csv';
-        }
-        else if (restOptions.body !== undefined) {
-            finalBody = restOptions.body;
-        }
-        const { body: processedBody, contentType } = processBody(finalBody);
-        const headers = new Headers(restOptions.headers);
-        const finalContentType = explicitContentType ?? contentType;
-        if (finalContentType && !headers.has('Content-Type')) {
-            headers.set('Content-Type', finalContentType);
-        }
-        return this.request(path, { ...restOptions, method, body: processedBody, headers });
-    }
-    post(path, body, options = {}) {
-        return this.requestWithBody('POST', path, body, options);
-    }
-    put(path, body, options = {}) {
-        return this.requestWithBody('PUT', path, body, options);
-    }
-    patch(path, body, options = {}) {
-        return this.requestWithBody('PATCH', path, body, options);
-    }
-    delete(path, options = {}) {
-        return this.request(path, { ...options, method: 'DELETE' });
-    }
-    head(path, options = {}) {
-        return this.request(path, { ...options, method: 'HEAD' });
-    }
-    options(path, options = {}) {
-        return this.request(path, { ...options, method: 'OPTIONS' });
-    }
-    trace(path, options = {}) {
-        return this.request(path, { ...options, method: 'TRACE' });
-    }
-    connect(path, options = {}) {
-        return this.request(path, { ...options, method: 'CONNECT' });
-    }
-    purge(path, options = {}) {
-        return this.request(path, { ...options, method: 'PURGE' });
-    }
-    propfind(path, body, options = {}) {
-        return this.requestWithBody('PROPFIND', path, body, options);
-    }
-    proppatch(path, body, options = {}) {
-        return this.requestWithBody('PROPPATCH', path, body, options);
-    }
-    mkcol(path, options = {}) {
-        return this.request(path, { ...options, method: 'MKCOL' });
-    }
-    copy(path, options = {}) {
-        return this.request(path, { ...options, method: 'COPY' });
-    }
-    move(path, options = {}) {
-        return this.request(path, { ...options, method: 'MOVE' });
-    }
-    lock(path, body, options = {}) {
-        return this.requestWithBody('LOCK', path, body, options);
-    }
-    unlock(path, options = {}) {
-        return this.request(path, { ...options, method: 'UNLOCK' });
-    }
-    link(path, body, options = {}) {
-        return this.requestWithBody('LINK', path, body, options);
-    }
-    unlink(path, body, options = {}) {
-        return this.requestWithBody('UNLINK', path, body, options);
-    }
-    scrape(path, options = {}) {
-        const method = options.method || 'GET';
-        const requestPromise = this.request(path, { ...options, method });
-        return scrape(requestPromise);
-    }
-    paginate(path, options = {}) {
-        const { getItems, getNextUrl, maxPages, pageParam, limitParam, resultsPath, nextCursorPath, ...reqOptions } = options;
-        const paginationOpts = {
-            getItems,
-            getNextUrl,
-            maxPages,
-            pageParam: pageParam || this.paginationConfig?.pageParam,
-            limitParam: limitParam || this.paginationConfig?.limitParam,
-            resultsPath: resultsPath || this.paginationConfig?.resultsPath,
-            nextCursorPath: nextCursorPath || this.paginationConfig?.nextCursorPath,
-        };
-        return paginate(this, path, reqOptions, paginationOpts);
-    }
-    pages(path, options = {}) {
-        const { getNextUrl, maxPages, pageParam, limitParam, resultsPath, nextCursorPath, ...reqOptions } = options;
-        const paginationOpts = {
-            getNextUrl,
-            maxPages,
-            pageParam: pageParam || this.paginationConfig?.pageParam,
-            limitParam: limitParam || this.paginationConfig?.limitParam,
-            nextCursorPath: nextCursorPath || this.paginationConfig?.nextCursorPath,
-        };
-        return streamPages(this, path, reqOptions, paginationOpts);
-    }
-    page(path, pageNumber, options = {}) {
-        const pageParam = options.pageParam || this.paginationConfig?.pageParam || 'page';
-        new URL(path.startsWith('http') ? path : `http://base${path}`);
-        const params = { ...options.params, [pageParam]: pageNumber };
-        return this.request(path, { ...options, params });
-    }
-    async getAll(path, options = {}) {
-        const items = [];
-        for await (const item of this.paginate(path, options)) {
-            items.push(item);
-        }
-        return items;
-    }
-    websocket(path, options = {}) {
-        let wsUrl;
-        if (path.startsWith('ws://') || path.startsWith('wss://')) {
-            wsUrl = path;
-        }
-        else if (this.baseUrl) {
-            const base = this.baseUrl.replace(/^http/, 'ws');
-            wsUrl = new URL(path, base).toString();
-        }
-        else {
-            throw new ConfigurationError('WebSocket requires either a full ws:// URL or a baseUrl', {
-                configKey: 'baseUrl',
-            });
-        }
-        const headersObj = {};
-        if (this.defaultHeaders) {
-            const headers = new Headers(this.defaultHeaders);
-            headers.forEach((value, key) => {
-                headersObj[key] = value;
-            });
-        }
-        const finalHeaders = { ...headersObj, ...options.headers };
-        return new ReckerWebSocket(wsUrl, { ...options, headers: finalHeaders });
-    }
-    ws(path, options = {}) {
-        return this.websocket(path, options);
-    }
-    async whois(query, options) {
-        return whois(query, options);
-    }
-    async isDomainAvailable(domain, options) {
-        return isDomainAvailable(domain, options);
-    }
-    hls(manifestUrl, options = {}) {
-        return new HlsPromise(this, manifestUrl, options);
-    }
-    get metadata() {
-        return { handlerProtocol: this.http2Enabled ? 'h2' : 'http/1.1' };
-    }
-    async handle(request, options) {
-        const protocol = request.protocol || 'https:';
-        const hostname = request.hostname;
-        const port = request.port;
-        const path = request.path || '/';
-        let url = `${protocol}//${hostname}`;
-        if (port && !((protocol === 'https:' && port === 443) || (protocol === 'http:' && port === 80))) {
-            url += `:${port}`;
-        }
-        url += path;
-        if (request.query) {
-            const searchParams = new URLSearchParams();
-            for (const [key, value] of Object.entries(request.query)) {
-                if (value === null || value === undefined)
-                    continue;
-                if (Array.isArray(value)) {
-                    for (const v of value) {
-                        searchParams.append(key, v);
-                    }
-                }
-                else {
-                    searchParams.set(key, value);
-                }
-            }
-            const qs = searchParams.toString();
-            if (qs) {
-                url += (url.includes('?') ? '&' : '?') + qs;
-            }
-        }
-        const headers = {};
-        if (request.headers) {
-            for (const [key, value] of Object.entries(request.headers)) {
-                if (value === undefined)
-                    continue;
-                headers[key] = Array.isArray(value) ? value.join(', ') : value;
-            }
-        }
-        const response = await this.request(url, {
-            method: (request.method || 'GET'),
-            headers,
-            body: request.body,
-            signal: options?.abortSignal,
-            timeout: options?.requestTimeout,
-        });
-        const responseHeaders = {};
-        response.headers.forEach((value, key) => {
-            responseHeaders[key] = value;
-        });
-        let body;
-        if (response.raw.body) {
-            const { Readable } = await import('stream');
-            body = Readable.fromWeb(response.raw.body);
-        }
-        return {
-            response: {
-                statusCode: response.status,
-                reason: response.statusText,
-                headers: responseHeaders,
-                body,
-            },
-        };
-    }
-    updateHttpClientConfig(_key, _value) {
-    }
-    httpHandlerConfigs() {
-        return {
-            http2: this.http2Enabled,
-            maxSockets: this.concurrencyConfig.agent.connections,
-            keepAlive: true,
-        };
-    }
-    async destroy() {
-        if (this.agentManager) {
-            await this.agentManager.destroy();
-        }
-        this.requestPool = undefined;
-    }
-    get ai() {
-        if (!this._ai) {
-            if (!this._aiConfig) {
-                throw new ConfigurationError('AI features require an AI-enabled preset. Use createClient(openai({...})), createClient(anthropic({...})), etc.', { configKey: '_aiConfig' });
-            }
-            this._ai = new ClientAIImpl(this, this._aiConfig);
-        }
-        return this._ai;
-    }
-    get hasAI() {
-        return this._aiConfig !== undefined;
-    }
-}
-function createClient(options = {}) {
-    return new Client(options);
-}
+var memoryStorage = /*#__PURE__*/Object.freeze({
+    __proto__: null,
+    MemoryStorage: MemoryStorage$1
+});
 
 var he$2 = {exports: {}};
 
@@ -49009,7 +49386,7 @@ class ScrapeElement {
     }
 }
 
-function resolveUrl(url, baseUrl) {
+function resolveUrl$1(url, baseUrl) {
     if (!url)
         return '';
     if (!baseUrl)
@@ -49058,7 +49435,7 @@ function extractLinks(root, options) {
     root.querySelectorAll(selector).forEach((element) => {
         let href = element.getAttribute('href') || '';
         if (options?.absolute && options?.baseUrl) {
-            href = resolveUrl(href, options.baseUrl);
+            href = resolveUrl$1(href, options.baseUrl);
         }
         const imgs = element.querySelectorAll('img');
         const svgs = element.querySelectorAll('svg');
@@ -49085,7 +49462,7 @@ function extractImages(root, options) {
     root.querySelectorAll(selector).forEach((element) => {
         let src = element.getAttribute('src') || '';
         if (options?.absolute && options?.baseUrl) {
-            src = resolveUrl(src, options.baseUrl);
+            src = resolveUrl$1(src, options.baseUrl);
         }
         const width = element.getAttribute('width');
         const height = element.getAttribute('height');
@@ -49622,6 +49999,819 @@ class ScrapeDocument {
 var document$1 = /*#__PURE__*/Object.freeze({
     __proto__: null,
     ScrapeDocument: ScrapeDocument
+});
+
+const BIN_DIR = join(homedir(), '.recker', 'bin');
+function getCurlBinName() {
+    return 'curl-impersonate-chrome';
+}
+function getCurlPath() {
+    return join(BIN_DIR, getCurlBinName());
+}
+async function hasImpersonate() {
+    try {
+        await promises.access(getCurlPath());
+        return true;
+    }
+    catch {
+        return false;
+    }
+}
+
+class CurlTransport {
+    async dispatch(req) {
+        return new Promise(async (resolve, reject) => {
+            const args = [
+                '-X', req.method,
+                req.url,
+                '-i',
+                '-s',
+                '--compressed',
+                '--no-keepalive'
+            ];
+            req.headers.forEach((val, key) => {
+                args.push('-H', `${key}: ${val}`);
+            });
+            if (req.body && typeof req.body === 'string') {
+                args.push('-d', req.body);
+            }
+            let command = process.env.RECKER_CURL_BIN;
+            if (!command) {
+                if (await hasImpersonate()) {
+                    command = getCurlPath();
+                }
+                else {
+                    command = 'curl';
+                }
+            }
+            const child = spawn(command, args);
+            const stdoutChunks = [];
+            const stderrChunks = [];
+            child.stdout.on('data', (chunk) => stdoutChunks.push(chunk));
+            child.stderr.on('data', (chunk) => stderrChunks.push(chunk));
+            child.on('error', (err) => {
+                reject(new NetworkError(`Failed to spawn curl: ${err.message}`, 'ERR_CURL_SPAWN', req));
+            });
+            child.on('close', (code) => {
+                if (code !== 0) {
+                    const stderr = Buffer.concat(stderrChunks).toString();
+                    reject(new NetworkError(`Curl exited with code ${code}: ${stderr}`, 'ERR_CURL_EXIT', req));
+                    return;
+                }
+                const fullOutput = Buffer.concat(stdoutChunks);
+                let headerEndIndex = fullOutput.indexOf('\r\n\r\n');
+                let offset = 4;
+                if (headerEndIndex === -1) {
+                    headerEndIndex = fullOutput.indexOf('\n\n');
+                    offset = 2;
+                }
+                if (headerEndIndex !== -1) {
+                    const firstLine = fullOutput.subarray(0, Math.min(20, headerEndIndex)).toString();
+                    if (firstLine.startsWith('HTTP/1.1 100') || firstLine.startsWith('HTTP/2 100')) {
+                        const nextStart = headerEndIndex + offset;
+                        const secondSplit = fullOutput.indexOf('\r\n\r\n', nextStart);
+                        if (secondSplit !== -1) {
+                            headerEndIndex = secondSplit;
+                            offset = 4;
+                        }
+                    }
+                }
+                if (headerEndIndex === -1) {
+                    const nativeResponse = new Response(fullOutput, { status: 200, statusText: 'OK' });
+                    resolve(new HttpResponse(nativeResponse, { connection: { protocol: 'curl' } }));
+                    return;
+                }
+                const headerBlock = fullOutput.subarray(0, headerEndIndex).toString();
+                const bodyBlock = fullOutput.subarray(headerEndIndex + offset);
+                const headerLines = headerBlock.split(/\r?\n/);
+                const statusLine = headerLines[0];
+                let status = 200;
+                let statusText = 'OK';
+                const statusMatch = statusLine.match(/HTTP\/[\d\.]+ (\d+) ?(.*)/);
+                if (statusMatch) {
+                    status = parseInt(statusMatch[1], 10);
+                    statusText = statusMatch[2] || '';
+                }
+                const headers = new Headers();
+                for (let i = 1; i < headerLines.length; i++) {
+                    const line = headerLines[i];
+                    const colon = line.indexOf(':');
+                    if (colon > 0) {
+                        const key = line.substring(0, colon).trim();
+                        const val = line.substring(colon + 1).trim();
+                        headers.append(key, val);
+                    }
+                }
+                const nativeResponse = new Response(bodyBlock, {
+                    status,
+                    statusText,
+                    headers
+                });
+                resolve(new HttpResponse(nativeResponse, {
+                    timings: {},
+                    connection: { protocol: 'curl' }
+                }));
+            });
+        });
+    }
+}
+
+var curl = /*#__PURE__*/Object.freeze({
+    __proto__: null,
+    CurlTransport: CurlTransport
+});
+
+async function fetchText(client, url, options) {
+    const response = await client.get(url, {
+        signal: options.signal,
+        headers: options.headers,
+        useCurl: options.useCurl,
+    });
+    const blob = await response.blob();
+    const buffer = Buffer.from(await blob.arrayBuffer());
+    if (buffer.length >= 2 && buffer[0] === 0x1f && buffer[1] === 0x8b) {
+        try {
+            const decompressed = gunzipSync(buffer);
+            return decompressed.toString('utf-8');
+        }
+        catch {
+        }
+    }
+    return buffer.toString('utf-8');
+}
+function parseAttributes(line, prefix) {
+    const attrs = {};
+    const content = line.substring(prefix.length);
+    const regex = /([A-Z0-9-]+)=(?:"([^"]*)"|([^,]*))/g;
+    let match;
+    while ((match = regex.exec(content)) !== null) {
+        attrs[match[1]] = match[2] ?? match[3];
+    }
+    return attrs;
+}
+function resolveUrl(url, baseUrl) {
+    if (url.startsWith('http://') || url.startsWith('https://')) {
+        return url;
+    }
+    try {
+        const base = new URL(baseUrl);
+        const basePath = base.pathname.substring(0, base.pathname.lastIndexOf('/') + 1);
+        return new URL(url, base.origin + basePath).toString();
+    }
+    catch {
+        return url;
+    }
+}
+function parseMasterPlaylist(content, baseUrl) {
+    const lines = content.split('\n');
+    const variants = [];
+    let pendingVariant = {};
+    for (const rawLine of lines) {
+        const line = rawLine.trim();
+        if (!line)
+            continue;
+        if (line.startsWith('#EXT-X-STREAM-INF:')) {
+            const attrs = parseAttributes(line, '#EXT-X-STREAM-INF:');
+            pendingVariant = {
+                bandwidth: attrs.BANDWIDTH ? parseInt(attrs.BANDWIDTH, 10) : undefined,
+                resolution: attrs.RESOLUTION,
+                codecs: attrs.CODECS,
+                name: attrs.NAME,
+            };
+        }
+        else if (!line.startsWith('#') && pendingVariant.bandwidth !== undefined) {
+            variants.push({
+                ...pendingVariant,
+                url: resolveUrl(line, baseUrl),
+            });
+            pendingVariant = {};
+        }
+    }
+    return { variants, isMaster: true };
+}
+function parseByteRange(value, lastEnd = 0) {
+    const parts = value.split('@');
+    const length = parseInt(parts[0], 10);
+    const offset = parts[1] ? parseInt(parts[1], 10) : lastEnd;
+    return { length, offset };
+}
+function parseMediaPlaylist(content, baseUrl) {
+    const lines = content.split('\n');
+    const segments = [];
+    let targetDuration = 5;
+    let mediaSequence = 0;
+    let discontinuitySequence = 0;
+    let endList = false;
+    let playlistType;
+    let currentDuration = 0;
+    let currentKey;
+    let currentDiscontinuity = false;
+    let currentProgramDateTime;
+    let currentByteRange;
+    let currentInitSegment;
+    let lastByteEnd = 0;
+    let segmentIndex = 0;
+    for (const rawLine of lines) {
+        const line = rawLine.trim();
+        if (!line)
+            continue;
+        if (line.startsWith('#EXT-X-TARGETDURATION:')) {
+            targetDuration = parseInt(line.split(':')[1], 10);
+        }
+        else if (line.startsWith('#EXT-X-MEDIA-SEQUENCE:')) {
+            mediaSequence = parseInt(line.split(':')[1], 10);
+        }
+        else if (line.startsWith('#EXT-X-DISCONTINUITY-SEQUENCE:')) {
+            discontinuitySequence = parseInt(line.split(':')[1], 10);
+        }
+        else if (line.startsWith('#EXT-X-PLAYLIST-TYPE:')) {
+            playlistType = line.split(':')[1];
+        }
+        else if (line === '#EXT-X-ENDLIST') {
+            endList = true;
+        }
+        else if (line === '#EXT-X-DISCONTINUITY') {
+            currentDiscontinuity = true;
+        }
+        else if (line.startsWith('#EXT-X-PROGRAM-DATE-TIME:')) {
+            currentProgramDateTime = new Date(line.split(':').slice(1).join(':'));
+        }
+        else if (line.startsWith('#EXT-X-KEY:')) {
+            const attrs = parseAttributes(line, '#EXT-X-KEY:');
+            if (attrs.METHOD === 'NONE') {
+                currentKey = undefined;
+            }
+            else {
+                currentKey = {
+                    method: attrs.METHOD,
+                    uri: attrs.URI ? resolveUrl(attrs.URI, baseUrl) : undefined,
+                    iv: attrs.IV,
+                };
+            }
+        }
+        else if (line.startsWith('#EXT-X-BYTERANGE:')) {
+            const value = line.substring(17);
+            currentByteRange = parseByteRange(value, lastByteEnd);
+            lastByteEnd = currentByteRange.offset + currentByteRange.length;
+        }
+        else if (line.startsWith('#EXT-X-MAP:')) {
+            const attrs = parseAttributes(line, '#EXT-X-MAP:');
+            currentInitSegment = {
+                url: resolveUrl(attrs.URI, baseUrl),
+                byteRange: attrs.BYTERANGE ? parseByteRange(attrs.BYTERANGE) : undefined,
+            };
+        }
+        else if (line.startsWith('#EXTINF:')) {
+            const durationStr = line.substring(8).split(',')[0];
+            currentDuration = parseFloat(durationStr);
+        }
+        else if (!line.startsWith('#')) {
+            segments.push({
+                url: resolveUrl(line, baseUrl),
+                duration: currentDuration,
+                sequence: mediaSequence + segmentIndex,
+                key: currentKey,
+                discontinuity: currentDiscontinuity,
+                programDateTime: currentProgramDateTime,
+                byteRange: currentByteRange,
+                initSegment: currentInitSegment,
+            });
+            if (currentByteRange) {
+                lastByteEnd = currentByteRange.offset + currentByteRange.length;
+            }
+            segmentIndex++;
+            currentDiscontinuity = false;
+            currentProgramDateTime = undefined;
+            currentByteRange = undefined;
+        }
+    }
+    return {
+        segments,
+        targetDuration,
+        mediaSequence,
+        endList,
+        playlistType,
+        discontinuitySequence,
+    };
+}
+function isMasterPlaylist(content) {
+    return content.includes('#EXT-X-STREAM-INF');
+}
+function selectVariant(variants, quality) {
+    if (!variants.length) {
+        throw new Error('No variants found in master playlist');
+    }
+    const sorted = [...variants].sort((a, b) => (a.bandwidth ?? 0) - (b.bandwidth ?? 0));
+    if (quality === 'lowest') {
+        return sorted[0];
+    }
+    if (quality === 'highest' || quality === undefined) {
+        return sorted[sorted.length - 1];
+    }
+    if (quality.resolution) {
+        const match = variants.find((v) => v.resolution === quality.resolution);
+        if (match)
+            return match;
+    }
+    if (quality.bandwidth) {
+        const target = quality.bandwidth;
+        return sorted.reduce((prev, curr) => {
+            const prevDiff = Math.abs((prev.bandwidth ?? 0) - target);
+            const currDiff = Math.abs((curr.bandwidth ?? 0) - target);
+            return currDiff < prevDiff ? curr : prev;
+        });
+    }
+    return sorted[sorted.length - 1];
+}
+class HlsPromise {
+    client;
+    manifestUrl;
+    options;
+    seenSequences = new Set();
+    downloadedBytes = 0;
+    downloadedSegments = 0;
+    startTime = 0;
+    aborted = false;
+    abortController = new AbortController();
+    keyCache = new Map();
+    initSegmentCache = new Map();
+    initSegmentPrepended = new Set();
+    defaultRetryStatusCodes = [403, 404, 408, 429, 500, 502, 503, 504];
+    consecutiveErrors = 0;
+    constructor(client, manifestUrl, options = {}) {
+        this.client = client;
+        this.manifestUrl = manifestUrl;
+        this.options = {
+            mode: 'merge',
+            format: 'ts',
+            concurrency: 5,
+            ...options,
+        };
+        if (this.options.format !== 'ts') {
+            throw new Error(`Format '${this.options.format}' requires ffmpeg. Use format: 'ts' or install ffmpeg.`);
+        }
+    }
+    get [Symbol.toStringTag]() {
+        return 'HlsPromise';
+    }
+    then(onfulfilled, onrejected) {
+        return Promise.reject(new Error('HlsPromise requires .download(), .stream(), or .pipe() to execute')).then(onfulfilled, onrejected);
+    }
+    catch(onrejected) {
+        return this.then(null, onrejected);
+    }
+    finally(onfinally) {
+        return this.then(() => {
+            onfinally?.();
+        }, () => {
+            onfinally?.();
+        });
+    }
+    cancel() {
+        this.aborted = true;
+        this.abortController.abort();
+    }
+    async download(dest) {
+        this.startTime = Date.now();
+        const mediaPlaylistUrl = await this.resolveMediaPlaylist();
+        if (this.options.mode === 'chunks') {
+            await this.downloadChunks(mediaPlaylistUrl, dest);
+        }
+        else {
+            if (typeof dest !== 'string') {
+                throw new Error('Merge mode requires a string path, not a function');
+            }
+            await this.downloadMerged(mediaPlaylistUrl, dest);
+        }
+    }
+    async *stream() {
+        this.startTime = Date.now();
+        const mediaPlaylistUrl = await this.resolveMediaPlaylist();
+        const isLive = this.isLiveMode();
+        const maxDuration = this.getMaxDuration();
+        const concurrency = this.options.concurrency ?? 5;
+        let pollInterval = 2000;
+        while (!this.aborted) {
+            if (this.consecutiveErrors >= this.getMaxConsecutiveErrors()) {
+                throw new Error(`Too many consecutive errors (${this.consecutiveErrors}). ` +
+                    `Limit: ${this.getMaxConsecutiveErrors()}. Stopping download.`);
+            }
+            let playlist;
+            try {
+                playlist = await this.fetchMediaPlaylist(mediaPlaylistUrl);
+            }
+            catch (err) {
+                if (isLive && this.consecutiveErrors < this.getMaxConsecutiveErrors()) {
+                    if (this.options.onError) {
+                        this.options.onError(new Error(`Playlist fetch failed: ${err.message}. Retrying...`));
+                    }
+                    await this.sleep(pollInterval);
+                    continue;
+                }
+                throw err;
+            }
+            pollInterval = Math.max(1000, (playlist.targetDuration * 1000) / 2);
+            const newSegments = playlist.segments.filter((s) => !this.seenSequences.has(s.sequence));
+            for (const segment of newSegments) {
+                this.seenSequences.add(segment.sequence);
+            }
+            if (newSegments.length > 0) {
+                yield* this.downloadSegmentsConcurrent(newSegments, concurrency, playlist, isLive, maxDuration);
+            }
+            if (!isLive || playlist.endList) {
+                break;
+            }
+            if (maxDuration && Date.now() - this.startTime > maxDuration) {
+                break;
+            }
+            await this.sleep(pollInterval);
+        }
+    }
+    async *downloadSegmentsConcurrent(segments, concurrency, playlist, isLive, maxDuration) {
+        const results = new Map();
+        const pending = new Map();
+        let nextToYield = 0;
+        let nextToStart = 0;
+        const startDownload = (index) => {
+            const segment = segments[index];
+            const promise = this.downloadSegment(segment).then((data) => ({
+                index,
+                data: data ? {
+                    sequence: segment.sequence,
+                    duration: segment.duration,
+                    data,
+                    url: segment.url,
+                    downloadedAt: new Date(),
+                } : null,
+            }));
+            pending.set(index, promise);
+        };
+        while (nextToStart < segments.length && pending.size < concurrency) {
+            startDownload(nextToStart++);
+        }
+        while (nextToYield < segments.length) {
+            if (this.aborted)
+                break;
+            if (maxDuration && Date.now() - this.startTime > maxDuration) {
+                break;
+            }
+            if (this.consecutiveErrors >= this.getMaxConsecutiveErrors()) {
+                throw new Error(`Too many consecutive errors (${this.consecutiveErrors}). ` +
+                    `Limit: ${this.getMaxConsecutiveErrors()}. Stopping download.`);
+            }
+            if (pending.size > 0) {
+                const completed = await Promise.race(pending.values());
+                pending.delete(completed.index);
+                results.set(completed.index, completed.data);
+                if (nextToStart < segments.length && pending.size < concurrency) {
+                    startDownload(nextToStart++);
+                }
+            }
+            while (results.has(nextToYield)) {
+                const segmentData = results.get(nextToYield);
+                results.delete(nextToYield);
+                nextToYield++;
+                if (!segmentData) {
+                    continue;
+                }
+                this.downloadedSegments++;
+                this.downloadedBytes += segmentData.data.byteLength;
+                this.emitProgress(playlist, isLive);
+                if (this.options.onSegment) {
+                    await this.options.onSegment(segmentData);
+                }
+                yield segmentData;
+            }
+        }
+    }
+    async pipe(writable) {
+        try {
+            for await (const segment of this.stream()) {
+                const canContinue = writable.write(segment.data);
+                if (!canContinue) {
+                    await new Promise((resolve) => writable.once('drain', resolve));
+                }
+            }
+        }
+        finally {
+            if ('end' in writable && typeof writable.end === 'function') {
+                writable.end();
+            }
+        }
+    }
+    async info() {
+        const content = await fetchText(this.client, this.manifestUrl, {
+            signal: this.abortController.signal,
+            headers: this.options.headers,
+            useCurl: this.options.useCurl,
+        });
+        if (isMasterPlaylist(content)) {
+            const master = parseMasterPlaylist(content, this.manifestUrl);
+            const selectedVariant = selectVariant(master.variants, this.options.quality);
+            const playlistContent = await fetchText(this.client, selectedVariant.url, {
+                signal: this.abortController.signal,
+                headers: this.options.headers,
+                useCurl: this.options.useCurl,
+            });
+            const playlist = parseMediaPlaylist(playlistContent, selectedVariant.url);
+            const totalDuration = playlist.endList
+                ? playlist.segments.reduce((sum, s) => sum + s.duration, 0)
+                : undefined;
+            return {
+                master,
+                playlist,
+                selectedVariant,
+                isLive: !playlist.endList,
+                totalDuration,
+            };
+        }
+        const playlist = parseMediaPlaylist(content, this.manifestUrl);
+        const totalDuration = playlist.endList
+            ? playlist.segments.reduce((sum, s) => sum + s.duration, 0)
+            : undefined;
+        return {
+            playlist,
+            isLive: !playlist.endList,
+            totalDuration,
+        };
+    }
+    async resolveMediaPlaylist() {
+        const headers = {
+            ...this.options.headers,
+        };
+        const content = await fetchText(this.client, this.manifestUrl, {
+            signal: this.abortController.signal,
+            headers,
+            useCurl: this.options.useCurl,
+        });
+        if (!isMasterPlaylist(content)) {
+            return this.manifestUrl;
+        }
+        const master = parseMasterPlaylist(content, this.manifestUrl);
+        const variant = selectVariant(master.variants, this.options.quality);
+        return variant.url;
+    }
+    async fetchMediaPlaylist(url) {
+        const content = await this.withRetry(async () => {
+            return fetchText(this.client, url, {
+                signal: this.abortController.signal,
+                headers: this.options.headers,
+                useCurl: this.options.useCurl,
+            });
+        }, 'Fetch playlist', false);
+        if (!content) {
+            throw new Error('Failed to fetch media playlist');
+        }
+        return parseMediaPlaylist(content, url);
+    }
+    async getKey(uri) {
+        if (this.keyCache.has(uri)) {
+            return this.keyCache.get(uri);
+        }
+        const response = await this.client.get(uri, {
+            headers: this.options.headers,
+            signal: this.abortController.signal,
+            useCurl: this.options.useCurl,
+        });
+        const blob = await response.blob();
+        const arrayBuffer = await blob.arrayBuffer();
+        const key = Buffer.from(arrayBuffer);
+        if (key.length !== 16) {
+            throw new Error(`Invalid AES-128 key length: ${key.length} bytes (expected 16)`);
+        }
+        this.keyCache.set(uri, key);
+        return key;
+    }
+    generateIV(mediaSequence) {
+        const iv = Buffer.alloc(16);
+        iv.writeBigUInt64BE(BigInt(mediaSequence), 8);
+        return iv;
+    }
+    parseIV(ivString) {
+        const hex = ivString.startsWith('0x') || ivString.startsWith('0X')
+            ? ivString.slice(2)
+            : ivString;
+        return Buffer.from(hex.padStart(32, '0'), 'hex');
+    }
+    decryptSegment(data, key, iv) {
+        const decipher = createDecipheriv('aes-128-cbc', key, iv);
+        decipher.setAutoPadding(true);
+        return Buffer.concat([decipher.update(data), decipher.final()]);
+    }
+    async getInitSegment(init) {
+        const cacheKey = `${init.url}:${init.byteRange?.offset ?? 0}:${init.byteRange?.length ?? 0}`;
+        if (this.initSegmentCache.has(cacheKey)) {
+            return this.initSegmentCache.get(cacheKey);
+        }
+        const headers = { ...this.options.headers };
+        if (init.byteRange) {
+            const { offset, length } = init.byteRange;
+            headers['Range'] = `bytes=${offset}-${offset + length - 1}`;
+        }
+        const response = await this.client.get(init.url, {
+            headers,
+            signal: this.abortController.signal,
+            useCurl: this.options.useCurl,
+        });
+        const blob = await response.blob();
+        const arrayBuffer = await blob.arrayBuffer();
+        const data = Buffer.from(arrayBuffer);
+        this.initSegmentCache.set(cacheKey, data);
+        return data;
+    }
+    async downloadSegment(segment) {
+        const result = await this.withRetry(async () => {
+            const headers = { ...this.options.headers };
+            if (segment.byteRange) {
+                const { offset, length } = segment.byteRange;
+                headers['Range'] = `bytes=${offset}-${offset + length - 1}`;
+            }
+            const response = await this.client.get(segment.url, {
+                headers,
+                signal: this.abortController.signal,
+                useCurl: this.options.useCurl,
+            });
+            const blob = await response.blob();
+            const arrayBuffer = await blob.arrayBuffer();
+            let data = Buffer.from(arrayBuffer);
+            if (segment.key && segment.key.method === 'AES-128') {
+                if (!segment.key.uri) {
+                    throw new Error('AES-128 encryption specified but no key URI provided');
+                }
+                const key = await this.getKey(segment.key.uri);
+                const iv = segment.key.iv
+                    ? this.parseIV(segment.key.iv)
+                    : this.generateIV(segment.sequence);
+                data = this.decryptSegment(data, key, iv);
+            }
+            else if (segment.key && segment.key.method === 'SAMPLE-AES') {
+                throw new Error('SAMPLE-AES encryption is not supported. This typically requires DRM handling.');
+            }
+            if (segment.initSegment) {
+                const initKey = `${segment.initSegment.url}:${segment.initSegment.byteRange?.offset ?? 0}`;
+                if (!this.initSegmentPrepended.has(initKey)) {
+                    const initData = await this.getInitSegment(segment.initSegment);
+                    data = Buffer.concat([initData, data]);
+                    this.initSegmentPrepended.add(initKey);
+                }
+            }
+            return new Uint8Array(data);
+        }, `Segment ${segment.sequence}`, true);
+        return result;
+    }
+    async downloadMerged(playlistUrl, outputPath) {
+        await mkdir(dirname(outputPath), { recursive: true });
+        const output = createWriteStream(outputPath, { flags: 'a' });
+        try {
+            await this.pipe(output);
+        }
+        catch (error) {
+            output.destroy();
+            throw error;
+        }
+    }
+    async downloadChunks(playlistUrl, dest) {
+        const getPath = typeof dest === 'string'
+            ? (seg) => join(dest, `segment-${seg.sequence}.ts`)
+            : dest;
+        const baseDir = typeof dest === 'string' ? dest : dirname(getPath({ sequence: 0, duration: 0, url: '' }));
+        await mkdir(baseDir, { recursive: true });
+        for await (const segment of this.stream()) {
+            const filePath = getPath({
+                sequence: segment.sequence,
+                duration: segment.duration,
+                url: segment.url,
+            });
+            await mkdir(dirname(filePath), { recursive: true });
+            const output = createWriteStream(filePath);
+            await new Promise((resolve, reject) => {
+                output.write(segment.data, (err) => {
+                    if (err)
+                        reject(err);
+                    else {
+                        output.end();
+                        resolve();
+                    }
+                });
+            });
+        }
+    }
+    isLiveMode() {
+        return this.options.live === true || typeof this.options.live === 'object';
+    }
+    getMaxDuration() {
+        if (typeof this.options.live === 'object' && this.options.live.duration) {
+            return this.options.live.duration;
+        }
+        return undefined;
+    }
+    emitProgress(playlist, isLive) {
+        if (!this.options.onProgress)
+            return;
+        this.options.onProgress({
+            downloadedSegments: this.downloadedSegments,
+            totalSegments: isLive ? undefined : playlist.segments.length,
+            downloadedBytes: this.downloadedBytes,
+            currentSegment: Math.max(...this.seenSequences),
+            isLive,
+            elapsed: Date.now() - this.startTime,
+        });
+    }
+    sleep(ms) {
+        return new Promise((resolve) => {
+            const timeout = setTimeout(resolve, ms);
+            this.abortController.signal.addEventListener('abort', () => {
+                clearTimeout(timeout);
+                resolve();
+            }, { once: true });
+        });
+    }
+    getRetryConfig() {
+        const isLive = this.isLiveMode();
+        const userConfig = this.options.retry || {};
+        return {
+            maxAttempts: userConfig.maxAttempts ?? (isLive ? 5 : 3),
+            delay: userConfig.delay ?? 1000,
+            maxDelay: userConfig.maxDelay ?? 30000,
+            backoff: userConfig.backoff ?? 2,
+            jitter: userConfig.jitter ?? true,
+            statusCodes: userConfig.statusCodes ?? this.defaultRetryStatusCodes,
+        };
+    }
+    getMaxConsecutiveErrors() {
+        const isLive = this.isLiveMode();
+        return this.options.maxConsecutiveErrors ?? (isLive ? 10 : 3);
+    }
+    calculateRetryDelay(attempt, config) {
+        let delay = config.delay * Math.pow(config.backoff, attempt);
+        delay = Math.min(delay, config.maxDelay);
+        if (config.jitter) {
+            const jitterRange = delay * 0.25;
+            delay = delay - jitterRange + (Math.random() * jitterRange * 2);
+        }
+        return Math.round(delay);
+    }
+    isRetryableError(error, config) {
+        if (error.code === 'ECONNRESET' || error.code === 'ETIMEDOUT' || error.code === 'ENOTFOUND') {
+            return true;
+        }
+        const status = error.status || error.statusCode || (error.response?.status);
+        if (status && config.statusCodes.includes(status)) {
+            return true;
+        }
+        return false;
+    }
+    async withRetry(fn, context, skipOnFail = false) {
+        const config = this.getRetryConfig();
+        const isLive = this.isLiveMode();
+        let lastError = null;
+        for (let attempt = 0; attempt <= config.maxAttempts; attempt++) {
+            if (this.aborted) {
+                throw new Error('Aborted');
+            }
+            try {
+                const result = await fn();
+                this.consecutiveErrors = 0;
+                return result;
+            }
+            catch (error) {
+                lastError = error;
+                if (!this.isRetryableError(error, config)) {
+                    if (this.options.onError) {
+                        this.options.onError(error);
+                    }
+                    if (skipOnFail && isLive) {
+                        this.consecutiveErrors++;
+                        return null;
+                    }
+                    throw error;
+                }
+                if (attempt < config.maxAttempts) {
+                    const delay = this.calculateRetryDelay(attempt, config);
+                    if (this.options.onError) {
+                        const retryError = new Error(`${context}: ${error.message}. Retrying in ${delay}ms (attempt ${attempt + 1}/${config.maxAttempts})`);
+                        retryError.cause = error;
+                        retryError.isRetry = true;
+                        this.options.onError(retryError);
+                    }
+                    await this.sleep(delay);
+                }
+            }
+        }
+        this.consecutiveErrors++;
+        if (this.options.onError && lastError) {
+            this.options.onError(lastError);
+        }
+        if (skipOnFail && isLive) {
+            return null;
+        }
+        throw lastError || new Error(`${context}: All retry attempts failed`);
+    }
+}
+
+var hls = /*#__PURE__*/Object.freeze({
+    __proto__: null,
+    HlsPromise: HlsPromise
 });
 
 class Http2MetricsCollector {
@@ -55392,7 +56582,7 @@ class MemoryStorage {
     }
     _generateETag(body) {
         const buffer = this._toBuffer(body);
-        return createHash$1('md5').update(buffer).digest('hex');
+        return createHash('md5').update(buffer).digest('hex');
     }
     _toBuffer(body) {
         if (Buffer.isBuffer(body)) {
@@ -55823,7 +57013,7 @@ class MemoryStorage {
         }
         const snapshot = this.snapshot();
         const json = JSON.stringify(snapshot, null, 2);
-        const [ok, err] = await tryFn$1(() => writeFile$1(path, json, 'utf-8'));
+        const [ok, err] = await tryFn$1(() => writeFile(path, json, 'utf-8'));
         if (!ok) {
             throw new ResourceError(`Failed to save to disk: ${err.message}`, {
                 bucket: this.bucket,
@@ -55846,7 +57036,7 @@ class MemoryStorage {
                 suggestion: 'Provide a persistPath when creating MemoryClient or pass a custom path to loadFromDisk().'
             });
         }
-        const [ok, err, json] = await tryFn$1(() => readFile$1(path, 'utf-8'));
+        const [ok, err, json] = await tryFn$1(() => readFile(path, 'utf-8'));
         if (!ok) {
             throw new ResourceError(`Failed to load from disk: ${err.message}`, {
                 bucket: this.bucket,
@@ -56976,7 +58166,7 @@ class FileSystemStorage {
     }
     _generateETag(body) {
         const buffer = this._toBuffer(body);
-        return createHash$1('md5').update(buffer).digest('hex');
+        return createHash('md5').update(buffer).digest('hex');
     }
     _toBuffer(body) {
         if (Buffer.isBuffer(body)) {
@@ -57079,12 +58269,12 @@ class FileSystemStorage {
         await this._ensureDirectory(filePath);
         const tempPath = `${filePath}.tmp.${Date.now()}.${idGenerator(6)}`;
         try {
-            await writeFile$1(tempPath, data);
+            await writeFile(tempPath, data);
             await rename(tempPath, filePath);
         }
         catch (error) {
             try {
-                await unlink$1(tempPath);
+                await unlink(tempPath);
             }
             catch (cleanupError) {
                 // Ignore cleanup errors
@@ -57094,7 +58284,7 @@ class FileSystemStorage {
     }
     async _readMetadata(key) {
         const metaPath = this._getMetadataPath(key);
-        const [ok, err, json] = await tryFn$1(() => readFile$1(metaPath, 'utf-8'));
+        const [ok, err, json] = await tryFn$1(() => readFile(metaPath, 'utf-8'));
         if (!ok) {
             throw this._mapFilesystemError(err, { key, path: metaPath, operation: 'readMetadata' });
         }
@@ -57177,7 +58367,7 @@ class FileSystemStorage {
     async _createBackup(filePath) {
         if (!this.enableBackup)
             return;
-        if (!existsSync$1(filePath))
+        if (!existsSync(filePath))
             return;
         const backupPath = filePath + this.backupSuffix;
         await tryFn$1(() => copyFile(filePath, backupPath));
@@ -57333,7 +58523,7 @@ class FileSystemStorage {
             this._validateLimits(body, metadata);
             const objectPath = this._getObjectPath(key);
             const metaPath = this._getMetadataPath(key);
-            const exists = existsSync$1(objectPath);
+            const exists = existsSync(objectPath);
             if (ifMatch !== undefined) {
                 if (!exists) {
                     throw new ResourceError(`Precondition failed: object does not exist for key "${key}"`, {
@@ -57415,7 +58605,7 @@ class FileSystemStorage {
             };
             const [okMeta, errMeta] = await tryFn$1(() => this._writeMetadata(key, metaData));
             if (!okMeta) {
-                await tryFn$1(() => unlink$1(objectPath));
+                await tryFn$1(() => unlink(objectPath));
                 if (this.enableStats)
                     this.stats.errors++;
                 throw this._mapFilesystemError(errMeta, { key, path: metaPath, operation: 'put' });
@@ -57462,7 +58652,7 @@ class FileSystemStorage {
             await this.delete(key);
             throw this._mapFilesystemError({ code: 'ENOENT', message: 'Object has expired' }, { key, path: objectPath, operation: 'get' });
         }
-        const [okBody, errBody, bodyBuffer] = await tryFn$1(() => readFile$1(objectPath));
+        const [okBody, errBody, bodyBuffer] = await tryFn$1(() => readFile(objectPath));
         if (!okBody) {
             if (this.enableStats)
                 this.stats.errors++;
@@ -57526,7 +58716,7 @@ class FileSystemStorage {
         const { metadata, metadataDirective, contentType } = params;
         const sourceObjectPath = this._getObjectPath(from);
         this._getMetadataPath(from);
-        if (!existsSync$1(sourceObjectPath)) {
+        if (!existsSync(sourceObjectPath)) {
             throw new ResourceError(`Source object not found: ${from}`, {
                 bucket: this.bucket,
                 key: from,
@@ -57575,11 +58765,11 @@ class FileSystemStorage {
     async delete(key) {
         const objectPath = this._getObjectPath(key);
         const metaPath = this._getMetadataPath(key);
-        await tryFn$1(() => unlink$1(objectPath));
-        await tryFn$1(() => unlink$1(metaPath));
+        await tryFn$1(() => unlink(objectPath));
+        await tryFn$1(() => unlink(metaPath));
         if (this.enableBackup) {
             const backupPath = objectPath + this.backupSuffix;
-            await tryFn$1(() => unlink$1(backupPath));
+            await tryFn$1(() => unlink(backupPath));
         }
         await this._journalOperation('delete', key);
         if (this.enableStats) {
@@ -57742,7 +58932,7 @@ class FileSystemStorage {
     }
     exists(key) {
         const objectPath = this._getObjectPath(key);
-        return existsSync$1(objectPath);
+        return existsSync(objectPath);
     }
     async clear() {
         if (!this.basePath.includes('s3db') && !this.basePath.includes('data')) {
@@ -60916,7 +62106,7 @@ class DatabaseMetadata {
             partitions: definition.partitions || {},
         };
         const stableString = jsonStableStringify(hashObj);
-        return `sha256:${createHash$1('sha256').update(stableString).digest('hex')}`;
+        return `sha256:${createHash('sha256').update(stableString).digest('hex')}`;
     }
     getNextVersion(versions = {}) {
         const versionNumbers = Object.keys(versions)
@@ -62233,7 +63423,7 @@ function generateSchemaFingerprint(attributes, options = {}) {
         allNestedObjectsOptional: options.allNestedObjectsOptional ?? false
     };
     const serialized = JSON.stringify(normalized);
-    return createHash$1('sha256').update(serialized).digest('hex');
+    return createHash('sha256').update(serialized).digest('hex');
 }
 function getCachedValidator(fingerprint) {
     const cached = validatorCache.get(fingerprint);
@@ -62313,7 +63503,7 @@ function generateBase62Mapping(keys) {
 }
 function generatePluginAttributeHash(pluginName, attributeName) {
     const input = `${pluginName}:${attributeName}`;
-    const hash = createHash$1('sha256').update(input).digest();
+    const hash = createHash('sha256').update(input).digest();
     const num = hash.readUInt32BE(0);
     const base62Hash = encode(num);
     const paddedHash = base62Hash.padStart(3, '0').substring(0, 3);
@@ -64688,7 +65878,7 @@ class ResourceIdGenerator {
     }
     _configureGenerator(customIdGenerator, idSize) {
         if (typeof customIdGenerator === 'function') {
-            return (() => String(customIdGenerator()));
+            return ((data) => String(customIdGenerator(data)));
         }
         const isIncrementalString = typeof customIdGenerator === 'string' &&
             (customIdGenerator === 'incremental' || customIdGenerator.startsWith('incremental:'));
@@ -64726,11 +65916,11 @@ class ResourceIdGenerator {
     getGenerator() {
         return this._generator;
     }
-    generate() {
+    generate(data) {
         if (!this._generator) {
             throw new Error('ID generator not initialized. Call initIncremental() first for incremental generators.');
         }
-        return this._generator();
+        return this._generator(data);
     }
     getType(customIdGenerator, idSize) {
         if (typeof customIdGenerator === 'function') {
@@ -66537,7 +67727,7 @@ class ResourcePersistence {
         Object.assign(validatedAttributes, extraData);
         let finalId = validatedId || preProcessedData.id || id$1;
         if (!finalId) {
-            finalId = await Promise.resolve(this.idGenerator());
+            finalId = await Promise.resolve(this.idGenerator(preProcessedData));
             if (!finalId || String(finalId).trim() === '') {
                 const { idGenerator } = await Promise.resolve().then(function () { return id; });
                 finalId = idGenerator();
@@ -68290,7 +69480,7 @@ class Resource extends AsyncEventEmitter {
             behavior: this.behavior
         };
         const stableString = jsonStableStringify(definition);
-        return `sha256:${createHash$1('sha256').update(stableString).digest('hex')}`;
+        return `sha256:${createHash('sha256').update(stableString).digest('hex')}`;
     }
     extractVersionFromKey(key) {
         const parts = key.split('/');
@@ -69018,8 +70208,8 @@ class Database extends SafeEventEmitter {
         })();
         this.version = '1';
         this.s3dbVersion = (() => {
-            const [ok, , version] = tryFnSync(() => (typeof globalThis['19.3.2'] !== 'undefined' && globalThis['19.3.2'] !== '19.3.2'
-                ? globalThis['19.3.2']
+            const [ok, , version] = tryFnSync(() => (typeof globalThis['19.3.5'] !== 'undefined' && globalThis['19.3.5'] !== '19.3.5'
+                ? globalThis['19.3.5']
                 : 'latest'));
             return ok ? version : 'latest';
         })();
@@ -69624,6 +70814,58 @@ class PerformanceMonitor {
         return arr.reduce((a, b) => a + b, 0) / arr.length;
     }
 }
+
+class FileStorage {
+    dir;
+    constructor(baseDir = '.recker/cache') {
+        this.dir = baseDir;
+    }
+    getHash(key) {
+        return createHash$1('md5').update(key).digest('hex');
+    }
+    getPath(key) {
+        return join(this.dir, `${this.getHash(key)}.json`);
+    }
+    async ensureDir() {
+        if (!existsSync$1(this.dir)) {
+            await mkdir(this.dir, { recursive: true });
+        }
+    }
+    async get(key) {
+        try {
+            const path = this.getPath(key);
+            if (!existsSync$1(path))
+                return undefined;
+            const content = await readFile$1(path, 'utf-8');
+            const data = JSON.parse(content);
+            return data;
+        }
+        catch (error) {
+            return undefined;
+        }
+    }
+    async set(key, entry, ttl) {
+        await this.ensureDir();
+        const path = this.getPath(key);
+        await writeFile$1(path, JSON.stringify(entry), 'utf-8');
+    }
+    async delete(key) {
+        const path = this.getPath(key);
+        if (existsSync$1(path)) {
+            await unlink$1(path);
+        }
+    }
+    async clear() {
+        if (existsSync$1(this.dir)) {
+            await rm(this.dir, { recursive: true, force: true });
+        }
+    }
+}
+
+var basicFileStorage = /*#__PURE__*/Object.freeze({
+    __proto__: null,
+    FileStorage: FileStorage
+});
 
 /**
  * Fixed-size circular buffer for efficient rolling metrics.

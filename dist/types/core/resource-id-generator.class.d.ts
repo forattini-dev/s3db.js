@@ -41,7 +41,7 @@ export interface BatchStatus {
     remaining: number;
     [key: string]: unknown;
 }
-export type IdGeneratorFunction = (() => string) | (() => Promise<string>);
+export type IdGeneratorFunction = ((data?: unknown) => string) | ((data?: unknown) => Promise<string>);
 export type IncrementalGenerator = IdGeneratorFunction & {
     _sequence?: SequenceInterface;
 };
@@ -56,7 +56,7 @@ export declare class ResourceIdGenerator {
     initIncremental(): void;
     isAsync(): boolean;
     getGenerator(): IncrementalGenerator | null;
-    generate(): string | Promise<string>;
+    generate(data?: unknown): string | Promise<string>;
     getType(customIdGenerator?: IdGeneratorConfig, idSize?: number): string;
     getSequenceValue(fieldName?: string): Promise<number | null>;
     resetSequence(fieldName: string, value: number): Promise<boolean>;

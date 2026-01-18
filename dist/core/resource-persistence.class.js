@@ -54,7 +54,7 @@ export class ResourcePersistence {
         Object.assign(validatedAttributes, extraData);
         let finalId = validatedId || preProcessedData.id || id;
         if (!finalId) {
-            finalId = await Promise.resolve(this.idGenerator());
+            finalId = await Promise.resolve(this.idGenerator(preProcessedData));
             if (!finalId || String(finalId).trim() === '') {
                 const { idGenerator } = await import('#src/concerns/id.js');
                 finalId = idGenerator();
