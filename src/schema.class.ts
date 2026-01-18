@@ -1506,7 +1506,7 @@ export class Schema {
   }
 
   async validate(resourceItem: Record<string, unknown>, { mutateOriginal = false } = {}): Promise<true | Record<string, unknown>[]> {
-    if (process.env.NODE_ENV !== 'production') {
+    if (process.env.NODE_ENV === 'development') {
       console.warn('[DEPRECATION] Schema.validate() is deprecated. Use ResourceValidator.validate() instead.');
     }
     const data = mutateOriginal ? resourceItem : cloneDeep(resourceItem);

@@ -2,46 +2,50 @@ import { cloneDeep } from 'lodash-es';
 
 import Resource from '#src/resource.class.js';
 import Schema from '#src/schema.class.js';
+import { ResourceValidator } from '#src/core/resource-validator.class.js';
 import { createClientForTest } from '#tests/config.js';
 
-const buildSchema = () =>
-  new Schema({
-    name: 'validation-schema',
-    attributes: {
-      name: 'string|required',
-      email: 'email|required',
-      age: 'number|optional',
-      active: 'boolean|default:true',
-      password: 'secret'
-    }
+const validationAttributes = {
+  name: 'string|required',
+  email: 'email|required',
+  age: 'number|optional',
+  active: 'boolean|default:true',
+  password: 'secret'
+};
+
+const buildValidator = () =>
+  new ResourceValidator({
+    attributes: validationAttributes,
+    passphrase: 'test-passphrase'
   });
 
-describe('Schema.validate', () => {
-  test('returns true for valid data and errors for invalid input', async () => {
-    const schema = buildSchema();
+describe('ResourceValidator.validate', () => {
+  test('returns isValid true for valid data and errors for invalid input', async () => {
+    const validator = buildValidator();
 
-    const validResult = await schema.validate({
+    const validResult = await validator.validate({
       name: 'John Doe',
       email: 'john@example.com',
       age: 30,
       active: true,
       password: 'secret123'
     });
-    expect(validResult).toBe(true);
+    expect(validResult.isValid).toBe(true);
+    expect(validResult.errors).toHaveLength(0);
 
-    const invalidResult = await schema.validate({
+    const invalidResult = await validator.validate({
       name: 'John Doe',
       email: 'invalid-email',
       age: 'not-a-number',
       active: 'not-a-boolean'
     });
 
-    expect(Array.isArray(invalidResult)).toBe(true);
-    expect(invalidResult).not.toHaveLength(0);
+    expect(invalidResult.isValid).toBe(false);
+    expect(invalidResult.errors.length).toBeGreaterThan(0);
   });
 
   test('respects mutateOriginal option', async () => {
-    const schema = buildSchema();
+    const validator = buildValidator();
     const original = {
       name: '  Jane Smith  ',
       email: 'jane@example.com',
@@ -52,12 +56,12 @@ describe('Schema.validate', () => {
 
     const copy = cloneDeep(original);
 
-    const resultWithoutMutation = await schema.validate(original, { mutateOriginal: false });
-    expect(resultWithoutMutation).toBe(true);
+    const resultWithoutMutation = await validator.validate(original, { mutateOriginal: false });
+    expect(resultWithoutMutation.isValid).toBe(true);
     expect(original.name).toBe('  Jane Smith  ');
 
-    const resultWithMutation = await schema.validate(copy, { mutateOriginal: true });
-    expect(resultWithMutation).toBe(true);
+    const resultWithMutation = await validator.validate(copy, { mutateOriginal: true });
+    expect(resultWithMutation.isValid).toBe(true);
     expect(copy.name).toBe('Jane Smith');
   });
 });
@@ -65,7 +69,7 @@ describe('Schema.validate', () => {
 describe('Schema validation options', () => {
   test('preprocesses optional nested objects before validation', () => {
     const attributes = {
-      costCenter: 'string',
+      department: 'string',
       team: 'string',
       scopes: 'string|optional',
       isActive: 'boolean|optional|default:true',
@@ -91,7 +95,7 @@ describe('Schema validation options', () => {
 
   test('honours allNestedObjectsOptional option', () => {
     const attributes = {
-      costCenter: 'string',
+      department: 'string',
       team: 'string',
       webpush: {
         enabled: 'boolean|optional|default:false',
@@ -137,34 +141,31 @@ describe('Schema validation options', () => {
   });
 
   test('validates nested optional objects', async () => {
-    const schema = new Schema({
-      name: 'nested-optional',
-      attributes: {
-        costCenter: 'string',
-        team: 'string',
-        webpush: {
-          $$type: 'object|optional',
-          enabled: 'boolean|optional|default:false',
-          endpoint: 'string|optional'
-        }
+    const nestedAttributes = {
+      department: 'string',
+      team: 'string',
+      webpush: {
+        $$type: 'object|optional',
+        enabled: 'boolean|optional|default:false',
+        endpoint: 'string|optional'
       }
+    };
+
+    const validator = new ResourceValidator({ attributes: nestedAttributes });
+
+    const result1 = await validator.validate({ department: 'DEP-001', team: 'engineering-team' });
+    expect(result1.isValid).toBe(true);
+
+    const result2 = await validator.validate({
+      department: 'DEP-001',
+      team: 'engineering-team',
+      webpush: { enabled: true, endpoint: 'https://example.com/push' }
     });
+    expect(result2.isValid).toBe(true);
 
-    await expect(
-      schema.validate({ costCenter: '860290021', team: 'dp-martech-growth' })
-    ).resolves.toBe(true);
-
-    await expect(
-      schema.validate({
-        costCenter: '860290021',
-        team: 'dp-martech-growth',
-        webpush: { enabled: true, endpoint: 'https://example.com/push' }
-      })
-    ).resolves.toBe(true);
-
-    const result = await schema.validate({ team: 'dp-martech-growth' });
-    expect(Array.isArray(result)).toBe(true);
-    expect(result).not.toHaveLength(0);
+    const result3 = await validator.validate({ team: 'engineering-team' });
+    expect(result3.isValid).toBe(false);
+    expect(result3.errors.length).toBeGreaterThan(0);
   });
 });
 
@@ -176,7 +177,7 @@ describe('Schema + Resource integration', () => {
       client,
       name: 'users_v1',
       attributes: {
-        costCenter: 'string',
+        department: 'string',
         team: 'string',
         scopes: 'string|optional',
         isActive: 'boolean|optional|default:true',
@@ -191,7 +192,7 @@ describe('Schema + Resource integration', () => {
       options: {
         timestamps: true,
         partitions: {
-          byCostCenter: { fields: { costCenter: 'string' } },
+          byDepartment: { fields: { department: 'string' } },
           byTeam: { fields: { team: 'string' } }
         }
       }
@@ -200,16 +201,16 @@ describe('Schema + Resource integration', () => {
     expect(resource.name).toBe('users_v1');
 
     const withoutWebpush = await resource.validate({
-      costCenter: '860290021',
-      team: 'dp-martech-growth',
+      department: 'DEP-001',
+      team: 'engineering-team',
       apiToken: 'test-token'
     });
     expect(withoutWebpush.isValid).toBe(true);
     expect(withoutWebpush.errors).toHaveLength(0);
 
     const withWebpush = await resource.validate({
-      costCenter: '860290021',
-      team: 'dp-martech-growth',
+      department: 'DEP-001',
+      team: 'engineering-team',
       apiToken: 'test-token',
       webpush: {
         enabled: true,

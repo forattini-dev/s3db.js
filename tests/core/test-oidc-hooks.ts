@@ -22,7 +22,7 @@ const testOidcHooks = async () => {
               get: async (id) => ({
                 id,
                 email: 'test@example.com',
-                costCenterId: 'FRESH-CC-999',
+                departmentId: 'FRESH-CC-999',
                 enrichedFromDb: true
               })
             }
@@ -56,8 +56,8 @@ const testOidcHooks = async () => {
         return {
           userData: {
             ...userData,
-            costCenterId: 'CC-12345',
-            costCenterName: 'Engineering',
+            departmentId: 'CC-12345',
+            departmentName: 'Engineering',
             metadata: {
               peopleData: { department: 'Engineering' },
               firstLoginIp: context?.req?.header?.('x-forwarded-for') || 'test-ip'
@@ -81,7 +81,7 @@ const testOidcHooks = async () => {
         return {
           updates: {
             ...updates,
-            costCenterId: 'CC-67890',
+            departmentId: 'CC-67890',
             metadata: {
               ...user.metadata,
               peopleData: { department: 'Updated Engineering' },
@@ -163,7 +163,7 @@ const testOidcHooks = async () => {
 
   console.log('\n🧪 Test 2: beforeUserUpdate hook with context\n');
   const updateResult = await hookExecutor.executeHooks('beforeUserUpdate', {
-    user: { email: 'existinguser@example.com', costCenterId: 'OLD-CC' },
+    user: { email: 'existinguser@example.com', departmentId: 'OLD-CC' },
     updates: { email: 'existinguser@example.com' },
     claims: { email: 'existinguser@example.com', sub: 'auth0|456' },
     usersResource: {},
@@ -203,13 +203,13 @@ const testOidcHooks = async () => {
 
   console.log('\n🎯 Verification:\n');
 
-  if (createResult.userData.costCenterId === 'CC-12345') {
+  if (createResult.userData.departmentId === 'CC-12345') {
     console.log('✅ beforeUserCreate modified userData correctly');
   } else {
     console.log('❌ beforeUserCreate failed to modify userData');
   }
 
-  if (updateResult.updates.costCenterId === 'CC-67890') {
+  if (updateResult.updates.departmentId === 'CC-67890') {
     console.log('✅ beforeUserUpdate modified updates correctly');
   } else {
     console.log('❌ beforeUserUpdate failed to modify updates');

@@ -1,5 +1,6 @@
 
 import Schema from '#src/schema.class.js';
+import { ResourceValidator } from '#src/core/resource-validator.class.js';
 
 const buildEmbeddingArray = length =>
   Array.from({ length }, (_, index) => Math.sin(index) * 0.75);
@@ -96,17 +97,22 @@ describe('Schema embedding hooks', () => {
     });
     expect(objectNotation.options.hooks.beforeMap.embedding).toEqual(['fromArrayOfEmbeddings']);
 
-    const optionalSchema = new Schema({
+    const optionalAttributes = {
+      id: 'string|optional',
+      vector: 'embedding:768|optional:true'
+    };
+
+    new Schema({
       name: 'embedding-optional',
-      attributes: {
-        id: 'string|optional',
-        vector: 'embedding:768|optional:true'
-      }
+      attributes: optionalAttributes
     });
 
-    await expect(optionalSchema.validate({ id: 'doc1' })).resolves.toBe(true);
-    await expect(
-      optionalSchema.validate({ id: 'doc2', vector: buildEmbeddingArray(768) })
-    ).resolves.toBe(true);
+    const validator = new ResourceValidator({ attributes: optionalAttributes });
+
+    const result1 = await validator.validate({ id: 'doc1' });
+    expect(result1.isValid).toBe(true);
+
+    const result2 = await validator.validate({ id: 'doc2', vector: buildEmbeddingArray(768) });
+    expect(result2.isValid).toBe(true);
   });
 });
