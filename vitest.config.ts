@@ -72,7 +72,8 @@ export default defineConfig({
         isolate: true,
         maxThreads: maxThreads,
         minThreads: 1,
-        useAtomics: true
+        useAtomics: true,
+        execArgv: ['--max-old-space-size=4096']
       }
     },
 

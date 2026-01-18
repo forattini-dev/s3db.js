@@ -63,10 +63,14 @@ jobs:
       matrix:
         node-version: [20, 22, 23]
         suite:
-          - name: core
+          - name: core-1/2
             path: tests/core/
-            timeout: 10
-            flags: ''
+            timeout: 8
+            flags: '--shard=1/2'
+          - name: core-2/2
+            path: tests/core/
+            timeout: 8
+            flags: '--shard=2/2'
           - name: scheduler
             path: tests/plugins/scheduler/
             timeout: 5
