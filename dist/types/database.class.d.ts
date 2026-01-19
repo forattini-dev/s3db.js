@@ -119,6 +119,11 @@ export declare class Database extends SafeEventEmitter {
         behavior?: BehaviorType;
         partitions?: PartitionsConfig;
     }): HashExistsResult;
+    prewarmResources(resourceNames?: string[]): {
+        warmed: string[];
+        skipped: string[];
+        alreadyCompiled: string[];
+    };
     uploadMetadataFile(): Promise<void>;
     flushMetadata(): Promise<void>;
     blankMetadataStructure(): SavedMetadata;

@@ -683,7 +683,9 @@ export class Resource extends AsyncEventEmitter implements Disposable {
   }
 
   applyConfiguration({ map }: { map?: StringRecord<string> } = {}): void {
-    this._ensureSchemaCompiled();
+    if (!this._lazySchema) {
+      this._ensureSchemaCompiled();
+    }
 
     if (this.config.timestamps) {
       if (!this.attributes.createdAt) {

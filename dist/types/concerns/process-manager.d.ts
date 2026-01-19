@@ -40,6 +40,8 @@ export declare class ProcessManager {
     private isShuttingDown;
     private shutdownPromise;
     private _boundSignalHandler;
+    private _boundUncaughtHandler;
+    private _boundUnhandledHandler;
     private _signalHandlersSetup;
     constructor(options?: ProcessManagerOptions);
     setInterval(fn: () => void, interval: number, name: string): ReturnType<typeof setTimeout>;

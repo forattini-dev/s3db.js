@@ -52,6 +52,8 @@ export interface ResourceConfig {
     schemaRegistry?: import('./schema.class.js').SchemaRegistry;
     /** Plugin schema registries for stable plugin attribute indices */
     pluginSchemaRegistry?: Record<string, import('./schema.class.js').PluginSchemaRegistry | import('./schema.class.js').SchemaRegistry>;
+    /** Defer schema/validator compilation until first CRUD operation (default: false) */
+    lazySchema?: boolean;
 }
 export interface ResourceApiConfig {
     enabled?: boolean;
@@ -216,6 +218,9 @@ export declare class Resource extends AsyncEventEmitter implements Disposable {
     map?: StringRecord<string>;
     private _schemaRegistry?;
     private _pluginSchemaRegistry?;
+    private _lazySchema;
+    private _schemaCompiled;
+    private _pendingSchemaConfig;
     private _instanceId;
     private _idGenerator;
     private _hooksModule;
@@ -231,6 +236,9 @@ export declare class Resource extends AsyncEventEmitter implements Disposable {
     private _normalizePartitionsInput;
     configureIdGenerator(customIdGenerator: IdGeneratorFunction | number | string | undefined, idSize: number): IdGeneratorFunction | IncrementalGenerator | null;
     private _initIncrementalIdGenerator;
+    private _ensureSchemaCompiled;
+    prewarmSchema(): void;
+    isSchemaCompiled(): boolean;
     hasAsyncIdGenerator(): boolean;
     getIdGeneratorType(customIdGenerator: IdGeneratorFunction | number | undefined, idSize: number): IdGeneratorConfig | undefined;
     export(): ResourceExport;

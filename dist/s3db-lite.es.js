@@ -52542,7 +52542,7 @@ function createDefaultTransport() {
     return createPrettyTransport();
 }
 function createLogger(options = {}) {
-    const { level = 'info', name, format, transport, bindings = {}, redactPatterns = [], maxPayloadBytes = 1_000_000 } = options;
+    const { level = 'info', name, format, transport, bindings = {}, redactPatterns = [] } = options;
     const redactRules = createRedactRules(redactPatterns);
     const normalizedBindings = bindings && typeof bindings === 'object' ? bindings : {};
     const useSharedDestination = !transport && format !== 'json';
@@ -52573,7 +52573,6 @@ function createLogger(options = {}) {
     if (baseBindings && Object.keys(baseBindings).length > 0) {
         logger = logger.child(baseBindings);
     }
-    logger._maxPayloadBytes = maxPayloadBytes;
     return logger;
 }
 function getLoggerOptionsFromEnv(configOptions = {}) {
@@ -59539,6 +59538,8 @@ class ProcessManager {
     isShuttingDown;
     shutdownPromise;
     _boundSignalHandler;
+    _boundUncaughtHandler;
+    _boundUnhandledHandler;
     _signalHandlersSetup;
     constructor(options = {}) {
         this.options = {
@@ -59560,6 +59561,8 @@ class ProcessManager {
         this.shutdownPromise = null;
         this._signalHandlersSetup = false;
         this._boundSignalHandler = this._handleSignal.bind(this);
+        this._boundUncaughtHandler = null;
+        this._boundUnhandledHandler = null;
         this._setupSignalHandlers();
         this.logger.debug({ shutdownTimeout: this.options.shutdownTimeout }, 'ProcessManager initialized');
     }
@@ -59651,17 +59654,19 @@ class ProcessManager {
     _setupSignalHandlers() {
         if (this._signalHandlersSetup)
             return;
+        this._boundUncaughtHandler = (err) => {
+            this.logger.error({ error: err.message, stack: err.stack }, 'uncaught exception');
+            this._handleSignal('uncaughtException');
+        };
+        this._boundUnhandledHandler = (reason, promise) => {
+            this.logger.error({ reason, promise: String(promise) }, 'unhandled rejection');
+            this._handleSignal('unhandledRejection');
+        };
         bumpProcessMaxListeners(4);
         process.on('SIGTERM', this._boundSignalHandler);
         process.on('SIGINT', this._boundSignalHandler);
-        process.on('uncaughtException', (err) => {
-            this.logger.error({ error: err.message, stack: err.stack }, 'uncaught exception');
-            this._handleSignal('uncaughtException');
-        });
-        process.on('unhandledRejection', (reason, promise) => {
-            this.logger.error({ reason, promise: String(promise) }, 'unhandled rejection');
-            this._handleSignal('unhandledRejection');
-        });
+        process.on('uncaughtException', this._boundUncaughtHandler);
+        process.on('unhandledRejection', this._boundUnhandledHandler);
         this._signalHandlersSetup = true;
         this.logger.debug('signal handlers registered (SIGTERM, SIGINT, uncaughtException, unhandledRejection)');
     }
@@ -59754,6 +59759,14 @@ class ProcessManager {
             return;
         process.removeListener('SIGTERM', this._boundSignalHandler);
         process.removeListener('SIGINT', this._boundSignalHandler);
+        if (this._boundUncaughtHandler) {
+            process.removeListener('uncaughtException', this._boundUncaughtHandler);
+            this._boundUncaughtHandler = null;
+        }
+        if (this._boundUnhandledHandler) {
+            process.removeListener('unhandledRejection', this._boundUnhandledHandler);
+            this._boundUnhandledHandler = null;
+        }
         this._signalHandlersSetup = false;
         bumpProcessMaxListeners(-4);
         this.logger.debug('signal handlers removed');
@@ -68974,6 +68987,9 @@ class Resource extends AsyncEventEmitter {
     map;
     _schemaRegistry;
     _pluginSchemaRegistry;
+    _lazySchema;
+    _schemaCompiled;
+    _pendingSchemaConfig;
     _instanceId;
     _idGenerator;
     _hooksModule;
@@ -68996,7 +69012,7 @@ class Resource extends AsyncEventEmitter {
                 validation: validation.errors,
             });
         }
-        const { name, client, version = '1', attributes = {}, behavior = DEFAULT_BEHAVIOR, passphrase = 'secret', bcryptRounds = 10, observers = [], cache = false, autoEncrypt = true, autoDecrypt = true, timestamps = false, partitions = {}, paranoid = true, allNestedObjectsOptional = true, hooks = {}, idGenerator: customIdGenerator, idSize = 22, versioningEnabled = false, strictValidation = true, events = {}, asyncEvents = true, asyncPartitions = true, strictPartitions = false, createdBy = 'user', guard, schemaRegistry, pluginSchemaRegistry } = config;
+        const { name, client, version = '1', attributes = {}, behavior = DEFAULT_BEHAVIOR, passphrase = 'secret', bcryptRounds = 10, observers = [], cache = false, autoEncrypt = true, autoDecrypt = true, timestamps = false, partitions = {}, paranoid = true, allNestedObjectsOptional = true, hooks = {}, idGenerator: customIdGenerator, idSize = 22, versioningEnabled = false, strictValidation = true, events = {}, asyncEvents = true, asyncPartitions = true, strictPartitions = false, createdBy = 'user', guard, schemaRegistry, pluginSchemaRegistry, lazySchema = false } = config;
         this.name = name;
         this.client = client;
         this.version = version;
@@ -69046,35 +69062,55 @@ class Resource extends AsyncEventEmitter {
             strictPartitions,
             createdBy,
         };
-        this.validator = new ResourceValidator({
-            attributes,
-            strictValidation,
-            allNestedObjectsOptional,
-            passphrase: this.passphrase,
-            bcryptRounds: this.bcryptRounds,
-            autoEncrypt,
-            autoDecrypt
-        });
-        // Fix: parse version to number for Schema
+        this._lazySchema = lazySchema;
+        this._schemaCompiled = false;
+        this._pendingSchemaConfig = null;
         const parsedVersion = parseInt(version.replace(/v/i, ''), 10) || 1;
         this._schemaRegistry = schemaRegistry;
         this._pluginSchemaRegistry = pluginSchemaRegistry;
-        this.schema = new Schema({
-            name,
-            attributes,
-            passphrase,
-            bcryptRounds,
-            version: parsedVersion,
-            options: {
+        if (lazySchema) {
+            this._pendingSchemaConfig = {
+                attributes,
+                passphrase: this.passphrase,
+                bcryptRounds: this.bcryptRounds,
+                version: parsedVersion,
                 allNestedObjectsOptional,
                 autoEncrypt,
+                autoDecrypt,
+                strictValidation
+            };
+            this.validator = null;
+            this.schema = null;
+            this.logger.debug({ resource: this.name }, `[LAZY_SCHEMA] Deferred schema/validator compilation`);
+        }
+        else {
+            this.validator = new ResourceValidator({
+                attributes,
+                strictValidation,
+                allNestedObjectsOptional,
+                passphrase: this.passphrase,
+                bcryptRounds: this.bcryptRounds,
+                autoEncrypt,
                 autoDecrypt
-            },
-            schemaRegistry: this._schemaRegistry,
-            pluginSchemaRegistry: this._pluginSchemaRegistry
-        });
-        this._schemaRegistry = this.schema.getSchemaRegistry() || this._schemaRegistry;
-        this._pluginSchemaRegistry = this.schema.getPluginSchemaRegistry() || this._pluginSchemaRegistry;
+            });
+            this.schema = new Schema({
+                name,
+                attributes,
+                passphrase,
+                bcryptRounds,
+                version: parsedVersion,
+                options: {
+                    allNestedObjectsOptional,
+                    autoEncrypt,
+                    autoDecrypt
+                },
+                schemaRegistry: this._schemaRegistry,
+                pluginSchemaRegistry: this._pluginSchemaRegistry
+            });
+            this._schemaRegistry = this.schema.getSchemaRegistry() || this._schemaRegistry;
+            this._pluginSchemaRegistry = this.schema.getPluginSchemaRegistry() || this._pluginSchemaRegistry;
+            this._schemaCompiled = true;
+        }
         const { database: _db, observers: _obs, client: _cli, ...cloneableConfig } = config;
         this.$schema = { ...cloneableConfig };
         this.$schema._createdAt = Date.now();
@@ -69158,6 +69194,53 @@ class Resource extends AsyncEventEmitter {
         this._idGenerator.initIncremental();
         this.idGenerator = this._idGenerator.getGenerator();
     }
+    _ensureSchemaCompiled() {
+        if (this._schemaCompiled)
+            return;
+        if (!this._pendingSchemaConfig) {
+            throw new ResourceError(`Resource '${this.name}' has lazy schema enabled but no pending config`, { resourceName: this.name });
+        }
+        const startTime = Date.now();
+        const cfg = this._pendingSchemaConfig;
+        this.validator = new ResourceValidator({
+            attributes: cfg.attributes,
+            strictValidation: cfg.strictValidation,
+            allNestedObjectsOptional: cfg.allNestedObjectsOptional,
+            passphrase: cfg.passphrase,
+            bcryptRounds: cfg.bcryptRounds,
+            autoEncrypt: cfg.autoEncrypt,
+            autoDecrypt: cfg.autoDecrypt
+        });
+        this.schema = new Schema({
+            name: this.name,
+            attributes: cfg.attributes,
+            passphrase: cfg.passphrase,
+            bcryptRounds: cfg.bcryptRounds,
+            version: cfg.version,
+            options: {
+                allNestedObjectsOptional: cfg.allNestedObjectsOptional,
+                autoEncrypt: cfg.autoEncrypt,
+                autoDecrypt: cfg.autoDecrypt
+            },
+            schemaRegistry: this._schemaRegistry,
+            pluginSchemaRegistry: this._pluginSchemaRegistry
+        });
+        this._schemaRegistry = this.schema.getSchemaRegistry() || this._schemaRegistry;
+        this._pluginSchemaRegistry = this.schema.getPluginSchemaRegistry() || this._pluginSchemaRegistry;
+        this._schemaCompiled = true;
+        this._pendingSchemaConfig = null;
+        const elapsed = Date.now() - startTime;
+        this.logger.debug({ resource: this.name, elapsedMs: elapsed }, `[LAZY_SCHEMA] Compiled on first use (${elapsed}ms)`);
+    }
+    prewarmSchema() {
+        if (this._schemaCompiled)
+            return;
+        this._ensureSchemaCompiled();
+        this.logger.debug({ resource: this.name }, `[LAZY_SCHEMA] Pre-warmed schema`);
+    }
+    isSchemaCompiled() {
+        return this._schemaCompiled;
+    }
     hasAsyncIdGenerator() {
         return this._idGenerator.isAsync();
     }
@@ -69165,6 +69248,7 @@ class Resource extends AsyncEventEmitter {
         return this._idGenerator.getType(customIdGenerator, idSize);
     }
     export() {
+        this._ensureSchemaCompiled();
         const exported = this.schema.export();
         exported.behavior = this.behavior;
         exported.timestamps = this.config.timestamps;
@@ -69178,6 +69262,9 @@ class Resource extends AsyncEventEmitter {
         return exported;
     }
     applyConfiguration({ map } = {}) {
+        if (!this._lazySchema) {
+            this._ensureSchemaCompiled();
+        }
         if (this.config.timestamps) {
             if (!this.attributes.createdAt) {
                 this.attributes.createdAt = 'string|optional';
@@ -69324,6 +69411,7 @@ class Resource extends AsyncEventEmitter {
         this._partitions.setupHooks(this._hooksModule);
     }
     async validate(data, options = {}) {
+        this._ensureSchemaCompiled();
         return this.validator.validate(data, options);
     }
     validatePartitions() {
@@ -69384,69 +69472,88 @@ class Resource extends AsyncEventEmitter {
         return this._eventsModule.emit(eventName, ...args);
     }
     async insert({ id, ...attributes }) {
+        this._ensureSchemaCompiled();
         return this._persistence.insert({ id, ...attributes });
     }
     async get(id) {
+        this._ensureSchemaCompiled();
         return this._persistence.get(id);
     }
     async getOrNull(id) {
+        this._ensureSchemaCompiled();
         return this._persistence.getOrNull(id);
     }
     async getOrThrow(id) {
+        this._ensureSchemaCompiled();
         return this._persistence.getOrThrow(id);
     }
     async exists(id) {
         return this._persistence.exists(id);
     }
     async update(id, attributes) {
+        this._ensureSchemaCompiled();
         return this._persistence.update(id, attributes);
     }
     async patch(id, fields, options = {}) {
+        this._ensureSchemaCompiled();
         return this._persistence.patch(id, fields, options);
     }
     async _patchViaCopyObject(id, fields, options = {}) {
+        this._ensureSchemaCompiled();
         return this._persistence._patchViaCopyObject(id, fields, options);
     }
     async replace(id, fullData, options = {}) {
+        this._ensureSchemaCompiled();
         return this._persistence.replace(id, fullData, options);
     }
     async updateConditional(id, attributes, options = {}) {
+        this._ensureSchemaCompiled();
         return this._persistence.updateConditional(id, attributes, options);
     }
     async delete(id) {
+        this._ensureSchemaCompiled();
         return this._persistence.delete(id);
     }
     async upsert({ id, ...attributes }) {
+        this._ensureSchemaCompiled();
         return this._persistence.upsert({ id, ...attributes });
     }
     async count({ partition = null, partitionValues = {} } = {}) {
         return this._query.count({ partition, partitionValues });
     }
     async insertMany(objects) {
+        this._ensureSchemaCompiled();
         return this._persistence.insertMany(objects);
     }
     async _executeBatchHelper(operations, options = {}) {
+        this._ensureSchemaCompiled();
         return this._persistence._executeBatchHelper(operations, options);
     }
     async deleteMany(ids) {
+        this._ensureSchemaCompiled();
         return this._persistence.deleteMany(ids);
     }
     async deleteAll() {
+        this._ensureSchemaCompiled();
         return this._persistence.deleteAll();
     }
     async deleteAllData() {
+        this._ensureSchemaCompiled();
         return this._persistence.deleteAllData();
     }
     async listIds({ partition = null, partitionValues = {}, limit, offset = 0 } = {}) {
         return this._query.listIds({ partition, partitionValues, limit, offset });
     }
     async list({ partition = null, partitionValues = {}, limit, offset = 0 } = {}) {
+        this._ensureSchemaCompiled();
         return this._query.list({ partition, partitionValues, limit, offset });
     }
     async listMain({ limit, offset = 0 }) {
+        this._ensureSchemaCompiled();
         return this._query.listMain({ limit, offset });
     }
     async listPartition({ partition, partitionValues, limit, offset = 0 }) {
+        this._ensureSchemaCompiled();
         return this._query.listPartition({ partition, partitionValues, limit, offset });
     }
     buildPartitionPrefix(partition, partitionDef, partitionValues) {
@@ -69471,12 +69578,15 @@ class Resource extends AsyncEventEmitter {
         return this._query.handleListError(error, { partition, partitionValues });
     }
     async getMany(ids) {
+        this._ensureSchemaCompiled();
         return this._query.getMany(ids);
     }
     async getAll() {
+        this._ensureSchemaCompiled();
         return this._query.getAll();
     }
     async page({ offset = 0, size = 100, partition = null, partitionValues = {}, skipCount = false } = {}) {
+        this._ensureSchemaCompiled();
         const result = await this._query.page({ offset, size, partition, partitionValues, skipCount });
         return result;
     }
@@ -69512,6 +69622,7 @@ class Resource extends AsyncEventEmitter {
         return versionPart ? versionPart.replace('v=', '') : null;
     }
     async getSchemaForVersion(version) {
+        this._ensureSchemaCompiled();
         return this.schema;
     }
     async createPartitionReferences(data) {
@@ -69521,6 +69632,7 @@ class Resource extends AsyncEventEmitter {
         return this._partitions.deleteReferences(data);
     }
     async query(filter = {}, { limit = 100, offset = 0, partition = null, partitionValues = {} } = {}) {
+        this._ensureSchemaCompiled();
         return this._query.query(filter, { limit, offset, partition, partitionValues });
     }
     async handlePartitionReferenceUpdates(oldData, newData) {
@@ -69536,6 +69648,7 @@ class Resource extends AsyncEventEmitter {
         return this._partitions.getFromPartition({ id, partitionName, partitionValues });
     }
     async createHistoricalVersion(id, data) {
+        this._ensureSchemaCompiled();
         const historicalKey = join$1(`resource=${this.name}`, `historical`, `id=${id}`);
         const historicalData = {
             ...data,
@@ -69580,6 +69693,7 @@ class Resource extends AsyncEventEmitter {
         return mappedData;
     }
     async composeFullObjectFromWrite({ id, metadata, body, behavior }) {
+        this._ensureSchemaCompiled();
         const behaviorFlags = {};
         if (metadata && metadata['$truncated'] === 'true') {
             behaviorFlags.$truncated = 'true';
@@ -69706,6 +69820,7 @@ class Resource extends AsyncEventEmitter {
         this._middleware.use(method, fn);
     }
     applyDefaults(data) {
+        this._ensureSchemaCompiled();
         return this.validator.applyDefaults(data);
     }
     async getSequenceValue(fieldName = 'id') {
@@ -69843,7 +69958,8 @@ class DatabaseResources {
             disableEvents: config.disableEvents !== undefined ? config.disableEvents : db.disableResourceEvents,
             createdBy: config.createdBy || 'user',
             api: config.api,
-            description: config.description
+            description: config.description,
+            lazySchema: config.lazySchema
         });
         resource.database = db;
         db._resourcesMap[name] = resource;
@@ -70506,6 +70622,32 @@ class Database extends SafeEventEmitter {
     }
     resourceExistsWithSameHash(params) {
         return this._resourcesModule.resourceExistsWithSameHash(params);
+    }
+    prewarmResources(resourceNames) {
+        const warmed = [];
+        const skipped = [];
+        const alreadyCompiled = [];
+        const resources = resourceNames
+            ? resourceNames.map(name => this._resourcesMap[name]).filter(Boolean)
+            : Object.values(this._resourcesMap);
+        for (const resource of resources) {
+            if (!resource)
+                continue;
+            if (resource.isSchemaCompiled()) {
+                alreadyCompiled.push(resource.name);
+                continue;
+            }
+            try {
+                resource.prewarmSchema();
+                warmed.push(resource.name);
+            }
+            catch (err) {
+                skipped.push(resource.name);
+                this.logger.warn({ resource: resource.name, err }, `[PREWARM] Failed to prewarm resource schema`);
+            }
+        }
+        this.logger.debug({ warmed: warmed.length, skipped: skipped.length, alreadyCompiled: alreadyCompiled.length }, `[PREWARM] Resources prewarmed`);
+        return { warmed, skipped, alreadyCompiled };
     }
     async uploadMetadataFile() {
         return this._metadataModule.uploadMetadataFile();

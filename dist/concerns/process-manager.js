@@ -9,6 +9,8 @@ export class ProcessManager {
     isShuttingDown;
     shutdownPromise;
     _boundSignalHandler;
+    _boundUncaughtHandler;
+    _boundUnhandledHandler;
     _signalHandlersSetup;
     constructor(options = {}) {
         this.options = {
@@ -30,6 +32,8 @@ export class ProcessManager {
         this.shutdownPromise = null;
         this._signalHandlersSetup = false;
         this._boundSignalHandler = this._handleSignal.bind(this);
+        this._boundUncaughtHandler = null;
+        this._boundUnhandledHandler = null;
         this._setupSignalHandlers();
         this.logger.debug({ shutdownTimeout: this.options.shutdownTimeout }, 'ProcessManager initialized');
     }
@@ -121,17 +125,19 @@ export class ProcessManager {
     _setupSignalHandlers() {
         if (this._signalHandlersSetup)
             return;
+        this._boundUncaughtHandler = (err) => {
+            this.logger.error({ error: err.message, stack: err.stack }, 'uncaught exception');
+            this._handleSignal('uncaughtException');
+        };
+        this._boundUnhandledHandler = (reason, promise) => {
+            this.logger.error({ reason, promise: String(promise) }, 'unhandled rejection');
+            this._handleSignal('unhandledRejection');
+        };
         bumpProcessMaxListeners(4);
         process.on('SIGTERM', this._boundSignalHandler);
         process.on('SIGINT', this._boundSignalHandler);
-        process.on('uncaughtException', (err) => {
-            this.logger.error({ error: err.message, stack: err.stack }, 'uncaught exception');
-            this._handleSignal('uncaughtException');
-        });
-        process.on('unhandledRejection', (reason, promise) => {
-            this.logger.error({ reason, promise: String(promise) }, 'unhandled rejection');
-            this._handleSignal('unhandledRejection');
-        });
+        process.on('uncaughtException', this._boundUncaughtHandler);
+        process.on('unhandledRejection', this._boundUnhandledHandler);
         this._signalHandlersSetup = true;
         this.logger.debug('signal handlers registered (SIGTERM, SIGINT, uncaughtException, unhandledRejection)');
     }
@@ -224,6 +230,14 @@ export class ProcessManager {
             return;
         process.removeListener('SIGTERM', this._boundSignalHandler);
         process.removeListener('SIGINT', this._boundSignalHandler);
+        if (this._boundUncaughtHandler) {
+            process.removeListener('uncaughtException', this._boundUncaughtHandler);
+            this._boundUncaughtHandler = null;
+        }
+        if (this._boundUnhandledHandler) {
+            process.removeListener('unhandledRejection', this._boundUnhandledHandler);
+            this._boundUnhandledHandler = null;
+        }
         this._signalHandlersSetup = false;
         bumpProcessMaxListeners(-4);
         this.logger.debug('signal handlers removed');

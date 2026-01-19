@@ -48,6 +48,7 @@ export interface CreateResourceConfig {
     allNestedObjectsOptional?: boolean;
     api?: ResourceApiConfig;
     description?: string;
+    lazySchema?: boolean;
 }
 export interface HashExistsResult {
     exists: boolean;

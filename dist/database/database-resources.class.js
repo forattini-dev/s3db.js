@@ -108,7 +108,8 @@ export class DatabaseResources {
             disableEvents: config.disableEvents !== undefined ? config.disableEvents : db.disableResourceEvents,
             createdBy: config.createdBy || 'user',
             api: config.api,
-            description: config.description
+            description: config.description,
+            lazySchema: config.lazySchema
         });
         resource.database = db;
         db._resourcesMap[name] = resource;

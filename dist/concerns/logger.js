@@ -54,7 +54,7 @@ function createDefaultTransport() {
     return createPrettyTransport();
 }
 export function createLogger(options = {}) {
-    const { level = 'info', name, format, transport, bindings = {}, redactPatterns = [], maxPayloadBytes = 1_000_000 } = options;
+    const { level = 'info', name, format, transport, bindings = {}, redactPatterns = [] } = options;
     const redactRules = createRedactRules(redactPatterns);
     const normalizedBindings = bindings && typeof bindings === 'object' ? bindings : {};
     const useSharedDestination = !transport && format !== 'json';
@@ -87,7 +87,6 @@ export function createLogger(options = {}) {
     if (baseBindings && Object.keys(baseBindings).length > 0) {
         logger = logger.child(baseBindings);
     }
-    logger._maxPayloadBytes = maxPayloadBytes;
     return logger;
 }
 export function getLogger(name, options = {}) {

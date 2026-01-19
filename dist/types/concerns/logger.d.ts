@@ -8,10 +8,8 @@ export interface LoggerOptions {
     transport?: TransportSingleOptions;
     bindings?: Record<string, unknown>;
     redactPatterns?: RegExp[];
-    maxPayloadBytes?: number;
 }
 export interface S3DBLogger extends PinoLogger {
-    _maxPayloadBytes?: number;
 }
 export type Logger = S3DBLogger;
 export declare function createLogger(options?: LoggerOptions): S3DBLogger;
