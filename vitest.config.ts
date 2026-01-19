@@ -14,7 +14,13 @@ const maxThreads = isCI ? 2 : Math.min(4, Math.max(1, Math.floor(cpuCount / 2)))
 const coreExclusions = [
   'node_modules/**',
   'tests/core/performance/**',
-  'tests/core/functions/**',
+  // Heavy function tests that use databases (pure unit tests are included)
+  'tests/core/functions/binary-efficiency.test.ts',
+  'tests/core/functions/bits-performance.test.ts',
+  'tests/core/functions/encoding-efficiency.test.ts',
+  'tests/core/functions/metadata-encoding-exhaustive.test.ts',
+  'tests/core/functions/replicators.test.ts',
+  'tests/core/functions/special-characters.test.ts',
   'tests/core/integration/all-types-exhaustive.test.ts', // Too memory-intensive for CI
 ];
 

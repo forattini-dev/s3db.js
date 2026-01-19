@@ -108,7 +108,7 @@ describe('Resource - Password Type with bcrypt hashing', () => {
   test('should handle different bcrypt rounds', async () => {
     // Create database with different bcrypt rounds
     const dbWithHigherRounds = createDatabaseForTest('suite=resources/password-type-rounds', {
-      bcryptRounds: 12
+      bcryptRounds: 4 // Low rounds for fast tests
     });
 
     const resource = await dbWithHigherRounds.createResource({
@@ -194,7 +194,7 @@ describe('Resource - Password Type with bcrypt hashing', () => {
   test('should differentiate between password and secret types', async () => {
     // Create database with passphrase for secret type and autoDecrypt disabled
     const dbWithPassphrase = createDatabaseForTest('suite=resources/password-secret-types', {
-      bcryptRounds: 10,
+      bcryptRounds: 4, // Low rounds for fast tests
       passphrase: 'test-encryption-key'
     });
 
