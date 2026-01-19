@@ -15,13 +15,30 @@ describe('bumpProcessMaxListeners', () => {
     expect(setSpy).toHaveBeenCalledWith(13);
   });
 
-  it('does nothing when additionalListeners is zero or negative', () => {
+  it('does nothing when additionalListeners is zero', () => {
     const setSpy = vi.spyOn(process, 'setMaxListeners').mockImplementation(() => process);
 
     bumpProcessMaxListeners(0);
-    bumpProcessMaxListeners(-2);
 
     expect(setSpy).not.toHaveBeenCalled();
+  });
+
+  it('decrements the process max listeners when negative', () => {
+    vi.spyOn(process, 'getMaxListeners').mockReturnValue(10);
+    const setSpy = vi.spyOn(process, 'setMaxListeners').mockImplementation(() => process);
+
+    bumpProcessMaxListeners(-2);
+
+    expect(setSpy).toHaveBeenCalledWith(8);
+  });
+
+  it('does not go below zero when decrementing', () => {
+    vi.spyOn(process, 'getMaxListeners').mockReturnValue(3);
+    const setSpy = vi.spyOn(process, 'setMaxListeners').mockImplementation(() => process);
+
+    bumpProcessMaxListeners(-10);
+
+    expect(setSpy).toHaveBeenCalledWith(0);
   });
 
   it('does nothing when process max listeners is unlimited', () => {
