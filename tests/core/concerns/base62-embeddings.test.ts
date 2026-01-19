@@ -1,5 +1,8 @@
 import { encodeDecimal, decodeDecimal, encodeFixedPoint, decodeFixedPoint, encodeFixedPointBatch, decodeFixedPointBatch } from '../../../src/concerns/base62.js';
 
+// Shared test embedding - created once, reused in tests
+const TEST_EMBEDDING_1536 = Array.from({ length: 1536 }, (_, i) => ((i / 1536) * 2 - 1) * 0.9);
+
 /**
  * Tests and analysis for embedding value encoding
  *
@@ -36,12 +39,7 @@ describe('Base62 Decimal Encoding - Embedding Analysis', () => {
     });
 
     test('should measure size of 1536-dim embedding with current encoding', () => {
-      // Typical embedding: values between -1 and 1
-      const embedding = Array.from({ length: 1536 }, () =>
-        (Math.random() * 2 - 1) * 0.9 // -0.9 to 0.9
-      );
-
-      const encoded = embedding.map(v => encodeDecimal(v));
+      const encoded = TEST_EMBEDDING_1536.map(v => encodeDecimal(v));
       const totalBytes = encoded.reduce((sum, s) => sum + s.length, 0);
       const avgBytesPerValue = totalBytes / 1536;
 
@@ -136,14 +134,10 @@ describe('Base62 Decimal Encoding - Embedding Analysis', () => {
     });
 
     test('should measure 1536-dim embedding size with fixed-point encoding', () => {
-      const embedding = Array.from({ length: 1536 }, () =>
-        (Math.random() * 2 - 1) * 0.9
-      );
-
-      const currentEncoded = embedding.map(v => encodeDecimal(v));
+      const currentEncoded = TEST_EMBEDDING_1536.map(v => encodeDecimal(v));
       const currentBytes = currentEncoded.reduce((sum, s) => sum + s.length, 0);
 
-      const fixedEncoded = embedding.map(v => encodeFixedPoint(v));
+      const fixedEncoded = TEST_EMBEDDING_1536.map(v => encodeFixedPoint(v));
       const fixedBytes = fixedEncoded.reduce((sum, s) => sum + s.length, 0);
 
       const savings = currentBytes - fixedBytes;
@@ -152,7 +146,7 @@ describe('Base62 Decimal Encoding - Embedding Analysis', () => {
 
       // Verify accuracy
       const decoded = fixedEncoded.map(s => decodeFixedPoint(s));
-      embedding.forEach((original, i) => {
+      TEST_EMBEDDING_1536.forEach((original, i) => {
         expect(decoded[i]).toBeCloseTo(original, 5);
       });
 
@@ -234,16 +228,12 @@ describe('Base62 Decimal Encoding - Embedding Analysis', () => {
     });
 
     test('should compare batch vs individual encoding size', () => {
-      const embedding = Array.from({ length: 1536 }, () =>
-        (Math.random() * 2 - 1) * 0.9
-      );
-
       // Individual encoding (old way)
-      const individualEncoded = embedding.map(v => encodeFixedPoint(v, 6));
+      const individualEncoded = TEST_EMBEDDING_1536.map(v => encodeFixedPoint(v, 6));
       const individualSize = individualEncoded.join(',').length;
 
       // Batch encoding (new way)
-      const batchEncoded = encodeFixedPointBatch(embedding, 6);
+      const batchEncoded = encodeFixedPointBatch(TEST_EMBEDDING_1536, 6);
       const batchSize = batchEncoded.length;
 
       const savings = individualSize - batchSize;
