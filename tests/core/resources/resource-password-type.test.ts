@@ -7,7 +7,7 @@ describe('Resource - Password Type with bcrypt hashing', () => {
 
   beforeEach(async () => {
     database = createDatabaseForTest('suite=resources/password-type', {
-      bcryptRounds: 10
+      bcryptRounds: 4 // Low rounds for fast tests
     });
 
     usersResource = await database.createResource({
@@ -22,6 +22,12 @@ describe('Resource - Password Type with bcrypt hashing', () => {
     try {
       await usersResource.deleteAll({ paranoid: false });
     } catch (error) {}
+  });
+
+  afterEach(async () => {
+    if (database) {
+      await database.disconnect();
+    }
   });
 
   test('should auto-hash password on insert with compacted bcrypt (60→53 bytes)', async () => {
