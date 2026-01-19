@@ -148,24 +148,26 @@ describe('tryFn', () => {
     expect(result[2]).toBeUndefined();
   });
 
-  // New tests to cover missing lines related to error stack handling
-  it('should handle error without stack property in sync function', () => {
+  // Non-Error objects are wrapped in Error with String(obj) as message
+  it('should wrap non-Error object in Error for sync function', () => {
     const customError = { message: 'custom error', name: 'CustomError' };
     Object.preventExtensions(customError); // Make it non-extensible
-    
+
     const [ok, err, data] = tryFn(() => { throw customError; });
     expect(ok).toBe(false);
-    expect(err).toBe(customError);
+    expect(err).toBeInstanceOf(Error);
+    expect(err.message).toBe('[object Object]');
     expect(data).toBeUndefined();
   });
 
-  it('should handle error without stack property in async function', async () => {
+  it('should wrap non-Error object in Error for async function', async () => {
     const customError = { message: 'custom async error', name: 'CustomAsyncError' };
     Object.preventExtensions(customError); // Make it non-extensible
-    
+
     const result = await tryFn(() => Promise.reject(customError));
     expect(result[0]).toBe(false);
-    expect(result[1]).toBe(customError);
+    expect(result[1]).toBeInstanceOf(Error);
+    expect(result[1].message).toBe('[object Object]');
     expect(result[2]).toBeUndefined();
   });
 
