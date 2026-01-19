@@ -121,6 +121,8 @@ jobs:
       - name: Run ${{ matrix.suite.name }} Tests
         run: pnpm vitest run ${{ matrix.suite.path }} --reporter=verbose ${{ matrix.suite.flags }}
         timeout-minutes: ${{ matrix.suite.timeout }}
+        env:
+          NODE_OPTIONS: '--max-old-space-size=4096'
 
   # ============================================
   # Stage 3: Quality Gate (waits for all tests)
