@@ -67,13 +67,8 @@ export default defineConfig({
     retry: isCI ? 2 : 0,
 
     pool: 'forks',
-    poolOptions: {
-      forks: {
-        singleFork: false,
-        isolate: true,
-        execArgv: ['--max-old-space-size=4096'],
-      },
-    },
+    isolate: true,
+    fileParallelism: true,
 
     environment: 'node',
     setupFiles: ['./tests/vitest.setup.ts'],

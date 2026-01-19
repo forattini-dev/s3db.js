@@ -134,6 +134,8 @@ describe('Resource - Password Type with bcrypt hashing', () => {
 
     // Note: verifyPassword() with bcrypt.compare() works regardless of rounds
     // The rounds are encoded in the hash itself, so verification is automatic
+
+    await dbWithHigherRounds.disconnect();
   });
 
   test('should work with multiple password fields', async () => {
@@ -231,6 +233,8 @@ describe('Resource - Password Type with bcrypt hashing', () => {
 
     // Secret type cannot be verified like password (it's reversibly encrypted)
     // To verify a secret, you'd need to decrypt it first
+
+    await dbWithPassphrase.disconnect();
   });
 
   test('should work with body-overflow behavior', async () => {
