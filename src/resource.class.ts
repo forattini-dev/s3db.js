@@ -675,7 +675,7 @@ export class Resource extends AsyncEventEmitter implements Disposable {
         name: this.name,
         attributes: this._pendingSchemaConfig.attributes,
         version: this._pendingSchemaConfig.version
-      } as ResourceExport;
+      } as unknown as ResourceExport;
     } else {
       this._ensureSchemaCompiled();
       exported = this.schema.export() as unknown as ResourceExport;
