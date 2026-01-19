@@ -24,6 +24,7 @@ const coreExclusions = [
   'tests/core/functions/special-characters.test.ts',
   'tests/core/integration/all-types-exhaustive.test.ts', // Too memory-intensive for CI
   'tests/core/resources/resource-password-type.test.ts', // bcrypt worker threads don't terminate in CI
+  'tests/core/lazy-schema.test.ts', // OOM in CI - lazy schema creates too many validators/schemas
 ];
 
 const pluginExclusions = [
