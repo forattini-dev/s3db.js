@@ -213,11 +213,12 @@ describe('tryFn', () => {
     expect(data).toBeUndefined();
   });
 
-  it('should handle non-Error objects being thrown', () => {
+  it('should wrap string errors in Error', () => {
     const stringError = 'This is a string error';
     const [ok, err, data] = tryFn(() => { throw stringError; });
     expect(ok).toBe(false);
-    expect(err).toBe(stringError);
+    expect(err).toBeInstanceOf(Error);
+    expect(err.message).toBe(stringError);
     expect(data).toBeUndefined();
   });
 
@@ -225,10 +226,12 @@ describe('tryFn', () => {
     const errorWithoutHasOwnProperty = Object.create(null);
     errorWithoutHasOwnProperty.message = 'error without hasOwnProperty';
     errorWithoutHasOwnProperty.stack = 'original stack';
-    
+    errorWithoutHasOwnProperty.toString = () => 'null proto error';
+
     const [ok, err, data] = tryFn(() => { throw errorWithoutHasOwnProperty; });
     expect(ok).toBe(false);
-    expect(err).toBe(errorWithoutHasOwnProperty);
+    expect(err).toBeInstanceOf(Error);
+    expect(err.message).toBe('null proto error');
     expect(data).toBeUndefined();
   });
 }); 
