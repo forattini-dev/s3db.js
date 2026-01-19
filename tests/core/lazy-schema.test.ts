@@ -1,12 +1,19 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { Database } from '../../src/database.class.js';
+import { randomBytes } from 'crypto';
+import { rm, mkdir } from 'fs/promises';
+import { join } from 'path';
+import { tmpdir } from 'os';
 
 describe('Lazy Schema (v19.3+)', () => {
   let db: Database;
+  let testDir: string;
 
   beforeEach(async () => {
+    testDir = join(tmpdir(), `s3db-lazy-schema-${randomBytes(4).toString('hex')}`);
+    await mkdir(testDir, { recursive: true });
     db = new Database({
-      connectionString: 'memory://test/lazy-schema',
+      connectionString: `file://${testDir}`,
       logLevel: 'silent'
     });
     await db.connect();
@@ -14,6 +21,7 @@ describe('Lazy Schema (v19.3+)', () => {
 
   afterEach(async () => {
     await db.disconnect();
+    await rm(testDir, { recursive: true, force: true }).catch(() => {});
   });
 
   describe('Resource Creation', () => {
