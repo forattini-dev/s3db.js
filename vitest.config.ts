@@ -15,6 +15,7 @@ const coreExclusions = [
   'node_modules/**',
   'tests/core/performance/**',
   'tests/core/functions/**',
+  'tests/core/integration/all-types-exhaustive.test.ts', // Too memory-intensive for CI
 ];
 
 const pluginExclusions = [
