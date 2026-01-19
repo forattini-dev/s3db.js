@@ -65,10 +65,9 @@ export default defineConfig({
     // Retry flaky tests (especially server startup tests)
     retry: isCI ? 2 : 0,
 
-    pool: 'forks',
+    pool: 'threads',
     isolate: true,
     maxWorkers: maxThreads,
-    execArgv: ['--max-old-space-size=4096'],
 
     environment: 'node',
     setupFiles: ['./tests/vitest.setup.ts'],
