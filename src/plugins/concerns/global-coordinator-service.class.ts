@@ -29,6 +29,7 @@ export interface GlobalCoordinatorConfig {
   circuitBreaker?: CircuitBreakerConfig;
   contention?: ContentionConfig;
   metricsBufferSize?: number;
+  stateCacheTtl?: number;
 }
 
 export interface GlobalCoordinatorOptions {
@@ -142,6 +143,7 @@ export interface NormalizedConfig {
   contentionThreshold: number;
   contentionRateLimitMs: number;
   metricsBufferSize: number;
+  stateCacheTtl: number;
 }
 
 export interface ElectionResult {
@@ -172,6 +174,12 @@ export class GlobalCoordinatorService extends EventEmitter {
   protected _circuitBreaker: CircuitBreakerInternalState;
   protected _contentionState: ContentionState;
   protected _latencyBuffer: LatencyBuffer;
+  protected _heartbeatStartedAt: number;
+  protected _heartbeatMutexTimeoutMs: number;
+
+  protected _cachedState: LeaderState | null;
+  protected _stateCacheTime: number;
+  protected _stateCacheTtl: number;
 
   storage: CoordinatorPluginStorage | null;
   protected _pluginStorage: CoordinatorPluginStorage | null;
@@ -241,6 +249,12 @@ export class GlobalCoordinatorService extends EventEmitter {
 
     this.storage = null;
     this._pluginStorage = null;
+    this._heartbeatStartedAt = 0;
+    this._heartbeatMutexTimeoutMs = (this.config.heartbeatInterval + this.config.heartbeatJitter) * 2;
+
+    this._cachedState = null;
+    this._stateCacheTime = 0;
+    this._stateCacheTtl = this.config.stateCacheTtl;
 
     this.logger = database.getChildLogger(`GlobalCoordinator:${namespace}`);
   }
@@ -328,13 +342,8 @@ export class GlobalCoordinatorService extends EventEmitter {
     this.subscribedPlugins.set(pluginName, plugin);
     this._log(`Plugin subscribed: ${pluginName}`);
 
-    if (this.isRunning && plugin.workerId && this.storage) {
-      this.logger.debug({ namespace: this.namespace, pluginName, workerId: plugin.workerId?.substring(0, 30) }, `[SUBSCRIBE] registering worker entry`);
-      const regStart = Date.now();
-      await this._registerWorkerEntry(plugin.workerId, pluginName);
-      this.logger.debug({ namespace: this.namespace, pluginName, ms: Date.now() - regStart }, `[SUBSCRIBE] worker entry registered`);
-
-      this.logger.debug({ namespace: this.namespace, pluginName }, `[SUBSCRIBE] triggering background heartbeat (fire-and-forget)`);
+    if (this.isRunning && this.storage) {
+      this.logger.debug({ namespace: this.namespace, pluginName }, `[SUBSCRIBE] triggering background heartbeat`);
       this._heartbeatCycle().catch(err => {
         this._logError('Background heartbeat after plugin subscription failed', err as Error);
       });
@@ -388,11 +397,25 @@ export class GlobalCoordinatorService extends EventEmitter {
   protected async _heartbeatCycle(): Promise<void> {
     if (!this.isRunning || !this.storage) return;
 
+    const now = Date.now();
+    const mutexExpired = this._heartbeatStartedAt > 0 &&
+      (now - this._heartbeatStartedAt) > this._heartbeatMutexTimeoutMs;
+
+    if (this._heartbeatStartedAt > 0 && !mutexExpired) {
+      this.logger.debug({ namespace: this.namespace, elapsedMs: now - this._heartbeatStartedAt }, `[HEARTBEAT] SKIPPED - already in progress`);
+      return;
+    }
+
+    if (mutexExpired) {
+      this.logger.warn({ namespace: this.namespace, elapsedMs: now - this._heartbeatStartedAt }, `[HEARTBEAT] Previous heartbeat timed out, forcing mutex release`);
+    }
+
     if (!this._circuitBreakerAllows()) {
       this.logger.debug({ namespace: this.namespace }, `[HEARTBEAT] SKIPPED - circuit breaker open`);
       return;
     }
 
+    this._heartbeatStartedAt = now;
     try {
       const startMs = Date.now();
       this.logger.debug({ namespace: this.namespace }, `[HEARTBEAT] START`);
@@ -469,6 +492,8 @@ export class GlobalCoordinatorService extends EventEmitter {
     } catch (err) {
       this._circuitBreakerFailure();
       this._logError('Heartbeat cycle failed', err as Error);
+    } finally {
+      this._heartbeatStartedAt = 0;
     }
   }
 
@@ -562,6 +587,7 @@ export class GlobalCoordinatorService extends EventEmitter {
         return { leaderId: null, epoch: previousEpoch };
       }
 
+      this._invalidateStateCache();
       this._log(`Leader elected: ${elected}`);
       return { leaderId: elected, epoch };
 
@@ -577,13 +603,22 @@ export class GlobalCoordinatorService extends EventEmitter {
     const regStart = Date.now();
     this.logger.debug({ namespace: this.namespace, subscribedCount: this.subscribedPlugins.size }, `[REGISTER_WORKER] START`);
 
-    const registrations: Promise<void>[] = [
-      this._registerWorkerEntry(this.workerId)
-    ];
+    const registeredIds = new Set<string>();
+    const registrations: Promise<void>[] = [];
+    let deduped = 0;
+
+    registrations.push(this._registerWorkerEntry(this.workerId));
+    registeredIds.add(this.workerId);
 
     for (const [pluginName, plugin] of this.subscribedPlugins.entries()) {
       if (plugin && plugin.workerId) {
+        if (registeredIds.has(plugin.workerId)) {
+          this.logger.debug({ namespace: this.namespace, pluginName, workerId: plugin.workerId.substring(0, 30) }, `[REGISTER_WORKER] deduped workerId`);
+          deduped++;
+          continue;
+        }
         registrations.push(this._registerWorkerEntry(plugin.workerId, pluginName));
+        registeredIds.add(plugin.workerId);
       }
     }
 
@@ -591,9 +626,9 @@ export class GlobalCoordinatorService extends EventEmitter {
 
     const totalMs = Date.now() - regStart;
     if (totalMs > 50) {
-      this.logger.warn({ namespace: this.namespace, totalMs, count: registrations.length }, `[PERF] SLOW _registerWorker`);
+      this.logger.warn({ namespace: this.namespace, totalMs, uniqueWorkers: registrations.length, deduped }, `[PERF] SLOW _registerWorker`);
     } else {
-      this.logger.debug({ namespace: this.namespace, totalMs, count: registrations.length }, `[REGISTER_WORKER] complete`);
+      this.logger.debug({ namespace: this.namespace, totalMs, uniqueWorkers: registrations.length, deduped }, `[REGISTER_WORKER] complete`);
     }
   }
 
@@ -656,6 +691,12 @@ export class GlobalCoordinatorService extends EventEmitter {
   protected async _getState(): Promise<LeaderState | null> {
     if (!this.storage) return null;
 
+    const now = Date.now();
+    if (this._stateCacheTtl > 0 && this._cachedState && (now - this._stateCacheTime) < this._stateCacheTtl) {
+      this.logger.debug({ namespace: this.namespace, cacheAge: now - this._stateCacheTime }, `[STATE_CACHE] HIT`);
+      return this._cachedState;
+    }
+
     const [ok, , data] = await tryFn(() =>
       this.storage!.get(this._getStateKey())
     );
@@ -664,7 +705,18 @@ export class GlobalCoordinatorService extends EventEmitter {
       return null;
     }
 
+    if (this._stateCacheTtl > 0) {
+      this._cachedState = data as LeaderState | null;
+      this._stateCacheTime = now;
+      this.logger.debug({ namespace: this.namespace }, `[STATE_CACHE] MISS - cached`);
+    }
+
     return data as LeaderState | null;
+  }
+
+  protected _invalidateStateCache(): void {
+    this._cachedState = null;
+    this._stateCacheTime = 0;
   }
 
   protected async _initializeMetadata(): Promise<void> {
@@ -864,7 +916,8 @@ export class GlobalCoordinatorService extends EventEmitter {
       contentionEnabled: config.contention?.enabled ?? true,
       contentionThreshold: config.contention?.threshold ?? 2.0,
       contentionRateLimitMs: config.contention?.rateLimitMs ?? 30000,
-      metricsBufferSize: Math.max(10, config.metricsBufferSize ?? 100)
+      metricsBufferSize: Math.max(10, config.metricsBufferSize ?? 100),
+      stateCacheTtl: Math.max(0, config.stateCacheTtl ?? 2000)
     };
   }
 

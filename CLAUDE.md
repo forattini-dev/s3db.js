@@ -439,6 +439,118 @@ await sitemap.parse('https://example.com/sitemap.xml');
 - **Security**: `secret` fields auto-encrypted, credentials need URL encoding
 - **patch()**: Falls back to update() for body behaviors
 
+## Performance Tuning
+
+### Multi-Plugin Optimization
+
+When using multiple coordinator plugins (TTL, S3Queue, Scheduler), configure shared coordination:
+
+```javascript
+const db = new Database({
+  connectionString: 's3://...',
+  plugins: [TTLPlugin, S3QueuePlugin, SchedulerPlugin]
+});
+
+// All plugins share one GlobalCoordinatorService per namespace
+const coordinator = await db.getGlobalCoordinator('default');
+```
+
+**Tuning Options:**
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `heartbeatInterval` | 10000ms | Time between heartbeat cycles |
+| `heartbeatJitter` | 2000ms | Random delay to prevent thundering herd |
+| `stateCacheTtl` | 2000ms | Cache state to reduce S3 GETs |
+
+**Lazy Schema (v19.3+):**
+
+```javascript
+// Defer schema compilation until first CRUD operation
+const resource = await db.createResource({
+  name: 'users',
+  attributes: { name: 'string' },
+  lazySchema: true  // Schema compiled on first insert/get/query
+});
+
+// Explicit pre-warming for predictable latency
+db.prewarmResources(['users', 'orders']);
+```
+
+## Troubleshooting
+
+### MaxListenersExceededWarning
+
+**Symptom:** `MaxListenersExceededWarning: Possible EventEmitter memory leak detected`
+
+**Cause:** Multiple resources/plugins registering process signal handlers without cleanup.
+
+**Solutions:**
+
+1. **Ensure proper disconnect:**
+```javascript
+await db.disconnect();  // Cleans up all listeners
+```
+
+2. **For tests with many resources:**
+```javascript
+// Each resource with autoCleanup adds 3 listeners (SIGTERM, SIGINT, beforeExit)
+// Disable if not needed:
+const emitter = new SafeEventEmitter({ autoCleanup: false });
+```
+
+3. **Verify listener balance:**
+```javascript
+// After full connect/disconnect cycle, maxListeners should return to initial value
+const initial = process.getMaxListeners();
+await db.connect();
+await db.disconnect();
+console.log(process.getMaxListeners() === initial); // should be true
+```
+
+**Fixed in v19.3+:**
+- SafeEventEmitter properly decrements in both `destroy()` and `removeSignalHandlers()`
+- ApiServer tracks and removes signal handlers in `stop()`
+- DatabaseConnection decrements on disconnect
+- ProcessManager and CronManager decrement on cleanup
+
+### Heartbeat Mutex Stall
+
+**Symptom:** Coordinator plugins stop responding, no leader election.
+
+**Cause:** S3 call hanging during heartbeat cycle.
+
+**Solution (v19.3+):** Automatic mutex timeout recovery:
+```javascript
+// Mutex auto-expires after 2x (heartbeatInterval + jitter)
+// Default: 2x (10000 + 2000) = 24000ms
+// Warning logged when timeout occurs
+```
+
+### Excessive S3 API Calls
+
+**Symptom:** High S3 costs, throttling errors.
+
+**Causes & Solutions:**
+
+1. **Worker deduplication (v19.3+):**
+   - Plugins sharing same workerId only register once per heartbeat
+   - Single PUT per unique workerId instead of N+1
+
+2. **State caching:**
+```javascript
+// Reduce GETs by caching coordinator state
+const coordinator = new GlobalCoordinatorService({
+  config: { stateCacheTtl: 5000 }  // Cache for 5s
+});
+```
+
+3. **Heartbeat interval tuning:**
+```javascript
+// Increase interval for less critical plugins
+config: { heartbeatInterval: 30000 }  // 30s instead of 10s
+```
+
 ## Documentation
 
 - **Plugin Docs Standard:** `docs/plugin-docs-standard.md`

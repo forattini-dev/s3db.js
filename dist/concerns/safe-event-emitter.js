@@ -96,11 +96,12 @@ export class SafeEventEmitter extends EventEmitter {
         const totalListeners = this.getTotalListenerCount();
         this.logger.debug({ totalListeners }, `Destroying emitter (${totalListeners} listeners)...`);
         this.removeAllListeners();
-        if (this._boundCleanupHandler) {
+        if (this._boundCleanupHandler && this._signalHandlersSetup) {
             process.removeListener('SIGTERM', this._boundCleanupHandler);
             process.removeListener('SIGINT', this._boundCleanupHandler);
             process.removeListener('beforeExit', this._boundCleanupHandler);
             this._signalHandlersSetup = false;
+            bumpProcessMaxListeners(-3);
         }
         this._isDestroyed = true;
         this.logger.debug('Destroyed');
@@ -109,11 +110,12 @@ export class SafeEventEmitter extends EventEmitter {
         return this._isDestroyed;
     }
     removeSignalHandlers() {
-        if (this._boundCleanupHandler) {
+        if (this._boundCleanupHandler && this._signalHandlersSetup) {
             process.removeListener('SIGTERM', this._boundCleanupHandler);
             process.removeListener('SIGINT', this._boundCleanupHandler);
             process.removeListener('beforeExit', this._boundCleanupHandler);
             this._signalHandlersSetup = false;
+            bumpProcessMaxListeners(-3);
             this.logger.debug('Signal handlers removed');
         }
     }

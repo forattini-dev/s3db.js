@@ -185,6 +185,9 @@ export declare class ApiServer {
     private swaggerUI;
     private cors;
     private ApiApp;
+    private _signalHandlersSetup;
+    private _boundSigtermHandler;
+    private _boundSigintHandler;
     constructor(options?: ApiServerOptions);
     start(): Promise<void>;
     stop(): Promise<void>;

@@ -43,6 +43,9 @@ export class ApiServer {
     swaggerUI = null;
     cors = null;
     ApiApp = null;
+    _signalHandlersSetup = false;
+    _boundSigtermHandler = null;
+    _boundSigintHandler = null;
     constructor(options = {}) {
         this.options = {
             port: options.port || 3000,
@@ -305,9 +308,14 @@ export class ApiServer {
                             process.exit(1);
                         }
                     };
-                    bumpProcessMaxListeners(2);
-                    process.once('SIGTERM', () => shutdownHandler('SIGTERM'));
-                    process.once('SIGINT', () => shutdownHandler('SIGINT'));
+                    if (!this._signalHandlersSetup) {
+                        this._boundSigtermHandler = () => shutdownHandler('SIGTERM');
+                        this._boundSigintHandler = () => shutdownHandler('SIGINT');
+                        bumpProcessMaxListeners(2);
+                        process.once('SIGTERM', this._boundSigtermHandler);
+                        process.once('SIGINT', this._boundSigintHandler);
+                        this._signalHandlersSetup = true;
+                    }
                     resolve();
                 });
             }
@@ -348,6 +356,18 @@ export class ApiServer {
         }
         if (this.oidcMiddleware && typeof this.oidcMiddleware.destroy === 'function') {
             this.oidcMiddleware.destroy();
+        }
+        if (this._signalHandlersSetup) {
+            if (this._boundSigtermHandler) {
+                process.removeListener('SIGTERM', this._boundSigtermHandler);
+                this._boundSigtermHandler = null;
+            }
+            if (this._boundSigintHandler) {
+                process.removeListener('SIGINT', this._boundSigintHandler);
+                this._boundSigintHandler = null;
+            }
+            this._signalHandlersSetup = false;
+            bumpProcessMaxListeners(-2);
         }
     }
     getInfo() {

@@ -513,6 +513,40 @@ export class Database extends SafeEventEmitter {
     return this._resourcesModule.resourceExistsWithSameHash(params);
   }
 
+  prewarmResources(resourceNames?: string[]): { warmed: string[]; skipped: string[]; alreadyCompiled: string[] } {
+    const warmed: string[] = [];
+    const skipped: string[] = [];
+    const alreadyCompiled: string[] = [];
+
+    const resources = resourceNames
+      ? resourceNames.map(name => this._resourcesMap[name]).filter(Boolean)
+      : Object.values(this._resourcesMap);
+
+    for (const resource of resources) {
+      if (!resource) continue;
+
+      if (resource.isSchemaCompiled()) {
+        alreadyCompiled.push(resource.name);
+        continue;
+      }
+
+      try {
+        resource.prewarmSchema();
+        warmed.push(resource.name);
+      } catch (err) {
+        skipped.push(resource.name);
+        this.logger.warn({ resource: resource.name, err }, `[PREWARM] Failed to prewarm resource schema`);
+      }
+    }
+
+    this.logger.debug(
+      { warmed: warmed.length, skipped: skipped.length, alreadyCompiled: alreadyCompiled.length },
+      `[PREWARM] Resources prewarmed`
+    );
+
+    return { warmed, skipped, alreadyCompiled };
+  }
+
   async uploadMetadataFile(): Promise<void> {
     return this._metadataModule.uploadMetadataFile();
   }

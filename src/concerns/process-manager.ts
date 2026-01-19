@@ -48,6 +48,8 @@ export class ProcessManager {
   private isShuttingDown: boolean;
   private shutdownPromise: Promise<void> | null;
   private _boundSignalHandler: (signal: string) => Promise<void>;
+  private _boundUncaughtHandler: ((err: Error) => void) | null;
+  private _boundUnhandledHandler: ((reason: unknown, promise: Promise<unknown>) => void) | null;
   private _signalHandlersSetup: boolean;
 
   constructor(options: ProcessManagerOptions = {}) {
@@ -72,6 +74,8 @@ export class ProcessManager {
     this._signalHandlersSetup = false;
 
     this._boundSignalHandler = this._handleSignal.bind(this);
+    this._boundUncaughtHandler = null;
+    this._boundUnhandledHandler = null;
     this._setupSignalHandlers();
 
     this.logger.debug({ shutdownTimeout: this.options.shutdownTimeout }, 'ProcessManager initialized');
@@ -184,17 +188,21 @@ export class ProcessManager {
   private _setupSignalHandlers(): void {
     if (this._signalHandlersSetup) return;
 
+    this._boundUncaughtHandler = (err: Error) => {
+      this.logger.error({ error: err.message, stack: err.stack }, 'uncaught exception');
+      this._handleSignal('uncaughtException');
+    };
+
+    this._boundUnhandledHandler = (reason: unknown, promise: Promise<unknown>) => {
+      this.logger.error({ reason, promise: String(promise) }, 'unhandled rejection');
+      this._handleSignal('unhandledRejection');
+    };
+
     bumpProcessMaxListeners(4);
     process.on('SIGTERM', this._boundSignalHandler as NodeJS.SignalsListener);
     process.on('SIGINT', this._boundSignalHandler as NodeJS.SignalsListener);
-    process.on('uncaughtException', (err: Error) => {
-      this.logger.error({ error: err.message, stack: err.stack }, 'uncaught exception');
-      this._handleSignal('uncaughtException');
-    });
-    process.on('unhandledRejection', (reason: unknown, promise: Promise<unknown>) => {
-      this.logger.error({ reason, promise: String(promise) }, 'unhandled rejection');
-      this._handleSignal('unhandledRejection');
-    });
+    process.on('uncaughtException', this._boundUncaughtHandler);
+    process.on('unhandledRejection', this._boundUnhandledHandler);
 
     this._signalHandlersSetup = true;
 
@@ -300,9 +308,23 @@ export class ProcessManager {
   }
 
   removeSignalHandlers(): void {
+    if (!this._signalHandlersSetup) return;
+
     process.removeListener('SIGTERM', this._boundSignalHandler as NodeJS.SignalsListener);
     process.removeListener('SIGINT', this._boundSignalHandler as NodeJS.SignalsListener);
+
+    if (this._boundUncaughtHandler) {
+      process.removeListener('uncaughtException', this._boundUncaughtHandler);
+      this._boundUncaughtHandler = null;
+    }
+
+    if (this._boundUnhandledHandler) {
+      process.removeListener('unhandledRejection', this._boundUnhandledHandler);
+      this._boundUnhandledHandler = null;
+    }
+
     this._signalHandlersSetup = false;
+    bumpProcessMaxListeners(-4);
 
     this.logger.debug('signal handlers removed');
   }

@@ -185,6 +185,9 @@ export class ApiServer {
   private swaggerUI: ((options: { url: string }) => MiddlewareHandler) | null = null;
   private cors: ((options: unknown) => MiddlewareHandler) | null = null;
   private ApiApp: unknown = null;
+  private _signalHandlersSetup = false;
+  private _boundSigtermHandler: (() => void) | null = null;
+  private _boundSigintHandler: (() => void) | null = null;
 
   constructor(options: ApiServerOptions = {}) {
     this.options = {
@@ -480,9 +483,14 @@ export class ApiServer {
               }
             };
 
-            bumpProcessMaxListeners(2);
-            process.once('SIGTERM', () => shutdownHandler('SIGTERM'));
-            process.once('SIGINT', () => shutdownHandler('SIGINT'));
+            if (!this._signalHandlersSetup) {
+              this._boundSigtermHandler = () => shutdownHandler('SIGTERM');
+              this._boundSigintHandler = () => shutdownHandler('SIGINT');
+              bumpProcessMaxListeners(2);
+              process.once('SIGTERM', this._boundSigtermHandler);
+              process.once('SIGINT', this._boundSigintHandler);
+              this._signalHandlersSetup = true;
+            }
 
             resolve();
           }
@@ -528,6 +536,19 @@ export class ApiServer {
 
     if (this.oidcMiddleware && typeof (this.oidcMiddleware as unknown as { destroy?: () => void }).destroy === 'function') {
       (this.oidcMiddleware as unknown as { destroy: () => void }).destroy();
+    }
+
+    if (this._signalHandlersSetup) {
+      if (this._boundSigtermHandler) {
+        process.removeListener('SIGTERM', this._boundSigtermHandler);
+        this._boundSigtermHandler = null;
+      }
+      if (this._boundSigintHandler) {
+        process.removeListener('SIGINT', this._boundSigintHandler);
+        this._boundSigintHandler = null;
+      }
+      this._signalHandlersSetup = false;
+      bumpProcessMaxListeners(-2);
     }
   }
 

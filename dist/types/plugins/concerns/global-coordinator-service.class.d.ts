@@ -23,6 +23,7 @@ export interface GlobalCoordinatorConfig {
     circuitBreaker?: CircuitBreakerConfig;
     contention?: ContentionConfig;
     metricsBufferSize?: number;
+    stateCacheTtl?: number;
 }
 export interface GlobalCoordinatorOptions {
     namespace: string;
@@ -122,6 +123,7 @@ export interface NormalizedConfig {
     contentionThreshold: number;
     contentionRateLimitMs: number;
     metricsBufferSize: number;
+    stateCacheTtl: number;
 }
 export interface ElectionResult {
     leaderId: string | null;
@@ -144,6 +146,11 @@ export declare class GlobalCoordinatorService extends EventEmitter {
     protected _circuitBreaker: CircuitBreakerInternalState;
     protected _contentionState: ContentionState;
     protected _latencyBuffer: LatencyBuffer;
+    protected _heartbeatStartedAt: number;
+    protected _heartbeatMutexTimeoutMs: number;
+    protected _cachedState: LeaderState | null;
+    protected _stateCacheTime: number;
+    protected _stateCacheTtl: number;
     storage: CoordinatorPluginStorage | null;
     protected _pluginStorage: CoordinatorPluginStorage | null;
     logger: S3DBLogger;
@@ -167,6 +174,7 @@ export declare class GlobalCoordinatorService extends EventEmitter {
     protected _unregisterWorker(): Promise<void>;
     protected _unregisterWorkerEntry(workerId: string): Promise<void>;
     protected _getState(): Promise<LeaderState | null>;
+    protected _invalidateStateCache(): void;
     protected _initializeMetadata(): Promise<void>;
     protected _notifyLeaderChange(previousLeaderId: string | null, newLeaderId: string | null): void;
     protected _notifyPlugin(pluginName: string, plugin: SubscribablePlugin, eventType: string, data: LeaderChangeEvent): void;

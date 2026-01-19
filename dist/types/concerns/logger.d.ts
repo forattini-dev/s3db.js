@@ -15,6 +15,7 @@ export interface S3DBLogger extends PinoLogger {
 }
 export type Logger = S3DBLogger;
 export declare function createLogger(options?: LoggerOptions): S3DBLogger;
+export declare function getLogger(name: string, options?: Omit<LoggerOptions, 'name'>): S3DBLogger;
 export declare function getGlobalLogger(options?: LoggerOptions): S3DBLogger;
 export declare function resetGlobalLogger(): void;
 export declare function getLoggerOptionsFromEnv(configOptions?: LoggerOptions): LoggerOptions;

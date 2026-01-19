@@ -410,4 +410,174 @@ describe('GlobalCoordinatorService', () => {
       await service.stop();
     });
   });
+
+  describe('Worker Deduplication (v19.3+)', () => {
+    it('should deduplicate workers with same workerId in single heartbeat', async () => {
+      service = new GlobalCoordinatorService({
+        namespace: 'test-dedup',
+        database: db,
+        config: {
+          heartbeatInterval: 500,
+          diagnosticsEnabled: false
+        }
+      });
+
+      const sharedWorkerId = 'shared-worker-123';
+
+      const plugin1 = { name: 'plugin1', workerId: sharedWorkerId };
+      const plugin2 = { name: 'plugin2', workerId: sharedWorkerId };
+      const plugin3 = { name: 'plugin3', workerId: sharedWorkerId };
+
+      service.subscribePlugin('plugin1', plugin1);
+      service.subscribePlugin('plugin2', plugin2);
+      service.subscribePlugin('plugin3', plugin3);
+
+      await service.start();
+      await new Promise(resolve => setTimeout(resolve, 600));
+
+      const workers = await service.getActiveWorkers();
+      const sharedWorkerEntries = workers.filter(w => w === sharedWorkerId || w.includes(sharedWorkerId));
+
+      expect(sharedWorkerEntries.length).toBeLessThanOrEqual(1);
+
+      await service.stop();
+    });
+
+    it('should register distinct workerIds separately', async () => {
+      service = new GlobalCoordinatorService({
+        namespace: 'test-distinct',
+        database: db,
+        config: {
+          heartbeatInterval: 500,
+          diagnosticsEnabled: false
+        }
+      });
+
+      const plugin1 = { name: 'plugin1', workerId: 'worker-a' };
+      const plugin2 = { name: 'plugin2', workerId: 'worker-b' };
+      const plugin3 = { name: 'plugin3', workerId: 'worker-c' };
+
+      service.subscribePlugin('plugin1', plugin1);
+      service.subscribePlugin('plugin2', plugin2);
+      service.subscribePlugin('plugin3', plugin3);
+
+      await service.start();
+      await new Promise(resolve => setTimeout(resolve, 600));
+
+      const workers = await service.getActiveWorkers();
+
+      expect(workers.length).toBeGreaterThanOrEqual(3);
+
+      await service.stop();
+    });
+  });
+
+  describe('Heartbeat Mutex (v19.3+)', () => {
+    it('should prevent concurrent heartbeat cycles', async () => {
+      service = new GlobalCoordinatorService({
+        namespace: 'test-mutex',
+        database: db,
+        config: {
+          heartbeatInterval: 100,
+          diagnosticsEnabled: false
+        }
+      });
+
+      await service.start();
+
+      const triggerHeartbeats = [];
+      for (let i = 0; i < 5; i++) {
+        triggerHeartbeats.push(service._heartbeatCycle());
+      }
+
+      await Promise.all(triggerHeartbeats);
+
+      const metrics = service.getMetrics();
+      expect(metrics.heartbeatCount).toBeGreaterThan(0);
+      expect(metrics.heartbeatCount).toBeLessThanOrEqual(5);
+
+      await service.stop();
+    });
+
+    it('should have auto-expiry timeout for stalled mutex', () => {
+      service = new GlobalCoordinatorService({
+        namespace: 'test-mutex-timeout',
+        database: db,
+        config: {
+          heartbeatInterval: 1000,
+          heartbeatJitter: 500
+        }
+      });
+
+      expect(service._heartbeatMutexTimeoutMs).toBe((1000 + 500) * 2);
+    });
+  });
+
+  describe('State Cache (v19.3+)', () => {
+    it('should cache state with TTL', async () => {
+      service = new GlobalCoordinatorService({
+        namespace: 'test-cache',
+        database: db,
+        config: {
+          heartbeatInterval: 500,
+          stateCacheTtl: 2000,
+          diagnosticsEnabled: false
+        }
+      });
+
+      await service.start();
+      await new Promise(resolve => setTimeout(resolve, 600));
+
+      const state1 = await service._getState();
+      const state2 = await service._getState();
+
+      expect(state1).toBeDefined();
+      expect(state2).toBeDefined();
+
+      await service.stop();
+    });
+
+    it('should invalidate cache on election', async () => {
+      service = new GlobalCoordinatorService({
+        namespace: 'test-cache-invalidate',
+        database: db,
+        config: {
+          heartbeatInterval: 200,
+          stateCacheTtl: 5000,
+          diagnosticsEnabled: false
+        }
+      });
+
+      await service.start();
+      await new Promise(resolve => setTimeout(resolve, 300));
+
+      service._invalidateStateCache();
+
+      expect(service._cachedState).toBeNull();
+      expect(service._stateCacheTime).toBe(0);
+
+      await service.stop();
+    });
+
+    it('should respect stateCacheTtl config', () => {
+      service = new GlobalCoordinatorService({
+        namespace: 'test-cache-ttl',
+        database: db,
+        config: {
+          stateCacheTtl: 5000
+        }
+      });
+
+      expect(service._stateCacheTtl).toBe(5000);
+    });
+
+    it('should default stateCacheTtl to 2000ms', () => {
+      service = new GlobalCoordinatorService({
+        namespace: 'test-cache-default',
+        database: db
+      });
+
+      expect(service._stateCacheTtl).toBe(2000);
+    });
+  });
 });

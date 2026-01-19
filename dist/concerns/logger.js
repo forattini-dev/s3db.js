@@ -1,6 +1,9 @@
 import pino from 'pino';
 import { createRedactRules } from './logger-redact.js';
 let globalLogger = null;
+let sharedPrettyTransport = null;
+let sharedDestination = null;
+const namedLoggers = new Map();
 function serializeError(err) {
     if (!err || typeof err !== 'object') {
         return err;
@@ -26,6 +29,23 @@ function createPrettyTransport() {
         }
     };
 }
+function getSharedPrettyTransport() {
+    if (!sharedPrettyTransport) {
+        sharedPrettyTransport = pino.transport(createPrettyTransport());
+    }
+    return sharedPrettyTransport;
+}
+function getSharedDestination(format) {
+    const envFormat = process.env.S3DB_LOG_FORMAT?.toLowerCase();
+    const effectiveFormat = format ?? (envFormat === 'json' ? 'json' : 'pretty');
+    if (effectiveFormat === 'json') {
+        return undefined;
+    }
+    if (!sharedDestination) {
+        sharedDestination = getSharedPrettyTransport();
+    }
+    return sharedDestination;
+}
 function createDefaultTransport() {
     const envFormat = process.env.S3DB_LOG_FORMAT?.toLowerCase();
     if (envFormat === 'json') {
@@ -36,38 +56,47 @@ function createDefaultTransport() {
 export function createLogger(options = {}) {
     const { level = 'info', name, format, transport, bindings = {}, redactPatterns = [], maxPayloadBytes = 1_000_000 } = options;
     const redactRules = createRedactRules(redactPatterns);
-    let finalTransport;
-    if (format === 'json') {
-        finalTransport = undefined;
-    }
-    else if (format === 'pretty') {
-        finalTransport = createPrettyTransport();
-    }
-    else if (transport !== undefined) {
-        finalTransport = transport;
-    }
-    else {
-        finalTransport = createDefaultTransport();
-    }
     const normalizedBindings = bindings && typeof bindings === 'object' ? bindings : {};
+    const useSharedDestination = !transport && format !== 'json';
+    const destination = useSharedDestination ? getSharedDestination(format) : undefined;
     const config = {
         level,
         redact: redactRules,
-        transport: finalTransport || undefined,
         serializers: {
             err: serializeError,
             error: serializeError
         }
     };
-    let logger = pino({
-        ...config,
-        name
-    });
+    if (transport) {
+        config.transport = transport;
+    }
+    else if (format === 'json') {
+        // no transport, write plain JSON to stdout
+    }
+    else if (!destination) {
+        config.transport = createDefaultTransport();
+    }
+    let logger;
+    if (destination) {
+        logger = pino({ ...config, name }, destination);
+    }
+    else {
+        logger = pino({ ...config, name });
+    }
     const baseBindings = name ? { ...normalizedBindings, name } : normalizedBindings;
     if (baseBindings && Object.keys(baseBindings).length > 0) {
         logger = logger.child(baseBindings);
     }
     logger._maxPayloadBytes = maxPayloadBytes;
+    return logger;
+}
+export function getLogger(name, options = {}) {
+    const cached = namedLoggers.get(name);
+    if (cached) {
+        return cached;
+    }
+    const logger = createLogger({ ...options, name });
+    namedLoggers.set(name, logger);
     return logger;
 }
 export function getGlobalLogger(options = {}) {
@@ -78,6 +107,9 @@ export function getGlobalLogger(options = {}) {
 }
 export function resetGlobalLogger() {
     globalLogger = null;
+    namedLoggers.clear();
+    sharedPrettyTransport = null;
+    sharedDestination = null;
 }
 export function getLoggerOptionsFromEnv(configOptions = {}) {
     const options = { ...configOptions };

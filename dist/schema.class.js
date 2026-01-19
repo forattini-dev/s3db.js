@@ -1262,7 +1262,7 @@ export class Schema {
         return cloned;
     }
     async validate(resourceItem, { mutateOriginal = false } = {}) {
-        if (process.env.NODE_ENV !== 'production') {
+        if (process.env.NODE_ENV === 'development') {
             console.warn('[DEPRECATION] Schema.validate() is deprecated. Use ResourceValidator.validate() instead.');
         }
         const data = mutateOriginal ? resourceItem : cloneDeep(resourceItem);

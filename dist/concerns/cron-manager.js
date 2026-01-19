@@ -111,6 +111,7 @@ export class CronManager {
             process.removeListener('unhandledRejection', this._boundErrorHandler);
         }
         this._signalHandlersSetup = false;
+        bumpProcessMaxListeners(-5);
         this.logger.debug('Signal handlers removed');
     }
     _handleShutdown(signal) {

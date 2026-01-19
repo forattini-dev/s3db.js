@@ -248,6 +248,7 @@ export class DatabaseConnection {
         process.off('exit', this._exitListener as any);
         this._exitListener = null;
         this._exitListenerRegistered = false;
+        bumpProcessMaxListeners(-1);
       }
 
       if (db.processManager && typeof (db.processManager as any).removeSignalHandlers === 'function') {

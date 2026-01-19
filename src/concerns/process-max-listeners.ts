@@ -1,9 +1,10 @@
-export function bumpProcessMaxListeners(additionalListeners: number): void {
-  if (additionalListeners <= 0 || typeof process === 'undefined') return;
+export function bumpProcessMaxListeners(delta: number): void {
+  if (delta === 0 || typeof process === 'undefined') return;
   if (typeof process.getMaxListeners !== 'function' || typeof process.setMaxListeners !== 'function') return;
 
   const current = process.getMaxListeners();
-  if (current === 0) return;
+  if (current === 0 && delta > 0) return;
 
-  process.setMaxListeners(current + additionalListeners);
+  const newValue = Math.max(0, current + delta);
+  process.setMaxListeners(newValue);
 }

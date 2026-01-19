@@ -220,9 +220,12 @@ export class ProcessManager {
         };
     }
     removeSignalHandlers() {
+        if (!this._signalHandlersSetup)
+            return;
         process.removeListener('SIGTERM', this._boundSignalHandler);
         process.removeListener('SIGINT', this._boundSignalHandler);
         this._signalHandlersSetup = false;
+        bumpProcessMaxListeners(-4);
         this.logger.debug('signal handlers removed');
     }
 }

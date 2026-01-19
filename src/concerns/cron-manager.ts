@@ -196,6 +196,7 @@ export class CronManager {
     }
 
     this._signalHandlersSetup = false;
+    bumpProcessMaxListeners(-5);
 
     this.logger.debug('Signal handlers removed');
   }

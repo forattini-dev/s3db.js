@@ -117,6 +117,8 @@ export interface ResourceConfig {
   schemaRegistry?: import('./schema.class.js').SchemaRegistry;
   /** Plugin schema registries for stable plugin attribute indices */
   pluginSchemaRegistry?: Record<string, import('./schema.class.js').PluginSchemaRegistry | import('./schema.class.js').SchemaRegistry>;
+  /** Defer schema/validator compilation until first CRUD operation (default: false) */
+  lazySchema?: boolean;
 }
 
 export interface ResourceApiConfig {
@@ -304,6 +306,19 @@ export class Resource extends AsyncEventEmitter implements Disposable {
   private _schemaRegistry?: SchemaRegistry;
   private _pluginSchemaRegistry?: Record<string, PluginSchemaRegistry | SchemaRegistry>;
 
+  private _lazySchema: boolean;
+  private _schemaCompiled: boolean;
+  private _pendingSchemaConfig: {
+    attributes: AttributesSchema;
+    passphrase: string;
+    bcryptRounds: number;
+    version: number;
+    allNestedObjectsOptional: boolean;
+    autoEncrypt: boolean;
+    autoDecrypt: boolean;
+    strictValidation: boolean;
+  } | null;
+
   private _instanceId: string;
   private _idGenerator: ResourceIdGenerator;
   private _hooksModule: ResourceHooks;
@@ -360,7 +375,8 @@ export class Resource extends AsyncEventEmitter implements Disposable {
       createdBy = 'user',
       guard,
       schemaRegistry,
-      pluginSchemaRegistry
+      pluginSchemaRegistry,
+      lazySchema = false
     } = config;
 
     this.name = name;
@@ -418,38 +434,58 @@ export class Resource extends AsyncEventEmitter implements Disposable {
       createdBy,
     };
 
-    this.validator = new ResourceValidator({
-      attributes,
-      strictValidation,
-      allNestedObjectsOptional,
-      passphrase: this.passphrase,
-      bcryptRounds: this.bcryptRounds,
-      autoEncrypt,
-      autoDecrypt
-    });
+    this._lazySchema = lazySchema;
+    this._schemaCompiled = false;
+    this._pendingSchemaConfig = null;
 
-    // Fix: parse version to number for Schema
     const parsedVersion = parseInt(version.replace(/v/i, ''), 10) || 1;
 
     this._schemaRegistry = schemaRegistry;
     this._pluginSchemaRegistry = pluginSchemaRegistry;
 
-    this.schema = new Schema({
-      name,
-      attributes,
-      passphrase,
-      bcryptRounds,
-      version: parsedVersion,
-      options: {
+    if (lazySchema) {
+      this._pendingSchemaConfig = {
+        attributes,
+        passphrase: this.passphrase,
+        bcryptRounds: this.bcryptRounds,
+        version: parsedVersion,
         allNestedObjectsOptional,
         autoEncrypt,
+        autoDecrypt,
+        strictValidation
+      };
+      this.validator = null as unknown as ResourceValidator;
+      this.schema = null as unknown as Schema;
+      this.logger.debug({ resource: this.name }, `[LAZY_SCHEMA] Deferred schema/validator compilation`);
+    } else {
+      this.validator = new ResourceValidator({
+        attributes,
+        strictValidation,
+        allNestedObjectsOptional,
+        passphrase: this.passphrase,
+        bcryptRounds: this.bcryptRounds,
+        autoEncrypt,
         autoDecrypt
-      },
-      schemaRegistry: this._schemaRegistry,
-      pluginSchemaRegistry: this._pluginSchemaRegistry
-    });
-    this._schemaRegistry = this.schema.getSchemaRegistry() || this._schemaRegistry;
-    this._pluginSchemaRegistry = this.schema.getPluginSchemaRegistry() || this._pluginSchemaRegistry;
+      });
+
+      this.schema = new Schema({
+        name,
+        attributes,
+        passphrase,
+        bcryptRounds,
+        version: parsedVersion,
+        options: {
+          allNestedObjectsOptional,
+          autoEncrypt,
+          autoDecrypt
+        },
+        schemaRegistry: this._schemaRegistry,
+        pluginSchemaRegistry: this._pluginSchemaRegistry
+      });
+      this._schemaRegistry = this.schema.getSchemaRegistry() || this._schemaRegistry;
+      this._pluginSchemaRegistry = this.schema.getPluginSchemaRegistry() || this._pluginSchemaRegistry;
+      this._schemaCompiled = true;
+    }
 
     const { database: _db, observers: _obs, client: _cli, ...cloneableConfig } = config;
     this.$schema = { ...cloneableConfig } as Readonly<Omit<ResourceConfig, 'database' | 'observers' | 'client'>>;
@@ -564,6 +600,65 @@ export class Resource extends AsyncEventEmitter implements Disposable {
     this.idGenerator = this._idGenerator.getGenerator();
   }
 
+  private _ensureSchemaCompiled(): void {
+    if (this._schemaCompiled) return;
+    if (!this._pendingSchemaConfig) {
+      throw new ResourceError(
+        `Resource '${this.name}' has lazy schema enabled but no pending config`,
+        { resourceName: this.name }
+      );
+    }
+
+    const startTime = Date.now();
+    const cfg = this._pendingSchemaConfig;
+
+    this.validator = new ResourceValidator({
+      attributes: cfg.attributes,
+      strictValidation: cfg.strictValidation,
+      allNestedObjectsOptional: cfg.allNestedObjectsOptional,
+      passphrase: cfg.passphrase,
+      bcryptRounds: cfg.bcryptRounds,
+      autoEncrypt: cfg.autoEncrypt,
+      autoDecrypt: cfg.autoDecrypt
+    });
+
+    this.schema = new Schema({
+      name: this.name,
+      attributes: cfg.attributes,
+      passphrase: cfg.passphrase,
+      bcryptRounds: cfg.bcryptRounds,
+      version: cfg.version,
+      options: {
+        allNestedObjectsOptional: cfg.allNestedObjectsOptional,
+        autoEncrypt: cfg.autoEncrypt,
+        autoDecrypt: cfg.autoDecrypt
+      },
+      schemaRegistry: this._schemaRegistry,
+      pluginSchemaRegistry: this._pluginSchemaRegistry
+    });
+
+    this._schemaRegistry = this.schema.getSchemaRegistry() || this._schemaRegistry;
+    this._pluginSchemaRegistry = this.schema.getPluginSchemaRegistry() || this._pluginSchemaRegistry;
+    this._schemaCompiled = true;
+    this._pendingSchemaConfig = null;
+
+    const elapsed = Date.now() - startTime;
+    this.logger.debug(
+      { resource: this.name, elapsedMs: elapsed },
+      `[LAZY_SCHEMA] Compiled on first use (${elapsed}ms)`
+    );
+  }
+
+  prewarmSchema(): void {
+    if (this._schemaCompiled) return;
+    this._ensureSchemaCompiled();
+    this.logger.debug({ resource: this.name }, `[LAZY_SCHEMA] Pre-warmed schema`);
+  }
+
+  isSchemaCompiled(): boolean {
+    return this._schemaCompiled;
+  }
+
   hasAsyncIdGenerator(): boolean {
     return this._idGenerator.isAsync();
   }
@@ -573,6 +668,7 @@ export class Resource extends AsyncEventEmitter implements Disposable {
   }
 
   export(): ResourceExport {
+    this._ensureSchemaCompiled();
     const exported = this.schema.export() as unknown as ResourceExport;
     exported.behavior = this.behavior;
     exported.timestamps = this.config.timestamps;
@@ -587,6 +683,8 @@ export class Resource extends AsyncEventEmitter implements Disposable {
   }
 
   applyConfiguration({ map }: { map?: StringRecord<string> } = {}): void {
+    this._ensureSchemaCompiled();
+
     if (this.config.timestamps) {
       if (!this.attributes.createdAt) {
         this.attributes.createdAt = 'string|optional';
@@ -779,6 +877,7 @@ export class Resource extends AsyncEventEmitter implements Disposable {
   }
 
   async validate(data: Record<string, unknown>, options: ValidationOptions = {}): Promise<ValidationResult> {
+    this._ensureSchemaCompiled();
     return this.validator.validate(data, options);
   }
 
@@ -851,18 +950,22 @@ export class Resource extends AsyncEventEmitter implements Disposable {
   }
 
   async insert({ id, ...attributes }: { id?: string } & Record<string, unknown>): Promise<ResourceData> {
+    this._ensureSchemaCompiled();
     return this._persistence.insert({ id, ...attributes }) as Promise<ResourceData>;
   }
 
   async get(id: string): Promise<ResourceData> {
+    this._ensureSchemaCompiled();
     return this._persistence.get(id) as Promise<ResourceData>;
   }
 
   async getOrNull(id: string): Promise<ResourceData | null> {
+    this._ensureSchemaCompiled();
     return this._persistence.getOrNull(id) as Promise<ResourceData | null>;
   }
 
   async getOrThrow(id: string): Promise<ResourceData> {
+    this._ensureSchemaCompiled();
     return this._persistence.getOrThrow(id) as Promise<ResourceData>;
   }
 
@@ -871,30 +974,37 @@ export class Resource extends AsyncEventEmitter implements Disposable {
   }
 
   async update(id: string, attributes: Record<string, unknown>): Promise<ResourceData> {
+    this._ensureSchemaCompiled();
     return this._persistence.update(id, attributes) as Promise<ResourceData>;
   }
 
   async patch(id: string, fields: Record<string, unknown>, options: { partition?: string; partitionValues?: StringRecord } = {}): Promise<ResourceData> {
+    this._ensureSchemaCompiled();
     return this._persistence.patch(id, fields, options) as Promise<ResourceData>;
   }
 
   async _patchViaCopyObject(id: string, fields: Record<string, unknown>, options: Record<string, unknown> = {}): Promise<ResourceData> {
+    this._ensureSchemaCompiled();
     return this._persistence._patchViaCopyObject(id, fields, options) as Promise<ResourceData>;
   }
 
   async replace(id: string, fullData: Record<string, unknown>, options: { partition?: string; partitionValues?: StringRecord } = {}): Promise<ResourceData> {
+    this._ensureSchemaCompiled();
     return this._persistence.replace(id, fullData, options) as Promise<ResourceData>;
   }
 
   async updateConditional(id: string, attributes: Record<string, unknown>, options: { ifMatch?: string } = {}): Promise<UpdateConditionalResult> {
+    this._ensureSchemaCompiled();
     return this._persistence.updateConditional(id, attributes, options as UpdateConditionalOptions) as unknown as Promise<UpdateConditionalResult>;
   }
 
   async delete(id: string): Promise<unknown> {
+    this._ensureSchemaCompiled();
     return this._persistence.delete(id);
   }
 
   async upsert({ id, ...attributes }: { id: string } & Record<string, unknown>): Promise<ResourceData> {
+    this._ensureSchemaCompiled();
     return this._persistence.upsert({ id, ...attributes }) as Promise<ResourceData>;
   }
 
@@ -903,22 +1013,27 @@ export class Resource extends AsyncEventEmitter implements Disposable {
   }
 
   async insertMany(objects: Record<string, unknown>[]): Promise<ResourceData[]> {
+    this._ensureSchemaCompiled();
     return this._persistence.insertMany(objects) as Promise<ResourceData[]>;
   }
 
   async _executeBatchHelper(operations: unknown[], options: Record<string, unknown> = {}): Promise<unknown> {
+    this._ensureSchemaCompiled();
     return this._persistence._executeBatchHelper(operations as any, options);
   }
 
   async deleteMany(ids: string[]): Promise<DeleteManyResult> {
+    this._ensureSchemaCompiled();
     return this._persistence.deleteMany(ids) as unknown as Promise<DeleteManyResult>;
   }
 
   async deleteAll(): Promise<{ deletedCount: number }> {
+    this._ensureSchemaCompiled();
     return this._persistence.deleteAll();
   }
 
   async deleteAllData(): Promise<{ deletedCount: number }> {
+    this._ensureSchemaCompiled();
     return this._persistence.deleteAllData();
   }
 
@@ -927,14 +1042,17 @@ export class Resource extends AsyncEventEmitter implements Disposable {
   }
 
   async list({ partition = null, partitionValues = {}, limit, offset = 0 }: ListOptions = {}): Promise<ResourceData[]> {
+    this._ensureSchemaCompiled();
     return this._query.list({ partition, partitionValues, limit, offset }) as Promise<ResourceData[]>;
   }
 
   async listMain({ limit, offset = 0 }: { limit?: number; offset?: number }): Promise<ResourceData[]> {
+    this._ensureSchemaCompiled();
     return this._query.listMain({ limit, offset }) as Promise<ResourceData[]>;
   }
 
   async listPartition({ partition, partitionValues, limit, offset = 0 }: { partition: string; partitionValues: StringRecord; limit?: number; offset?: number }): Promise<ResourceData[]> {
+    this._ensureSchemaCompiled();
     return this._query.listPartition({ partition, partitionValues, limit, offset }) as Promise<ResourceData[]>;
   }
 
@@ -967,14 +1085,17 @@ export class Resource extends AsyncEventEmitter implements Disposable {
   }
 
   async getMany(ids: string[]): Promise<ResourceData[]> {
+    this._ensureSchemaCompiled();
     return this._query.getMany(ids) as Promise<ResourceData[]>;
   }
 
   async getAll(): Promise<ResourceData[]> {
+    this._ensureSchemaCompiled();
     return this._query.getAll() as Promise<ResourceData[]>;
   }
 
   async page({ offset = 0, size = 100, partition = null, partitionValues = {}, skipCount = false }: PageOptions = {}): Promise<PageResult> {
+    this._ensureSchemaCompiled();
     const result = await this._query.page({ offset, size, partition, partitionValues, skipCount });
     return result as unknown as PageResult;
   }
@@ -1020,6 +1141,7 @@ export class Resource extends AsyncEventEmitter implements Disposable {
   }
 
   async getSchemaForVersion(version: string): Promise<Schema> {
+    this._ensureSchemaCompiled();
     return this.schema;
   }
 
@@ -1032,6 +1154,7 @@ export class Resource extends AsyncEventEmitter implements Disposable {
   }
 
   async query(filter: QueryFilter = {}, { limit = 100, offset = 0, partition = null, partitionValues = {} }: QueryOptions = {}): Promise<ResourceData[]> {
+    this._ensureSchemaCompiled();
     return this._query.query(filter, { limit, offset, partition, partitionValues }) as Promise<ResourceData[]>;
   }
 
@@ -1052,6 +1175,7 @@ export class Resource extends AsyncEventEmitter implements Disposable {
   }
 
   async createHistoricalVersion(id: string, data: ResourceData): Promise<void> {
+    this._ensureSchemaCompiled();
     const historicalKey = join(`resource=${this.name}`, `historical`, `id=${id}`);
 
     const historicalData = {
@@ -1105,6 +1229,7 @@ export class Resource extends AsyncEventEmitter implements Disposable {
   }
 
   async composeFullObjectFromWrite({ id, metadata, body, behavior }: ComposeFullObjectParams): Promise<ResourceData> {
+    this._ensureSchemaCompiled();
     const behaviorFlags: StringRecord<string> = {};
     if (metadata && metadata['$truncated'] === 'true') {
       behaviorFlags.$truncated = 'true';
@@ -1256,6 +1381,7 @@ export class Resource extends AsyncEventEmitter implements Disposable {
   }
 
   applyDefaults(data: Record<string, unknown>): Record<string, unknown> {
+    this._ensureSchemaCompiled();
     return this.validator.applyDefaults(data);
   }
 
