@@ -20,6 +20,7 @@ export class S3Client extends EventEmitter {
     httpClientOptions;
     client;
     httpHandler = null;
+    _rawHttpClientOptions;
     _inflightCoalescing;
     taskExecutorConfig;
     taskExecutor;
@@ -37,6 +38,7 @@ export class S3Client extends EventEmitter {
         this.id = id ?? idGenerator(77);
         this.config = new ConnectionString(connectionString);
         this.connectionString = connectionString;
+        this._rawHttpClientOptions = httpClientOptions || {};
         this.httpClientOptions = {
             keepAlive: true,
             keepAliveMsecs: 1000,
@@ -102,17 +104,23 @@ export class S3Client extends EventEmitter {
     }
     _normalizeHttpHandlerOptions() {
         const options = this.httpClientOptions;
-        const connections = typeof options.connections === 'number'
-            ? options.connections
-            : options.maxSockets;
-        const keepAliveTimeout = options.keepAliveTimeout ?? options.keepAliveMsecs;
-        const bodyTimeout = options.bodyTimeout ?? options.timeout;
-        return {
-            ...options,
-            connections,
-            keepAliveTimeout,
-            bodyTimeout
-        };
+        const raw = this._rawHttpClientOptions;
+        const connections = typeof raw.connections === 'number'
+            ? raw.connections
+            : raw.maxSockets;
+        const keepAliveTimeout = raw.keepAliveTimeout ?? raw.keepAliveMsecs;
+        const bodyTimeout = raw.bodyTimeout ?? raw.timeout;
+        const normalized = { ...options };
+        if (connections !== undefined) {
+            normalized.connections = connections;
+        }
+        if (keepAliveTimeout !== undefined) {
+            normalized.keepAliveTimeout = keepAliveTimeout;
+        }
+        if (bodyTimeout !== undefined) {
+            normalized.bodyTimeout = bodyTimeout;
+        }
+        return normalized;
     }
     _createTasksPool() {
         const poolConfig = {
@@ -217,7 +225,7 @@ export class S3Client extends EventEmitter {
     }
     async destroy() {
         if (this.httpHandler) {
-            await this.httpHandler.destroy();
+            await this.httpHandler.destroyAsync();
             this.httpHandler = null;
         }
         if (this.client && typeof this.client.destroy === 'function') {

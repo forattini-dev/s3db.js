@@ -486,6 +486,6 @@ export interface Client extends EventEmitter {
     }>>;
     getQueueStats(): QueueStats | null;
     getAggregateMetrics(since?: number): unknown | null;
-    destroy(): void;
+    destroy(): void | Promise<void>;
 }
 //# sourceMappingURL=types.d.ts.map

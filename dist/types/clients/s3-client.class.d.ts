@@ -17,6 +17,7 @@ export declare class S3Client extends EventEmitter {
     httpClientOptions: HttpClientOptions;
     client: AwsS3Client;
     private httpHandler;
+    private _rawHttpClientOptions;
     private _inflightCoalescing;
     private taskExecutorConfig;
     private taskExecutor;
