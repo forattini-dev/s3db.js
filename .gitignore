@@ -5,7 +5,8 @@ coverage/
 *.log
 .coveralls.yml
 
-# Build directories  
+# Build directories
+dist/
 build-binaries/
 releases/
 
