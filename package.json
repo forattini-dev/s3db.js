@@ -86,7 +86,7 @@
     "UNLICENSE"
   ],
   "scripts": {
-    "build": "npm run build:core",
+    "build": "npm run build:all",
     "build:core": "tsc -p tsconfig.build.json && rollup -c",
     "build:types": "rollup -c rollup.dts.config.js",
     "build:all": "npm run build:core && npm run build:types",
