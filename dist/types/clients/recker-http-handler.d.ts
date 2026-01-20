@@ -17,7 +17,7 @@ export declare class ReckerHttpHandler {
     httpHandlerConfigs(): ReckerHttpHandlerOptions;
     getMetrics(): HandlerMetrics;
     resetMetrics(): void;
-    destroy(): void;
+    destroy(): Promise<void>;
 }
 export default ReckerHttpHandler;
 //# sourceMappingURL=recker-http-handler.d.ts.map

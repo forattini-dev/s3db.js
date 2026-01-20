@@ -11,11 +11,35 @@ export interface S3ClientConfig {
     executorPool?: boolean | TaskExecutorConfig | null;
 }
 export interface HttpClientOptions {
+    connectTimeout?: number;
+    headersTimeout?: number;
+    bodyTimeout?: number;
     keepAlive?: boolean;
     keepAliveMsecs?: number;
     maxSockets?: number;
     maxFreeSockets?: number;
     timeout?: number;
+    connections?: number;
+    pipelining?: number;
+    keepAliveTimeout?: number;
+    keepAliveMaxTimeout?: number;
+    keepAliveTimeoutThreshold?: number;
+    maxRequestsPerClient?: number;
+    clientTtl?: number | null;
+    http2?: boolean;
+    http2Preset?: 'balanced' | 'performance' | 'low-latency' | 'low-memory';
+    http2MaxConcurrentStreams?: number;
+    enableHttp2Metrics?: boolean;
+    enableDedup?: boolean;
+    enableCircuitBreaker?: boolean;
+    circuitBreakerThreshold?: number;
+    circuitBreakerResetTimeout?: number;
+    enableRetry?: boolean;
+    maxRetries?: number;
+    retryDelay?: number;
+    maxRetryDelay?: number;
+    retryJitter?: boolean;
+    respectRetryAfter?: boolean;
     [key: string]: unknown;
 }
 export interface TaskExecutorConfig {
@@ -353,10 +377,16 @@ export interface ReckerHttpHandlerOptions {
     connectTimeout?: number;
     headersTimeout?: number;
     bodyTimeout?: number;
+    keepAlive?: boolean;
     keepAliveTimeout?: number;
     keepAliveMaxTimeout?: number;
+    keepAliveTimeoutThreshold?: number;
     connections?: number;
     pipelining?: number;
+    maxRequestsPerClient?: number;
+    clientTtl?: number | null;
+    maxCachedSessions?: number;
+    localAddress?: string;
     http2?: boolean;
     http2MaxConcurrentStreams?: number;
     /** HTTP/2 preset: 'balanced' | 'performance' | 'low-latency' | 'low-memory' */

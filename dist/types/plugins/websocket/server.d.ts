@@ -121,7 +121,11 @@ export declare class WebSocketServer extends EventEmitter {
         count: number;
         windowStart: number;
     }>;
-    _resourceListeners: Map<string, Function>;
+    _resourceListeners: Map<string, {
+        insert: Function;
+        update: Function;
+        delete: Function;
+    }>;
     healthManager: HealthManager | null;
     channelManager: ChannelManager | null;
     metrics: {

@@ -12,6 +12,7 @@ export declare class AsyncEventEmitter extends EventEmitter {
     emit(event: string | symbol, ...args: unknown[]): boolean;
     emitSync(event: string | symbol, ...args: unknown[]): boolean;
     setAsyncMode(enabled: boolean): void;
+    destroy(): void;
 }
 export default AsyncEventEmitter;
 //# sourceMappingURL=async-event-emitter.d.ts.map

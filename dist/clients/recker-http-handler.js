@@ -159,10 +159,15 @@ export class ReckerHttpHandler {
             connectTimeout: 10000,
             headersTimeout: 30000,
             bodyTimeout: 60000,
+            keepAlive: options.keepAlive ?? true,
             keepAliveTimeout: 4000,
             keepAliveMaxTimeout: 600000,
+            keepAliveTimeoutThreshold: 1000,
             connections: 100,
             pipelining: 10,
+            maxRequestsPerClient: 100,
+            clientTtl: null,
+            maxCachedSessions: 100,
             http2: true,
             http2MaxConcurrentStreams: 100,
             http2Preset: 'performance', // Default to performance preset for S3 workloads
@@ -204,9 +209,14 @@ export class ReckerHttpHandler {
                 agent: {
                     connections: this.options.connections,
                     pipelining: this.options.pipelining,
-                    keepAlive: true,
+                    keepAlive: this.options.keepAlive,
                     keepAliveTimeout: this.options.keepAliveTimeout,
                     keepAliveMaxTimeout: this.options.keepAliveMaxTimeout,
+                    keepAliveTimeoutThreshold: this.options.keepAliveTimeoutThreshold,
+                    maxRequestsPerClient: this.options.maxRequestsPerClient,
+                    clientTtl: this.options.clientTtl ?? null,
+                    maxCachedSessions: this.options.maxCachedSessions,
+                    ...(this.options.localAddress ? { localAddress: this.options.localAddress } : {}),
                 },
             },
             hooks,
@@ -349,8 +359,11 @@ export class ReckerHttpHandler {
             circuitBreakerTrips: 0,
         };
     }
-    destroy() {
-        this.client = null;
+    async destroy() {
+        if (this.client) {
+            await this.client.destroy();
+            this.client = null;
+        }
         this.deduplicator = null;
         this.circuitBreaker = null;
     }

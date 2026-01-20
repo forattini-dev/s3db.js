@@ -47,6 +47,9 @@ export class AsyncEventEmitter extends EventEmitter {
     setAsyncMode(enabled) {
         this._asyncMode = enabled;
     }
+    destroy() {
+        this.removeAllListeners();
+    }
 }
 export default AsyncEventEmitter;
 //# sourceMappingURL=async-event-emitter.js.map

@@ -51174,10 +51174,15 @@ class ReckerHttpHandler {
             connectTimeout: 10000,
             headersTimeout: 30000,
             bodyTimeout: 60000,
+            keepAlive: options.keepAlive ?? true,
             keepAliveTimeout: 4000,
             keepAliveMaxTimeout: 600000,
+            keepAliveTimeoutThreshold: 1000,
             connections: 100,
             pipelining: 10,
+            maxRequestsPerClient: 100,
+            clientTtl: null,
+            maxCachedSessions: 100,
             http2: true,
             http2MaxConcurrentStreams: 100,
             http2Preset: 'performance', // Default to performance preset for S3 workloads
@@ -51219,9 +51224,14 @@ class ReckerHttpHandler {
                 agent: {
                     connections: this.options.connections,
                     pipelining: this.options.pipelining,
-                    keepAlive: true,
+                    keepAlive: this.options.keepAlive,
                     keepAliveTimeout: this.options.keepAliveTimeout,
                     keepAliveMaxTimeout: this.options.keepAliveMaxTimeout,
+                    keepAliveTimeoutThreshold: this.options.keepAliveTimeoutThreshold,
+                    maxRequestsPerClient: this.options.maxRequestsPerClient,
+                    clientTtl: this.options.clientTtl ?? null,
+                    maxCachedSessions: this.options.maxCachedSessions,
+                    ...(this.options.localAddress ? { localAddress: this.options.localAddress } : {}),
                 },
             },
             hooks,
@@ -51364,8 +51374,11 @@ class ReckerHttpHandler {
             circuitBreakerTrips: 0,
         };
     }
-    destroy() {
-        this.client = null;
+    async destroy() {
+        if (this.client) {
+            await this.client.destroy();
+            this.client = null;
+        }
         this.deduplicator = null;
         this.circuitBreaker = null;
     }
@@ -55024,6 +55037,7 @@ class S3Client extends EventEmitter$1 {
     connectionString;
     httpClientOptions;
     client;
+    httpHandler = null;
     _inflightCoalescing;
     taskExecutorConfig;
     taskExecutor;
@@ -55103,6 +55117,20 @@ class S3Client extends EventEmitter$1 {
             monitoring: configObj.monitoring ?? { collectMetrics: true },
         };
         return normalized;
+    }
+    _normalizeHttpHandlerOptions() {
+        const options = this.httpClientOptions;
+        const connections = typeof options.connections === 'number'
+            ? options.connections
+            : options.maxSockets;
+        const keepAliveTimeout = options.keepAliveTimeout ?? options.keepAliveMsecs;
+        const bodyTimeout = options.bodyTimeout ?? options.timeout;
+        return {
+            ...options,
+            connections,
+            keepAliveTimeout,
+            bodyTimeout
+        };
     }
     _createTasksPool() {
         const poolConfig = {
@@ -55205,7 +55233,11 @@ class S3Client extends EventEmitter$1 {
             return;
         this.taskExecutor.stop();
     }
-    destroy() {
+    async destroy() {
+        if (this.httpHandler) {
+            await this.httpHandler.destroy();
+            this.httpHandler = null;
+        }
         if (this.client && typeof this.client.destroy === 'function') {
             this.client.destroy();
         }
@@ -55213,11 +55245,11 @@ class S3Client extends EventEmitter$1 {
         this.removeAllListeners();
     }
     createClient() {
-        const httpHandler = new ReckerHttpHandler(this.httpClientOptions);
+        this.httpHandler = new ReckerHttpHandler(this._normalizeHttpHandlerOptions());
         const options = {
             region: this.config.region,
             endpoint: this.config.endpoint,
-            requestHandler: httpHandler,
+            requestHandler: this.httpHandler,
         };
         if (this.config.forcePathStyle)
             options.forcePathStyle = true;
@@ -62729,6 +62761,9 @@ class AsyncEventEmitter extends EventEmitter$1 {
     setAsyncMode(enabled) {
         this._asyncMode = enabled;
     }
+    destroy() {
+        this.removeAllListeners();
+    }
 }
 
 /**
@@ -69248,8 +69283,18 @@ class Resource extends AsyncEventEmitter {
         return this._idGenerator.getType(customIdGenerator, idSize);
     }
     export() {
-        this._ensureSchemaCompiled();
-        const exported = this.schema.export();
+        let exported;
+        if (this._lazySchema && !this._schemaCompiled && this._pendingSchemaConfig) {
+            exported = {
+                name: this.name,
+                attributes: this._pendingSchemaConfig.attributes,
+                version: this._pendingSchemaConfig.version
+            };
+        }
+        else {
+            this._ensureSchemaCompiled();
+            exported = this.schema.export();
+        }
         exported.behavior = this.behavior;
         exported.timestamps = this.config.timestamps;
         exported.partitions = this.config.partitions || {};
@@ -69300,27 +69345,28 @@ class Resource extends AsyncEventEmitter {
                 };
             }
         }
-        // Fix: parse version to number for Schema
-        const parsedVersion = parseInt(this.version.replace(/v/i, ''), 10) || 1;
-        this.schema = new Schema({
-            name: this.name,
-            attributes: this.attributes,
-            passphrase: this.passphrase,
-            bcryptRounds: this.bcryptRounds,
-            version: parsedVersion,
-            options: {
-                autoEncrypt: this.config.autoEncrypt,
-                autoDecrypt: this.config.autoDecrypt,
-                allNestedObjectsOptional: this.config.allNestedObjectsOptional
-            },
-            map: map || this.map,
-            schemaRegistry: this._schemaRegistry,
-            pluginSchemaRegistry: this._pluginSchemaRegistry
-        });
-        this._schemaRegistry = this.schema.getSchemaRegistry() || this._schemaRegistry;
-        this._pluginSchemaRegistry = this.schema.getPluginSchemaRegistry() || this._pluginSchemaRegistry;
-        if (this.validator) {
-            this.validator.updateSchema(this.attributes);
+        if (!this._lazySchema) {
+            const parsedVersion = parseInt(this.version.replace(/v/i, ''), 10) || 1;
+            this.schema = new Schema({
+                name: this.name,
+                attributes: this.attributes,
+                passphrase: this.passphrase,
+                bcryptRounds: this.bcryptRounds,
+                version: parsedVersion,
+                options: {
+                    autoEncrypt: this.config.autoEncrypt,
+                    autoDecrypt: this.config.autoDecrypt,
+                    allNestedObjectsOptional: this.config.allNestedObjectsOptional
+                },
+                map: map || this.map,
+                schemaRegistry: this._schemaRegistry,
+                pluginSchemaRegistry: this._pluginSchemaRegistry
+            });
+            this._schemaRegistry = this.schema.getSchemaRegistry() || this._schemaRegistry;
+            this._pluginSchemaRegistry = this.schema.getPluginSchemaRegistry() || this._pluginSchemaRegistry;
+            if (this.validator) {
+                this.validator.updateSchema(this.attributes);
+            }
         }
         this.validatePartitions();
     }
@@ -70270,7 +70316,7 @@ class DatabaseConnection {
                     db.client.removeAllListeners();
                 }
                 if (typeof db.client.destroy === 'function') {
-                    db.client.destroy();
+                    await db.client.destroy();
                 }
             }
             await db.emit('db:disconnected', new Date());
@@ -70349,8 +70395,8 @@ class Database extends SafeEventEmitter {
         })();
         this.version = '1';
         this.s3dbVersion = (() => {
-            const [ok, , version] = tryFnSync(() => (typeof globalThis['19.3.16'] !== 'undefined' && globalThis['19.3.16'] !== '19.3.16'
-                ? globalThis['19.3.16']
+            const [ok, , version] = tryFnSync(() => (typeof globalThis['19.3.17'] !== 'undefined' && globalThis['19.3.17'] !== '19.3.17'
+                ? globalThis['19.3.17']
                 : 'latest'));
             return ok ? version : 'latest';
         })();

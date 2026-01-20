@@ -19,6 +19,7 @@ export class S3Client extends EventEmitter {
     connectionString;
     httpClientOptions;
     client;
+    httpHandler = null;
     _inflightCoalescing;
     taskExecutorConfig;
     taskExecutor;
@@ -98,6 +99,20 @@ export class S3Client extends EventEmitter {
             monitoring: configObj.monitoring ?? { collectMetrics: true },
         };
         return normalized;
+    }
+    _normalizeHttpHandlerOptions() {
+        const options = this.httpClientOptions;
+        const connections = typeof options.connections === 'number'
+            ? options.connections
+            : options.maxSockets;
+        const keepAliveTimeout = options.keepAliveTimeout ?? options.keepAliveMsecs;
+        const bodyTimeout = options.bodyTimeout ?? options.timeout;
+        return {
+            ...options,
+            connections,
+            keepAliveTimeout,
+            bodyTimeout
+        };
     }
     _createTasksPool() {
         const poolConfig = {
@@ -200,7 +215,11 @@ export class S3Client extends EventEmitter {
             return;
         this.taskExecutor.stop();
     }
-    destroy() {
+    async destroy() {
+        if (this.httpHandler) {
+            await this.httpHandler.destroy();
+            this.httpHandler = null;
+        }
         if (this.client && typeof this.client.destroy === 'function') {
             this.client.destroy();
         }
@@ -208,11 +227,11 @@ export class S3Client extends EventEmitter {
         this.removeAllListeners();
     }
     createClient() {
-        const httpHandler = new ReckerHttpHandler(this.httpClientOptions);
+        this.httpHandler = new ReckerHttpHandler(this._normalizeHttpHandlerOptions());
         const options = {
             region: this.config.region,
             endpoint: this.config.endpoint,
-            requestHandler: httpHandler,
+            requestHandler: this.httpHandler,
         };
         if (this.config.forcePathStyle)
             options.forcePathStyle = true;

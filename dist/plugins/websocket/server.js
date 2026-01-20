@@ -965,14 +965,23 @@ export class WebSocketServer extends EventEmitter {
             const resource = this.database.resources?.[resourceName];
             if (!resource)
                 continue;
-            const listener = (event, data) => {
-                this._broadcastResourceEvent(resourceName, event, data);
+            const insertListener = (data) => {
+                this._broadcastResourceEvent(resourceName, 'insert', data);
             };
-            // Listen to resource events
-            resource.on('insert', (data) => listener('insert', data));
-            resource.on('update', (data) => listener('update', data));
-            resource.on('delete', (data) => listener('delete', data));
-            this._resourceListeners.set(resourceName, listener);
+            const updateListener = (data) => {
+                this._broadcastResourceEvent(resourceName, 'update', data);
+            };
+            const deleteListener = (data) => {
+                this._broadcastResourceEvent(resourceName, 'delete', data);
+            };
+            resource.on('insert', insertListener);
+            resource.on('update', updateListener);
+            resource.on('delete', deleteListener);
+            this._resourceListeners.set(resourceName, {
+                insert: insertListener,
+                update: updateListener,
+                delete: deleteListener
+            });
         }
     }
     /**
@@ -980,12 +989,12 @@ export class WebSocketServer extends EventEmitter {
      * @private
      */
     _removeResourceListeners() {
-        for (const [resourceName, listener] of this._resourceListeners) {
+        for (const [resourceName, listeners] of this._resourceListeners) {
             const resource = this.database.resources?.[resourceName];
             if (resource) {
-                resource.removeListener('insert', listener);
-                resource.removeListener('update', listener);
-                resource.removeListener('delete', listener);
+                resource.removeListener('insert', listeners.insert);
+                resource.removeListener('update', listeners.update);
+                resource.removeListener('delete', listeners.delete);
             }
         }
         this._resourceListeners.clear();

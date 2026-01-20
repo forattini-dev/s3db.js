@@ -313,8 +313,18 @@ export class Resource extends AsyncEventEmitter {
         return this._idGenerator.getType(customIdGenerator, idSize);
     }
     export() {
-        this._ensureSchemaCompiled();
-        const exported = this.schema.export();
+        let exported;
+        if (this._lazySchema && !this._schemaCompiled && this._pendingSchemaConfig) {
+            exported = {
+                name: this.name,
+                attributes: this._pendingSchemaConfig.attributes,
+                version: this._pendingSchemaConfig.version
+            };
+        }
+        else {
+            this._ensureSchemaCompiled();
+            exported = this.schema.export();
+        }
         exported.behavior = this.behavior;
         exported.timestamps = this.config.timestamps;
         exported.partitions = this.config.partitions || {};
@@ -365,27 +375,28 @@ export class Resource extends AsyncEventEmitter {
                 };
             }
         }
-        // Fix: parse version to number for Schema
-        const parsedVersion = parseInt(this.version.replace(/v/i, ''), 10) || 1;
-        this.schema = new Schema({
-            name: this.name,
-            attributes: this.attributes,
-            passphrase: this.passphrase,
-            bcryptRounds: this.bcryptRounds,
-            version: parsedVersion,
-            options: {
-                autoEncrypt: this.config.autoEncrypt,
-                autoDecrypt: this.config.autoDecrypt,
-                allNestedObjectsOptional: this.config.allNestedObjectsOptional
-            },
-            map: map || this.map,
-            schemaRegistry: this._schemaRegistry,
-            pluginSchemaRegistry: this._pluginSchemaRegistry
-        });
-        this._schemaRegistry = this.schema.getSchemaRegistry() || this._schemaRegistry;
-        this._pluginSchemaRegistry = this.schema.getPluginSchemaRegistry() || this._pluginSchemaRegistry;
-        if (this.validator) {
-            this.validator.updateSchema(this.attributes);
+        if (!this._lazySchema) {
+            const parsedVersion = parseInt(this.version.replace(/v/i, ''), 10) || 1;
+            this.schema = new Schema({
+                name: this.name,
+                attributes: this.attributes,
+                passphrase: this.passphrase,
+                bcryptRounds: this.bcryptRounds,
+                version: parsedVersion,
+                options: {
+                    autoEncrypt: this.config.autoEncrypt,
+                    autoDecrypt: this.config.autoDecrypt,
+                    allNestedObjectsOptional: this.config.allNestedObjectsOptional
+                },
+                map: map || this.map,
+                schemaRegistry: this._schemaRegistry,
+                pluginSchemaRegistry: this._pluginSchemaRegistry
+            });
+            this._schemaRegistry = this.schema.getSchemaRegistry() || this._schemaRegistry;
+            this._pluginSchemaRegistry = this.schema.getPluginSchemaRegistry() || this._pluginSchemaRegistry;
+            if (this.validator) {
+                this.validator.updateSchema(this.attributes);
+            }
         }
         this.validatePartitions();
     }

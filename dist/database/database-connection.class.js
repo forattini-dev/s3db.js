@@ -199,7 +199,7 @@ export class DatabaseConnection {
                     db.client.removeAllListeners();
                 }
                 if (typeof db.client.destroy === 'function') {
-                    db.client.destroy();
+                    await db.client.destroy();
                 }
             }
             await db.emit('db:disconnected', new Date());

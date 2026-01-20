@@ -188,6 +188,7 @@ export declare class ApiServer {
     private _signalHandlersSetup;
     private _boundSigtermHandler;
     private _boundSigintHandler;
+    private _metricsListeners;
     constructor(options?: ApiServerOptions);
     start(): Promise<void>;
     stop(): Promise<void>;
@@ -207,6 +208,7 @@ export declare class ApiServer {
         timeout?: number | undefined;
     }): Promise<void>;
     private _setupMetricsEventListeners;
+    private _removeMetricsEventListeners;
     private _setupDocumentationRoutes;
     private _setupOIDCRoutes;
     private _createAuthMiddleware;

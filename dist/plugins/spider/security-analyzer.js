@@ -30,25 +30,28 @@ export class SecurityAnalyzer {
             vulnerabilities: [],
             securityScore: 0
         };
+        let responseHeaders = {};
+        let captureHeaders = null;
+        let consoleListener = null;
+        const consoleLogs = [];
         try {
-            let responseHeaders = {};
-            const captureHeaders = (response) => {
+            captureHeaders = (response) => {
                 if (response.url() === baseUrl || response.url().startsWith(baseUrl)) {
                     const headers = response.headers();
                     responseHeaders = { ...headers };
                 }
             };
             page.on('response', captureHeaders);
-            const consoleLogs = [];
             if (activities.includes('security_console_logs')) {
-                page.on('console', (msg) => {
+                consoleListener = (msg) => {
                     consoleLogs.push({
                         type: msg.type(),
                         text: msg.text(),
                         location: msg.location(),
                         args: msg.args().length
                     });
-                });
+                };
+                page.on('console', consoleListener);
             }
             if (activities.includes('security_headers')) {
                 result.securityHeaders = this._analyzeSecurityHeaders(responseHeaders);
@@ -80,11 +83,18 @@ export class SecurityAnalyzer {
                 result.vulnerabilities = this._checkVulnerabilities(responseHeaders, result);
             }
             result.securityScore = this._calculateSecurityScore(result);
-            page.removeListener('response', captureHeaders);
             return result;
         }
         catch {
             return result;
+        }
+        finally {
+            if (captureHeaders) {
+                page.removeListener('response', captureHeaders);
+            }
+            if (consoleListener) {
+                page.removeListener('console', consoleListener);
+            }
         }
     }
     async analyze(page, baseUrl, html = null) {
@@ -99,25 +109,28 @@ export class SecurityAnalyzer {
             vulnerabilities: [],
             securityScore: 0
         };
+        let responseHeaders = {};
+        let captureHeaders = null;
+        let consoleListener = null;
+        const consoleLogs = [];
         try {
-            let responseHeaders = {};
-            const captureHeaders = (response) => {
+            captureHeaders = (response) => {
                 if (response.url() === baseUrl || response.url().startsWith(baseUrl)) {
                     const headers = response.headers();
                     responseHeaders = { ...headers };
                 }
             };
             page.on('response', captureHeaders);
-            const consoleLogs = [];
             if (this.config.captureConsoleLogs) {
-                page.on('console', (msg) => {
+                consoleListener = (msg) => {
                     consoleLogs.push({
                         type: msg.type(),
                         text: msg.text(),
                         location: msg.location(),
                         args: msg.args().length
                     });
-                });
+                };
+                page.on('console', consoleListener);
             }
             if (this.config.analyzeSecurityHeaders) {
                 result.securityHeaders = this._analyzeSecurityHeaders(responseHeaders);
@@ -147,12 +160,19 @@ export class SecurityAnalyzer {
                 result.vulnerabilities = this._checkVulnerabilities(responseHeaders, result);
             }
             result.securityScore = this._calculateSecurityScore(result);
-            page.removeListener('response', captureHeaders);
             return result;
         }
         catch (error) {
             this.logger?.error('[SecurityAnalyzer] Error during analysis:', error);
             return result;
+        }
+        finally {
+            if (captureHeaders) {
+                page.removeListener('response', captureHeaders);
+            }
+            if (consoleListener) {
+                page.removeListener('console', consoleListener);
+            }
         }
     }
     _analyzeSecurityHeaders(headers) {

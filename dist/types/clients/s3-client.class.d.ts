@@ -16,12 +16,14 @@ export declare class S3Client extends EventEmitter {
     connectionString: string;
     httpClientOptions: HttpClientOptions;
     client: AwsS3Client;
+    private httpHandler;
     private _inflightCoalescing;
     private taskExecutorConfig;
     private taskExecutor;
     constructor({ logLevel, logger, id, AwsS3Client: providedClient, connectionString, httpClientOptions, taskExecutor, executorPool, }: S3ClientConfig);
     private _coalesce;
     private _normalizeTaskExecutorConfig;
+    private _normalizeHttpHandlerOptions;
     private _createTasksPool;
     private _executeOperation;
     private _executeBatch;
@@ -31,7 +33,7 @@ export declare class S3Client extends EventEmitter {
     resumePool(): void | null;
     drainPool(): Promise<void | null>;
     stopPool(): void;
-    destroy(): void;
+    destroy(): Promise<void>;
     createClient(): AwsS3Client;
     sendCommand(command: AwsCommand): Promise<unknown>;
     putObject(params: PutObjectParams): Promise<unknown>;
