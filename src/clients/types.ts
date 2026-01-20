@@ -502,5 +502,5 @@ export interface Client extends EventEmitter {
   moveAllObjects(params: { prefixFrom: string; prefixTo: string }): Promise<Array<{ from: string; to: string }>>;
   getQueueStats(): QueueStats | null;
   getAggregateMetrics(since?: number): unknown | null;
-  destroy(): void;
+  destroy(): void | Promise<void>;
 }

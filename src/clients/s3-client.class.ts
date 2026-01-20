@@ -88,6 +88,7 @@ export class S3Client extends EventEmitter {
   httpClientOptions: HttpClientOptions;
   client: AwsS3Client;
   private httpHandler: ReckerHttpHandler | null = null;
+  private _rawHttpClientOptions: HttpClientOptions;
   private _inflightCoalescing: Map<string, Promise<unknown>>;
   private taskExecutorConfig: NormalizedTaskExecutorConfig;
   private taskExecutor: TasksPoolType | null;
@@ -117,6 +118,7 @@ export class S3Client extends EventEmitter {
     this.id = id ?? idGenerator(77);
     this.config = new ConnectionString(connectionString);
     this.connectionString = connectionString;
+    this._rawHttpClientOptions = httpClientOptions || {};
     this.httpClientOptions = {
       keepAlive: true,
       keepAliveMsecs: 1000,
@@ -194,18 +196,26 @@ export class S3Client extends EventEmitter {
 
   private _normalizeHttpHandlerOptions(): ReckerHttpHandlerOptions {
     const options = this.httpClientOptions;
-    const connections = typeof options.connections === 'number'
-      ? options.connections
-      : options.maxSockets;
-    const keepAliveTimeout = options.keepAliveTimeout ?? options.keepAliveMsecs;
-    const bodyTimeout = options.bodyTimeout ?? options.timeout;
+    const raw = this._rawHttpClientOptions;
+    const connections = typeof raw.connections === 'number'
+      ? raw.connections
+      : raw.maxSockets;
+    const keepAliveTimeout = raw.keepAliveTimeout ?? raw.keepAliveMsecs;
+    const bodyTimeout = raw.bodyTimeout ?? raw.timeout;
 
-    return {
-      ...options,
-      connections,
-      keepAliveTimeout,
-      bodyTimeout
-    } as ReckerHttpHandlerOptions;
+    const normalized: ReckerHttpHandlerOptions = { ...options };
+
+    if (connections !== undefined) {
+      normalized.connections = connections;
+    }
+    if (keepAliveTimeout !== undefined) {
+      normalized.keepAliveTimeout = keepAliveTimeout;
+    }
+    if (bodyTimeout !== undefined) {
+      normalized.bodyTimeout = bodyTimeout;
+    }
+
+    return normalized;
   }
 
   private _createTasksPool(): TasksPoolType {
@@ -334,7 +344,7 @@ export class S3Client extends EventEmitter {
 
   async destroy(): Promise<void> {
     if (this.httpHandler) {
-      await this.httpHandler.destroy();
+      await this.httpHandler.destroyAsync();
       this.httpHandler = null;
     }
     if (this.client && typeof this.client.destroy === 'function') {

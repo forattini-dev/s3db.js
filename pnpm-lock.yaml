@@ -216,8 +216,8 @@ importers:
         specifier: ^2.0.0
         version: 2.11.2(puppeteer-extra@3.3.6(puppeteer-core@24.35.0)(puppeteer@24.35.0(typescript@5.9.3)))
       recker:
-        specifier: 1.0.66
-        version: 1.0.66(ioredis@5.9.2)
+        specifier: 1.0.68
+        version: 1.0.68(ioredis@5.9.2)
       user-agents:
         specifier: ^1.0.0
         version: 1.1.669
@@ -4887,8 +4887,8 @@ packages:
     resolution: {integrity: sha512-/vxpCXddiX8NGfGO/mTafwjq4aFa/71pvamip0++IQk3zG8cbCj0fifNPrjjF1XMXUne91jL9OoxmdykoEtifQ==}
     engines: {node: '>= 10.13.0'}
 
-  recker@1.0.66:
-    resolution: {integrity: sha512-Q81q7A/aqOeC/mm7KggPtg3kzYAaWsu3ATSMzMFTBaoFKOvEBfE9jRVjB42S5s/QSnOKWq9vmPtQ0pLLGPX41g==}
+  recker@1.0.68:
+    resolution: {integrity: sha512-lIjfr9decK5JsbzExi3Rp4OvxwINlfH5BGSP0z/TGhZj9PYwS+UMqUsfXYCWODSat0OiqvEzLaPMzHvq2FMovQ==}
     engines: {node: '>=18'}
     hasBin: true
     peerDependencies:
@@ -5452,8 +5452,8 @@ packages:
     engines: {node: '>=18.0.0'}
     hasBin: true
 
-  tuiuiu.js@1.0.50:
-    resolution: {integrity: sha512-WAncxcVQ2cuL7lK5GCFPtARxN0ste9XI0+XRH+7Z7tqLXwpE0YJSDDFHQmfrg7Wfuv5vQX6R/Yfn/Duds+lWnw==}
+  tuiuiu.js@1.0.51:
+    resolution: {integrity: sha512-SyMZtPNDJsGqmFEzqiegwLtfHDc4M2R4K6+gMJAZxXF/YULo7bvnnwAuTAiOXZL4S5YQWZbTDlYSXYQDm2/p/Q==}
     engines: {node: '>=18'}
     hasBin: true
 
@@ -12529,14 +12529,14 @@ snapshots:
     dependencies:
       resolve: 1.22.11
 
-  recker@1.0.66(ioredis@5.9.2):
+  recker@1.0.68(ioredis@5.9.2):
     dependencies:
       '@maxmind/geoip2-node': 6.3.4
       cli-args-parser: 1.0.3
       css-select: 6.0.0
       fuse.js: 7.1.0
       he: 1.2.0
-      tuiuiu.js: 1.0.50
+      tuiuiu.js: 1.0.51
       undici: 7.18.2
       zod: 4.3.5
     optionalDependencies:
@@ -13198,7 +13198,7 @@ snapshots:
     optionalDependencies:
       fsevents: 2.3.3
 
-  tuiuiu.js@1.0.50: {}
+  tuiuiu.js@1.0.51: {}
 
   tunnel-agent@0.6.0:
     dependencies:

@@ -462,13 +462,22 @@ export class ReckerHttpHandler {
     };
   }
 
-  async destroy(): Promise<void> {
-    if (this.client) {
-      await this.client.destroy();
-      this.client = null;
-    }
+  destroy(): void {
+    void this.destroyAsync();
+  }
+
+  async destroyAsync(): Promise<void> {
+    const client = this.client;
+    this.client = null;
     this.deduplicator = null;
     this.circuitBreaker = null;
+    if (client) {
+      try {
+        await client.destroy();
+      } catch {
+        // Ignore cleanup errors
+      }
+    }
   }
 }
 
