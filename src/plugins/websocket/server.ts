@@ -101,7 +101,7 @@ export class WebSocketServer extends EventEmitter {
   heartbeatTimers: Map<string, { ping: NodeJS.Timeout; timeout: NodeJS.Timeout | null }>; // clientId -> { ping, timeout }
   rateLimitState: Map<string, { count: number; windowStart: number }>; // clientId -> { count, windowStart }
 
-  _resourceListeners: Map<string, Function>;
+  _resourceListeners: Map<string, { insert: Function; update: Function; delete: Function }>;
 
   healthManager: HealthManager | null;
   channelManager: ChannelManager | null;
@@ -1186,16 +1186,25 @@ export class WebSocketServer extends EventEmitter {
       const resource = (this.database.resources as any)?.[resourceName];
       if (!resource) continue;
 
-      const listener = (event: string, data: any) => {
-        this._broadcastResourceEvent(resourceName, event, data);
+      const insertListener = (data: any) => {
+        this._broadcastResourceEvent(resourceName, 'insert', data);
+      };
+      const updateListener = (data: any) => {
+        this._broadcastResourceEvent(resourceName, 'update', data);
+      };
+      const deleteListener = (data: any) => {
+        this._broadcastResourceEvent(resourceName, 'delete', data);
       };
 
-      // Listen to resource events
-      resource.on('insert', (data: any) => listener('insert', data));
-      resource.on('update', (data: any) => listener('update', data));
-      resource.on('delete', (data: any) => listener('delete', data));
+      resource.on('insert', insertListener);
+      resource.on('update', updateListener);
+      resource.on('delete', deleteListener);
 
-      this._resourceListeners.set(resourceName, listener);
+      this._resourceListeners.set(resourceName, {
+        insert: insertListener,
+        update: updateListener,
+        delete: deleteListener
+      });
     }
   }
 
@@ -1204,12 +1213,12 @@ export class WebSocketServer extends EventEmitter {
    * @private
    */
   private _removeResourceListeners(): void {
-    for (const [resourceName, listener] of this._resourceListeners) {
+    for (const [resourceName, listeners] of this._resourceListeners) {
       const resource = (this.database.resources as any)?.[resourceName];
       if (resource) {
-        resource.removeListener('insert', listener as any);
-        resource.removeListener('update', listener as any);
-        resource.removeListener('delete', listener as any);
+        resource.removeListener('insert', listeners.insert);
+        resource.removeListener('update', listeners.update);
+        resource.removeListener('delete', listeners.delete);
       }
     }
     this._resourceListeners.clear();
