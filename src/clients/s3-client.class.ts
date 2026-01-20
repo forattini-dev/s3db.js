@@ -288,6 +288,10 @@ export class S3Client extends EventEmitter {
     fns: Array<() => Promise<T>>,
     options: BatchOptions = {}
   ): Promise<{ results: (T | null)[]; errors: Array<{ error: Error; index: number }> }> {
+    if (!this.taskExecutor) {
+      return await this._executeBatchWithLimit(fns, options);
+    }
+
     const wrapped = fns.map((fn, index) =>
       Promise.resolve()
         .then(() => fn())
@@ -311,6 +315,62 @@ export class S3Client extends EventEmitter {
       )
       .filter((e): e is { error: Error; index: number } => e !== null);
 
+    return { results, errors };
+  }
+
+  private _resolveBatchConcurrency(total: number): number {
+    if (total <= 1) return total;
+
+    const env = process.env.S3DB_CONCURRENCY;
+    if (env) {
+      const parsed = parseInt(env, 10);
+      if (!isNaN(parsed) && parsed > 0) {
+        return Math.min(total, parsed);
+      }
+    }
+
+    const maxSockets = this.httpClientOptions.maxSockets;
+    if (typeof maxSockets === 'number' && maxSockets > 0) {
+      return Math.min(total, maxSockets);
+    }
+
+    return Math.min(total, 10);
+  }
+
+  private async _executeBatchWithLimit<T>(
+    fns: Array<() => Promise<T>>,
+    options: BatchOptions = {}
+  ): Promise<{ results: (T | null)[]; errors: Array<{ error: Error; index: number }> }> {
+    if (fns.length === 0) {
+      return { results: [], errors: [] };
+    }
+
+    const results = new Array<T | null>(fns.length).fill(null);
+    const errorsByIndex = new Array<{ error: Error; index: number } | null>(fns.length).fill(null);
+    const concurrency = Math.max(1, this._resolveBatchConcurrency(fns.length));
+    let nextIndex = 0;
+
+    const worker = async (): Promise<void> => {
+      while (true) {
+        const index = nextIndex++;
+        if (index >= fns.length) return;
+
+        try {
+          const value = await fns[index]!();
+          results[index] = value;
+          options.onItemComplete?.(value, index);
+        } catch (error) {
+          const err = error as Error;
+          errorsByIndex[index] = { error: err, index };
+          options.onItemError?.(err, index);
+        }
+      }
+    };
+
+    const workers = Array.from({ length: concurrency }, () => worker());
+    await Promise.allSettled(workers);
+
+    const errors = errorsByIndex.filter((e): e is { error: Error; index: number } => e !== null);
     return { results, errors };
   }
 
