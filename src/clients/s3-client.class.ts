@@ -87,6 +87,7 @@ export class S3Client extends EventEmitter {
   connectionString: string;
   httpClientOptions: HttpClientOptions;
   client: AwsS3Client;
+  private httpHandler: ReckerHttpHandler | null = null;
   private _inflightCoalescing: Map<string, Promise<unknown>>;
   private taskExecutorConfig: NormalizedTaskExecutorConfig;
   private taskExecutor: TasksPoolType | null;
@@ -189,6 +190,22 @@ export class S3Client extends EventEmitter {
     };
 
     return normalized;
+  }
+
+  private _normalizeHttpHandlerOptions(): ReckerHttpHandlerOptions {
+    const options = this.httpClientOptions;
+    const connections = typeof options.connections === 'number'
+      ? options.connections
+      : options.maxSockets;
+    const keepAliveTimeout = options.keepAliveTimeout ?? options.keepAliveMsecs;
+    const bodyTimeout = options.bodyTimeout ?? options.timeout;
+
+    return {
+      ...options,
+      connections,
+      keepAliveTimeout,
+      bodyTimeout
+    } as ReckerHttpHandlerOptions;
   }
 
   private _createTasksPool(): TasksPoolType {
@@ -315,7 +332,11 @@ export class S3Client extends EventEmitter {
     this.taskExecutor.stop();
   }
 
-  destroy(): void {
+  async destroy(): Promise<void> {
+    if (this.httpHandler) {
+      await this.httpHandler.destroy();
+      this.httpHandler = null;
+    }
     if (this.client && typeof this.client.destroy === 'function') {
       this.client.destroy();
     }
@@ -324,7 +345,7 @@ export class S3Client extends EventEmitter {
   }
 
   createClient(): AwsS3Client {
-    const httpHandler = new ReckerHttpHandler(this.httpClientOptions as unknown as ReckerHttpHandlerOptions);
+    this.httpHandler = new ReckerHttpHandler(this._normalizeHttpHandlerOptions());
 
     const options: {
       region: string;
@@ -335,7 +356,7 @@ export class S3Client extends EventEmitter {
     } = {
       region: this.config.region,
       endpoint: this.config.endpoint,
-      requestHandler: httpHandler,
+      requestHandler: this.httpHandler,
     };
 
     if (this.config.forcePathStyle) options.forcePathStyle = true;

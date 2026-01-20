@@ -234,7 +234,7 @@ export class DatabaseConnection {
           (db.client as any).removeAllListeners();
         }
         if (typeof (db.client as any).destroy === 'function') {
-          (db.client as any).destroy();
+          await (db.client as any).destroy();
         }
       }
 
