@@ -59,6 +59,10 @@ export class AsyncEventEmitter extends EventEmitter {
   setAsyncMode(enabled: boolean): void {
     this._asyncMode = enabled;
   }
+
+  destroy(): void {
+    this.removeAllListeners();
+  }
 }
 
 export default AsyncEventEmitter;
