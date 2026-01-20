@@ -188,6 +188,7 @@ export class ApiServer {
   private _signalHandlersSetup = false;
   private _boundSigtermHandler: (() => void) | null = null;
   private _boundSigintHandler: (() => void) | null = null;
+  private _metricsListeners: Map<string, (data: any) => void> = new Map();
 
   constructor(options: ApiServerOptions = {}) {
     this.options = {
@@ -530,6 +531,8 @@ export class ApiServer {
       this.metrics.stop();
     }
 
+    this._removeMetricsEventListeners();
+
     if (this.failban) {
       await this.failban.cleanup();
     }
@@ -688,68 +691,93 @@ export class ApiServer {
   }
 
   private _setupMetricsEventListeners(): void {
-    this.events.on('request:end', (data: { method: string; path: string; status: number; duration: number }) => {
+    const requestEndHandler = (data: { method: string; path: string; status: number; duration: number }) => {
       this.metrics.recordRequest({
         method: data.method,
         path: data.path,
         status: data.status,
         duration: data.duration
       });
-    });
+    };
+    this._metricsListeners.set('request:end', requestEndHandler);
+    this.events.on('request:end', requestEndHandler);
 
-    this.events.on('request:error', (data: { error: Error }) => {
+    const requestErrorHandler = (data: { error: Error }) => {
       this.metrics.recordError({
         error: data.error.message,
         type: 'request'
       });
-    });
+    };
+    this._metricsListeners.set('request:error', requestErrorHandler);
+    this.events.on('request:error', requestErrorHandler);
 
-    this.events.on('auth:success', (data: { method: string }) => {
+    const authSuccessHandler = (data: { method: string }) => {
       this.metrics.recordAuth({
         success: true,
         method: data.method
       });
-    });
+    };
+    this._metricsListeners.set('auth:success', authSuccessHandler);
+    this.events.on('auth:success', authSuccessHandler);
 
-    this.events.on('auth:failure', (data: { allowedMethods?: string[] }) => {
+    const authFailureHandler = (data: { allowedMethods?: string[] }) => {
       this.metrics.recordAuth({
         success: false,
         method: data.allowedMethods?.[0] || 'unknown'
       });
-    });
+    };
+    this._metricsListeners.set('auth:failure', authFailureHandler);
+    this.events.on('auth:failure', authFailureHandler);
 
-    this.events.on('resource:created', (data: { resource: string }) => {
+    const resourceCreatedHandler = (data: { resource: string }) => {
       this.metrics.recordResourceOperation({
         action: 'created',
         resource: data.resource
       });
-    });
+    };
+    this._metricsListeners.set('resource:created', resourceCreatedHandler);
+    this.events.on('resource:created', resourceCreatedHandler);
 
-    this.events.on('resource:updated', (data: { resource: string }) => {
+    const resourceUpdatedHandler = (data: { resource: string }) => {
       this.metrics.recordResourceOperation({
         action: 'updated',
         resource: data.resource
       });
-    });
+    };
+    this._metricsListeners.set('resource:updated', resourceUpdatedHandler);
+    this.events.on('resource:updated', resourceUpdatedHandler);
 
-    this.events.on('resource:deleted', (data: { resource: string }) => {
+    const resourceDeletedHandler = (data: { resource: string }) => {
       this.metrics.recordResourceOperation({
         action: 'deleted',
         resource: data.resource
       });
-    });
+    };
+    this._metricsListeners.set('resource:deleted', resourceDeletedHandler);
+    this.events.on('resource:deleted', resourceDeletedHandler);
 
-    this.events.on('user:created', () => {
+    const userCreatedHandler = () => {
       this.metrics.recordUserEvent({ action: 'created' });
-    });
+    };
+    this._metricsListeners.set('user:created', userCreatedHandler);
+    this.events.on('user:created', userCreatedHandler);
 
-    this.events.on('user:login', () => {
+    const userLoginHandler = () => {
       this.metrics.recordUserEvent({ action: 'login' });
-    });
+    };
+    this._metricsListeners.set('user:login', userLoginHandler);
+    this.events.on('user:login', userLoginHandler);
 
     if (this.options.logLevel) {
       this.logger.debug('Metrics event listeners configured');
     }
+  }
+
+  private _removeMetricsEventListeners(): void {
+    for (const [event, handler] of this._metricsListeners) {
+      this.events.removeListener(event, handler);
+    }
+    this._metricsListeners.clear();
   }
 
   private _setupDocumentationRoutes(): void {
