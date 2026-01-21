@@ -671,7 +671,7 @@ async function main() {
   console.log('');
   console.log('  s3db.js API Plugin:');
   console.log('  - ~500 lines of config');
-  console.log('  - 3 core dependencies (Hono, jose, nanoid)');
+  console.log('  - 2 core dependencies (Hono, jose)');
   console.log('  - Automatic middleware');
   console.log('  - Built-in auth drivers');
   console.log('  - Integrated template engine');
