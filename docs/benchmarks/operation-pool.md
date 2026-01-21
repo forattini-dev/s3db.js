@@ -753,7 +753,7 @@ class OperationPool {
   async enqueue(fn, options = {}) {
     // Create deferred promise
     const task = {
-      id: nanoid(),
+      id: idGenerator(),
       fn,
       priority: options.priority || 0,
       resolve: null,
@@ -824,7 +824,7 @@ Per-operation overhead:
 
 ```javascript
 {
-  id: nanoid(),           // 22 bytes
+  id: idGenerator(),      // 22 chars
   fn: () => {},           // 8 bytes (reference)
   priority: 0,            // 8 bytes
   promise: Promise<T>,    // ~100 bytes
