@@ -202,7 +202,7 @@ const orders = await db.createResource({
 | `behavior` | `string` | `'user-managed'` | Behavior strategy (see [Behaviors](#behaviors)) |
 | `timestamps` | `boolean` | `false` | Auto-add createdAt/updatedAt fields |
 | `versioningEnabled` | `boolean` | `false` | Enable resource versioning |
-| `idGenerator` | `function` | nanoid(22) | Custom ID generation function |
+| `idGenerator` | `function` | built-in (22) | Custom ID generation function |
 | `idSize` | `number` | `22` | Size for auto-generated IDs |
 | `partitions` | `object` | `{}` | Partition definitions |
 | `asyncPartitions` | `boolean` | `false` | Enable async partition indexing (70-100% faster writes) |
