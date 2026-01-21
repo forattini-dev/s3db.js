@@ -78,7 +78,6 @@ const coreDependencies = [
   'fastest-validator',
   'json-stable-stringify',
   'lodash-es',
-  'nanoid',
   'pino',
   'pino-pretty',
   'recker'
