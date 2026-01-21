@@ -273,7 +273,9 @@ export class ResourcePersistence {
 
     let finalId = validatedId || preProcessedData.id || id;
     if (!finalId) {
-      finalId = await Promise.resolve(this.idGenerator(preProcessedData));
+      const shouldUseData = this.resource.idGeneratorType === 'custom';
+      const generatedId = shouldUseData ? this.idGenerator(preProcessedData) : this.idGenerator();
+      finalId = await Promise.resolve(generatedId);
       if (!finalId || String(finalId).trim() === '') {
         const { idGenerator } = await import('#src/concerns/id.js');
         finalId = idGenerator();
