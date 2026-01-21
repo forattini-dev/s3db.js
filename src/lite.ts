@@ -67,7 +67,7 @@ export { tryFn, tryFnSync, type TryResult } from './concerns/try-fn.js';
 export { encrypt, decrypt } from './concerns/crypto.js';
 
 // ID generation
-export { idGenerator, passwordGenerator, createCustomGenerator, initializeNanoid } from './concerns/id.js';
+export { idGenerator, passwordGenerator, createCustomGenerator } from './concerns/id.js';
 
 // Base62 encoding
 export { encode, decode, encodeDecimal, decodeDecimal } from './concerns/base62.js';
