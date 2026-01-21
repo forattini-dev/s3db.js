@@ -1,9 +1,9 @@
 import { EventEmitter } from 'events';
 import { cpus } from 'os';
 import { setTimeout as delay } from 'timers/promises';
-import { nanoid } from 'nanoid';
 import type { TaskExecutor } from '../concurrency/task-executor.interface.js';
 import { AdaptiveTuning } from '../concerns/adaptive-tuning.js';
+import { idGenerator } from '../concerns/id.js';
 import { SignatureStats } from './concerns/signature-stats.js';
 import { FifoTaskQueue } from './concerns/fifo-task-queue.js';
 import { PriorityTaskQueue } from './concerns/priority-task-queue.js';
@@ -625,7 +625,7 @@ export class TasksPool extends EventEmitter implements TaskExecutor {
     };
 
     const task: PoolTask<T> = {
-      id: nanoid(),
+      id: idGenerator(),
       fn: fn as TaskFunction<T>,
       priority: options.priority || 0,
       retries: options.retries ?? this.retries,
@@ -687,7 +687,7 @@ export class TasksPool extends EventEmitter implements TaskExecutor {
   async addBatch<T = unknown>(fns: Array<TaskFunction<T>>, options: BatchOptions = {}): Promise<BatchResult<T>> {
     const results: (T | null)[] = [];
     const errors: Array<{ error: Error; index: number }> = [];
-    const batchId = nanoid();
+    const batchId = idGenerator();
 
     const promises = fns.map((fn, index) => {
       const taskOptions: EnqueueOptions = {
