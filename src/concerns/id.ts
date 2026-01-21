@@ -1,14 +1,4 @@
 import { randomFillSync } from 'node:crypto';
-import { createLogger } from './logger.js';
-
-interface Logger {
-  warn(obj: Record<string, unknown>, msg: string): void;
-  info(obj: Record<string, unknown>, msg: string): void;
-  error(obj: Record<string, unknown>, msg: string): void;
-  debug(obj: Record<string, unknown>, msg: string): void;
-}
-
-const logger = createLogger({ name: 'IdGenerator', level: 'info' }) as Logger;
 
 const FALLBACK_URL_ALPHABET =
   'useandom-26T198340PX75pxJACKVERYMINDBUSHWOLF_GQZbfghjklqvwyzrict';
@@ -71,38 +61,6 @@ let activeCustomAlphabet: CustomAlphabetFunction = customAlphabetFallback;
 let activeUrlAlphabet: string = FALLBACK_URL_ALPHABET;
 let idGeneratorImpl: (size?: number) => string = activeCustomAlphabet(activeUrlAlphabet, 22);
 let passwordGeneratorImpl: (size?: number) => string = activeCustomAlphabet(PASSWORD_ALPHABET, 16);
-let nanoidInitializationError: Error | null = null;
-
-interface NanoidModule {
-  customAlphabet?: CustomAlphabetFunction;
-  urlAlphabet?: string;
-}
-
-const nanoidReadyPromise: Promise<void> = import('nanoid')
-  .then((mod: NanoidModule) => {
-    const resolvedCustomAlphabet = mod?.customAlphabet ?? activeCustomAlphabet;
-    const resolvedUrlAlphabet = mod?.urlAlphabet ?? activeUrlAlphabet;
-
-    activeCustomAlphabet = resolvedCustomAlphabet;
-    activeUrlAlphabet = resolvedUrlAlphabet;
-    idGeneratorImpl = activeCustomAlphabet(activeUrlAlphabet, 22);
-    passwordGeneratorImpl = activeCustomAlphabet(PASSWORD_ALPHABET, 16);
-  })
-  .catch((error: Error) => {
-    nanoidInitializationError = error;
-    if (typeof process !== 'undefined' && process?.env?.S3DB_DEBUG) {
-      logger.warn({ error: error.message }, 'Failed to dynamically import "nanoid". Using fallback implementation.');
-    }
-  });
-
-export function initializeNanoid(): Promise<void> {
-  return nanoidReadyPromise;
-}
-
-export function getNanoidInitializationError(): Error | null {
-  return nanoidInitializationError;
-}
-
 export const idGenerator = (size?: number): string => idGeneratorImpl(size);
 
 export const passwordGenerator = (size?: number): string => passwordGeneratorImpl(size);
