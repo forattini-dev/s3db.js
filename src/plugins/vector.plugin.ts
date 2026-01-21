@@ -153,8 +153,11 @@ class MaxHeap<T> {
     let current = index;
     while (current > 0) {
       const parent = Math.floor((current - 1) / 2);
-      if (this.compare(this.data[current], this.data[parent]) <= 0) break;
-      [this.data[current], this.data[parent]] = [this.data[parent], this.data[current]];
+      const currentValue = this.data[current]!;
+      const parentValue = this.data[parent]!;
+      if (this.compare(currentValue, parentValue) <= 0) break;
+      this.data[current] = parentValue;
+      this.data[parent] = currentValue;
       current = parent;
     }
   }
@@ -167,16 +170,18 @@ class MaxHeap<T> {
       const right = current * 2 + 2;
       let largest = current;
 
-      if (left < length && this.compare(this.data[left], this.data[largest]) > 0) {
+      if (left < length && this.compare(this.data[left]!, this.data[largest]!) > 0) {
         largest = left;
       }
 
-      if (right < length && this.compare(this.data[right], this.data[largest]) > 0) {
+      if (right < length && this.compare(this.data[right]!, this.data[largest]!) > 0) {
         largest = right;
       }
 
       if (largest === current) break;
-      [this.data[current], this.data[largest]] = [this.data[largest], this.data[current]];
+      const currentValue = this.data[current]!;
+      this.data[current] = this.data[largest]!;
+      this.data[largest] = currentValue;
       current = largest;
     }
   }
