@@ -1,5 +1,3 @@
-import { nanoid } from 'nanoid';
-
 import { createClientForTest } from '#tests/config.js';
 import { MemoryClient } from '../../../src/clients/memory-client.class.js';
 
@@ -102,4 +100,3 @@ describe('Client Class - Complete Journey', () => {
     expect(client.id).toBeDefined();
   });
 });
-
