@@ -45,7 +45,7 @@ const DOMAIN_TERMS = [
   'compression', 'encoding', 'base62', 'dictionary', 'benchmark',
   'streaming', 'batch', 'pool', 'parallel', 'concurrent',
   // Field types
-  'embedding', 'vector', 'ip4', 'ip6', 'timestamp', 'uuid', 'nanoid',
+  'embedding', 'vector', 'ip4', 'ip6', 'timestamp', 'uuid',
   // MCP
   'mcp', 'model-context-protocol', 'ai', 'claude', 'agent', 'tool',
   // Plugins
