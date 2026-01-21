@@ -22,6 +22,7 @@
 |-----------|------|---------|
 | `new VectorPlugin({...})` | Constructor | Create plugin instance |
 | `resource.vectorSearch()` | Method | Find k-nearest neighbors |
+| `resource.vectorSearchPaged()` | Method | Paged search with scan stats |
 | `resource.similarTo()` | Alias | Alternative name for vectorSearch |
 | `resource.cluster()` | Method | K-means clustering |
 | `resource.vectorDistance()` | Method | Calculate distance between vectors |
@@ -45,7 +46,10 @@ new VectorPlugin({
   autoDetectVectorField: true, // Auto-detect embedding:XXX fields
   emitEvents: true,            // Emit events for monitoring
   verboseEvents: false,        // Emit detailed progress events
-  eventThrottle: 100           // Throttle progress events (ms)
+  eventThrottle: 100,          // Throttle progress events (ms)
+  partitionPolicy: 'warn',     // 'allow' | 'warn' | 'error'
+  maxUnpartitionedRecords: 1000,
+  searchPageSize: 1000
 })
 ```
 
@@ -61,6 +65,9 @@ new VectorPlugin({
 | `emitEvents` | boolean | `true` | Enable event emission for monitoring and debugging | true/false |
 | `verboseEvents` | boolean | `false` | Emit detailed progress events (use for debugging, impacts performance) | true/false |
 | `eventThrottle` | number | `100` | Throttle progress events in milliseconds (prevents spam) | 0-unlimited |
+| `partitionPolicy` | string | `'warn'` | Unpartitioned scan policy: `'allow'`, `'warn'`, `'error'` | See values |
+| `maxUnpartitionedRecords` | number | `1000` | Threshold for unpartitioned scans when policy is warn/error | 0-unlimited |
+| `searchPageSize` | number | `1000` | Default page size for vector search scans | 1-unlimited |
 
 ### Default Configuration
 
@@ -73,7 +80,10 @@ new VectorPlugin({
   autoDetectVectorField: true,   // Auto-detect embedding:XXX fields
   emitEvents: true,              // Enable event emission
   verboseEvents: false,          // Don't emit detailed progress
-  eventThrottle: 100             // Throttle progress events (ms)
+  eventThrottle: 100,            // Throttle progress events (ms)
+  partitionPolicy: 'warn',       // Warn on large unpartitioned scans
+  maxUnpartitionedRecords: 1000, // Threshold for unpartitioned scans
+  searchPageSize: 1000           // Default scan page size
 }
 ```
 
@@ -98,6 +108,11 @@ vectorSearch(
     threshold?: number;
     partition?: string;
     partitionValues?: Record<string, any>;
+    pageSize?: number;
+    maxScannedRecords?: number;
+    partitionPolicy?: string;
+    maxUnpartitionedRecords?: number;
+    recordFilter?: (record: any) => boolean;
   }
 ): Promise<{ record: any; distance: number }[]>
 ```
@@ -113,6 +128,11 @@ vectorSearch(
 | `options.threshold` | number | unlimited | Only return distances ≤ threshold (optional filtering) |
 | `options.partition` | string | auto | Partition name for filtered search (e.g., `'byCategory'`) |
 | `options.partitionValues` | object | none | Partition field values to filter by (e.g., `{ category: 'electronics' }`) |
+| `options.pageSize` | number | plugin config | Page size for scanning large datasets |
+| `options.maxScannedRecords` | number | unlimited | Stop after scanning this many records (marks results as approximate) |
+| `options.partitionPolicy` | string | plugin config | Override partition policy for this search |
+| `options.maxUnpartitionedRecords` | number | plugin config | Override unpartitioned threshold for this search |
+| `options.recordFilter` | function | none | In-process filter applied before distance calculation |
 
 **Returns:** Array of objects sorted by distance (ascending):
 ```javascript
@@ -156,6 +176,55 @@ const results = await products.vectorSearch([0.1, 0.2, ...], {
   limit: 10,
   distanceMetric: 'cosine'
 });
+```
+
+---
+
+### vectorSearchPaged(queryVector, options)
+
+Paged vector search that returns results and scan statistics (bounded memory).
+
+**Signature:**
+```typescript
+vectorSearchPaged(
+  queryVector: number[],
+  options?: {
+    vectorField?: string;
+    limit?: number;
+    distanceMetric?: string;
+    threshold?: number;
+    partition?: string;
+    partitionValues?: Record<string, any>;
+    pageSize?: number;
+    maxScannedRecords?: number;
+    partitionPolicy?: string;
+    maxUnpartitionedRecords?: number;
+    recordFilter?: (record: any) => boolean;
+  }
+): Promise<{
+  results: { record: any; distance: number }[];
+  stats: {
+    totalRecords: number | null;
+    scannedRecords: number;
+    processedRecords: number;
+    pagesScanned: number;
+    dimensionMismatches: number;
+    durationMs: number;
+    approximate: boolean;
+  };
+}>
+```
+
+**Example:**
+```javascript
+const { results, stats } = await products.vectorSearchPaged([0.1, 0.2, ...], {
+  limit: 10,
+  pageSize: 500,
+  partition: 'byProject',
+  partitionValues: { projectId }
+});
+
+console.log(`Scanned ${stats.scannedRecords} records in ${stats.durationMs}ms`);
 ```
 
 ---
@@ -443,6 +512,7 @@ const dist = products.vectorDistance([1, 2, 3], [4, 5, 6], 'euclidean');
 | Operation | Technical Name | Intuitive Alias | Best for |
 |-----------|---------------|-----------------|----------|
 | Find similar vectors | `vectorSearch()` | `similarTo()`, `findSimilar()` | Recommendations, search, discovery |
+| Paged vector search | `vectorSearchPaged()` | - | Large datasets, monitoring |
 | K-means clustering | `cluster()` | - | Grouping, segmentation, analysis |
 | Calculate distance | `vectorDistance()` | `distance()` | Comparisons, metrics, similarity % |
 

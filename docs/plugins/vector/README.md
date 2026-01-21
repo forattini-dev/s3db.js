@@ -258,6 +258,27 @@ const filtered = await products.vectorSearch(queryVector, {
 });
 ```
 
+### Production-safe Paged Search
+
+Use paged scanning to keep memory bounded and capture scan stats:
+
+```javascript
+const vectorPlugin = new VectorPlugin({
+  partitionPolicy: 'warn',
+  maxUnpartitionedRecords: 1000,
+  searchPageSize: 500
+});
+
+const { results, stats } = await products.vectorSearchPaged(queryVector, {
+  limit: 10,
+  pageSize: 500,
+  partition: 'byProject',
+  partitionValues: { projectId }
+});
+
+console.log(`Scanned ${stats.scannedRecords} records in ${stats.durationMs}ms`);
+```
+
 ### K-Means Clustering
 
 Group items automatically:

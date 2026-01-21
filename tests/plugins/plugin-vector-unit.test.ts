@@ -384,6 +384,9 @@ describe('VectorPlugin - Unit Tests (Mocked)', () => {
     test('should call list with partition when provided', async () => {
       const plugin = new VectorPlugin();
 
+      const records = [
+        { id: '1', vector: [1, 0, 0] }
+      ];
       const mockResource = {
         name: 'testResource',
         schema: {
@@ -395,24 +398,35 @@ describe('VectorPlugin - Unit Tests (Mocked)', () => {
             }
           }
         },
-        list: vi.fn().mockResolvedValue([
-          { id: '1', vector: [1, 0, 0] }
-        ])
+        list: vi.fn().mockImplementation(({ limit = 1000, offset = 0 } = {}) => {
+          return Promise.resolve(records.slice(offset, offset + limit));
+        })
       };
 
       const searchMethod = plugin.createVectorSearchMethod(mockResource);
 
       await searchMethod([1, 0, 0], {
         partition: 'byCategory',
-        partitionValues: { category: 'Electronics' }
+        partitionValues: { category: 'Electronics' },
+        pageSize: 5
       });
 
-      expect(mockResource.list).toHaveBeenCalled();
+      expect(mockResource.list).toHaveBeenCalledWith({
+        partition: 'byCategory',
+        partitionValues: { category: 'Electronics' },
+        limit: 5,
+        offset: 0
+      });
     });
 
     test('should filter by threshold', async () => {
       const plugin = new VectorPlugin();
 
+      const records = [
+        { id: '1', vector: [1, 0, 0] },  // dist = 0
+        { id: '2', vector: [0, 1, 0] },  // dist ~ 1 (cosine)
+        { id: '3', vector: [-1, 0, 0] }  // dist ~ 2 (opposite)
+      ];
       const mockResource = {
         name: 'testResource',
         schema: {
@@ -424,11 +438,9 @@ describe('VectorPlugin - Unit Tests (Mocked)', () => {
             }
           }
         },
-        getAll: vi.fn().mockResolvedValue([
-          { id: '1', vector: [1, 0, 0] },  // dist = 0
-          { id: '2', vector: [0, 1, 0] },  // dist ~ 1 (cosine)
-          { id: '3', vector: [-1, 0, 0] }  // dist ~ 2 (opposite)
-        ])
+        list: vi.fn().mockImplementation(({ limit = 1000, offset = 0 } = {}) => {
+          return Promise.resolve(records.slice(offset, offset + limit));
+        })
       };
 
       const searchMethod = plugin.createVectorSearchMethod(mockResource);
@@ -444,6 +456,11 @@ describe('VectorPlugin - Unit Tests (Mocked)', () => {
     test('should skip records without vector field', async () => {
       const plugin = new VectorPlugin();
 
+      const records = [
+        { id: '1', vector: [1, 0, 0] },
+        { id: '2' },  // No vector
+        { id: '3', vector: null }  // Null vector
+      ];
       const mockResource = {
         name: 'testResource',
         schema: {
@@ -455,11 +472,9 @@ describe('VectorPlugin - Unit Tests (Mocked)', () => {
             }
           }
         },
-        getAll: vi.fn().mockResolvedValue([
-          { id: '1', vector: [1, 0, 0] },
-          { id: '2' },  // No vector
-          { id: '3', vector: null }  // Null vector
-        ])
+        list: vi.fn().mockImplementation(({ limit = 1000, offset = 0 } = {}) => {
+          return Promise.resolve(records.slice(offset, offset + limit));
+        })
       };
 
       const searchMethod = plugin.createVectorSearchMethod(mockResource);
@@ -473,6 +488,10 @@ describe('VectorPlugin - Unit Tests (Mocked)', () => {
     test('should handle dimension mismatch gracefully', async () => {
       const plugin = new VectorPlugin();
 
+      const records = [
+        { id: '1', vector: [1, 0, 0] },
+        { id: '2', vector: [1, 0] }  // Different dimension
+      ];
       const mockResource = {
         name: 'testResource',
         schema: {
@@ -484,10 +503,9 @@ describe('VectorPlugin - Unit Tests (Mocked)', () => {
             }
           }
         },
-        getAll: vi.fn().mockResolvedValue([
-          { id: '1', vector: [1, 0, 0] },
-          { id: '2', vector: [1, 0] }  // Different dimension
-        ])
+        list: vi.fn().mockImplementation(({ limit = 1000, offset = 0 } = {}) => {
+          return Promise.resolve(records.slice(offset, offset + limit));
+        })
       };
 
       const searchMethod = plugin.createVectorSearchMethod(mockResource);
@@ -497,6 +515,118 @@ describe('VectorPlugin - Unit Tests (Mocked)', () => {
       // Should only return matching dimension
       expect(results).toHaveLength(1);
       expect(results[0].record.id).toBe('1');
+    });
+  });
+
+  describe('vectorSearchPaged', () => {
+    test('should return paged results with stats', async () => {
+      const plugin = new VectorPlugin();
+
+      const records = [
+        { id: '1', vector: [1, 0] },
+        { id: '2', vector: [0.9, 0.1] },
+        { id: '3', vector: [0, 1] },
+        { id: '4', vector: [-1, 0] },
+        { id: '5', vector: [0.7, 0.7] }
+      ];
+
+      const mockResource = {
+        name: 'testResource',
+        schema: {
+          attributes: {
+            vector: {
+              type: 'array',
+              items: 'number',
+              length: 2
+            }
+          }
+        },
+        list: vi.fn().mockImplementation(({ limit = 1000, offset = 0 } = {}) => {
+          return Promise.resolve(records.slice(offset, offset + limit));
+        })
+      };
+
+      const searchPagedMethod = plugin.createVectorSearchPagedMethod(mockResource);
+
+      const { results, stats } = await searchPagedMethod([1, 0], {
+        limit: 2,
+        pageSize: 2,
+        distanceMetric: 'cosine'
+      });
+
+      expect(results).toHaveLength(2);
+      expect(results[0].record.id).toBe('1');
+      expect(stats.pagesScanned).toBeGreaterThan(1);
+      expect(stats.scannedRecords).toBe(5);
+      expect(stats.approximate).toBe(false);
+      expect(mockResource.list).toHaveBeenCalledTimes(3);
+    });
+
+    test('should enforce partition policy error', async () => {
+      const plugin = new VectorPlugin({
+        partitionPolicy: 'error',
+        maxUnpartitionedRecords: 2
+      });
+
+      const mockResource = {
+        name: 'testResource',
+        schema: {
+          attributes: {
+            vector: {
+              type: 'array',
+              items: 'number',
+              length: 2
+            }
+          }
+        },
+        list: vi.fn().mockResolvedValue([]),
+        count: vi.fn().mockResolvedValue(3)
+      };
+
+      const searchPagedMethod = plugin.createVectorSearchPagedMethod(mockResource);
+
+      await expect(searchPagedMethod([1, 0], { pageSize: 2 })).rejects.toThrow('requires a partition');
+      expect(mockResource.count).toHaveBeenCalled();
+      expect(mockResource.list).not.toHaveBeenCalled();
+    });
+
+    test('should stop early with maxScannedRecords', async () => {
+      const plugin = new VectorPlugin();
+
+      const records = [
+        { id: '1', vector: [1, 0] },
+        { id: '2', vector: [0.9, 0.1] },
+        { id: '3', vector: [0, 1] },
+        { id: '4', vector: [-1, 0] },
+        { id: '5', vector: [0.7, 0.7] }
+      ];
+
+      const mockResource = {
+        name: 'testResource',
+        schema: {
+          attributes: {
+            vector: {
+              type: 'array',
+              items: 'number',
+              length: 2
+            }
+          }
+        },
+        list: vi.fn().mockImplementation(({ limit = 1000, offset = 0 } = {}) => {
+          return Promise.resolve(records.slice(offset, offset + limit));
+        })
+      };
+
+      const searchPagedMethod = plugin.createVectorSearchPagedMethod(mockResource);
+
+      const { stats } = await searchPagedMethod([1, 0], {
+        limit: 3,
+        pageSize: 2,
+        maxScannedRecords: 3
+      });
+
+      expect(stats.approximate).toBe(true);
+      expect(stats.scannedRecords).toBe(3);
     });
   });
 
@@ -645,10 +775,12 @@ describe('VectorPlugin - Unit Tests (Mocked)', () => {
 
       // Check technical methods
       expect(typeof mockResource1.vectorSearch).toBe('function');
+      expect(typeof mockResource1.vectorSearchPaged).toBe('function');
       expect(typeof mockResource1.cluster).toBe('function');
       expect(typeof mockResource1.vectorDistance).toBe('function');
 
       expect(typeof mockResource2.vectorSearch).toBe('function');
+      expect(typeof mockResource2.vectorSearchPaged).toBe('function');
       expect(typeof mockResource2.cluster).toBe('function');
       expect(typeof mockResource2.vectorDistance).toBe('function');
 
@@ -674,6 +806,7 @@ describe('VectorPlugin - Unit Tests (Mocked)', () => {
 
       const mockResource1 = {
         vectorSearch: vi.fn(),
+        vectorSearchPaged: vi.fn(),
         cluster: vi.fn(),
         vectorDistance: vi.fn(),
         similarTo: vi.fn(),
@@ -683,6 +816,7 @@ describe('VectorPlugin - Unit Tests (Mocked)', () => {
 
       const mockResource2 = {
         vectorSearch: vi.fn(),
+        vectorSearchPaged: vi.fn(),
         cluster: vi.fn(),
         vectorDistance: vi.fn(),
         similarTo: vi.fn(),
@@ -701,10 +835,12 @@ describe('VectorPlugin - Unit Tests (Mocked)', () => {
 
       // Check technical methods removed
       expect(mockResource1.vectorSearch).toBeUndefined();
+      expect(mockResource1.vectorSearchPaged).toBeUndefined();
       expect(mockResource1.cluster).toBeUndefined();
       expect(mockResource1.vectorDistance).toBeUndefined();
 
       expect(mockResource2.vectorSearch).toBeUndefined();
+      expect(mockResource2.vectorSearchPaged).toBeUndefined();
       expect(mockResource2.cluster).toBeUndefined();
       expect(mockResource2.vectorDistance).toBeUndefined();
 
@@ -753,6 +889,10 @@ describe('VectorPlugin - Unit Tests (Mocked)', () => {
     test('should call list with partition in vectorSearch', async () => {
       const plugin = new VectorPlugin();
 
+      const records = [
+        { id: '1', vector: [1, 0, 0] },
+        { id: '2', vector: [0.9, 0.1, 0] }
+      ];
       const mockResource = {
         name: 'testResource',
         schema: {
@@ -764,20 +904,25 @@ describe('VectorPlugin - Unit Tests (Mocked)', () => {
             }
           }
         },
-        list: vi.fn().mockResolvedValue([
-          { id: '1', vector: [1, 0, 0] },
-          { id: '2', vector: [0.9, 0.1, 0] }
-        ])
+        list: vi.fn().mockImplementation(({ limit = 1000, offset = 0 } = {}) => {
+          return Promise.resolve(records.slice(offset, offset + limit));
+        })
       };
 
       const searchMethod = plugin.createVectorSearchMethod(mockResource);
 
       const results = await searchMethod([1, 0, 0], {
         partition: 'byCategory',
-        partitionValues: { category: 'tech' }
+        partitionValues: { category: 'tech' },
+        pageSize: 2
       });
 
-      expect(mockResource.list).toHaveBeenCalledWith({ partition: 'byCategory', partitionValues: { category: 'tech' } });
+      expect(mockResource.list).toHaveBeenCalledWith({
+        partition: 'byCategory',
+        partitionValues: { category: 'tech' },
+        limit: 2,
+        offset: 0
+      });
       expect(results).toHaveLength(2);
       expect(results[0].record.id).toBe('1');
     });

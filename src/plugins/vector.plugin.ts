@@ -10,6 +10,7 @@ import type { Logger } from '../concerns/logger.js';
 
 export type DistanceMetric = 'cosine' | 'euclidean' | 'manhattan';
 export type DistanceFunction = (a: number[], b: number[]) => number;
+export type PartitionPolicy = 'allow' | 'warn' | 'error';
 
 export interface VectorPluginOptions extends Record<string, unknown> {
   dimensions?: number;
@@ -20,6 +21,9 @@ export interface VectorPluginOptions extends Record<string, unknown> {
   emitEvents?: boolean;
   verboseEvents?: boolean;
   eventThrottle?: number;
+  partitionPolicy?: PartitionPolicy;
+  maxUnpartitionedRecords?: number;
+  searchPageSize?: number;
   logLevel?: string;
   logLevelEvents?: boolean;
   logger?: Logger;
@@ -34,6 +38,9 @@ export interface VectorPluginConfig extends VectorPluginOptions {
   emitEvents: boolean;
   verboseEvents: boolean;
   eventThrottle: number;
+  partitionPolicy: PartitionPolicy;
+  maxUnpartitionedRecords: number;
+  searchPageSize: number;
 }
 
 export interface VectorSearchOptions {
@@ -43,11 +50,32 @@ export interface VectorSearchOptions {
   threshold?: number | null;
   partition?: string | null;
   partitionValues?: Record<string, unknown> | null;
+  pageSize?: number;
+  maxScannedRecords?: number | null;
+  recordFilter?: (record: Record<string, unknown>) => boolean;
+  partitionPolicy?: PartitionPolicy;
+  maxUnpartitionedRecords?: number;
+  onProgress?: (stats: VectorSearchStats) => void;
+}
+
+export interface VectorSearchStats {
+  totalRecords: number | null;
+  scannedRecords: number;
+  processedRecords: number;
+  pagesScanned: number;
+  dimensionMismatches: number;
+  durationMs: number;
+  approximate: boolean;
 }
 
 export interface VectorSearchResult {
   record: Record<string, unknown>;
   distance: number;
+}
+
+export interface VectorSearchPagedResult {
+  results: VectorSearchResult[];
+  stats: VectorSearchStats;
 }
 
 export interface ClusterOptions {
@@ -87,6 +115,73 @@ export interface FindOptimalKOptions {
   distanceFn?: DistanceFunction;
 }
 
+class MaxHeap<T> {
+  private data: T[] = [];
+  private compare: (a: T, b: T) => number;
+
+  constructor(compare: (a: T, b: T) => number) {
+    this.compare = compare;
+  }
+
+  size(): number {
+    return this.data.length;
+  }
+
+  peek(): T | null {
+    return this.data[0] ?? null;
+  }
+
+  push(item: T): void {
+    this.data.push(item);
+    this._bubbleUp(this.data.length - 1);
+  }
+
+  replaceTop(item: T): void {
+    if (this.data.length === 0) {
+      this.data[0] = item;
+      return;
+    }
+    this.data[0] = item;
+    this._bubbleDown(0);
+  }
+
+  toArray(): T[] {
+    return [...this.data];
+  }
+
+  private _bubbleUp(index: number): void {
+    let current = index;
+    while (current > 0) {
+      const parent = Math.floor((current - 1) / 2);
+      if (this.compare(this.data[current], this.data[parent]) <= 0) break;
+      [this.data[current], this.data[parent]] = [this.data[parent], this.data[current]];
+      current = parent;
+    }
+  }
+
+  private _bubbleDown(index: number): void {
+    let current = index;
+    const length = this.data.length;
+    while (true) {
+      const left = current * 2 + 1;
+      const right = current * 2 + 2;
+      let largest = current;
+
+      if (left < length && this.compare(this.data[left], this.data[largest]) > 0) {
+        largest = left;
+      }
+
+      if (right < length && this.compare(this.data[right], this.data[largest]) > 0) {
+        largest = right;
+      }
+
+      if (largest === current) break;
+      [this.data[current], this.data[largest]] = [this.data[largest], this.data[current]];
+      current = largest;
+    }
+  }
+}
+
 export class VectorPlugin extends Plugin {
 
   config: VectorPluginConfig;
@@ -114,6 +209,9 @@ export class VectorPlugin extends Plugin {
       emitEvents = true,
       verboseEvents = false,
       eventThrottle = 100,
+      partitionPolicy = 'warn',
+      maxUnpartitionedRecords = 1000,
+      searchPageSize = 1000,
       ...rest
     } = this.options;
 
@@ -126,6 +224,9 @@ export class VectorPlugin extends Plugin {
       emitEvents: emitEvents as boolean,
       verboseEvents: verboseEvents as boolean,
       eventThrottle: eventThrottle as number,
+      partitionPolicy: partitionPolicy as PartitionPolicy,
+      maxUnpartitionedRecords: maxUnpartitionedRecords as number,
+      searchPageSize: searchPageSize as number,
       logLevel: this.logLevel,
       ...rest
     };
@@ -158,6 +259,7 @@ export class VectorPlugin extends Plugin {
   override async onUninstall(): Promise<void> {
     for (const resource of Object.values(this.database.resources)) {
       delete (resource as unknown as Record<string, unknown>).vectorSearch;
+      delete (resource as unknown as Record<string, unknown>).vectorSearchPaged;
       delete (resource as unknown as Record<string, unknown>).cluster;
       delete (resource as unknown as Record<string, unknown>).vectorDistance;
       delete (resource as unknown as Record<string, unknown>).similarTo;
@@ -497,11 +599,13 @@ export class VectorPlugin extends Plugin {
   installResourceMethods(): void {
     for (const resource of Object.values(this.database.resources)) {
       const searchMethod = this.createVectorSearchMethod(resource);
+      const searchPagedMethod = this.createVectorSearchPagedMethod(resource);
       const clusterMethod = this.createClusteringMethod(resource);
       const distanceMethod = this.createDistanceMethod();
 
       const resourceAny = resource as unknown as Record<string, unknown>;
       resourceAny.vectorSearch = searchMethod;
+      resourceAny.vectorSearchPaged = searchPagedMethod;
       resourceAny.cluster = clusterMethod;
       resourceAny.vectorDistance = distanceMethod;
       resourceAny.similarTo = searchMethod;
@@ -512,189 +616,395 @@ export class VectorPlugin extends Plugin {
 
   createVectorSearchMethod(resource: Resource): (queryVector: number[], options?: VectorSearchOptions) => Promise<VectorSearchResult[]> {
     return async (queryVector: number[], options: VectorSearchOptions = {}): Promise<VectorSearchResult[]> => {
-      const startTime = Date.now();
+      const { results } = await this._vectorSearchPaged(resource, queryVector, options);
+      return results;
+    };
+  }
 
-      let vectorField = options.vectorField;
-      if (!vectorField && this.config.autoDetectVectorField) {
-        vectorField = this.detectVectorField(resource) || 'vector';
-      } else if (!vectorField) {
-        vectorField = 'vector';
-      }
+  createVectorSearchPagedMethod(resource: Resource): (queryVector: number[], options?: VectorSearchOptions) => Promise<VectorSearchPagedResult> {
+    return async (queryVector: number[], options: VectorSearchOptions = {}): Promise<VectorSearchPagedResult> => {
+      return await this._vectorSearchPaged(resource, queryVector, options);
+    };
+  }
 
-      const {
-        limit = 10,
-        distanceMetric = this.config.distanceMetric,
-        threshold = null,
-        partition = null,
-        partitionValues = null
-      } = options;
+  private async _vectorSearchPaged(resource: Resource, queryVector: number[], options: VectorSearchOptions = {}): Promise<VectorSearchPagedResult> {
+    const startTime = Date.now();
 
-      let actualPartition = partition;
-      let actualPartitionValues = partitionValues;
+    let vectorField = options.vectorField;
+    if (!vectorField && this.config.autoDetectVectorField) {
+      vectorField = this.detectVectorField(resource) || 'vector';
+    } else if (!vectorField) {
+      vectorField = 'vector';
+    }
 
-      const distanceFn = this.distanceFunctions[distanceMetric];
-      if (!distanceFn) {
-        const error = new VectorError(`Invalid distance metric: ${distanceMetric}`, {
-          operation: 'vectorSearch',
-          availableMetrics: Object.keys(this.distanceFunctions),
-          providedMetric: distanceMetric
-        });
+    const {
+      limit = 10,
+      distanceMetric = this.config.distanceMetric,
+      threshold = null,
+      partition = null,
+      partitionValues = null,
+      pageSize = this.config.searchPageSize,
+      maxScannedRecords = null,
+      recordFilter,
+      partitionPolicy = this.config.partitionPolicy,
+      maxUnpartitionedRecords = this.config.maxUnpartitionedRecords,
+      onProgress
+    } = options;
 
-        this._emitEvent('vector:search-error', {
-          resource: resource.name,
-          error: error.message,
-          timestamp: Date.now()
-        });
+    let actualPartition = partition;
+    let actualPartitionValues = partitionValues;
 
-        throw error;
-      }
-
-      if (!actualPartition) {
-        const autoPartition = this.getAutoEmbeddingPartition(resource, vectorField);
-        if (autoPartition) {
-          actualPartition = autoPartition.partitionName;
-          actualPartitionValues = autoPartition.partitionValues;
-
-          this._emitEvent('vector:auto-partition-used', {
-            resource: resource.name,
-            vectorField,
-            partition: actualPartition,
-            partitionValues: actualPartitionValues,
-            timestamp: Date.now()
-          });
-        }
-      }
-
-      this._emitEvent('vector:search-start', {
-        resource: resource.name,
-        vectorField,
-        limit,
-        distanceMetric,
-        partition: actualPartition,
-        partitionValues: actualPartitionValues,
-        threshold,
-        queryDimensions: queryVector.length,
-        timestamp: startTime
+    const distanceFn = this.distanceFunctions[distanceMetric];
+    if (!distanceFn) {
+      const error = new VectorError(`Invalid distance metric: ${distanceMetric}`, {
+        operation: 'vectorSearch',
+        availableMetrics: Object.keys(this.distanceFunctions),
+        providedMetric: distanceMetric
       });
 
-      try {
-        let allRecords: Array<Record<string, unknown>>;
-        if (actualPartition && actualPartitionValues) {
-          this._emitEvent('vector:partition-filter', {
-            resource: resource.name,
-            partition: actualPartition,
-            partitionValues: actualPartitionValues,
-            timestamp: Date.now()
-          });
-          allRecords = await resource.list({ partition: actualPartition, partitionValues: actualPartitionValues });
-        } else {
-          const resourceAny = resource as unknown as { getAll?: () => Promise<Array<Record<string, unknown>>> };
-          allRecords = resourceAny.getAll ? await resourceAny.getAll() : await resource.list();
-        }
+      this._emitEvent('vector:search-error', {
+        resource: resource.name,
+        error: error.message,
+        timestamp: Date.now()
+      });
 
-        const totalRecords = allRecords.length;
-        let processedRecords = 0;
-        let dimensionMismatches = 0;
+      throw error;
+    }
 
-        if (!actualPartition && totalRecords > 1000) {
-          const warning = {
-            resource: resource.name,
-            operation: 'vectorSearch',
-            totalRecords,
-            vectorField,
-            recommendation: 'Use partitions to filter data before vector search for better performance'
-          };
+    if (!actualPartition) {
+      const autoPartition = this.getAutoEmbeddingPartition(resource, vectorField);
+      if (autoPartition) {
+        actualPartition = autoPartition.partitionName;
+        actualPartitionValues = autoPartition.partitionValues;
 
-          this._emitEvent('vector:performance-warning', warning);
+        this._emitEvent('vector:auto-partition-used', {
+          resource: resource.name,
+          vectorField,
+          partition: actualPartition,
+          partitionValues: actualPartitionValues,
+          timestamp: Date.now()
+        });
+      }
+    }
 
-          this.logger.warn(`⚠️  VectorPlugin: Performing vectorSearch on ${totalRecords} records without partition filter`);
-          this.logger.warn(`   Resource: '${resource.name}'`);
-          this.logger.warn(`   Recommendation: Use partition parameter to reduce search space`);
-          this.logger.warn(`   Example: resource.vectorSearch(vector, { partition: 'byCategory', partitionValues: { category: 'books' } })`);
-        }
+    if (actualPartition && actualPartitionValues === null) {
+      actualPartitionValues = {};
+    }
 
-        const results = allRecords
-          .filter(record => record[vectorField!] && Array.isArray(record[vectorField!]))
-          .map((record, index) => {
-            try {
-              const distance = distanceFn(queryVector, record[vectorField!] as number[]);
-              processedRecords++;
+    const effectivePageSize = pageSize && pageSize > 0 ? pageSize : this.config.searchPageSize;
 
-              if (this.config.logLevelEvents && processedRecords % 100 === 0) {
-                const progressData = {
+    this._emitEvent('vector:search-start', {
+      resource: resource.name,
+      vectorField,
+      limit,
+      distanceMetric,
+      partition: actualPartition,
+      partitionValues: actualPartitionValues,
+      threshold,
+      pageSize: effectivePageSize,
+      maxScannedRecords,
+      partitionPolicy,
+      maxUnpartitionedRecords,
+      queryDimensions: queryVector.length,
+      timestamp: startTime
+    });
+
+    try {
+      const stats: VectorSearchStats = {
+        totalRecords: null,
+        scannedRecords: 0,
+        processedRecords: 0,
+        pagesScanned: 0,
+        dimensionMismatches: 0,
+        durationMs: 0,
+        approximate: false
+      };
+
+      const policyMaxRecords = maxUnpartitionedRecords ?? this.config.maxUnpartitionedRecords;
+      const policyMode = partitionPolicy ?? this.config.partitionPolicy;
+      let policyWarned = false;
+
+      if (!actualPartition && policyMode !== 'allow' && policyMaxRecords > 0) {
+        const countFn = (resource as unknown as { count?: (options?: { partition?: string | null; partitionValues?: Record<string, unknown> }) => Promise<number> }).count;
+        if (countFn) {
+          try {
+            stats.totalRecords = await countFn.call(resource, { partition: null, partitionValues: {} });
+            if (stats.totalRecords > policyMaxRecords) {
+              const policyEvent = {
+                resource: resource.name,
+                operation: 'vectorSearch',
+                policy: policyMode,
+                totalRecords: stats.totalRecords,
+                maxUnpartitionedRecords: policyMaxRecords,
+                vectorField,
+                timestamp: Date.now()
+              };
+
+              this._emitEvent('vector:search-policy', policyEvent);
+
+              if (policyMode === 'error') {
+                throw new VectorError(`Vector search requires a partition when dataset exceeds ${policyMaxRecords} records`, {
+                  operation: 'vectorSearch',
+                  policy: policyMode,
+                  totalRecords: stats.totalRecords,
+                  maxUnpartitionedRecords: policyMaxRecords,
                   resource: resource.name,
-                  processed: processedRecords,
-                  total: totalRecords,
-                  progress: (processedRecords / totalRecords) * 100,
-                  timestamp: Date.now()
-                };
-                this._emitEvent('vector:search-progress', progressData, `search-${resource.name}`);
-                this.logger.debug(progressData, `Search progress: ${processedRecords}/${totalRecords} (${progressData.progress.toFixed(1)}%)`);
+                  vectorField
+                });
               }
 
-              return { record, distance };
-            } catch {
-              dimensionMismatches++;
-
-              if (this.config.logLevelEvents) {
-                const mismatchData = {
+              if (policyMode === 'warn') {
+                const warning = {
                   resource: resource.name,
-                  recordIndex: index,
-                  expected: queryVector.length,
-                  got: (record[vectorField!] as number[] | undefined)?.length,
-                  timestamp: Date.now()
+                  operation: 'vectorSearch',
+                  totalRecords: stats.totalRecords,
+                  vectorField,
+                  recommendation: 'Use partitions to filter data before vector search for better performance'
                 };
-                this._emitEvent('vector:dimension-mismatch', mismatchData);
-                this.logger.debug(mismatchData, `Dimension mismatch at record ${index}: expected ${mismatchData.expected}, got ${mismatchData.got}`);
+                this._emitEvent('vector:performance-warning', warning);
+                this.logger.warn(`⚠️  VectorPlugin: Performing vectorSearch on ${stats.totalRecords} records without partition filter`);
+                this.logger.warn(`   Resource: '${resource.name}'`);
+                this.logger.warn(`   Recommendation: Use partition parameter to reduce search space`);
+                this.logger.warn(`   Example: resource.vectorSearch(vector, { partition: 'byCategory', partitionValues: { category: 'books' } })`);
+                policyWarned = true;
               }
-
-              return null;
             }
-          })
-          .filter((result): result is VectorSearchResult => result !== null)
-          .filter(result => threshold === null || result.distance <= threshold)
-          .sort((a, b) => a.distance - b.distance)
-          .slice(0, limit);
+          } catch (error) {
+            if (policyMode === 'error') {
+              throw error;
+            }
+          }
+        }
+      }
 
+      if (actualPartition && actualPartitionValues) {
+        this._emitEvent('vector:partition-filter', {
+          resource: resource.name,
+          partition: actualPartition,
+          partitionValues: actualPartitionValues,
+          timestamp: Date.now()
+        });
+      }
+
+      if (limit <= 0) {
         const duration = Date.now() - startTime;
-        const throughput = totalRecords / (duration / 1000);
+        stats.durationMs = duration;
 
         this._emitEvent('vector:search-complete', {
           resource: resource.name,
           vectorField,
-          resultsCount: results.length,
-          totalRecords,
-          processedRecords,
-          dimensionMismatches,
+          resultsCount: 0,
+          totalRecords: stats.totalRecords,
+          processedRecords: stats.processedRecords,
+          scannedRecords: stats.scannedRecords,
+          pagesScanned: stats.pagesScanned,
+          dimensionMismatches: stats.dimensionMismatches,
           duration,
-          throughput: throughput.toFixed(2),
+          approximate: stats.approximate,
+          throughput: '0.00',
           timestamp: Date.now()
         });
 
-        if (this.config.logLevelEvents) {
-          const perfData = {
-            operation: 'search',
-            resource: resource.name,
-            duration,
-            throughput: throughput.toFixed(2),
-            recordsPerSecond: (processedRecords / (duration / 1000)).toFixed(2),
-            timestamp: Date.now()
-          };
-          this._emitEvent('vector:performance', perfData);
-          this.logger.debug(perfData, `Search performance: ${duration}ms, ${perfData.throughput} MB/s, ${perfData.recordsPerSecond} rec/s`);
+        return { results: [], stats };
+      }
+
+      const resultsHeap = new MaxHeap<VectorSearchResult>((a, b) => a.distance - b.distance);
+      let offset = 0;
+      let stopScan = false;
+
+      while (true) {
+        const listOptions = actualPartition && actualPartitionValues
+          ? { partition: actualPartition, partitionValues: actualPartitionValues, limit: effectivePageSize, offset }
+          : { limit: effectivePageSize, offset };
+
+        const batch = await resource.list(listOptions);
+
+        if (batch.length === 0) {
+          break;
         }
 
-        return results;
-      } catch (error) {
-        this._emitEvent('vector:search-error', {
-          resource: resource.name,
-          error: (error as Error).message,
-          stack: (error as Error).stack,
-          timestamp: Date.now()
-        });
-        throw error;
+        stats.pagesScanned += 1;
+
+        for (const [index, record] of batch.entries()) {
+          if (maxScannedRecords && stats.scannedRecords >= maxScannedRecords) {
+            stats.approximate = true;
+            stopScan = true;
+            break;
+          }
+
+          stats.scannedRecords += 1;
+
+          if (recordFilter && !recordFilter(record as Record<string, unknown>)) {
+            continue;
+          }
+
+          const vectorValue = (record as Record<string, unknown>)[vectorField!];
+          if (!vectorValue || !Array.isArray(vectorValue)) {
+            continue;
+          }
+
+          try {
+            const distance = distanceFn(queryVector, vectorValue as number[]);
+            stats.processedRecords += 1;
+
+            if (threshold !== null && distance > threshold) {
+              continue;
+            }
+
+            const resultItem = { record: record as Record<string, unknown>, distance };
+
+            if (resultsHeap.size() < limit) {
+              resultsHeap.push(resultItem);
+            } else {
+              const currentWorst = resultsHeap.peek();
+              if (currentWorst && distance < currentWorst.distance) {
+                resultsHeap.replaceTop(resultItem);
+              }
+            }
+
+            if (this.config.logLevelEvents && stats.processedRecords % 100 === 0) {
+              const progress = stats.totalRecords ? (stats.scannedRecords / stats.totalRecords) * 100 : null;
+              const progressData = {
+                resource: resource.name,
+                processed: stats.processedRecords,
+                scanned: stats.scannedRecords,
+                total: stats.totalRecords,
+                progress,
+                timestamp: Date.now()
+              };
+              this._emitEvent('vector:search-progress', progressData, `search-${resource.name}`);
+              if (progress !== null) {
+                this.logger.debug(progressData, `Search progress: ${stats.scannedRecords}/${stats.totalRecords} (${progress.toFixed(1)}%)`);
+              } else {
+                this.logger.debug(progressData, `Search progress: scanned ${stats.scannedRecords} records`);
+              }
+            }
+          } catch {
+            stats.dimensionMismatches += 1;
+
+            if (this.config.logLevelEvents) {
+              const mismatchData = {
+                resource: resource.name,
+                recordIndex: offset + index,
+                expected: queryVector.length,
+                got: (vectorValue as number[] | undefined)?.length,
+                timestamp: Date.now()
+              };
+              this._emitEvent('vector:dimension-mismatch', mismatchData);
+              this.logger.debug(mismatchData, `Dimension mismatch at record ${offset + index}: expected ${mismatchData.expected}, got ${mismatchData.got}`);
+            }
+          }
+        }
+
+        if (stopScan) {
+          break;
+        }
+
+        if (!actualPartition && policyMode !== 'allow' && stats.totalRecords === null && policyMaxRecords > 0 && stats.scannedRecords > policyMaxRecords) {
+          const policyEvent = {
+            resource: resource.name,
+            operation: 'vectorSearch',
+            policy: policyMode,
+            totalRecords: stats.scannedRecords,
+            maxUnpartitionedRecords: policyMaxRecords,
+            vectorField,
+            timestamp: Date.now()
+          };
+
+          if (!policyWarned || policyMode === 'error') {
+            this._emitEvent('vector:search-policy', policyEvent);
+          }
+
+          if (policyMode === 'error') {
+            throw new VectorError(`Vector search requires a partition when dataset exceeds ${policyMaxRecords} records`, {
+              operation: 'vectorSearch',
+              policy: policyMode,
+              totalRecords: stats.scannedRecords,
+              maxUnpartitionedRecords: policyMaxRecords,
+              resource: resource.name,
+              vectorField
+            });
+          }
+
+          if (policyMode === 'warn' && !policyWarned) {
+            const warning = {
+              resource: resource.name,
+              operation: 'vectorSearch',
+              totalRecords: stats.scannedRecords,
+              vectorField,
+              recommendation: 'Use partitions to filter data before vector search for better performance'
+            };
+            this._emitEvent('vector:performance-warning', warning);
+            this.logger.warn(`⚠️  VectorPlugin: Performing vectorSearch on ${stats.scannedRecords} records without partition filter`);
+            this.logger.warn(`   Resource: '${resource.name}'`);
+            this.logger.warn(`   Recommendation: Use partition parameter to reduce search space`);
+            this.logger.warn(`   Example: resource.vectorSearch(vector, { partition: 'byCategory', partitionValues: { category: 'books' } })`);
+            policyWarned = true;
+          }
+        }
+
+        if (batch.length < effectivePageSize) {
+          break;
+        }
+
+        offset += effectivePageSize;
+
+        if (onProgress) {
+          onProgress({
+            ...stats,
+            durationMs: Date.now() - startTime
+          });
+        }
       }
-    };
+
+      const results = resultsHeap
+        .toArray()
+        .sort((a, b) => a.distance - b.distance);
+
+      const duration = Date.now() - startTime;
+      const throughput = stats.scannedRecords > 0 ? stats.scannedRecords / (duration / 1000) : 0;
+      stats.durationMs = duration;
+
+      this._emitEvent('vector:search-complete', {
+        resource: resource.name,
+        vectorField,
+        resultsCount: results.length,
+        totalRecords: stats.totalRecords,
+        processedRecords: stats.processedRecords,
+        scannedRecords: stats.scannedRecords,
+        pagesScanned: stats.pagesScanned,
+        dimensionMismatches: stats.dimensionMismatches,
+        duration,
+        approximate: stats.approximate,
+        throughput: throughput.toFixed(2),
+        timestamp: Date.now()
+      });
+
+      if (this.config.logLevelEvents) {
+        const perfData = {
+          operation: 'search',
+          resource: resource.name,
+          duration,
+          throughput: throughput.toFixed(2),
+          recordsPerSecond: stats.processedRecords > 0 ? (stats.processedRecords / (duration / 1000)).toFixed(2) : '0.00',
+          scannedRecords: stats.scannedRecords,
+          approximate: stats.approximate,
+          timestamp: Date.now()
+        };
+        this._emitEvent('vector:performance', perfData);
+        this.logger.debug(perfData, `Search performance: ${duration}ms, ${perfData.throughput} MB/s, ${perfData.recordsPerSecond} rec/s`);
+      }
+
+      return { results, stats };
+    } catch (error) {
+      this._emitEvent('vector:search-error', {
+        resource: resource.name,
+        error: (error as Error).message,
+        stack: (error as Error).stack,
+        timestamp: Date.now()
+      });
+      throw error;
+    }
   }
 
   createClusteringMethod(resource: Resource): (options?: ClusterOptions) => Promise<ClusterResult> {
