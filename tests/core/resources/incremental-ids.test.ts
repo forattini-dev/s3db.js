@@ -247,7 +247,7 @@ describe('Incremental IDs', () => {
       const resource = await database.createResource({
         name: 'non_incremental',
         attributes: { name: 'string' }
-        // Default nanoid generator
+        // Default built-in generator
       });
 
       const value = await resource.getSequenceValue();
@@ -608,7 +608,7 @@ describe('Incremental IDs', () => {
       const resource = await database.createResource({
         name: 'non_incremental_methods',
         attributes: { name: 'string' }
-        // No idGenerator = default nanoid
+        // No idGenerator = default generator
       });
 
       // All these should return null without errors
