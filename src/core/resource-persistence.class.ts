@@ -7,6 +7,7 @@ import { calculateTotalSize, calculateEffectiveLimit } from '../concerns/calcula
 import { mapAwsError, InvalidResourceItem, ResourceError, ValidationError } from '../errors.js';
 import { streamToString } from '../stream/index.js';
 import type { StringRecord, JSONValue } from '../types/common.types.js';
+import type { IdGeneratorConfig } from './resource-id-generator.class.js';
 
 export interface ResourceData extends StringRecord {
   id?: string;
@@ -147,6 +148,7 @@ export interface Resource {
   hooks: HooksCollection;
   logger: Logger;
   idGenerator: (data?: unknown) => string | Promise<string>;
+  idGeneratorType?: IdGeneratorConfig;
   versioningEnabled: boolean;
   observers: Observer[];
 
