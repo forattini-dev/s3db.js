@@ -2425,7 +2425,7 @@ This project is licensed under the [Unlicense](LICENSE) - see the LICENSE file f
 
 - Built with [AWS SDK for JavaScript](https://aws.amazon.com/sdk-for-javascript/)
 - Validation powered by [@icebob/fastest-validator](https://github.com/icebob/fastest-validator)
-- ID generation using [nanoid](https://github.com/ai/nanoid)
+- ID generation using the built-in generator
 
 ---
 
