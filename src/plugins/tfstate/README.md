@@ -28,7 +28,7 @@ Stores metadata about each imported `.tfstate`.
 **Complete Schema:**
 ```javascript
 {
-  id: 'string|required',                    // generated nanoid
+  id: 'string|required',                    // generated ID
   sourceFile: 'string|required',            // 'prod/terraform.tfstate'
   serial: 'number|required',                // State serial
   lineage: 'string',                        // Terraform lineage
@@ -74,7 +74,7 @@ The main resource containing all infrastructure resources extracted from states.
 **Complete Schema:**
 ```javascript
 {
-  id: 'string|required',                    // generated nanoid
+  id: 'string|required',                    // generated ID
   stateFileId: 'string|required',           // FK to states resource
 
   // Denormalized for queries
@@ -179,7 +179,7 @@ Tracks changes between state versions.
 **Complete Schema:**
 ```javascript
 {
-  id: 'string|required',                    // generated nanoid
+  id: 'string|required',                    // generated ID
   sourceFile: 'string|required',            // Which state
   oldSerial: 'number|required',             // Old version
   newSerial: 'number|required',             // New version
