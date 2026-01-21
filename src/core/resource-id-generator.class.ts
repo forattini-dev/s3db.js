@@ -155,7 +155,7 @@ export class ResourceIdGenerator {
       return 'incremental';
     }
 
-    return 'nanoid';
+    return 'default';
   }
 
   async getSequenceValue(fieldName: string = 'id'): Promise<number | null> {
