@@ -1,7 +1,7 @@
 import { EventEmitter } from 'events';
-import { nanoid } from 'nanoid';
 import type { TaskExecutor } from '../concurrency/task-executor.interface.js';
 import { AdaptiveTuning, type AdaptiveTuningOptions } from '../concerns/adaptive-tuning.js';
+import { idGenerator } from '../concerns/id.js';
 import { FifoTaskQueue } from './concerns/fifo-task-queue.js';
 import { PriorityTaskQueue } from './concerns/priority-task-queue.js';
 import { extractLengthHint, deriveSignature } from './concerns/task-signature.js';
@@ -343,7 +343,7 @@ export class TasksRunner extends EventEmitter implements TaskExecutor {
       ...(options.metadata || {})
     };
     const task: RunnerTask<T> = {
-      id: nanoid(),
+      id: idGenerator(),
       fn,
       priority: options.priority || 0,
       retries: options.retries ?? this.retries,
