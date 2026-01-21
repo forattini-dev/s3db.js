@@ -216,9 +216,9 @@ const main = async () => {
     console.log('\n📊 Summary:');
     console.log('- UUID v4: Standard UUID format with 36 characters');
     console.log('- UUID v1: Time-based UUID format with 36 characters');
-    console.log('- Custom size: Configurable length using nanoid');
+    console.log('- Custom size: Configurable length using the built-in generator');
     console.log('- Custom function: Any function that returns a string');
-    console.log('- Default: 22-character nanoid (original behavior)');
+    console.log('- Default: 22-character built-in ID');
 
   } catch (error) {
     console.error('❌ Error:', error.message);
