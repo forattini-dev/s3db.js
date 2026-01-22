@@ -20,7 +20,6 @@ export interface MultiBackupDriverConfig extends BackupDriverConfig {
   destinations?: DestinationConfig[];
   strategy?: 'all' | 'any' | 'priority';
   concurrency?: number;
-  requireAll?: boolean;
 }
 
 interface DriverInstance {
@@ -96,17 +95,6 @@ export default class MultiBackupDriver extends BaseBackupDriver {
           original: error,
           suggestion: 'Check destination driver configuration and ensure dependencies are available'
         });
-      }
-    }
-
-    if (this.config.requireAll !== undefined) {
-      this.logger.warn(
-        '[MultiBackupDriver] DEPRECATED: The "requireAll" option is deprecated. ' +
-        'Use "strategy" instead: strategy: "any" (instead of requireAll: false) or strategy: "all" (instead of requireAll: true). ' +
-        'This will be removed in v17.0.'
-      );
-      if (this.config.requireAll === false) {
-        this.config.strategy = 'any';
       }
     }
 
