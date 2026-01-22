@@ -119,11 +119,6 @@ export interface MetricsPluginOptions {
     errors?: string;
     performance?: string;
   };
-  resources?: {
-    metrics?: string;
-    errors?: string;
-    performance?: string;
-  };
   collectPerformance?: boolean;
   collectErrors?: boolean;
   collectUsage?: boolean;
@@ -282,7 +277,6 @@ export class MetricsPlugin extends Plugin {
     const metricsOptions = this.options as MetricsPluginOptions;
     const {
       resourceNames = {},
-      resources = {},
       collectPerformance,
       collectErrors,
       collectUsage,
@@ -293,22 +287,12 @@ export class MetricsPlugin extends Plugin {
     } = metricsOptions;
 
     const resourceNamesOption = resourceNames as { metrics?: string; errors?: string; performance?: string } || {};
-    const legacyResourceOption = resources as { metrics?: string; errors?: string; performance?: string } || {};
     const prometheusConfig = prometheus as PrometheusConfig || {};
 
-    if (Object.keys(legacyResourceOption).length > 0) {
-      this.logger.warn(
-        {},
-        '[MetricsPlugin] DEPRECATED: The "resources" option is deprecated. ' +
-        'Use "resourceNames" instead: { resourceNames: { metrics: "...", errors: "...", performance: "..." } }. ' +
-        'This will be removed in v17.0.'
-      );
-    }
-
     const resourceOverrides = {
-      metrics: resourceNamesOption.metrics ?? legacyResourceOption.metrics,
-      errors: resourceNamesOption.errors ?? legacyResourceOption.errors,
-      performance: resourceNamesOption.performance ?? legacyResourceOption.performance
+      metrics: resourceNamesOption.metrics,
+      errors: resourceNamesOption.errors,
+      performance: resourceNamesOption.performance
     };
 
     this._resourceDescriptors = {
