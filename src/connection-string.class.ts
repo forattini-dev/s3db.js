@@ -180,11 +180,17 @@ export class ConnectionString {
 
     // Parse pathname
     let pathname = uri.pathname || '';
+    let isRelativePath = false;
 
     // Handle Windows paths (file:///C:/path/to/data)
     if (uri.hostname && uri.hostname.match(/^[a-zA-Z]$/)) {
       // Windows drive letter in hostname (file://C:/path)
       pathname = `${uri.hostname}:${pathname}`;
+    } else if (uri.hostname === '.' || uri.hostname === '..') {
+      // Relative path: file://./path or file://../path
+      // URL parser puts . or .. in hostname, reconstruct the relative path
+      pathname = `${uri.hostname}${pathname}`;
+      isRelativePath = true;
     } else if (uri.hostname && uri.hostname !== 'localhost') {
       // UNC path (file://server/share/path)
       pathname = `//${uri.hostname}${pathname}`;
@@ -207,35 +213,17 @@ export class ConnectionString {
       });
     }
 
-    // Parse path segments: /basePath/bucket/keyPrefix
-    const segments = decodedPath.split('/').filter(Boolean);
-
-    if (segments.length === 0) {
-      throw new ConnectionStringError('file:// connection string requires a path', {
-        input: uri.href,
-        suggestion: 'Use file:///absolute/path or file://./relative/path'
-      });
-    }
-
-    // For relative paths starting with ./ or ../
-    if (decodedPath.startsWith('./') || decodedPath.startsWith('../')) {
+    // For relative paths (detected from hostname or starting with ./ or ../)
+    if (isRelativePath || decodedPath.startsWith('./') || decodedPath.startsWith('../')) {
       this.basePath = path.resolve(decodedPath);
       this.bucket = 's3db';
       this.keyPrefix = '';
-    } else if (segments.length === 1) {
-      this.basePath = path.resolve('/', segments[0]!);
+    } else {
+      // Absolute path: use the entire path as basePath
+      // This is the intuitive behavior - file:///path/to/data means "use /path/to/data"
+      this.basePath = path.resolve(decodedPath);
       this.bucket = 's3db';
       this.keyPrefix = '';
-    } else if (segments.length === 2) {
-      const [baseSegment, bucketSegment] = segments;
-      this.basePath = path.resolve('/', baseSegment!);
-      this.bucket = bucketSegment!;
-      this.keyPrefix = '';
-    } else {
-      const [baseSegment, bucketSegment, ...prefixSegments] = segments;
-      this.basePath = path.resolve('/', baseSegment!);
-      this.bucket = bucketSegment!;
-      this.keyPrefix = prefixSegments.join('/');
     }
 
     // Set synthetic endpoint for compatibility

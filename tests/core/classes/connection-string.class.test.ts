@@ -261,3 +261,77 @@ describe('ConnectionString S3-Compatible Providers', () => {
     expect(conn.forcePathStyle).toBe(true);
   });
 });
+
+describe('ConnectionString FileSystem (file://)', () => {
+  test('absolute path - simple directory', () => {
+    const conn = new ConnectionString('file:///tmp/s3db');
+    expect(conn.clientType).toBe('filesystem');
+    expect(conn.basePath).toBe('/tmp/s3db');
+    expect(conn.bucket).toBe('s3db');
+    expect(conn.keyPrefix).toBe('');
+    expect(conn.region).toBe('local');
+    expect(conn.forcePathStyle).toBe(true);
+  });
+
+  test('absolute path - deep nested directory', () => {
+    const conn = new ConnectionString('file:///home/user/project/data/s3db');
+    expect(conn.clientType).toBe('filesystem');
+    expect(conn.basePath).toBe('/home/user/project/data/s3db');
+    expect(conn.bucket).toBe('s3db');
+    expect(conn.keyPrefix).toBe('');
+  });
+
+  test('relative path with ./ prefix', () => {
+    const conn = new ConnectionString('file://./data/s3db');
+    expect(conn.clientType).toBe('filesystem');
+    expect(conn.basePath).toMatch(/data\/s3db$/);
+    expect(conn.bucket).toBe('s3db');
+    expect(conn.keyPrefix).toBe('');
+  });
+
+  test('relative path with ../ prefix', () => {
+    const conn = new ConnectionString('file://../parent/data');
+    expect(conn.clientType).toBe('filesystem');
+    expect(conn.basePath).toMatch(/parent\/data$/);
+    expect(conn.bucket).toBe('s3db');
+    expect(conn.keyPrefix).toBe('');
+  });
+
+  test('path with URL-encoded characters', () => {
+    const conn = new ConnectionString('file:///tmp/my%20data/s3db');
+    expect(conn.basePath).toBe('/tmp/my data/s3db');
+    expect(conn.bucket).toBe('s3db');
+  });
+
+  test('path with query parameters', () => {
+    const conn = new ConnectionString('file:///tmp/s3db?compression=true&locking.enabled=true');
+    expect(conn.basePath).toBe('/tmp/s3db');
+    expect(conn.clientOptions.compression).toBe(true);
+    expect((conn.clientOptions.locking as { enabled: boolean }).enabled).toBe(true);
+  });
+
+  test('localhost hostname is ignored', () => {
+    const conn = new ConnectionString('file://localhost/tmp/s3db');
+    expect(conn.basePath).toBe('/tmp/s3db');
+    expect(conn.bucket).toBe('s3db');
+  });
+
+  test('empty path throws error', () => {
+    expect(() => new ConnectionString('file://')).toThrow(/requires a path/);
+  });
+
+  test('root path only throws error', () => {
+    expect(() => new ConnectionString('file:///')).toThrow(/requires a path/);
+  });
+
+  test('no credentials for filesystem', () => {
+    const conn = new ConnectionString('file:///tmp/s3db');
+    expect(conn.accessKeyId).toBeUndefined();
+    expect(conn.secretAccessKey).toBeUndefined();
+  });
+
+  test('endpoint is synthetic file:// URL', () => {
+    const conn = new ConnectionString('file:///tmp/s3db');
+    expect(conn.endpoint).toBe('file:///tmp/s3db');
+  });
+});
