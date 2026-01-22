@@ -303,9 +303,6 @@ jobs:
       - name: Install Dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Build Embeddings (MCP)
-        run: pnpm run build:embeddings
-
       - name: Build
         run: pnpm run build
 
@@ -426,9 +423,6 @@ jobs:
           draft: false
           prerelease: false
           generate_release_notes: false
-          files: |
-            mcp/data/embeddings-core.json
-            mcp/data/embeddings-plugins.json
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 

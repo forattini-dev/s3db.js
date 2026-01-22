@@ -1,187 +1,263 @@
 /**
- * Documentation Search Tools with Hybrid Search (Fuzzy + Semantic)
- * Provides separate tools for core docs and plugin docs.
+ * Documentation Search Tools - Fuzzy Search
+ * Provides search tools for core docs and plugin docs using Fuse.js.
  */
 
-import { readFileSync } from 'fs';
-import { join, dirname } from 'path';
+import { readFileSync, readdirSync, statSync, existsSync } from 'fs';
+import { join, dirname, basename, relative } from 'path';
 import { fileURLToPath } from 'url';
-import {
-  HybridSearch,
-  loadEmbeddings,
-  EMBEDDING_TYPES,
-} from '../search/index.js'; // Import from TS version
+import Fuse from 'fuse.js';
 
-import type { S3dbMCPServer } from '../entrypoint.js'; // Assuming entrypoint is converted
+import type { S3dbMCPServer } from '../entrypoint.js';
 import type { S3dbSearchDocsArgs, S3dbListTopicsArgs } from '../types/index.js';
-import type { IndexedDoc, SearchResult, SearchOptions, HybridSearchConfig, EmbeddingEntry, EmbeddingsData } from '../search/types.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 const PROJECT_ROOT = join(__dirname, '../../');
+const DOCS_ROOT = join(PROJECT_ROOT, 'docs');
 
-/**
- * Cached search instances.
- */
-const searchInstances = new Map<string, HybridSearch>();
-
-/**
- * Embedder instance for generating query vectors.
- */
-let embedder: any = null; // Type for EmbeddingModel
-
-/**
- * Initializes the embedder if available.
- */
-async function initEmbedder(): Promise<any> {
-  if (embedder !== null) return embedder;
-
-  try {
-    const { EmbeddingModel } = await import('fastembed');
-    embedder = await EmbeddingModel.init({ model: 'BGE-small-en-v1.5' });
-  } catch (err) {
-    // fastembed not available, use fuzzy-only mode
-    embedder = false;
-  }
-
-  return embedder;
+interface DocEntry {
+  id: string;
+  path: string;
+  title: string;
+  content: string;
+  category: string;
 }
 
-/**
- * Gets or creates a HybridSearch instance for the given type.
- * @param type - 'core' or 'plugins'
- * @returns
- */
-async function getSearchInstance(type: string): Promise<HybridSearch> {
-  if (searchInstances.has(type)) {
-    return searchInstances.get(type)!;
-  }
-
-  const embeddings: EmbeddingsData = await loadEmbeddings(type);
-  const search = new HybridSearch(embeddings.documents || [], {
-    fuzzyThreshold: 0.4,
-    fuzzyWeight: 0.5,
-    semanticWeight: 0.5,
-  });
-
-  searchInstances.set(type, search);
-  return search;
+interface SearchResult {
+  id: string;
+  path: string;
+  title: string;
+  content: string;
+  snippet: string;
+  score: number;
 }
 
-/**
- * Generates query embedding vector.
- * @param query - Search query
- * @returns
- */
-async function getQueryVector(query: string): Promise<number[] | null> {
-  const emb = await initEmbedder();
-  if (!emb) return null;
+const CORE_PATHS = ['core', 'guides', 'reference', 'clients', 'benchmarks'];
+const PLUGIN_PATHS = ['plugins'];
 
-  try {
-    const vectors = await emb.embed([query]);
-    return vectors[0];
-  } catch (err) {
-    return null;
-  }
+let coreIndex: Fuse<DocEntry> | null = null;
+let pluginIndex: Fuse<DocEntry> | null = null;
+let coreDocs: DocEntry[] = [];
+let pluginDocs: DocEntry[] = [];
+
+function extractTitle(content: string, filename: string): string {
+  const match = content.match(/^#\s+(.+)$/m);
+  if (match) return match[1].trim();
+  return basename(filename, '.md').replace(/-/g, ' ');
 }
 
-/**
- * Performs hybrid search on documentation.
- * @param type - 'core' or 'plugins'
- * @param query - Search query
- * @param options - Search options
- * @returns
- */
-async function searchDocs(type: string, query: string, options: SearchOptions = {}): Promise<any> {
-  const { limit = 5, minScore = 0.1 } = options;
+function loadMarkdownFiles(basePath: string, category: string): DocEntry[] {
+  const entries: DocEntry[] = [];
 
-  try {
-    const search = await getSearchInstance(type);
-    const queryVector = await getQueryVector(query);
+  if (!existsSync(basePath)) return entries;
 
-    const results = search.search(query, queryVector, {
-      limit,
-      minScore,
-    });
+  function walkDir(dir: string) {
+    const files = readdirSync(dir);
+    for (const file of files) {
+      const fullPath = join(dir, file);
+      const stat = statSync(fullPath);
 
-    // Enrich results with full file content if needed
-    const enrichedResults = results.map(r => {
-      let fullContent = r.content;
-
-      // If content is truncated, try to load full file
-      if (r.path && fullContent.length < 500) {
+      if (stat.isDirectory()) {
+        walkDir(fullPath);
+      } else if (file.endsWith('.md') && !file.startsWith('_')) {
         try {
-          const fullPath = join(PROJECT_ROOT, r.path);
-          fullContent = readFileSync(fullPath, 'utf-8');
+          const content = readFileSync(fullPath, 'utf-8');
+          const relPath = relative(DOCS_ROOT, fullPath);
+          entries.push({
+            id: relPath,
+            path: relPath,
+            title: extractTitle(content, file),
+            content: content.slice(0, 5000),
+            category,
+          });
         } catch (err) {
-          // Keep original content
+          // Skip unreadable files
         }
       }
-
-      return {
-        ...r,
-        fullContent: fullContent.length > 3000
-          ? fullContent.slice(0, 3000) + '\n\n... (truncated)'
-          : fullContent,
-      };
-    });
-
-    const stats = search.getStats();
-    const hasSemanticSearch = queryVector !== null;
-
-    return {
-      success: true,
-      query,
-      type,
-      mode: hasSemanticSearch ? 'hybrid' : 'fuzzy-only',
-      resultCount: enrichedResults.length,
-      totalDocs: stats.totalDocuments,
-      results: enrichedResults,
-    };
-  } catch (error: any) {
-    return {
-      success: false,
-      query,
-      type,
-      error: error.message,
-      suggestion: 'Try rephrasing your query or check if embeddings are built.',
-    };
-  }
-}
-
-/**
- * Lists all available documentation topics for a type.
- * @param type - 'core' or 'plugins'
- * @returns
- */
-async function listTopics(type: string): Promise<any> {
-  try {
-    const search = await getSearchInstance(type);
-    const stats = search.getStats();
-    const docs = search.documents || [];
-
-    // Group by path/section
-    const topics: Record<string, string[]> = {};
-    for (const doc of docs) {
-      const basePath = doc.parentPath || doc.path;
-      if (!topics[basePath]) {
-        topics[basePath] = [];
-      }
-      if (doc.section) {
-        topics[basePath].push(doc.section);
-      }
     }
+  }
 
+  walkDir(basePath);
+  return entries;
+}
+
+function buildIndex(docs: DocEntry[]): Fuse<DocEntry> {
+  return new Fuse(docs, {
+    keys: [
+      { name: 'title', weight: 0.4 },
+      { name: 'content', weight: 0.6 },
+    ],
+    threshold: 0.4,
+    includeScore: true,
+    ignoreLocation: true,
+    minMatchCharLength: 2,
+  });
+}
+
+function loadCoreDocs(): void {
+  if (coreDocs.length > 0) return;
+
+  for (const subdir of CORE_PATHS) {
+    const path = join(DOCS_ROOT, subdir);
+    coreDocs.push(...loadMarkdownFiles(path, subdir));
+  }
+
+  // Also load root-level docs
+  const rootFiles = readdirSync(DOCS_ROOT).filter(f =>
+    f.endsWith('.md') && !f.startsWith('_')
+  );
+  for (const file of rootFiles) {
+    try {
+      const content = readFileSync(join(DOCS_ROOT, file), 'utf-8');
+      coreDocs.push({
+        id: file,
+        path: file,
+        title: extractTitle(content, file),
+        content: content.slice(0, 5000),
+        category: 'root',
+      });
+    } catch (err) {}
+  }
+
+  coreIndex = buildIndex(coreDocs);
+}
+
+function loadPluginDocs(): void {
+  if (pluginDocs.length > 0) return;
+
+  for (const subdir of PLUGIN_PATHS) {
+    const path = join(DOCS_ROOT, subdir);
+    pluginDocs.push(...loadMarkdownFiles(path, 'plugins'));
+  }
+
+  pluginIndex = buildIndex(pluginDocs);
+}
+
+function extractSnippet(content: string, query: string, maxLength = 200): string {
+  const lowerContent = content.toLowerCase();
+  const terms = query.toLowerCase().split(/\s+/).filter(t => t.length > 2);
+
+  let bestPos = 0;
+  for (const term of terms) {
+    const pos = lowerContent.indexOf(term);
+    if (pos !== -1) {
+      bestPos = pos;
+      break;
+    }
+  }
+
+  const start = Math.max(0, bestPos - 50);
+  const end = Math.min(content.length, start + maxLength);
+  let snippet = content.slice(start, end);
+
+  if (start > 0) snippet = '...' + snippet;
+  if (end < content.length) snippet = snippet + '...';
+
+  return snippet.trim();
+}
+
+function search(index: Fuse<DocEntry> | null, docs: DocEntry[], query: string, limit = 5): SearchResult[] {
+  if (!index) return [];
+
+  const results = index.search(query, { limit });
+
+  return results.map(r => ({
+    id: r.item.id,
+    path: r.item.path,
+    title: r.item.title,
+    content: r.item.content,
+    snippet: extractSnippet(r.item.content, query),
+    score: 1 - (r.score || 0),
+  }));
+}
+
+async function searchDocs(type: 'core' | 'plugins', query: string, limit = 5): Promise<any> {
+  try {
+    if (type === 'core') {
+      loadCoreDocs();
+      const results = search(coreIndex, coreDocs, query, limit);
+      return {
+        success: true,
+        query,
+        type,
+        mode: 'fuzzy',
+        resultCount: results.length,
+        totalDocs: coreDocs.length,
+        results: results.map(r => ({
+          ...r,
+          fullContent: r.content.length > 3000
+            ? r.content.slice(0, 3000) + '\n\n... (truncated)'
+            : r.content,
+        })),
+      };
+    } else {
+      loadPluginDocs();
+      const results = search(pluginIndex, pluginDocs, query, limit);
+      return {
+        success: true,
+        query,
+        type,
+        mode: 'fuzzy',
+        resultCount: results.length,
+        totalDocs: pluginDocs.length,
+        results: results.map(r => ({
+          ...r,
+          fullContent: r.content.length > 3000
+            ? r.content.slice(0, 3000) + '\n\n... (truncated)'
+            : r.content,
+        })),
+      };
+    }
+  } catch (error: any) {
     return {
-      success: true,
+      success: false,
+      query,
       type,
-      totalDocuments: stats.totalDocuments,
-      documentsWithVectors: stats.documentsWithVectors,
-      topics: Object.entries(topics).map(([path, sections]) => ({
-        path,
-        sections: [...new Set(sections)],
-      })),
+      error: error.message,
     };
+  }
+}
+
+async function listTopics(type: 'core' | 'plugins'): Promise<any> {
+  try {
+    if (type === 'core') {
+      loadCoreDocs();
+      const categories = [...new Set(coreDocs.map(d => d.category))];
+      return {
+        success: true,
+        type,
+        totalDocuments: coreDocs.length,
+        topics: categories.map(cat => ({
+          category: cat,
+          documents: coreDocs.filter(d => d.category === cat).map(d => ({
+            path: d.path,
+            title: d.title,
+          })),
+        })),
+      };
+    } else {
+      loadPluginDocs();
+      const byPlugin = new Map<string, DocEntry[]>();
+      for (const doc of pluginDocs) {
+        const parts = doc.path.split('/');
+        const plugin = parts[1] || 'general';
+        if (!byPlugin.has(plugin)) byPlugin.set(plugin, []);
+        byPlugin.get(plugin)!.push(doc);
+      }
+      return {
+        success: true,
+        type,
+        totalDocuments: pluginDocs.length,
+        topics: Array.from(byPlugin.entries()).map(([plugin, docs]) => ({
+          plugin,
+          documents: docs.map(d => ({
+            path: d.path,
+            title: d.title,
+          })),
+        })),
+      };
+    }
   } catch (error: any) {
     return {
       success: false,
@@ -191,13 +267,10 @@ async function listTopics(type: string): Promise<any> {
   }
 }
 
-/**
- * Tool definitions for MCP.
- */
 export const docsSearchTools = [
   {
     name: 's3dbSearchCoreDocs',
-    description: `Search s3db.js CORE documentation using hybrid search (fuzzy + semantic).
+    description: `Search s3db.js CORE documentation using fuzzy search.
 Core docs include: getting started, database/resource API, schema validation,
 CRUD operations, partitioning, behaviors, encoding, encryption, streaming, and CLI.
 Use this for questions about the main s3db.js functionality.`,
@@ -206,7 +279,7 @@ Use this for questions about the main s3db.js functionality.`,
       properties: {
         query: {
           type: 'string',
-          description: 'Natural language search query (e.g., "how do partitions work", "create resource with validation")',
+          description: 'Search query (e.g., "how do partitions work", "create resource with validation")',
         },
         limit: {
           type: 'number',
@@ -219,17 +292,16 @@ Use this for questions about the main s3db.js functionality.`,
   },
   {
     name: 's3dbSearchPluginDocs',
-    description: `Search s3db.js PLUGIN documentation using hybrid search (fuzzy + semantic).
+    description: `Search s3db.js PLUGIN documentation using fuzzy search.
 Plugin docs include: CachePlugin, AuditPlugin, ReplicatorPlugin, GeoPlugin,
-MetricsPlugin, TTLPlugin, BackupPlugin, QueuePlugin, EventualConsistencyPlugin,
-VectorPlugin, FulltextPlugin, ApiPlugin, and more.
+MetricsPlugin, TTLPlugin, BackupPlugin, QueuePlugin, ApiPlugin, and more.
 Use this for questions about specific plugins and their configuration.`,
     inputSchema: {
       type: 'object',
       properties: {
         query: {
           type: 'string',
-          description: 'Natural language search query (e.g., "cache plugin configuration", "how to use geo plugin")',
+          description: 'Search query (e.g., "cache plugin configuration", "how to use geo plugin")',
         },
         limit: {
           type: 'number',
@@ -260,41 +332,31 @@ Use this for questions about specific plugins and their configuration.`,
   },
 ];
 
-/**
- * Creates handlers for the docs search tools.
- * @param server - MCP server instance
- * @returns Tool handlers
- */
 export function createDocsSearchHandlers(server: S3dbMCPServer) {
   return {
     async s3dbSearchCoreDocs(args: S3dbSearchDocsArgs): Promise<any> {
       const { query, limit = 5 } = args;
-      return searchDocs(EMBEDDING_TYPES.CORE, query, { limit });
+      return searchDocs('core', query, limit);
     },
 
     async s3dbSearchPluginDocs(args: S3dbSearchDocsArgs): Promise<any> {
       const { query, limit = 5 } = args;
-      return searchDocs(EMBEDDING_TYPES.PLUGINS, query, { limit });
+      return searchDocs('plugins', query, limit);
     },
 
-    async s3dbListCoreTopics(args: S3dbListTopicsArgs): Promise<any> {
-      return listTopics(EMBEDDING_TYPES.CORE);
+    async s3dbListCoreTopics(_args: S3dbListTopicsArgs): Promise<any> {
+      return listTopics('core');
     },
 
-    async s3dbListPluginTopics(args: S3dbListTopicsArgs): Promise<any> {
-      return listTopics(EMBEDDING_TYPES.PLUGINS);
+    async s3dbListPluginTopics(_args: S3dbListTopicsArgs): Promise<any> {
+      return listTopics('plugins');
     },
   };
 }
 
-/**
- * Preloads search instances for faster first query.
- */
 export async function preloadSearch(): Promise<void> {
-  await Promise.all([
-    getSearchInstance(EMBEDDING_TYPES.CORE),
-    getSearchInstance(EMBEDDING_TYPES.PLUGINS),
-  ]);
+  loadCoreDocs();
+  loadPluginDocs();
 }
 
 export default {

@@ -1,16 +1,8 @@
 /**
- * MCP Search module - Hybrid search for s3db.js documentation.
+ * MCP Search module - Fuzzy search for s3db.js documentation.
  */
 
 export { HybridSearch } from './hybrid-search.js';
-export {
-  loadEmbeddings,
-  loadAllEmbeddings,
-  clearCache,
-  getCacheStats,
-  preloadEmbeddings,
-  EMBEDDING_TYPES,
-} from './embeddings-loader.js';
 export {
   cosineSimilarity,
   levenshtein,
