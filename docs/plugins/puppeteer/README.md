@@ -661,7 +661,9 @@ const plugin = new PuppeteerPlugin({
       'http://proxy1.example.com:8080',
       'http://user:pass@proxy2.example.com:3128',
       {
-        server: 'socks5://proxy3.example.com:1080',
+        protocol: 'socks5',
+        host: 'proxy3.example.com',
+        port: 1080,
         username: 'user',
         password: 'pass'
       }
