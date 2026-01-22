@@ -578,11 +578,10 @@ describe('Schema Class - Comprehensive Shorthand Notation Validation', () => {
 
       expect(await testSchema.validator(validObj)).toBe(true);
 
-      // Note: sanitization effects happen during mapping, not validation
-      // Values remain unchanged during validation
-      expect(validObj.username).toBe('  JohnDoe123  ');
-      expect(validObj.profile.firstName).toBe('  John  ');
-      expect(validObj.profile.lastName).toBe('  Doe  ');
+      // Sanitization rules (trim, lowercase) are applied during validation
+      expect(validObj.username).toBe('johndoe123'); // trimmed + lowercased
+      expect(validObj.profile.firstName).toBe('John'); // trimmed
+      expect(validObj.profile.lastName).toBe('Doe'); // trimmed
       expect(validObj.preferences.notifications).toBe(true);
 
       // Test complex constraint violations
