@@ -16,17 +16,15 @@ export interface ValidationError {
 }
 
 export interface ValidationResult {
-  valid: boolean;
-  errors?: ValidationError[];
-  data?: Record<string, unknown>;
-}
-
-export interface SchemaLike {
-  validate(data: unknown, options?: { partial?: boolean; strict?: boolean }): ValidationResult;
+  isValid: boolean;
+  errors: ValidationError[];
+  data: Record<string, unknown>;
 }
 
 export interface ResourceLike {
-  schema: SchemaLike;
+  validator: {
+    validate(data: Record<string, unknown>, options?: { includeId?: boolean; mutateOriginal?: boolean; throwOnError?: boolean }): Promise<ValidationResult>;
+  };
 }
 
 export interface QueryParamRule {
@@ -66,11 +64,8 @@ export function createValidationMiddleware(resource: ResourceLike, options: Vali
 
   const {
     validateOnInsert = true,
-    validateOnUpdate = true,
-    partial = true
+    validateOnUpdate = true
   } = options;
-
-  const schema = resource.schema;
 
   const middleware: MiddlewareHandler = async (c: Context, next: Next): Promise<void | Response> => {
     const method = c.req.method;
@@ -92,14 +87,11 @@ export function createValidationMiddleware(resource: ResourceLike, options: Vali
       return c.json(response, response._status as Parameters<typeof c.json>[1]);
     }
 
-    const isPartial = method === 'PATCH' && partial;
-
-    const validationResult = schema.validate(data, {
-      partial: isPartial,
-      strict: !isPartial
+    const validationResult = await resource.validator.validate(data as Record<string, unknown>, {
+      includeId: true
     });
 
-    if (!validationResult.valid) {
+    if (!validationResult.isValid) {
       const errors: FormattedError[] = (validationResult.errors || []).map((err: ValidationError) => ({
         field: err.field || err.attribute || 'unknown',
         message: err.message,
