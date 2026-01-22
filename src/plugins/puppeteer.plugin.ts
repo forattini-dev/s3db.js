@@ -216,9 +216,6 @@ export interface ProxyPluginConfig {
   selectionStrategy: 'round-robin' | 'random' | 'least-used' | 'best-performance';
   bypassList: string[];
   healthCheck: ProxyHealthCheckConfig;
-  server: string | null;
-  username: string | null;
-  password: string | null;
 }
 
 export interface RetriesConfig {
@@ -609,9 +606,6 @@ export class PuppeteerPlugin extends Plugin {
           timeout: 10000,
           successRateThreshold: 0.3
         },
-        server: null,
-        username: null,
-        password: null,
         ...options.proxy
       } as ProxyPluginConfig,
 
@@ -702,13 +696,6 @@ export class PuppeteerPlugin extends Plugin {
       });
     }
 
-    if (options.proxy?.server || options.proxy?.username || options.proxy?.password) {
-      this.logger.warn(
-        '[PuppeteerPlugin] DEPRECATED: The single proxy config (server, username, password) is deprecated. ' +
-        'Use the proxy.list array with proxy objects instead. Example: proxy: { list: [{ proxy: "http://host:port", username: "user", password: "pass" }] }. ' +
-        'This will be removed in v17.0.'
-      );
-    }
   }
 
   _resolveResourceNames(): ResourceNames {
@@ -949,8 +936,6 @@ export class PuppeteerPlugin extends Plugin {
     if (proxy && this.proxyManager) {
       const proxyArgs = this.proxyManager.getProxyLaunchArgs(proxy);
       (launchOptions.args as string[]).push(...proxyArgs);
-    } else if (this.config.proxy.enabled && this.config.proxy.server) {
-      (launchOptions.args as string[]).push(`--proxy-server=${this.config.proxy.server}`);
     }
 
     const browser = await this.puppeteer.launch(launchOptions);
