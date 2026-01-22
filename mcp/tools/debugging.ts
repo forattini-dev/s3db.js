@@ -180,14 +180,13 @@ export function createDebuggingHandlers(server: S3dbMCPServer) {
       const resource = server.getResource(database, resourceName);
 
       try {
-        // Use the schema validator if available
-        const validationResult = resource.schema.validate(data);
+        const validationResult = await resource.validator.validate(data);
 
         return {
           success: true,
-          valid: validationResult === true,
-          errors: validationResult === true ? [] : validationResult,
-          data: data
+          valid: validationResult.isValid,
+          errors: validationResult.errors,
+          data: validationResult.data
         };
       } catch (error: any) {
         return {
