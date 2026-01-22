@@ -1505,15 +1505,6 @@ export class Schema {
     return cloned;
   }
 
-  async validate(resourceItem: Record<string, unknown>, { mutateOriginal = false } = {}): Promise<true | Record<string, unknown>[]> {
-    if (process.env.NODE_ENV === 'development') {
-      console.warn('[DEPRECATION] Schema.validate() is deprecated. Use ResourceValidator.validate() instead.');
-    }
-    const data = mutateOriginal ? resourceItem : cloneDeep(resourceItem);
-    const result = await this.validator(data);
-    return result;
-  }
-
   async mapper(resourceItem: Record<string, unknown>): Promise<Record<string, unknown>> {
     let obj = cloneDeep(resourceItem);
     obj = await this.applyHooksActions(obj, "beforeMap");
