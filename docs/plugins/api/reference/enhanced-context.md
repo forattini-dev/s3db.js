@@ -981,9 +981,9 @@ return ctx.success(user);
 ```javascript
 // Before
 const body = await c.req.json();
-const validation = database.resources.users.schema.validate(body);
-if (validation !== true) {
-  return c.json({ error: validation[0].message }, 400);
+const validation = await database.resources.users.validator.validate(body);
+if (!validation.isValid) {
+  return c.json({ error: validation.errors[0].message }, 400);
 }
 
 // After
@@ -998,7 +998,7 @@ if (!valid) return ctx.error(errors[0].message, 400);
 | Feature | Legacy API | Enhanced API | Improvement |
 |---------|-----------|--------------|-------------|
 | Resource access | `c.get('customRouteContext').database.resources.users` | `ctx.resources.users` | 70% shorter |
-| Validation | `resource.schema.validate(data)` | `ctx.validator.validateBody()` | Built-in |
+| Validation | `resource.validator.validate(data)` | `ctx.validator.validateBody()` | Built-in |
 | Request params | `c.req.param('id')` | `ctx.param('id')` | 20% shorter |
 | Response | `c.json({ success: true, data })` | `ctx.success(data)` | 50% shorter |
 | Auth check | `if (!c.get('user'))` | `ctx.requireAuth()` | Clearer |
