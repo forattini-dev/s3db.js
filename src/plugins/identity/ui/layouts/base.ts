@@ -24,7 +24,6 @@ function getCSS(): string {
 
 export interface ThemeConfig {
   title?: string;
-  logo?: string | null;
   logoUrl?: string | null;
   favicon?: string | null;
   registrationEnabled?: boolean;
@@ -109,7 +108,6 @@ export function BaseLayout(props: BaseLayoutProps): HtmlEscapedString {
 
   const theme = {
     title: config.title || 'S3DB Identity',
-    logo: config.logo || null,
     logoUrl: config.logoUrl || null,
     favicon: config.favicon || null,
     registrationEnabled: config.registrationEnabled !== false,

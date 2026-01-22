@@ -134,7 +134,6 @@ export interface UIConfig {
   tagline: string;
   welcomeMessage: string;
   logoUrl: string | null;
-  logo: string | null;
   favicon: string | null;
   primaryColor: string;
   secondaryColor: string;
@@ -364,7 +363,7 @@ export interface IdentityPluginOptions {
   session?: Partial<SessionOptions>;
   passwordPolicy?: Partial<PasswordPolicyConfig>;
   registration?: Partial<RegistrationConfig>;
-  ui?: Partial<UIConfig> & { logo?: string };
+  ui?: Partial<UIConfig>;
   email?: Partial<EmailConfig>;
   mfa?: Partial<MFAConfig>;
   audit?: Partial<AuditConfig>;
@@ -651,16 +650,6 @@ export class IdentityPlugin extends Plugin {
         tagline: options.ui?.tagline || 'Secure Identity & Access Management',
         welcomeMessage: options.ui?.welcomeMessage || 'Welcome back!',
         logoUrl: options.ui?.logoUrl || null,
-        logo: (() => {
-          if (options.ui?.logo) {
-            this.logger?.warn(
-              '[IdentityPlugin] DEPRECATED: The "logo" field is deprecated. ' +
-              'Use "logoUrl" instead: { ui: { logoUrl: "..." } }. ' +
-              'This will be removed in v17.0.'
-            );
-          }
-          return options.ui?.logo || null;
-        })(),
         favicon: options.ui?.favicon || null,
 
         primaryColor: options.ui?.primaryColor || '#007bff',
@@ -714,7 +703,7 @@ export class IdentityPlugin extends Plugin {
         templates: {
           baseUrl: options.email?.templates?.baseUrl || options.ui?.baseUrl || `http://localhost:${options.port || 4000}`,
           brandName: options.email?.templates?.brandName || options.ui?.title || 'S3DB Identity',
-          brandLogo: options.email?.templates?.brandLogo || options.ui?.logo || null,
+          brandLogo: options.email?.templates?.brandLogo || options.ui?.logoUrl || null,
           brandColor: options.email?.templates?.brandColor || options.ui?.primaryColor || '#007bff',
           supportEmail: options.email?.templates?.supportEmail || options.email?.replyTo || null,
           customFooter: options.email?.templates?.customFooter || null
