@@ -1712,11 +1712,11 @@ console.log(resource.schema.options.hooks);
 
 **3. Test validation separately:**
 ```javascript
-const result = await resource.schema.validate({
+const result = await resource.validator.validate({
   email: 'test@example.com',
   password: 'secret'
 });
-console.log(result);  // true or array of errors
+console.log(result.isValid, result.errors);
 ```
 
 **4. Check metadata size:**
