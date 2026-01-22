@@ -35,7 +35,7 @@ describe('Schema Class - Comprehensive Shorthand Notation Validation', () => {
         code: 'ABC123'
       };
 
-      const validResult = await testSchema.validate(validData);
+      const validResult = await testSchema.validator(validData);
       expect(validResult).toBe(true);
 
       // Test constraint violations with proper error structure validation
@@ -47,7 +47,7 @@ describe('Schema Class - Comprehensive Shorthand Notation Validation', () => {
         code: 'TOOLONG' // wrong length
       };
 
-      const invalidResult = await testSchema.validate(invalidData);
+      const invalidResult = await testSchema.validator(invalidData);
       expect(Array.isArray(invalidResult)).toBe(true);
       expect(invalidResult.length).toBe(5); // Should have exactly 5 errors
 
@@ -88,7 +88,7 @@ describe('Schema Class - Comprehensive Shorthand Notation Validation', () => {
         alphadashField: 'hello-world_test'
       };
 
-      const validResult = await testSchema.validate(validObj);
+      const validResult = await testSchema.validator(validObj);
       expect(validResult).toBe(true);
 
       // Note: sanitization effects happen during mapping, not validation
@@ -99,7 +99,7 @@ describe('Schema Class - Comprehensive Shorthand Notation Validation', () => {
       expect(validObj.alphadashField).toBe('hello-world_test');
 
       // Test constraint violations
-      const invalidResult = await testSchema.validate({
+      const invalidResult = await testSchema.validator({
         alphaField: 'Hello123', // contains numbers
         numericField: 'abc123', // contains letters
         alphanumField: 'test!', // contains special char
@@ -128,14 +128,14 @@ describe('Schema Class - Comprehensive Shorthand Notation Validation', () => {
       });
 
       // Test valid format data (no trimming during validation)
-      expect(await testSchema.validate({
+      expect(await testSchema.validator({
         base64Field: 'SGVsbG8=',
         singleLineField: 'Valid text',
         multiFormatField: 'ValidTest123'
       })).toBe(true);
 
       // Test format violations
-      const result = await testSchema.validate({
+      const result = await testSchema.validator({
         base64Field: 'invalid_base64!',
         singleLineField: 'Multi\nline\ntext',
         multiFormatField: 'ab' // too short
@@ -175,13 +175,13 @@ describe('Schema Class - Comprehensive Shorthand Notation Validation', () => {
         amount: 123.45 // already a number
       };
 
-      const validResult = await testSchema.validate(validData);
+      const validResult = await testSchema.validator(validData);
       expect(validResult).toBe(true);
       // Note: conversion happens during mapping, not validation
       expect(validData.amount).toBe(123.45);
 
       // Test constraint violations
-      const invalidResult = await testSchema.validate({
+      const invalidResult = await testSchema.validator({
         age: 15, // too young
         score: 150, // too high
         price: -10, // negative
@@ -215,7 +215,7 @@ describe('Schema Class - Comprehensive Shorthand Notation Validation', () => {
       });
 
       // Test valid specialized numbers
-      expect(await testSchema.validate({
+      expect(await testSchema.validator({
         percentage: 85.5,
         temperature: 25.0,
         naturalNumber: 42,
@@ -223,7 +223,7 @@ describe('Schema Class - Comprehensive Shorthand Notation Validation', () => {
       })).toBe(true);
 
       // Test boundary violations
-      const result = await testSchema.validate({
+      const result = await testSchema.validator({
         percentage: 150, // exceeds max
         temperature: -300, // below absolute zero
         naturalNumber: -5, // negative natural number
@@ -254,7 +254,7 @@ describe('Schema Class - Comprehensive Shorthand Notation Validation', () => {
       });
 
       // Test valid arrays
-      expect(await testSchema.validate({
+      expect(await testSchema.validator({
         tags: ['javascript', 'nodejs'],
         scores: [85, 92, 78],
         flags: [true, false, true],
@@ -262,7 +262,7 @@ describe('Schema Class - Comprehensive Shorthand Notation Validation', () => {
       })).toBe(true);
 
       // Test array constraint violations (basic type validation only)
-      const result = await testSchema.validate({
+      const result = await testSchema.validator({
         tags: [123, 'valid'], // 123 is not a string
         scores: ['invalid', 90], // 'invalid' is not a number
         flags: ['yes', true], // 'yes' not boolean
@@ -292,7 +292,7 @@ describe('Schema Class - Comprehensive Shorthand Notation Validation', () => {
       });
 
       // Test valid complex arrays
-      expect(await testSchema.validate({
+      expect(await testSchema.validator({
         integers: [1, -5, 0, 42],
         positiveNumbers: [0.1, 3.14, 100],
         constrainedStrings: ['test123', 'valid456'],
@@ -300,7 +300,7 @@ describe('Schema Class - Comprehensive Shorthand Notation Validation', () => {
       })).toBe(true);
 
       // Test basic type violations (detailed constraints not available in shorthand)
-      const result = await testSchema.validate({
+      const result = await testSchema.validator({
         integers: ['not-a-number', 2], // 'not-a-number' not a number
         positiveNumbers: ['invalid', 5], // 'invalid' not a number
         constrainedStrings: [123, 'test'], // 123 not a string
@@ -327,13 +327,13 @@ describe('Schema Class - Comprehensive Shorthand Notation Validation', () => {
       });
 
       // Test valid multi-dimensional arrays (basic array validation only)
-      expect(await testSchema.validate({
+      expect(await testSchema.validator({
         matrix2D: [[1, 2, 3], [4, 5, 6]],
         stringGrid: [['a', 'b'], ['c', 'd']]
       })).toBe(true);
 
       // Test multi-dimensional constraint violations (basic type only)
-      const result = await testSchema.validate({
+      const result = await testSchema.validator({
         matrix2D: ['not-an-array', [3, 4]], // 'not-an-array' not an array
         stringGrid: [123, ['c', 'd']] // 123 not an array
       });
@@ -366,12 +366,12 @@ describe('Schema Class - Comprehensive Shorthand Notation Validation', () => {
         required: false
       };
 
-      expect(await testSchema.validate(validObj)).toBe(true);
+      expect(await testSchema.validator(validObj)).toBe(true);
       // Note: conversion happens during mapping, not validation
       expect(validObj.converted).toBe(true);
 
       // Test boolean violations
-      const result = await testSchema.validate({
+      const result = await testSchema.validator({
         active: 'maybe',
         converted: 'invalid',
         // required field missing
@@ -403,12 +403,12 @@ describe('Schema Class - Comprehensive Shorthand Notation Validation', () => {
         optionalDate: undefined
       };
 
-      expect(await testSchema.validate(validObj)).toBe(true);
+      expect(await testSchema.validator(validObj)).toBe(true);
       // Note: conversion happens during mapping, not validation
       expect(validObj.convertedDate instanceof Date).toBe(true);
 
       // Test date violations
-      const result = await testSchema.validate({
+      const result = await testSchema.validator({
         createdAt: 'not-a-date',
         convertedDate: 'invalid-date'
       });
@@ -441,7 +441,7 @@ describe('Schema Class - Comprehensive Shorthand Notation Validation', () => {
       });
 
       // Test valid nested data
-      expect(await testSchema.validate({
+      expect(await testSchema.validator({
         user: {
           name: 'John Doe',
           email: 'john@example.com'
@@ -453,7 +453,7 @@ describe('Schema Class - Comprehensive Shorthand Notation Validation', () => {
       })).toBe(true);
 
       // Test nested validation errors
-      const result = await testSchema.validate({
+      const result = await testSchema.validator({
         user: {
           name: 'J', // too short
           email: 'invalid-email'
@@ -495,7 +495,7 @@ describe('Schema Class - Comprehensive Shorthand Notation Validation', () => {
       });
 
       // Test valid deep nesting
-      expect(await testSchema.validate({
+      expect(await testSchema.validator({
         organization: {
           department: {
             team: {
@@ -509,7 +509,7 @@ describe('Schema Class - Comprehensive Shorthand Notation Validation', () => {
       })).toBe(true);
 
       // Test deep validation errors
-      const result = await testSchema.validate({
+      const result = await testSchema.validator({
         organization: {
           department: {
             team: {
@@ -576,7 +576,7 @@ describe('Schema Class - Comprehensive Shorthand Notation Validation', () => {
         metadata: { role: 'developer', level: 'senior' }
       };
 
-      expect(await testSchema.validate(validObj)).toBe(true);
+      expect(await testSchema.validator(validObj)).toBe(true);
 
       // Note: sanitization effects happen during mapping, not validation
       // Values remain unchanged during validation
@@ -586,7 +586,7 @@ describe('Schema Class - Comprehensive Shorthand Notation Validation', () => {
       expect(validObj.preferences.notifications).toBe(true);
 
       // Test complex constraint violations
-      const result = await testSchema.validate({
+      const result = await testSchema.validator({
         username: 'jo', // too short
         email: 'invalid-email',
         profile: {
