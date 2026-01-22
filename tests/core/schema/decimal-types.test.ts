@@ -293,10 +293,10 @@ describe('Schema Integration', () => {
     });
 
     // Should reject negative values
-    const result = await resource.schema.validate({ amount: -10 });
-    expect(result).not.toBe(true);
-    expect(Array.isArray(result)).toBe(true);
-    expect(result.length).toBeGreaterThan(0);
+    const result = await resource.validator.validate({ amount: -10 });
+    expect(result.isValid).toBe(false);
+    expect(Array.isArray(result.errors)).toBe(true);
+    expect(result.errors.length).toBeGreaterThan(0);
   });
 
   it('should validate geo coordinates are in range', async () => {
@@ -309,17 +309,17 @@ describe('Schema Integration', () => {
     });
 
     // Should reject out of range latitude
-    const result1 = await resource.schema.validate({ lat: 91, lon: 0 });
-    expect(result1).not.toBe(true);
-    expect(Array.isArray(result1)).toBe(true);
+    const result1 = await resource.validator.validate({ lat: 91, lon: 0 });
+    expect(result1.isValid).toBe(false);
+    expect(Array.isArray(result1.errors)).toBe(true);
 
     // Should reject out of range longitude
-    const result2 = await resource.schema.validate({ lat: 0, lon: 181 });
-    expect(result2).not.toBe(true);
-    expect(Array.isArray(result2)).toBe(true);
+    const result2 = await resource.validator.validate({ lat: 0, lon: 181 });
+    expect(result2.isValid).toBe(false);
+    expect(Array.isArray(result2.errors)).toBe(true);
 
     // Should accept valid coordinates
-    const result3 = await resource.schema.validate({ lat: -23.5, lon: -46.6 });
-    expect(result3).toBe(true);
+    const result3 = await resource.validator.validate({ lat: -23.5, lon: -46.6 });
+    expect(result3.isValid).toBe(true);
   });
 });
