@@ -1,7 +1,7 @@
 /**
  * Interactive Onboarding Wizard - CLI prompts for admin account creation
  *
- * Uses enquirer for beautiful CLI prompts (lazy-loaded peer dependency)
+ * Uses tuiuiu.js for CLI prompts (zero-dependency)
  * Only works in TTY environments (development)
  *
  * Security:
@@ -52,12 +52,9 @@ interface Logger {
   error?: (message: string, ...args: any[]) => void;
 }
 
-interface PromptClass {
-  new (options: any): PromptInstance;
-}
-
-interface PromptInstance {
-  run(): Promise<string>;
+interface TuiuiuPrompt {
+  input: (message: string, options?: { default?: string; validate?: (value: string) => true | string }) => Promise<string>;
+  password: (message: string, options?: { validate?: (value: string) => true | string }) => Promise<string>;
 }
 
 export class InteractiveWizard {
@@ -80,13 +77,13 @@ export class InteractiveWizard {
   async run(): Promise<AdminData> {
     this._printBanner();
 
-    const { Input, Password } = await this._loadEnquirer();
+    const prompt = await this._loadTuiuiu();
 
-    const email = await this._promptEmail(Input);
+    const email = await this._promptEmail(prompt);
 
-    const password = await this._promptPassword(Password);
+    const password = await this._promptPassword(prompt);
 
-    const name = await this._promptName(Input);
+    const name = await this._promptName(prompt);
 
     this._printSuccess(email);
 
@@ -113,33 +110,41 @@ export class InteractiveWizard {
     console.log('');
   }
 
-  private async _promptEmail(Input: PromptClass): Promise<string> {
+  private async _promptEmail(prompt: TuiuiuPrompt): Promise<string> {
     let attempts = 0;
 
     while (attempts < this.maxEmailAttempts) {
       attempts++;
 
-      const prompt = new Input({
-        name: 'email',
-        message: '👤 Admin Email:',
-        validate: (value: string) => {
-          if (!value || !value.trim()) {
-            return 'Email is required';
+      try {
+        const email = await prompt.input('👤 Admin Email:', {
+          validate: (value: string) => {
+            if (!value || !value.trim()) {
+              return 'Email is required';
+            }
+            if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value)) {
+              return 'Please enter a valid email address';
+            }
+            return true;
           }
-          if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value)) {
-            return 'Please enter a valid email address';
-          }
-          return true;
+        });
+
+        if (/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email || '')) {
+          return email;
         }
-      });
 
-      const email = await prompt.run();
-
-      if (/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email || '')) {
-        return email;
+        console.log('❌ Invalid email address. Please try again.\n');
+      } catch (error: any) {
+        if (error.message?.includes('canceled') || error.message?.includes('aborted')) {
+          throw new PluginError('Onboarding canceled by user', {
+            pluginName: 'IdentityPlugin',
+            operation: 'runInteractiveMode',
+            statusCode: 400,
+            retriable: false
+          });
+        }
+        throw error;
       }
-
-      console.log('❌ Invalid email address. Please try again.\n');
     }
 
     throw new PluginError(
@@ -153,15 +158,30 @@ export class InteractiveWizard {
     );
   }
 
-  private async _promptPassword(Password: PromptClass): Promise<string> {
+  private async _promptPassword(prompt: TuiuiuPrompt): Promise<string> {
     let attempts = 0;
 
     while (attempts < this.maxPasswordAttempts) {
       attempts++;
 
       try {
-        const password = await this._promptPasswordOnce(Password);
-        const confirmPassword = await this._promptPasswordConfirm(Password);
+        const password = await prompt.password('🔒 Admin Password:', {
+          validate: (value: string) => {
+            if (!value || !value.trim()) {
+              return 'Password is required';
+            }
+            return true;
+          }
+        });
+
+        const confirmPassword = await prompt.password('🔒 Confirm Password:', {
+          validate: (value: string) => {
+            if (!value || !value.trim()) {
+              return 'Password confirmation is required';
+            }
+            return true;
+          }
+        });
 
         if (password !== confirmPassword) {
           console.log('❌ Passwords do not match. Please try again.\n');
@@ -178,7 +198,7 @@ export class InteractiveWizard {
 
         return password;
       } catch (error: any) {
-        if (error.name === 'ExitPromptError') {
+        if (error.message?.includes('canceled') || error.message?.includes('aborted')) {
           throw new PluginError('Onboarding canceled by user', {
             pluginName: 'IdentityPlugin',
             operation: 'runInteractiveMode',
@@ -202,47 +222,23 @@ export class InteractiveWizard {
     );
   }
 
-  private async _promptPasswordOnce(Password: PromptClass): Promise<string> {
-    const prompt = new Password({
-      name: 'password',
-      message: '🔒 Admin Password:',
-      mask: '*',
-      validate: (value: string) => {
-        if (!value || !value.trim()) {
-          return 'Password is required';
-        }
-        return true;
+  private async _promptName(prompt: TuiuiuPrompt): Promise<string> {
+    try {
+      const name = await prompt.input('📝 Display Name (optional):', {
+        default: 'Administrator'
+      });
+      return name || 'Administrator';
+    } catch (error: any) {
+      if (error.message?.includes('canceled') || error.message?.includes('aborted')) {
+        throw new PluginError('Onboarding canceled by user', {
+          pluginName: 'IdentityPlugin',
+          operation: 'runInteractiveMode',
+          statusCode: 400,
+          retriable: false
+        });
       }
-    });
-
-    return prompt.run();
-  }
-
-  private async _promptPasswordConfirm(Password: PromptClass): Promise<string> {
-    const prompt = new Password({
-      name: 'confirmPassword',
-      message: '🔒 Confirm Password:',
-      mask: '*',
-      validate: (value: string) => {
-        if (!value || !value.trim()) {
-          return 'Password confirmation is required';
-        }
-        return true;
-      }
-    });
-
-    return prompt.run();
-  }
-
-  private async _promptName(Input: PromptClass): Promise<string> {
-    const prompt = new Input({
-      name: 'name',
-      message: '📝 Display Name (optional):',
-      initial: 'Administrator'
-    });
-
-    const name = await prompt.run();
-    return name || 'Administrator';
+      throw error;
+    }
   }
 
   private _validatePassword(password: string): PasswordValidationResult {
@@ -275,22 +271,19 @@ export class InteractiveWizard {
     };
   }
 
-  private async _loadEnquirer(): Promise<{ Input: PromptClass; Password: PromptClass }> {
+  private async _loadTuiuiu(): Promise<TuiuiuPrompt> {
     try {
-      const enquirer = await import('enquirer') as any;
-      return {
-        Input: enquirer.Input,
-        Password: enquirer.Password
-      };
+      const tuiuiu = await import('tuiuiu.js') as any;
+      return tuiuiu.prompt;
     } catch (error) {
       throw new PluginError(
-        'enquirer package is required for interactive mode. Install with: npm install enquirer',
+        'tuiuiu.js package is required for interactive mode. Install with: npm install tuiuiu.js',
         {
           pluginName: 'IdentityPlugin',
           operation: 'runInteractiveMode',
           cause: error,
           retriable: false,
-          suggestion: 'Run: npm install enquirer@^2.4.1'
+          suggestion: 'Run: npm install tuiuiu.js'
         }
       );
     }

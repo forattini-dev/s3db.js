@@ -663,15 +663,15 @@ export class OnboardingManager {
 
       return admin;
     } catch (error: any) {
-      if (error.code === 'ERR_MODULE_NOT_FOUND' || error.message.includes('enquirer')) {
+      if (error.code === 'ERR_MODULE_NOT_FOUND' || error.message.includes('tuiuiu')) {
         throw new PluginError(
-          'Interactive mode requires "enquirer" package. Install with: npm install enquirer',
+          'Interactive mode requires "tuiuiu.js" package. Install with: npm install tuiuiu.js',
           {
             pluginName: 'IdentityPlugin',
             operation: 'runInteractiveMode',
             cause: error,
             retriable: false,
-            suggestion: 'Run: npm install enquirer, or use env/config mode instead'
+            suggestion: 'Run: npm install tuiuiu.js, or use env/config mode instead'
           }
         );
       }

@@ -10,7 +10,6 @@
  */
 
 import { createCLI, type CLI, type CommandParseResult } from 'cli-args-parser';
-import inquirer from 'inquirer';
 import {
   Table,
   Spinner,
@@ -23,6 +22,7 @@ import {
   dim,
   c,
 } from './components/index.js';
+import { prompt } from 'tuiuiu.js';
 import { S3db } from '../database.class.js';
 import fs from 'fs/promises';
 import path from 'path';
@@ -203,23 +203,17 @@ const cli = createCLI({
     configure: {
       description: 'Configure S3DB connection',
       handler: async () => {
-        const answers = await inquirer.prompt([
-          {
-            type: 'input',
-            name: 'connection',
-            message: 'Enter S3 connection string:',
-            default: 's3://KEY:SECRET@bucket/database'
-          },
-          {
-            type: 'list',
-            name: 'defaultBehavior',
-            message: 'Default behavior for resources:',
-            choices: ['user-managed', 'enforce-limits', 'body-overflow', 'body-only', 'truncate-data'],
-            default: 'user-managed'
-          }
-        ]);
+        const connection = await prompt.input('Enter S3 connection string:', {
+          default: 's3://KEY:SECRET@bucket/database'
+        });
 
-        await saveConfig(answers);
+        const defaultBehavior = await prompt.select(
+          'Default behavior for resources:',
+          ['user-managed', 'enforce-limits', 'body-overflow', 'body-only', 'truncate-data'] as const,
+          { default: 'user-managed' }
+        );
+
+        await saveConfig({ connection, defaultBehavior });
         console.log(green('✓ Configuration saved to ~/.s3db/config.json'));
       }
     },
@@ -444,16 +438,12 @@ const cli = createCLI({
         const pos = result.positional as any;
 
         if (!opts.force) {
-          const { confirm } = await inquirer.prompt([
-            {
-              type: 'confirm',
-              name: 'confirm',
-              message: `Are you sure you want to delete ${pos.id} from ${pos.resource}?`,
-              default: false
-            }
-          ]);
+          const confirmed = await prompt.confirm(
+            `Are you sure you want to delete ${pos.id} from ${pos.resource}?`,
+            { default: false }
+          );
 
-          if (!confirm) {
+          if (!confirmed) {
             console.log(yellow('Cancelled'));
             return;
           }
@@ -1197,16 +1187,12 @@ const cli = createCLI({
             const pos = result.positional as any;
 
             if (!opts.force) {
-              const { confirm } = await inquirer.prompt([
-                {
-                  type: 'confirm',
-                  name: 'confirm',
-                  message: `This will delete ALL data from ${pos.resource}. Continue?`,
-                  default: false
-                }
-              ]);
+              const confirmed = await prompt.confirm(
+                `This will delete ALL data from ${pos.resource}. Continue?`,
+                { default: false }
+              );
 
-              if (!confirm) {
+              if (!confirmed) {
                 console.log(yellow('Cancelled'));
                 return;
               }
@@ -1368,16 +1354,12 @@ const cli = createCLI({
             const opts = result.options as any;
 
             if (!opts.force) {
-              const { confirm } = await inquirer.prompt([
-                {
-                  type: 'confirm',
-                  name: 'confirm',
-                  message: 'This will rollback ALL migrations. Continue?',
-                  default: false
-                }
-              ]);
+              const confirmed = await prompt.confirm(
+                'This will rollback ALL migrations. Continue?',
+                { default: false }
+              );
 
-              if (!confirm) {
+              if (!confirmed) {
                 console.log(yellow('Cancelled'));
                 return;
               }
