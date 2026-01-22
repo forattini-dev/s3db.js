@@ -94,7 +94,6 @@ export interface DatabaseOptions {
   metadataWriteDelay?: number;
   parallelism?: number | string;
   executorPool?: ExecutorPoolConfig | false;
-  operationsPool?: ExecutorPoolConfig | false;
   taskExecutorMonitoring?: TaskExecutorMonitoringConfig;
   logLevel?: LogLevel;
   loggerOptions?: LoggerConfig;
@@ -193,7 +192,7 @@ export class Database extends SafeEventEmitter {
     this.savedMetadata = null;
     this.databaseOptions = options;
 
-    const executorPoolConfig = options?.executorPool ?? options?.operationsPool;
+    const executorPoolConfig = options?.executorPool;
 
     this._parallelism = this._normalizeParallelism(
       options?.parallelism ?? (executorPoolConfig as any)?.concurrency,
@@ -221,14 +220,6 @@ export class Database extends SafeEventEmitter {
     }
 
     this._childLoggerLevels = options.loggerOptions?.childLevels || {};
-
-    if (options?.operationsPool && !options?.executorPool) {
-      this.logger.warn(
-        '⚠️  "operationsPool" is deprecated in s3db.js v16.x. ' +
-        'Use "executorPool" instead. ' +
-        'Migration: https://s3db.js/docs/migration/v16-to-v17'
-      );
-    }
 
     this.executorPool = this._normalizeOperationsPool(executorPoolConfig, this._parallelism);
     if (options?.taskExecutorMonitoring) {
@@ -418,10 +409,6 @@ export class Database extends SafeEventEmitter {
     if (this.executorPool) {
       this.executorPool.concurrency = normalized;
     }
-  }
-
-  get operationsPool(): ExecutorPoolConfig {
-    return this.executorPool;
   }
 
   get config(): {
