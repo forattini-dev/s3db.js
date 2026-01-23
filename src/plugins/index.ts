@@ -165,10 +165,8 @@ export const loadSMTPPlugin = (): Promise<PluginClass> => lazyLoadPlugin('SMTPPl
 export const loadQueueConsumerPlugin = (): Promise<PluginClass> => lazyLoadPlugin('QueueConsumerPlugin');
 export const loadWebSocketPlugin = (): Promise<PluginClass> => lazyLoadPlugin('WebSocketPlugin');
 
-export { ApiPlugin } from './api/index.js';
 export type { ApiPluginOptions } from './api/index.js';
 
-export { IdentityPlugin } from './identity/index.js';
 export type {
   IdentityPluginOptions,
   OnboardingStatus,
@@ -193,25 +191,6 @@ export { GeoPlugin } from './geo.plugin.js';
 export { ReplicatorPlugin } from './replicator.plugin.js';
 export { QueueConsumerPlugin } from './queue-consumer.plugin.js';
 export { WebSocketPlugin, WebSocketServer } from './websocket/index.js';
-
-export {
-  OIDCClient,
-  setupTemplateEngine,
-  ejsEngine,
-  pugEngine,
-  jsxEngine,
-  OpenGraphHelper,
-  RouteContext,
-  withContext,
-  errorResponse,
-  successResponse,
-  createContextInjectionMiddleware,
-  getChunkedCookie,
-  setChunkedCookie,
-  deleteChunkedCookie,
-  isChunkedCookie,
-  initCookieChunking
-} from './api/index.js';
 
 export type {
   CookieOptions,
@@ -242,3 +221,27 @@ export {
   createNotificationStateMachine,
   createAttemptStateMachine
 } from './api/concerns/state-machine.js';
+
+export const loadApiHelpers = async () => {
+  const apiModule = await import('./api/index.js');
+  return {
+    ApiPlugin: apiModule.ApiPlugin,
+    OIDCClient: apiModule.OIDCClient,
+    setupTemplateEngine: apiModule.setupTemplateEngine,
+    ejsEngine: apiModule.ejsEngine,
+    pugEngine: apiModule.pugEngine,
+    jsxEngine: apiModule.jsxEngine,
+    OpenGraphHelper: apiModule.OpenGraphHelper,
+    RouteContext: apiModule.RouteContext,
+    withContext: apiModule.withContext,
+    errorResponse: apiModule.errorResponse,
+    successResponse: apiModule.successResponse,
+    createContextInjectionMiddleware: apiModule.createContextInjectionMiddleware,
+    getChunkedCookie: apiModule.getChunkedCookie,
+    setChunkedCookie: apiModule.setChunkedCookie,
+    deleteChunkedCookie: apiModule.deleteChunkedCookie,
+    isChunkedCookie: apiModule.isChunkedCookie,
+    initCookieChunking: apiModule.initCookieChunking
+  };
+};
+
