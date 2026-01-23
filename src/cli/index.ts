@@ -107,7 +107,7 @@ async function getDatabase(connection?: string): Promise<S3db> {
 
 const cli = createCLI({
   name: 's3db',
-  version: '19.3.25',
+  version: '19.4.10',
   description: 'S3DB CLI - Transform AWS S3 into a powerful document database',
   autoShort: true,
   options: {
@@ -163,7 +163,7 @@ const cli = createCLI({
           const { spawn } = await import('child_process');
           const { existsSync } = await import('fs');
 
-          // Find the MCP entrypoint - check both dist and source locations
+          // Find the MCP entrypoint
           const possiblePaths = [
             path.resolve(__dirname, '../../mcp/entrypoint.ts'),
             path.resolve(__dirname, '../../../mcp/entrypoint.ts'),
@@ -193,10 +193,13 @@ const cli = createCLI({
             args.push(`--port=${opts.port}`);
           }
 
-          // Run the MCP entrypoint using tsx
+          // Run the MCP entrypoint with tsx
+          // Set cwd to package root so dependencies are resolved correctly (important for npx)
+          const packageRoot = path.resolve(path.dirname(entrypointPath), '..');
           const child = spawn('npx', ['tsx', entrypointPath, ...args], {
             stdio: 'inherit',
-            env: process.env
+            env: process.env,
+            cwd: packageRoot
           });
 
           child.on('close', (code) => process.exit(code ?? 0));
