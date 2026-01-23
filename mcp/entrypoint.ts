@@ -37,8 +37,7 @@ import { complete, completeToolArgument } from './completions.js';
 
 import type { TransportArgs } from './types/index.js';
 
-// Load environment variables
-config();
+config({ quiet: true });
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);

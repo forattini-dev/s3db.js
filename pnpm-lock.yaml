@@ -162,6 +162,9 @@ importers:
       fastest-validator:
         specifier: ^1.19.1
         version: 1.19.1
+      fuse.js:
+        specifier: ^7.1.0
+        version: 7.1.0
       ghost-cursor:
         specifier: ^1.0.0
         version: 1.4.2
@@ -284,9 +287,6 @@ importers:
       esbuild:
         specifier: ^0.27.2
         version: 0.27.2
-      fuse.js:
-        specifier: ^7.1.0
-        version: 7.1.0
       got:
         specifier: ^14.6.6
         version: 14.6.6

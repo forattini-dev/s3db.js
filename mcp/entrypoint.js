@@ -19,8 +19,7 @@ import { createExportImportHandlers, exportImportTools } from './tools/export-im
 import { createStatsHandlers, statsTools } from './tools/stats.js';
 import { createDocsSearchHandlers, docsSearchTools, preloadSearch } from './tools/docs-search.js';
 import { createDocumentationHandlers, documentationTools } from './tools/documentation.js';
-// Load environment variables
-config();
+config({ quiet: true });
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 // Global database instance
