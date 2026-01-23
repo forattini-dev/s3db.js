@@ -27,9 +27,12 @@ import { S3db } from '../database.class.js';
 import fs from 'fs/promises';
 import path from 'path';
 import os from 'os';
-import { URL } from 'url';
+import { URL, fileURLToPath } from 'url';
 import { CLIConfig } from '../../src/types/cli.types.js';
 import { MigrationManager } from './migration-manager.js';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 const configPath = path.join(os.homedir(), '.s3db', 'config.json');
 
@@ -157,42 +160,53 @@ const cli = createCLI({
         }
 
         try {
+          const { spawn } = await import('child_process');
+          const { existsSync } = await import('fs');
+
+          // Find the MCP entrypoint - check both dist and source locations
           const possiblePaths = [
-            '../../mcp/entrypoint.js',
-            '../../mcp/entrypoint.ts',
-            path.resolve(__dirname, '../../mcp/entrypoint.js'),
-            path.resolve(__dirname, '../../mcp/entrypoint.ts')
+            path.resolve(__dirname, '../../mcp/entrypoint.ts'),
+            path.resolve(__dirname, '../../../mcp/entrypoint.ts'),
           ];
 
-          let startServer: any = null;
-
+          let entrypointPath: string | null = null;
           for (const p of possiblePaths) {
-            try {
-              const mod = await import(p);
-              if (mod.startServer) {
-                startServer = mod.startServer;
-                break;
-              }
-            } catch {}
-          }
-
-          if (!startServer) {
-            try {
-              // @ts-ignore
-              const mod = await import('../../../mcp/entrypoint.ts');
-              startServer = mod.startServer;
-            } catch {
-              throw new Error('Could not load MCP server entrypoint.');
+            if (existsSync(p)) {
+              entrypointPath = p;
+              break;
             }
           }
 
-          if (startServer) {
-            await startServer({
-              port: opts.port,
-              host: opts.host,
-              transport: opts.transport
-            });
+          if (!entrypointPath) {
+            throw new Error('Could not find MCP server entrypoint.');
           }
+
+          // Build command args
+          const args: string[] = [];
+          if (opts.transport && opts.transport !== 'stdio') {
+            args.push(`--transport=${opts.transport}`);
+          }
+          if (opts.host) {
+            args.push(`--host=${opts.host}`);
+          }
+          if (opts.port) {
+            args.push(`--port=${opts.port}`);
+          }
+
+          // Run the MCP entrypoint using tsx
+          const child = spawn('npx', ['tsx', entrypointPath, ...args], {
+            stdio: 'inherit',
+            env: process.env
+          });
+
+          child.on('close', (code) => process.exit(code ?? 0));
+          child.on('error', (err) => {
+            console.error(red(`Failed to start MCP server: ${err.message}`));
+            process.exit(1);
+          });
+
+          // Keep the process running
+          await new Promise(() => {});
         } catch (error: any) {
           console.error(red(`Failed to start MCP server: ${error.message}`));
           process.exit(1);
