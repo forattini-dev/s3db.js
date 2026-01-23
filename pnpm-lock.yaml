@@ -214,8 +214,8 @@ importers:
         specifier: ^2.0.0
         version: 2.11.2(puppeteer-extra@3.3.6(puppeteer-core@24.36.0)(puppeteer@24.36.0(typescript@5.9.3)))
       recker:
-        specifier: 1.0.71
-        version: 1.0.71(ioredis@5.9.2)
+        specifier: 1.0.72
+        version: 1.0.72(ioredis@5.9.2)(ws@8.19.0)
       tuiuiu.js:
         specifier: ^1.0.53
         version: 1.0.53
@@ -4482,20 +4482,23 @@ packages:
     resolution: {integrity: sha512-/vxpCXddiX8NGfGO/mTafwjq4aFa/71pvamip0++IQk3zG8cbCj0fifNPrjjF1XMXUne91jL9OoxmdykoEtifQ==}
     engines: {node: '>= 10.13.0'}
 
-  recker@1.0.71:
-    resolution: {integrity: sha512-9y6NyUlj320HrqZOXJWkylov95cMpR20wgE2srhwC9AGMLfqinuvu6x1xDKlPjj9AaFYRpXvFYeCGfo73XYYfA==}
+  recker@1.0.72:
+    resolution: {integrity: sha512-HshDMZyQPfjDln6sYz7BHe75mw5fCBo6lks730FkRqHBOsCXTnCAofsZHfOiLACo9u378aWsYcoH1cf3DWzKsw==}
     engines: {node: '>=18'}
     hasBin: true
     peerDependencies:
       cardinal: ^2.1.0
       ioredis: ^5.0.0
       ssh2-sftp-client: ^11.0.0
+      ws: ^8.0.0
     peerDependenciesMeta:
       cardinal:
         optional: true
       ioredis:
         optional: true
       ssh2-sftp-client:
+        optional: true
+      ws:
         optional: true
 
   redis-errors@1.2.0:
@@ -11713,7 +11716,7 @@ snapshots:
     dependencies:
       resolve: 1.22.11
 
-  recker@1.0.71(ioredis@5.9.2):
+  recker@1.0.72(ioredis@5.9.2)(ws@8.19.0):
     dependencies:
       '@maxmind/geoip2-node': 6.3.4
       cli-args-parser: 1.0.6
@@ -11724,6 +11727,7 @@ snapshots:
       zod: 4.3.6
     optionalDependencies:
       ioredis: 5.9.2
+      ws: 8.19.0
 
   redis-errors@1.2.0: {}
 
