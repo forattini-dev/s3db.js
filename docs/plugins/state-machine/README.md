@@ -150,7 +150,8 @@ console.log(machine.visualize()); // Outputs GraphViz DOT format
 Build a simple order workflow in under 2 minutes:
 
 ```javascript
-import { Database, StateMachinePlugin } from 's3db.js';
+import { Database } from 's3db.js';
+import { StateMachinePlugin } from 's3db.js';
 
 // Step 1: Create database
 const db = new Database({ connectionString: 's3://key:secret@bucket' });
@@ -331,6 +332,8 @@ Here's a visual representation of an order processing state machine:
 - **Async Support**: Full support for asynchronous operations
 - **Distributed Locks**: Prevent concurrent transitions with PluginStorage locks
 - **Multi-Worker Safe**: Automatic concurrency control across multiple workers
+- **Auto Cleanup**: Automatic state/history cleanup when records are deleted (via `autoCleanup` option)
+- **Resource State API**: Convenient `resource.state.*` shorthand for attached resources
 
 ---
 

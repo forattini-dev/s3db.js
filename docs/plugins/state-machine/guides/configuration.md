@@ -16,6 +16,9 @@
           type?: 'final'                 // Mark as final state
         }
       },
+      resource?: string,                // Resource to attach (enables resource.state.* API)
+      stateField?: string,              // Field that stores state in the resource
+      autoCleanup?: boolean,            // Auto-delete state/history on record delete (default: true)
       context?: object,                 // Default context data
       strict?: boolean                  // Strict mode (default: true)
     }
@@ -26,7 +29,7 @@
   guards: {
     [guardName]: function              // Named guard functions
   },
-  stateField: string,                  // Field name for state (default: '_state')
+  stateField: string,                  // Global field name for state (default: '_state')
 
   // Concurrency Control (Distributed Locks)
   workerId: string,                    // Worker identifier (default: 'default')

@@ -390,6 +390,23 @@ await machine.initializeEntity('order-456', {
 // Entity state set to initialState (e.g., 'pending')
 ```
 
+#### `deleteEntity(recordId)`
+Delete an entity's state and transition history. Useful for cleanup when removing records.
+
+```javascript
+// Manual cleanup
+await machine.deleteEntity('order-123');
+
+// Emits 'plg:state-machine:entity-deleted' event
+```
+
+**What gets deleted:**
+- In-memory state cache
+- Persisted state record (`plg_entity_states`)
+- All transition history (`plg_state_transitions`) if `persistTransitions: true`
+
+> **Note:** When using `autoCleanup: true` (default), this is called automatically when the attached resource's record is deleted. See [Auto Cleanup](#auto-cleanup-on-delete) below.
+
 #### `visualize()`
 Generate GraphViz DOT format visualization of the state machine.
 
@@ -440,6 +457,110 @@ guards: {
     return user && user.role === 'admin';
   }
 }
+```
+
+---
+
+## Resource State API
+
+When a state machine is attached to a resource (via the `resource` option), the resource gets a convenient `state` property with shorthand methods:
+
+```javascript
+const orders = db.resources.orders;
+
+// Instead of: db.stateMachine('order').send('order-123', 'PAY')
+await orders.state.send('order-123', 'PAY');
+
+// Instead of: db.stateMachine('order').getState('order-123')
+const state = await orders.state.get('order-123');
+
+// Instead of: db.stateMachine('order').canTransition('order-123', 'SHIP')
+const canShip = await orders.state.canTransition('order-123', 'SHIP');
+
+// Instead of: db.stateMachine('order').getValidEvents('order-123')
+const validEvents = await orders.state.getValidEvents('order-123');
+
+// Instead of: db.stateMachine('order').initializeEntity('order-123', context)
+await orders.state.initialize('order-123', { customerId: 'user-1' });
+
+// Instead of: db.stateMachine('order').getTransitionHistory('order-123')
+const history = await orders.state.history('order-123');
+
+// Instead of: db.stateMachine('order').deleteEntity('order-123')
+await orders.state.delete('order-123');
+```
+
+---
+
+## Auto Cleanup on Delete
+
+When a state machine is attached to a resource, it can automatically clean up state and transition history when records are deleted.
+
+### Configuration
+
+```javascript
+const stateMachinePlugin = new StateMachinePlugin({
+  stateMachines: {
+    order: {
+      resource: 'orders',
+      stateField: 'status',
+      initialState: 'pending',
+      autoCleanup: true,  // Default: true
+      states: { /* ... */ }
+    }
+  }
+});
+```
+
+### Behavior
+
+When `autoCleanup: true` (the default):
+- An `afterDelete` hook is registered on the attached resource
+- When a record is deleted, the plugin automatically:
+  1. Removes the entity from in-memory cache
+  2. Deletes the persisted state record
+  3. Deletes all transition history (if `persistTransitions: true`)
+  4. Emits `plg:state-machine:entity-deleted` event
+
+### Example
+
+```javascript
+// Create order with state machine
+const order = await orders.insert({
+  id: 'order-123',
+  customerId: 'customer-1',
+  status: 'pending'
+});
+
+// Make some transitions
+await orders.state.send('order-123', 'PAY');
+await orders.state.send('order-123', 'SHIP');
+
+// Delete the order - state machine cleanup happens automatically!
+await orders.delete('order-123');
+// ✅ Order record deleted
+// ✅ State record (plg_entity_states) deleted
+// ✅ Transition history (plg_state_transitions) deleted
+```
+
+### Disabling Auto Cleanup
+
+If you need to manage cleanup manually:
+
+```javascript
+const stateMachinePlugin = new StateMachinePlugin({
+  stateMachines: {
+    order: {
+      resource: 'orders',
+      autoCleanup: false,  // Disable automatic cleanup
+      // ...
+    }
+  }
+});
+
+// Now you must clean up manually
+await orders.delete('order-123');
+await db.stateMachine('order').deleteEntity('order-123');
 ```
 
 ---
