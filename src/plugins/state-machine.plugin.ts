@@ -131,6 +131,7 @@ interface MachineConfig {
   resource?: string | Resource;
   stateField?: string;
   retryConfig?: RetryConfig;
+  autoCleanup?: boolean;
   config?: MachineConfig;
 }
 
@@ -252,6 +253,7 @@ interface MachineProxy {
   getValidEvents(id: string): Promise<string[]>;
   initializeEntity(id: string, context?: Record<string, unknown>): Promise<string>;
   getTransitionHistory(id: string, options?: TransitionHistoryOptions): Promise<TransitionHistoryEntry[]>;
+  deleteEntity(id: string): Promise<void>;
 }
 
 interface SchedulerPluginClass {
@@ -958,6 +960,48 @@ export class StateMachinePlugin extends Plugin {
     return initialState;
   }
 
+  async deleteEntity(machineId: string, entityId: string): Promise<void> {
+    const machine = this.machines.get(machineId);
+    if (!machine) {
+      throw new StateMachineError(`State machine '${machineId}' not found`, {
+        operation: 'deleteEntity',
+        machineId,
+        availableMachines: Array.from(this.machines.keys()),
+        suggestion: 'Check machine ID or use getMachines() to list available machines'
+      });
+    }
+
+    const stateId = `${machineId}_${entityId}`;
+
+    machine.currentStates.delete(entityId);
+
+    await tryFn(() =>
+      this.database.resources[this.config.stateResource]?.delete(stateId)
+    );
+
+    if (this.config.persistTransitions) {
+      const [ok, , transitions] = await tryFn<TransitionRecord[]>(() =>
+        this.database.resources[this.config.transitionLogResource]?.query({
+          machineId,
+          entityId
+        }) as unknown as Promise<TransitionRecord[]>
+      );
+
+      if (ok && transitions && transitions.length > 0) {
+        await Promise.all(
+          transitions.map(t =>
+            tryFn(() =>
+              this.database.resources[this.config.transitionLogResource]?.delete(t.id)
+            )
+          )
+        );
+      }
+    }
+
+    this.logger.debug({ machineId, entityId }, `Deleted entity state and history`);
+    this.emit('plg:state-machine:entity-deleted', { machineId, entityId });
+  }
+
   getMachineDefinition(machineId: string): MachineConfig | null {
     const machine = this.machines.get(machineId);
     return machine ? machine.config : null;
@@ -1499,6 +1543,9 @@ export class StateMachinePlugin extends Plugin {
         },
         getTransitionHistory: async (id: string, options?: TransitionHistoryOptions) => {
           return this.getTransitionHistory(machineName, id, options);
+        },
+        deleteEntity: async (id: string) => {
+          return this.deleteEntity(machineName, id);
         }
       };
 
@@ -1511,11 +1558,26 @@ export class StateMachinePlugin extends Plugin {
           canTransition: async (id: string, event: string) => machineProxy.canTransition(id, event),
           getValidEvents: async (id: string) => machineProxy.getValidEvents(id),
           initialize: async (id: string, context?: Record<string, unknown>) => machineProxy.initializeEntity(id, context),
-          history: async (id: string, options?: TransitionHistoryOptions) => machineProxy.getTransitionHistory(id, options)
+          history: async (id: string, options?: TransitionHistoryOptions) => machineProxy.getTransitionHistory(id, options),
+          delete: async (id: string) => machineProxy.deleteEntity(id)
         }),
         configurable: true,
         enumerable: false
       });
+
+      if (resourceConfig.autoCleanup !== false) {
+        const resourceWithHooks = resource as Resource & { addHook?: (event: string, handler: (data: Record<string, unknown>) => Promise<Record<string, unknown>>) => void };
+        if (typeof resourceWithHooks.addHook === 'function') {
+          resourceWithHooks.addHook('afterDelete', async (data: Record<string, unknown>) => {
+            const entityId = data.id as string;
+            if (entityId) {
+              await tryFn(() => this.deleteEntity(machineName, entityId));
+            }
+            return data;
+          });
+          this.logger.debug({ machineName, resourceName: resource.name }, `Registered autoCleanup hook for machine '${machineName}'`);
+        }
+      }
 
       this.logger.debug({ machineName, resourceName: resource.name }, `Attached machine '${machineName}' to resource '${resource.name}'`);
     }
