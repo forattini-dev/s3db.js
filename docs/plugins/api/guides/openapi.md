@@ -13,7 +13,8 @@ Note on CSP and Docs UI:
 ## 🎯 Quick Start
 
 ```javascript
-import { Database, ApiPlugin } from 's3db.js';
+import { Database } from 's3db.js';
+import { ApiPlugin } from 's3db.js';
 
 const db = new Database({ connectionString: 's3://...' });
 await db.connect();
@@ -161,7 +162,8 @@ await db.createResource({
 Here's a fully documented e-commerce API:
 
 ```javascript
-import { Database, ApiPlugin } from 's3db.js';
+import { Database } from 's3db.js';
+import { ApiPlugin } from 's3db.js';
 
 const db = new Database({ connectionString: 's3://bucket?region=us-east-1' });
 await db.connect();

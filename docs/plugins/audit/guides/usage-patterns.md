@@ -263,7 +263,7 @@ await users.update('user-123', previousVersion);
 Replicate audit logs to external systems:
 
 ```javascript
-import { AuditPlugin, ReplicatorPlugin } from 's3db.js/plugins';
+import { AuditPlugin, ReplicatorPlugin } from 's3db.js';
 
 // Replicate audit logs to PostgreSQL/BigQuery/Elasticsearch
 await db.usePlugin(new AuditPlugin());

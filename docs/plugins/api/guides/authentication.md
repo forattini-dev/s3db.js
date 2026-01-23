@@ -722,7 +722,7 @@ curl -u email@example.com:token http://localhost:3000/api/orders
 **Q: Can I use custom authentication logic?**
 A: Yes! Create a custom auth driver:
 ```javascript
-import { AuthDriver } from 's3db.js/plugins/api';
+import { AuthDriver } from 's3db.js';
 
 class CustomAuthDriver extends AuthDriver {
   async authenticate(context) {

@@ -8,7 +8,7 @@ How to enable and customize HTTP request logs in the API Plugin.
 
 ```javascript
 import { Database } from 's3db.js';
-import { ApiPlugin } from 's3db.js/plugins';
+import { ApiPlugin } from 's3db.js';
 
 const db = new Database({
   connectionString: 'memory://mybucket/db'
@@ -267,7 +267,7 @@ logging: {
 
 ```javascript
 import { Database } from 's3db.js';
-import { ApiPlugin } from 's3db.js/plugins';
+import { ApiPlugin } from 's3db.js';
 
 const db = new Database({
   connectionString: process.env.DATABASE_URL || 'memory://mybucket/db'

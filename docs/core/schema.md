@@ -564,7 +564,7 @@ const doc = await documents.insert({
 });
 
 // Query by similarity (requires VectorPlugin)
-import { VectorPlugin } from 's3db/plugins';
+import { VectorPlugin } from 's3db.js';
 await database.usePlugin(new VectorPlugin());
 
 const similar = await documents.findSimilar({

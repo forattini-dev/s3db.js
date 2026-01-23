@@ -39,7 +39,8 @@ await backupPlugin.restore(backups[0].id);
 ## Quick Start
 
 ```javascript
-import { Database, BackupPlugin } from 's3db.js';
+import { Database } from 's3db.js';
+import { BackupPlugin } from 's3db.js';
 
 // Step 1: Create database and plugin
 const db = new Database({ connectionString: 's3://key:secret@bucket' });

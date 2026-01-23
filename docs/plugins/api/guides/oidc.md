@@ -9,7 +9,8 @@
 ## ⚡ Quick Start (30 seconds)
 
 ```javascript
-import { Database, ApiPlugin } from 's3db.js';
+import { Database } from 's3db.js';
+import { ApiPlugin } from 's3db.js';
 
 const db = new Database({ connectionString: 's3://bucket/db' });
 await db.connect();
@@ -800,7 +801,7 @@ External session storage with Redis, Memcached, or MongoDB:
 
 **Quick Start:**
 ```javascript
-import { RedisStore } from 's3db.js/plugins/api/concerns/session-store';
+import { RedisStore } from 's3db.js/src/plugins/api/concerns/session-store.js';
 import { createClient } from 'redis';
 
 // 1. Create Redis client
@@ -838,7 +839,7 @@ config: {
 
 **MemoryStore Example** (Testing Only):
 ```javascript
-import { MemoryStore } from 's3db.js/plugins/api/concerns/session-store';
+import { MemoryStore } from 's3db.js/src/plugins/api/concerns/session-store.js';
 
 const sessionStore = new MemoryStore({
   maxSessions: 10000,     // LRU eviction (default: 10000)
@@ -853,7 +854,7 @@ config: {
 
 **RedisStore Example** (Production):
 ```javascript
-import { RedisStore } from 's3db.js/plugins/api/concerns/session-store';
+import { RedisStore } from 's3db.js/src/plugins/api/concerns/session-store.js';
 import { createClient } from 'redis';
 
 const redis = createClient({
@@ -881,7 +882,7 @@ config: {
 
 **Custom Store** (Implement `SessionStore` interface):
 ```javascript
-import { SessionStore } from 's3db.js/plugins/api/concerns/session-store';
+import { SessionStore } from 's3db.js/src/plugins/api/concerns/session-store.js';
 
 class MongoSessionStore extends SessionStore {
   constructor(mongoClient, collection) {
@@ -1058,7 +1059,7 @@ console.log(`Active sessions: ${allSessions.filter(s => new Date(s.expiresAt) >=
 
 **Pro Tip:** Use the **TTL Plugin** to automatically cleanup expired sessions:
 ```javascript
-import { TTLPlugin } from 's3db.js/plugins/ttl.plugin';
+import { TTLPlugin } from 's3db.js';
 
 const ttlPlugin = new TTLPlugin({
   // auto-delete sessions where expiresAt < now
@@ -1528,7 +1529,7 @@ Pre-flight validation of provider capabilities against your configuration:
 
 **Quick Start:**
 ```javascript
-import { validateProviderCompatibility, getProviderCapabilities } from 's3db.js/plugins/api/concerns/oidc-provider-validator';
+import { validateProviderCompatibility, getProviderCapabilities } from 's3db.js/src/plugins/api/concerns/oidc-provider-validator.js';
 
 // Get discovery document
 const discovery = await fetchDiscoveryDocument(config.issuer);
@@ -1798,7 +1799,7 @@ Use Case: Financial-grade API (FAPI), Open Banking
 
 **Quick Start:**
 ```javascript
-import { providerSupportsPAR, validatePARConfig } from 's3db.js/plugins/api/concerns/oidc-par';
+import { providerSupportsPAR, validatePARConfig } from 's3db.js/src/plugins/api/concerns/oidc-par.js';
 
 // 1. Check if provider supports PAR
 const discovery = await fetchDiscoveryDocument(config.issuer);
@@ -1873,7 +1874,7 @@ config: {
 import {
   pushAuthorizationRequest,
   buildPARAuthorizationUrl
-} from 's3db.js/plugins/api/concerns/oidc-par';
+} from 's3db.js/src/plugins/api/concerns/oidc-par.js';
 
 // 1. Push authorization params
 const authParams = {
@@ -1974,7 +1975,7 @@ Use Case: Financial-grade API (FAPI), healthcare (SMART on FHIR), government
 
 **Quick Start:**
 ```javascript
-import { generateRSAKeyPair } from 's3db.js/plugins/api/concerns/oidc-client-assertion';
+import { generateRSAKeyPair } from 's3db.js/src/plugins/api/concerns/oidc-client-assertion.js';
 
 // 1. Generate key pair (do once, store securely)
 const { privateKey, publicKey } = await generateRSAKeyPair({
@@ -2033,7 +2034,7 @@ import {
   createClientAuth,
   applyClientAuth,
   validatePrivateKey
-} from 's3db.js/plugins/api/concerns/oidc-client-assertion';
+} from 's3db.js/src/plugins/api/concerns/oidc-client-assertion.js';
 
 // 1. Generate and validate key pair
 const { privateKey, publicKey } = await generateRSAKeyPair({
@@ -2185,7 +2186,7 @@ import {
   providerSupportsBackchannelLogout,
   validateBackchannelLogoutConfig,
   getBackchannelLogoutUri
-} from 's3db.js/plugins/api/concerns/oidc-backchannel-logout';
+} from 's3db.js/src/plugins/api/concerns/oidc-backchannel-logout.js';
 
 // 1. Check provider support
 const discovery = await fetchDiscoveryDocument(config.issuer);
@@ -2287,12 +2288,12 @@ class CustomSessionStore {
 **Complete Example:**
 ```javascript
 import { Hono } from 'hono';
-import { RedisStore } from 's3db.js/plugins/api/concerns/session-store';
+import { RedisStore } from 's3db.js/src/plugins/api/concerns/session-store.js';
 import {
   registerBackchannelLogoutRoute,
   handleBackchannelLogout,
   validateLogoutTokenClaims
-} from 's3db.js/plugins/api/concerns/oidc-backchannel-logout';
+} from 's3db.js/src/plugins/api/concerns/oidc-backchannel-logout.js';
 
 // 1. Create session store
 const sessionStore = new RedisStore({

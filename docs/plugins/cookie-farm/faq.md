@@ -886,7 +886,8 @@ console.log('Queue health:', {
 A: Use minimal configuration and MemoryClient:
 
 ```javascript
-import { Database, CookieFarmPlugin } from 's3db.js';
+import { Database } from 's3db.js';
+import { CookieFarmPlugin } from 's3db.js';
 
 // Use memory client for testing (no S3 required)
 const db = new Database({
@@ -943,7 +944,8 @@ A: Yes, but with limitations:
 
 ```javascript
 // Lambda handler
-import { Database, CookieFarmPlugin } from 's3db.js';
+import { Database } from 's3db.js';
+import { CookieFarmPlugin } from 's3db.js';
 
 // Initialize outside handler (reused across invocations)
 const db = new Database({

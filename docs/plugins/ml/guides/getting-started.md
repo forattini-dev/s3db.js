@@ -138,7 +138,7 @@ await products.insert({ cost: 180, demand: 350, price: 260 });
 #### Step 3: Install ML Plugin (No Config!)
 
 ```javascript
-import { MLPlugin } from 's3db.js/plugins';
+import { MLPlugin } from 's3db.js';
 
 const mlPlugin = new MLPlugin();  // ← THAT'S IT!
 await db.usePlugin(mlPlugin);
@@ -184,7 +184,8 @@ Confidence: 92.3%
 The classic API gives you more control with explicit configuration:
 
 ```javascript
-import { Database, MLPlugin } from 's3db.js';
+import { Database } from 's3db.js';
+import { MLPlugin } from 's3db.js';
 
 const db = new Database({
   connectionString: 's3://key:secret@bucket/ml-classic'

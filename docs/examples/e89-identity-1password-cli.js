@@ -20,7 +20,7 @@
  */
 
 import { Database } from 's3db.js';
-import { IdentityPlugin } from 's3db.js/plugins/identity';
+import { IdentityPlugin } from 's3db.js';
 import { execSync } from 'child_process';
 
 // ============================================================================

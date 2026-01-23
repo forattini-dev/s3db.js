@@ -36,7 +36,8 @@ See [Configuration Guide](./guides/configuration.md) for all options.
 
 **Quick example:**
 ```javascript
-import { Database, MyPlugin } from 's3db.js';
+import { Database } from 's3db.js';
+import { MyPlugin } from 's3db.js';
 
 const db = new Database({
   plugins: [
@@ -102,7 +103,8 @@ pnpm install s3db.js
 ### 2. Setup
 
 ```javascript
-import { Database, MyPlugin } from 's3db.js';
+import { Database } from 's3db.js';
+import { MyPlugin } from 's3db.js';
 
 const db = new Database({
   connectionString: 's3://bucket/db',

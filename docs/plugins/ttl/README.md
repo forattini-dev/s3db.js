@@ -11,7 +11,8 @@
 **Automatic Time-To-Live cleanup** with partition-based indexing for O(1) performance.
 
 ```javascript
-import { Database, TTLPlugin } from 's3db.js';
+import { Database } from 's3db.js';
+import { TTLPlugin } from 's3db.js';
 
 const db = new Database('s3://key:secret@bucket');
 
@@ -68,7 +69,8 @@ TTLPlugin is **built into s3db.js core** with zero external dependencies.
 ### Installation & Setup (5 minutes)
 
 ```javascript
-import { Database, TTLPlugin } from 's3db.js';
+import { Database } from 's3db.js';
+import { TTLPlugin } from 's3db.js';
 
 const db = new Database('s3://key:secret@bucket');
 

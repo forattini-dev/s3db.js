@@ -256,7 +256,7 @@ pm.registerCleanup('myHandler', async () => { ... });
 
 ```javascript
 import { Database } from 's3db.js';
-import { CachePlugin, TTLPlugin } from 's3db.js/plugins';
+import { CachePlugin, TTLPlugin } from 's3db.js';
 
 const db = new Database({
   connectionString: process.env.S3_CONNECTION_STRING,

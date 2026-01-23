@@ -52,7 +52,8 @@ for (let i = 0; i < 1000; i++) {
 ## Quickstart
 
 ```javascript
-import { S3db, CachePlugin } from 's3db.js';
+import { S3db } from 's3db.js';
+import { CachePlugin } from 's3db.js';
 
 const s3db = new S3db({
   connectionString: "s3://key:secret@bucket/path",
@@ -106,7 +107,7 @@ CachePlugin works out-of-the-box with **zero external dependencies**. All cachin
 **Zero-Configuration Setup:**
 ```javascript
 import { Database } from 's3db.js';
-import { CachePlugin } from 's3db.js/plugins';
+import { CachePlugin } from 's3db.js';
 
 const db = new Database({ connectionString: 's3://...' });
 await db.usePlugin(new CachePlugin());  // That's it!

@@ -136,7 +136,8 @@ await enqueue({ jobType: 'generate', payload: { count: 10 } });
 ## ⚡ Quick Start Example
 
 ```javascript
-import { Database, CookieFarmPlugin } from 's3db.js';
+import { Database } from 's3db.js';
+import { CookieFarmPlugin } from 's3db.js';
 
 const db = new Database({
   connectionString: 's3://key:secret@bucket/path'

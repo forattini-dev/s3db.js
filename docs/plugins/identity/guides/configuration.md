@@ -19,7 +19,8 @@
 ## Default Configuration
 
 ```javascript
-import { Database, IdentityPlugin } from 's3db.js';
+import { Database } from 's3db.js';
+import { IdentityPlugin } from 's3db.js';
 
 const db = new Database({
   connectionString: 's3://...',

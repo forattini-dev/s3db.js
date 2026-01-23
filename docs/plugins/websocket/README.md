@@ -23,7 +23,8 @@
 ## TLDR
 
 ```javascript
-import { Database, WebSocketPlugin } from 's3db.js';
+import { Database } from 's3db.js';
+import { WebSocketPlugin } from 's3db.js';
 
 const db = new Database({ connectionString: 'http://localhost:9000/bucket' });
 await db.connect();
@@ -101,7 +102,8 @@ npm install ws jose
 ### Basic Server
 
 ```javascript
-import { Database, WebSocketPlugin } from 's3db.js';
+import { Database } from 's3db.js';
+import { WebSocketPlugin } from 's3db.js';
 
 const db = new Database({
   connectionString: 'http://minioadmin:minioadmin@localhost:9000/mybucket'
@@ -647,7 +649,8 @@ wsPlugin.on('client.disconnected', ({ clientId, code, reason }) => {
 ### Chat Application
 
 ```javascript
-import { Database, WebSocketPlugin } from 's3db.js';
+import { Database } from 's3db.js';
+import { WebSocketPlugin } from 's3db.js';
 
 const db = new Database({ connectionString: process.env.DB_URL });
 await db.connect();

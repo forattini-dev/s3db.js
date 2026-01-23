@@ -228,7 +228,8 @@ Start here: How do you want to generate embeddings?
 Complete working example:
 
 ```javascript
-import { Database, VectorPlugin } from 's3db.js';
+import { Database } from 's3db.js';
+import { VectorPlugin } from 's3db.js';
 import OpenAI from 'openai';
 
 const db = new Database('s3://key:secret@bucket');

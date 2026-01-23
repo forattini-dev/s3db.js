@@ -37,7 +37,8 @@ const neighbors = await users.graph.neighbors(userId);
 ## Quick Start
 
 ```javascript
-import { Database, GraphPlugin } from 's3db.js';
+import { Database } from 's3db.js';
+import { GraphPlugin } from 's3db.js';
 
 const db = new Database({ connectionString: 's3://key:secret@bucket' });
 await db.connect();

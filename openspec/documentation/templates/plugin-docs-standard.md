@@ -205,7 +205,7 @@ Complete, copy-paste-ready example (10-20 lines) that:
 
 ```javascript
 import { Database } from 's3db.js';
-import { PluginName } from 's3db.js/plugins';
+import { PluginName } from 's3db.js';
 
 const db = new Database({
   connectionString: 's3://key:secret@bucket/path'

@@ -378,7 +378,7 @@ admin.get('/stats', {}, handler);  // Herda tags + guards
 
 ### Quick Start
 ```javascript
-import { ApiApp } from 's3db.js/plugins/api';
+import { ApiApp } from 's3db.js';
 
 const app = new ApiApp({ db });
 

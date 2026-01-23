@@ -35,7 +35,8 @@ routes: {
 Just add a **second parameter** to your handler:
 
 ```javascript
-import { Database, ApiPlugin } from 's3db.js';
+import { Database } from 's3db.js';
+import { ApiPlugin } from 's3db.js';
 
 await db.usePlugin(new ApiPlugin({
   routes: {
@@ -412,7 +413,7 @@ import {
   ValidationError,  // → HttpValidationError
   NotFoundError,    // → HttpNotFoundError
   createHttpError
-} from 's3db.js/api';
+} from 's3db.js';
 
 // ✅ Pre-built error classes (recommended!)
 routes: {

@@ -36,7 +36,8 @@
 ### Setup
 
 ```javascript
-import { Database, ReplicatorPlugin } from 's3db.js';
+import { Database } from 's3db.js';
+import { ReplicatorPlugin } from 's3db.js';
 
 const db = new Database({
   connectionString: 's3://key:secret@production-bucket'

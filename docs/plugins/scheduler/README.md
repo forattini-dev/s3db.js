@@ -48,7 +48,8 @@ The Scheduler Plugin has **zero external dependencies** - it's built directly in
 
 **Installation:**
 ```javascript
-import { Database, SchedulerPlugin } from 's3db.js';
+import { Database } from 's3db.js';
+import { SchedulerPlugin } from 's3db.js';
 
 await db.usePlugin(new SchedulerPlugin({
   jobs: {
@@ -97,7 +98,8 @@ await db.usePlugin(new SchedulerPlugin({ jobs: { daily_cleanup: { schedule: '0 3
 Schedule your first job in under 2 minutes:
 
 ```javascript
-import { Database, SchedulerPlugin } from 's3db.js';
+import { Database } from 's3db.js';
+import { SchedulerPlugin } from 's3db.js';
 
 // Step 1: Create database
 const db = new Database({ connectionString: 's3://key:secret@bucket' });

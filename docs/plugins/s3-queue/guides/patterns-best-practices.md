@@ -1141,7 +1141,8 @@ await db2.usePlugin(queue2);
 
 ```javascript
 // Lambda handler
-import { Database, S3QueuePlugin } from 's3db.js';
+import { Database } from 's3db.js';
+import { S3QueuePlugin } from 's3db.js';
 
 // Initialize outside handler (reused across invocations)
 const db = new Database({ connectionString: process.env.S3DB_CONNECTION });
@@ -1280,7 +1281,7 @@ const queue = new S3QueuePlugin({
 
 ```javascript
 // Option 1: Use TTL for delayed processing
-import { TTLPlugin } from 's3db.js/plugins';
+import { TTLPlugin } from 's3db.js';
 
 await db.usePlugin(new TTLPlugin());
 

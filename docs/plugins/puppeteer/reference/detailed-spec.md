@@ -45,7 +45,7 @@
 ## 📦 Configuration Schema
 
 ```javascript
-import { PuppeteerPlugin } from 's3db.js/plugins/puppeteer';
+import { PuppeteerPlugin } from 's3db.js';
 
 const puppeteer = new PuppeteerPlugin({
   // ============================================

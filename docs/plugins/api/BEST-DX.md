@@ -15,7 +15,7 @@
 ## 🚀 Quick Start
 
 ```javascript
-import { ApiApp } from 's3db.js/plugins/api';
+import { ApiApp } from 's3db.js';
 
 const app = new ApiApp({ db });
 

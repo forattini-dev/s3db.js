@@ -11,8 +11,8 @@
 ### URL Pattern Matching
 
 ```javascript
-import { Database } from 's3db.js'
-import { SpiderPlugin } from 's3db.js/plugins'
+import { Database } from 's3db.js';
+import { SpiderPlugin } from 's3db.js';
 
 const spider = new SpiderPlugin({
   namespace: 'crawler',
@@ -67,7 +67,7 @@ await spider.completeTarget(target.id, { result: 'success' })
 ### Basic Link Extraction
 
 ```javascript
-import { LinkDiscoverer } from 's3db.js/plugins/spider'
+import { LinkDiscoverer } from 's3db.js'
 
 const discoverer = new LinkDiscoverer({
   enabled: true,
@@ -126,7 +126,7 @@ const discoverer = new LinkDiscoverer({
 ### Basic Usage
 
 ```javascript
-import { RobotsParser } from 's3db.js/plugins/spider'
+import { RobotsParser } from 's3db.js'
 
 const parser = new RobotsParser({
   userAgent: 's3db-spider',
@@ -173,7 +173,7 @@ const allowed = await parser.isAllowed('https://example.com/page1')
 ### Basic Parsing
 
 ```javascript
-import { SitemapParser } from 's3db.js/plugins/spider'
+import { SitemapParser } from 's3db.js'
 
 const parser = new SitemapParser({
   userAgent: 's3db-spider',
@@ -222,7 +222,7 @@ console.log(links[0].metadata.lastmod)      // '2024-01-15'
 ### Crawler Compatibility Analysis
 
 ```javascript
-import { DeepDiscovery } from 's3db.js/plugins/spider'
+import { DeepDiscovery } from 's3db.js'
 
 const deepDiscovery = new DeepDiscovery()
 const report = await deepDiscovery.discover('https://example.com')
@@ -454,4 +454,3 @@ const entries = await parser.parse('https://example.com/sitemap.xml')
 - [Configuration](/plugins/spider/guides/configuration.md) - All options and API reference
 - [Best Practices](/plugins/spider/guides/best-practices.md) - Performance, troubleshooting, FAQ
 - [Deep Discovery](/plugins/spider/deep-discovery.md) - Advanced crawler compatibility analysis
-

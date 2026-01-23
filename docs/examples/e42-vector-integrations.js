@@ -10,7 +10,8 @@
  * - Local models (Sentence Transformers via Transformers.js)
  */
 
-import { S3db, VectorPlugin } from 's3db.js';
+import { S3db } from 's3db.js';
+import { VectorPlugin } from 's3db.js';
 
 // ============================================================================
 // 1. OpenAI Embeddings

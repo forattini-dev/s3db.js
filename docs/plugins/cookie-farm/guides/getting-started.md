@@ -87,7 +87,8 @@ pnpm install @google-cloud/bigquery
 Here's a minimal persona generation setup:
 
 ```javascript
-import { Database, CookieFarmPlugin } from 's3db.js';
+import { Database } from 's3db.js';
+import { CookieFarmPlugin } from 's3db.js';
 
 // Step 1: Create database
 const db = new Database({
@@ -157,7 +158,8 @@ Let's build a production-ready persona generation pipeline:
 ### Step 1: Configure Suite
 
 ```javascript
-import { Database, CookieFarmPlugin } from 's3db.js';
+import { Database } from 's3db.js';
+import { CookieFarmPlugin } from 's3db.js';
 
 const db = new Database({
   connectionString: process.env.S3DB_CONNECTION

@@ -9,7 +9,8 @@
 ## Basic Cost Tracking
 
 ```javascript
-import { S3db, CostsPlugin } from 's3db.js';
+import { S3db } from 's3db.js';
+import { CostsPlugin } from 's3db.js';
 
 const s3db = new S3db({
   connectionString: "s3://ACCESS_KEY:SECRET_KEY@BUCKET_NAME/databases/myapp",
@@ -47,7 +48,8 @@ Object.entries(costs.requests.counts).forEach(([operation, count]) => {
 ## Advanced Cost Monitoring
 
 ```javascript
-import { S3db, CostsPlugin } from 's3db.js';
+import { S3db } from 's3db.js';
+import { CostsPlugin } from 's3db.js';
 
 class CostMonitor {
   constructor(s3db) {
@@ -197,7 +199,8 @@ console.log('Cost Report:', JSON.stringify(costReport, null, 2));
 ## Storage and Data Transfer Tracking
 
 ```javascript
-import { S3db, CostsPlugin } from 's3db.js';
+import { S3db } from 's3db.js';
+import { CostsPlugin } from 's3db.js';
 
 const s3db = new S3db({
   connectionString: "s3://ACCESS_KEY:SECRET_KEY@BUCKET_NAME/databases/myapp",

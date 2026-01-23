@@ -18,62 +18,22 @@ import { HealthManager } from './server/health-manager.class.js';
 import { ChannelManager } from './server/channel-manager.class.js';
 import type { Database } from '../../database.class.js';
 import type * as http from 'http';
-// ws is imported dynamically at runtime
+import type {
+  WebSocketAuthDriver,
+  WebSocketAuth,
+  WebSocketResourceConfig,
+  WebSocketOptions,
+  ClientInfo,
+  WebSocketMetrics
+} from './types.internal.js';
 
-export interface WebSocketAuthDriver {
-  driver: 'jwt' | 'apiKey';
-  config?: any;
-}
-
-export interface WebSocketAuth {
-  drivers?: WebSocketAuthDriver[];
-  required?: boolean;
-}
-
-export interface WebSocketResourceConfig {
-  auth?: string[] | Record<string, any>; // Roles or guards
-  protected?: string[]; // Fields to hide
-  guard?: {
-    get?: Function;
-    list?: Function;
-    create?: Function;
-    update?: Function;
-    delete?: Function;
-  };
-  publishAuth?: string[] | Record<string, any>;
-}
-
-export interface WebSocketOptions {
-  port?: number;
-  host?: string;
-  database: Database;
-  namespace?: string;
-  logger?: any;
-  logLevel?: string;
-  auth?: WebSocketAuth;
-  resources?: Record<string, WebSocketResourceConfig>;
-  heartbeatInterval?: number;
-  heartbeatTimeout?: number;
-  maxPayloadSize?: number;
-  rateLimit?: { enabled: boolean; windowMs?: number; maxRequests?: number };
-  cors?: { enabled: boolean; origin?: string };
-  startupBanner?: boolean;
-  health?: { enabled?: boolean; [key: string]: any };
-  channels?: { enabled?: boolean; guards?: Record<string, Function> };
-  messageHandlers?: Record<string, Function>;
-}
-
-export interface ClientInfo {
-  ws: any; // WebSocket instance
-  user: any | null; // Authenticated user
-  subscriptions: Set<string>; // subscriptionKey
-  connectedAt: string;
-  lastActivity: number;
-  metadata: {
-    ip?: string;
-    userAgent?: string;
-  };
-}
+export type {
+  WebSocketAuthDriver,
+  WebSocketAuth,
+  WebSocketResourceConfig,
+  WebSocketOptions,
+  ClientInfo
+};
 
 export class WebSocketServer extends EventEmitter {
   port: number;
@@ -106,14 +66,7 @@ export class WebSocketServer extends EventEmitter {
   healthManager: HealthManager | null;
   channelManager: ChannelManager | null;
 
-  metrics: {
-    connections: number;
-    disconnections: number;
-    messagesReceived: number;
-    messagesSent: number;
-    broadcasts: number;
-    errors: number;
-  };
+  metrics: WebSocketMetrics;
 
   constructor(options: WebSocketOptions) {
     super();

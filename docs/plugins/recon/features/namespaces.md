@@ -57,7 +57,7 @@ Namespace support allows running multiple ReconPlugin instances in parallel with
 
 ```javascript
 import { Database } from 's3db.js';
-import { ReconPlugin } from 's3db.js/plugins/recon';
+import { ReconPlugin } from 's3db.js';
 
 const db = new Database({ connectionString: '...' });
 await db.initialize();
@@ -311,7 +311,7 @@ console.log(`Uptime namespace: ${uptimeData.length} reports`);
 
 ```javascript
 import { Database } from 's3db.js';
-import { ReconPlugin } from 's3db.js/plugins/recon';
+import { ReconPlugin } from 's3db.js';
 
 const db = new Database({
   connectionString: 's3://ACCESS_KEY:SECRET_KEY@prod-recon-bucket?region=us-east-1'

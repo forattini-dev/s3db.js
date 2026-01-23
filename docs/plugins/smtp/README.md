@@ -34,7 +34,7 @@ await db.usePlugin(new SMTPPlugin({ driver: 'sendgrid', from: 'noreply@example.c
 
 ```javascript
 import { Database } from 's3db.js';
-import { SMTPPlugin } from 's3db.js/plugins';
+import { SMTPPlugin } from 's3db.js';
 
 const db = new Database({ connectionString: 's3://key:secret@bucket/path' });
 

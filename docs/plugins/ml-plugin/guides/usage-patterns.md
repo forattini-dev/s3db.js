@@ -34,7 +34,7 @@
 
 ```javascript
 import { Database } from 's3db.js';
-import { MLPlugin } from 's3db.js/plugins';
+import { MLPlugin } from 's3db.js';
 
 const db = new Database({
   connectionString: 's3://key:secret@bucket/ml-demo'
@@ -102,7 +102,7 @@ Confidence: 89.5%
 
 ```javascript
 import { Database } from 's3db.js';
-import { MLPlugin } from 's3db.js/plugins';
+import { MLPlugin } from 's3db.js';
 
 const db = new Database({
   connectionString: 's3://key:secret@bucket/ml-spam'
@@ -173,7 +173,7 @@ if (prediction === 'spam') {
 
 ```javascript
 import { Database } from 's3db.js';
-import { MLPlugin } from 's3db.js/plugins';
+import { MLPlugin } from 's3db.js';
 
 const db = new Database({
   connectionString: 's3://key:secret@bucket/ml-stocks'
@@ -260,7 +260,7 @@ Confidence: 87.3%
 
 ```javascript
 import { Database } from 's3db.js';
-import { MLPlugin } from 's3db.js/plugins';
+import { MLPlugin } from 's3db.js';
 
 const db = new Database({
   connectionString: 's3://key:secret@bucket/ml-products'
@@ -368,7 +368,7 @@ console.log(`
 
 ```javascript
 import { Database } from 's3db.js';
-import { MLPlugin } from 's3db.js/plugins';
+import { MLPlugin } from 's3db.js';
 
 const db = new Database({
   connectionString: 's3://key:secret@bucket/ml-auto'
@@ -504,7 +504,7 @@ const { prediction, confidence, metrics } = await resource.ml.predict(data, targ
 
 ```javascript
 import { Database } from 's3db.js';
-import { MLPlugin } from 's3db.js/plugins';
+import { MLPlugin } from 's3db.js';
 
 const db = new Database({ connectionString: 's3://...' });
 const resource = await db.createResource({ name: 'data', attributes: {...} });

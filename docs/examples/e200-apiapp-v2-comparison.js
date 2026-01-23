@@ -209,8 +209,8 @@ V2 (Pre-compiled):
 /*
 
 1. Replace ApiApp import
-   - FROM: import { ApiApp } from 's3db.js/plugins/api/app.class.js'
-   - TO:   import { ApiApp } from 's3db.js/plugins/api/app-v2.class.js'
+   - FROM: import { ApiApp } from 's3db.js/src/plugins/api/app.class.js'
+   - TO:   import { ApiApp } from 's3db.js'
 
 2. Convert describe() chains to route()
    - FROM: app.describe({ ... }).post('/path', handler)

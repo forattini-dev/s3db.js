@@ -20,7 +20,7 @@
 ## Quick Start
 
 ```javascript
-import { DistributedLock } from 's3db.js/concerns/distributed-lock.js';
+import { DistributedLock } from 's3db.js/src/concerns/distributed-lock.js';
 
 const lock = new DistributedLock(storage, {
   keyGenerator: (name) => `locks/${name}`
@@ -174,7 +174,7 @@ const delay = min(baseDelay * 2^attempt, maxDelay) + random(0, baseDelay/2)
 Calculate exponential backoff with jitter.
 
 ```javascript
-import { computeBackoff } from 's3db.js/concerns/distributed-lock.js';
+import { computeBackoff } from 's3db.js/src/concerns/distributed-lock.js';
 
 const delay = computeBackoff(3, 100, 1000); // ~400-450ms
 ```
@@ -184,7 +184,7 @@ const delay = computeBackoff(3, 100, 1000); // ~400-450ms
 Promise-based delay.
 
 ```javascript
-import { sleep } from 's3db.js/concerns/distributed-lock.js';
+import { sleep } from 's3db.js/src/concerns/distributed-lock.js';
 
 await sleep(1000); // Wait 1 second
 ```
@@ -194,7 +194,7 @@ await sleep(1000); // Wait 1 second
 Check if error is 412 PreconditionFailed.
 
 ```javascript
-import { isPreconditionFailure } from 's3db.js/concerns/distributed-lock.js';
+import { isPreconditionFailure } from 's3db.js/src/concerns/distributed-lock.js';
 
 try {
   await storage.set(key, data, { ifNoneMatch: '*' });
@@ -210,7 +210,7 @@ try {
 Create a reusable locked function.
 
 ```javascript
-import { createLockedFunction } from 's3db.js/concerns/distributed-lock.js';
+import { createLockedFunction } from 's3db.js/src/concerns/distributed-lock.js';
 
 const lockedProcess = createLockedFunction(lock, 'order-processing', { ttl: 60 });
 

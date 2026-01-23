@@ -8,7 +8,7 @@
 
 import Database from 's3db.js';
 import { APIPlugin } from 's3db.js';
-import { OAuth2Server } from 's3db.js/plugins/identity/oauth2-server';
+import { OAuth2Server } from 's3db.js/src/plugins/identity/oauth2-server.js';
 import { OIDCClient } from 's3db.js';
 
 // ============================================================================

@@ -20,7 +20,7 @@
 ## Quick Start
 
 ```javascript
-import { DistributedSequence, createSequence } from 's3db.js/concerns/distributed-sequence.js';
+import { DistributedSequence, createSequence } from 's3db.js/src/concerns/distributed-sequence.js';
 
 // Resource-scoped sequence (recommended)
 const seq = createSequence(storage, { resourceName: 'orders' });
@@ -139,7 +139,7 @@ const newValue = await seq.increment('counter');
 Create a sequence with appropriate key generators.
 
 ```javascript
-import { createSequence } from 's3db.js/concerns/distributed-sequence.js';
+import { createSequence } from 's3db.js/src/concerns/distributed-sequence.js';
 
 // Resource-scoped
 const seq = createSequence(storage, { resourceName: 'orders' });

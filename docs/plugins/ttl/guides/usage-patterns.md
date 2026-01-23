@@ -41,7 +41,7 @@
 
 ```javascript
 import { Database } from 's3db.js';
-import { TTLPlugin } from 's3db.js/plugins';
+import { TTLPlugin } from 's3db.js';
 
 const db = new Database({
   connectionString: 's3://key:secret@bucket/path'

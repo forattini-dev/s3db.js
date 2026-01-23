@@ -9,7 +9,8 @@
 ## TLDR
 
 ```javascript
-import { Database, GraphPlugin } from 's3db.js';
+import { Database } from 's3db.js';
+import { GraphPlugin } from 's3db.js';
 
 const db = new Database({ connectionString: 'memory://test/db' });
 await db.connect();
@@ -94,7 +95,8 @@ npm install s3db.js
 ### Basic Setup
 
 ```javascript
-import { Database, GraphPlugin } from 's3db.js';
+import { Database } from 's3db.js';
+import { GraphPlugin } from 's3db.js';
 
 const db = new Database({ connectionString: 'memory://test/db' });
 await db.connect();

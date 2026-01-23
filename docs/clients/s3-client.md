@@ -543,8 +543,10 @@ client.on('command.response', (commandName, response, input) => {
 Pass your own configured S3Client:
 
 ```javascript
-import { S3Client } from '@aws-sdk/client-s3';
-import { Client } from 's3db.js';
+import {
+  S3Client } from '@aws-sdk/client-s3';
+import { Client
+} from 's3db.js';
 
 const s3Client = new S3Client({
   region: 'us-east-1',

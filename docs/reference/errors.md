@@ -41,7 +41,7 @@ Error
 Thrown when a resource ID doesn't exist:
 
 ```javascript
-import { ResourceNotFound } from 's3db.js/errors';
+import { ResourceNotFound } from 's3db.js';
 
 try {
   await users.get('nonexistent-id');
@@ -65,7 +65,7 @@ try {
 Thrown when data fails schema validation:
 
 ```javascript
-import { ValidationError } from 's3db.js/errors';
+import { ValidationError } from 's3db.js';
 
 try {
   await users.insert({ name: '' });  // Missing required email
@@ -87,7 +87,7 @@ try {
 Thrown when item doesn't match schema:
 
 ```javascript
-import { InvalidResourceItem } from 's3db.js/errors';
+import { InvalidResourceItem } from 's3db.js';
 
 try {
   await users.insert({ email: 'not-an-email', age: -5 });
@@ -110,7 +110,7 @@ try {
 Thrown for S3 access denied errors:
 
 ```javascript
-import { PermissionError } from 's3db.js/errors';
+import { PermissionError } from 's3db.js';
 
 try {
   await db.connect();
@@ -132,7 +132,7 @@ try {
 Thrown when S3 bucket doesn't exist:
 
 ```javascript
-import { NoSuchBucket } from 's3db.js/errors';
+import { NoSuchBucket } from 's3db.js';
 
 try {
   await db.connect();
@@ -149,7 +149,7 @@ try {
 Thrown when data exceeds S3's 2KB metadata limit:
 
 ```javascript
-import { MetadataLimitError } from 's3db.js/errors';
+import { MetadataLimitError } from 's3db.js';
 
 try {
   await resource.insert({ hugeField: 'x'.repeat(3000) });
@@ -174,7 +174,7 @@ try {
 Thrown for partition configuration issues:
 
 ```javascript
-import { PartitionError } from 's3db.js/errors';
+import { PartitionError } from 's3db.js';
 
 try {
   await db.createResource({
@@ -198,7 +198,7 @@ try {
 Thrown for encryption/decryption failures:
 
 ```javascript
-import { CryptoError } from 's3db.js/errors';
+import { CryptoError } from 's3db.js';
 
 try {
   const user = await users.get('id');  // Wrong passphrase
@@ -215,7 +215,7 @@ try {
 Thrown for plugin-related issues:
 
 ```javascript
-import { PluginError } from 's3db.js/errors';
+import { PluginError } from 's3db.js';
 
 try {
   await db.getPlugin('nonexistent');
@@ -255,7 +255,7 @@ import {
   ResourceNotFound,
   ValidationError,
   PermissionError
-} from 's3db.js/errors';
+} from 's3db.js';
 
 try {
   const user = await users.get(id);
@@ -279,7 +279,7 @@ try {
 s3db.js includes a `tryFn` helper for functional error handling:
 
 ```javascript
-import tryFn from 's3db.js/concerns/try-fn';
+import tryFn from 's3db.js/src/concerns/try-fn';
 
 const [ok, err, user] = await tryFn(() => users.get(id));
 
@@ -296,7 +296,7 @@ return user;
 Convert AWS errors to s3db.js errors:
 
 ```javascript
-import { mapAwsError } from 's3db.js/errors';
+import { mapAwsError } from 's3db.js';
 
 try {
   await s3Client.send(command);
@@ -370,7 +370,7 @@ const user = await withRetry(() => users.get(id));
 ## Logging Errors
 
 ```javascript
-import { S3dbError } from 's3db.js/errors';
+import { S3dbError } from 's3db.js';
 
 try {
   await operation();

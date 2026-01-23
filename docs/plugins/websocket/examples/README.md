@@ -24,7 +24,8 @@
 ### Minimal Setup
 
 ```javascript
-import { Database, WebSocketPlugin } from 's3db.js';
+import { Database } from 's3db.js';
+import { WebSocketPlugin } from 's3db.js';
 
 const db = new Database({
   connectionString: 'http://minioadmin:minioadmin@localhost:9000/bucket'
@@ -73,7 +74,8 @@ A complete real-time chat application with rooms, typing indicators, and message
 ### Server
 
 ```javascript
-import { Database, WebSocketPlugin } from 's3db.js';
+import { Database } from 's3db.js';
+import { WebSocketPlugin } from 's3db.js';
 
 const db = new Database({
   connectionString: process.env.DATABASE_URL
@@ -330,7 +332,8 @@ A metrics dashboard that updates in real-time.
 ### Server
 
 ```javascript
-import { Database, WebSocketPlugin } from 's3db.js';
+import { Database } from 's3db.js';
+import { WebSocketPlugin } from 's3db.js';
 
 const db = new Database({ connectionString: process.env.DATABASE_URL });
 await db.connect();

@@ -205,10 +205,11 @@ console.log(`Total users: ${allUsers.length}`);
 
 ### 5. Add plugins for a better experience (Optional)
 
-Enhance your database with powerful plugins for production-ready features:
+Enhance your database with powerful plugins for production-ready features. All plugins are available from the main `s3db.js` package:
 
 ```javascript
-import { S3db, TTLPlugin, RelationPlugin, ReplicatorPlugin, CachePlugin } from "s3db.js";
+import { S3db } from "s3db.js";
+import { RelationPlugin, TTLPlugin, ReplicatorPlugin, CachePlugin } from "s3db.js";
 
 const s3db = new S3db({
   connectionString: "s3://ACCESS_KEY:SECRET_KEY@BUCKET_NAME/databases/myapp",
@@ -564,8 +565,13 @@ client.clear();
 **Testing Example:**
 
 ```javascript
-import { describe, test, beforeEach, afterEach } from '@jest/globals';
-import { S3db } from 's3db.js';
+import {
+  describe,
+  test,
+  beforeEach,
+  afterEach } from '@jest/globals';
+import { S3db
+} from 's3db.js';
 
 describe('User Tests', () => {
   let db, users, snapshot;
@@ -1082,7 +1088,7 @@ npm install pino-http
 
 **Usage:**
 ```javascript
-import { APIPlugin } from 's3db.js/plugins';
+import { APIPlugin } from 's3db.js';
 
 const api = new APIPlugin({
   port: 3000,
@@ -1768,9 +1774,7 @@ Each database instance gets **its own executor pool**, enabling:
 Executor pool is **enabled by default** with optimized settings:
 
 ```javascript
-import { Database } from 's3db.js'
-
-const db = new Database({
+import { Database } from 's3db.js';const db = new Database({
   connectionString: 's3://bucket/database'
   // That's it! Executor pool is automatically configured with:
   // - Separate pool per database (zero contention)
@@ -1815,9 +1819,7 @@ Use the light profile for PromisePool-style throughput when you just need FIFO f
 Customize concurrency for your specific workload:
 
 ```javascript
-import { Database } from 's3db.js'
-
-const db = new Database({
+import { Database } from 's3db.js';const db = new Database({
   connectionString: 's3://bucket/database',
   executorPool: {
     concurrency: 200,         // Increase for high-throughput scenarios
@@ -2071,7 +2073,8 @@ pnpm add ejs                     # Template engine (APIPlugin - optional)
 ### Quick Example
 
 ```javascript
-import { S3db, CachePlugin, MetricsPlugin, TTLPlugin } from 's3db.js';
+import { S3db } from 's3db.js';
+import { CachePlugin, MetricsPlugin, TTLPlugin } from 's3db.js';
 
 const db = new S3db({
   connectionString: 's3://bucket/databases/myapp',

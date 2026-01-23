@@ -10,7 +10,8 @@
  * Run with: node examples/vector-benchmarks.js
  */
 
-import { S3db, VectorPlugin } from 's3db.js';
+import { S3db } from 's3db.js';
+import { VectorPlugin } from 's3db.js';
 import { performance } from 'perf_hooks';
 
 // ============================================================================

@@ -11,7 +11,7 @@
 Start with simple email sending via any relay option.
 
 ```javascript
-import { SMTPPlugin } from 's3db.js/plugins';
+import { SMTPPlugin } from 's3db.js';
 
 const plugin = new SMTPPlugin({
   mode: 'relay',

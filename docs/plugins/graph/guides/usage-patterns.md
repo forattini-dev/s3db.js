@@ -11,7 +11,8 @@
 Create vertex and edge resources:
 
 ```javascript
-import { Database, GraphPlugin } from 's3db.js';
+import { Database } from 's3db.js';
+import { GraphPlugin } from 's3db.js';
 
 const db = new Database({ connectionString: 's3://key:secret@bucket' });
 await db.connect();

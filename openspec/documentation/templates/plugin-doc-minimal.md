@@ -78,7 +78,7 @@ const result = await {pluginInstance}.{method}();
 
 ```javascript
 import { Database } from 's3db.js';
-import { {PLUGIN_NAME} } from 's3db.js/plugins';
+import { {PLUGIN_NAME} } from 's3db.js';
 
 const db = new Database({ connectionString: 's3://key:secret@bucket/path' });
 

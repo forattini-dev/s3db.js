@@ -41,7 +41,7 @@ Unlike basic crawlers, DeepDiscovery:
 ## Quick Start
 
 ```javascript
-import { DeepDiscovery } from 's3db.js/plugins/spider'
+import { DeepDiscovery } from 's3db.js'
 
 const discoverer = new DeepDiscovery({
   userAgent: 's3db-deep-discovery/1.0',

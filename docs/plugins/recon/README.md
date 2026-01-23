@@ -81,7 +81,7 @@ const report = await reconPlugin.scan('example.com');
 
 ```javascript
 import { Database } from 's3db.js';
-import { ReconPlugin } from 's3db.js/plugins';
+import { ReconPlugin } from 's3db.js';
 
 const db = new Database({
   connectionString: 's3://key:secret@bucket/path'
@@ -270,7 +270,7 @@ Simple DNS reconnaissance without any advanced features.
 
 ```javascript
 import { Database } from 's3db.js';
-import { ReconPlugin } from 's3db.js/plugins';
+import { ReconPlugin } from 's3db.js';
 
 const db = new Database({ connectionString: 's3://...' });
 const plugin = new ReconPlugin();
@@ -3136,7 +3136,7 @@ console.log(artifacts.length);  // 0 (nothing persisted)
 A: Subclass ReconPlugin and override `_buildFingerprint()`:
 
 ```javascript
-import { ReconPlugin } from 's3db.js/plugins';
+import { ReconPlugin } from 's3db.js';
 
 class CustomReconPlugin extends ReconPlugin {
   _buildFingerprint(target, results) {

@@ -188,7 +188,7 @@ queue: {
 ### LinkDiscoverer
 
 ```javascript
-import { LinkDiscoverer } from 's3db.js/plugins/spider'
+import { LinkDiscoverer } from 's3db.js'
 
 const discoverer = new LinkDiscoverer({
   enabled: true,
@@ -203,7 +203,7 @@ const discoverer = new LinkDiscoverer({
 ### RobotsParser
 
 ```javascript
-import { RobotsParser } from 's3db.js/plugins/spider'
+import { RobotsParser } from 's3db.js'
 
 const parser = new RobotsParser({
   userAgent: 's3db-spider',
@@ -232,7 +232,7 @@ Sitemap: https://example.com/sitemap.xml
 ### SitemapParser
 
 ```javascript
-import { SitemapParser } from 's3db.js/plugins/spider'
+import { SitemapParser } from 's3db.js'
 
 const parser = new SitemapParser({
   userAgent: 's3db-spider',
@@ -261,7 +261,7 @@ const parser = new SitemapParser({
 ### DeepDiscovery
 
 ```javascript
-import { DeepDiscovery } from 's3db.js/plugins/spider'
+import { DeepDiscovery } from 's3db.js'
 
 const discoverer = new DeepDiscovery({
   userAgent: 's3db-deep-discovery/1.0',

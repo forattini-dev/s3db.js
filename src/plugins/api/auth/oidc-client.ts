@@ -5,7 +5,7 @@
  * Fetches and caches JWKS (public keys) from the issuer's /.well-known/jwks.json endpoint.
  *
  * @example
- * import { OIDCClient } from 's3db.js/plugins/api/auth/oidc-client';
+ * import { OIDCClient } from 's3db.js';
  *
  * const oidcClient = new OIDCClient({
  *   issuer: 'https://sso.example.com',

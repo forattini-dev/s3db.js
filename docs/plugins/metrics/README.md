@@ -39,7 +39,8 @@ console.log('Avg time:', metrics.performance.averageResponseTime);
 ## Quick Start
 
 ```javascript
-import { Database, MetricsPlugin } from 's3db.js';
+import { Database } from 's3db.js';
+import { MetricsPlugin } from 's3db.js';
 
 const db = new Database({ connectionString: 's3://key:secret@bucket' });
 await db.connect();

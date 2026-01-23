@@ -42,7 +42,8 @@ const stats = await plugin.getLastNDays('wallets', 'balance', 7);
 ## Quick Start
 
 ```javascript
-import { S3db, EventualConsistencyPlugin } from 's3db.js';
+import { S3db } from 's3db.js';
+import { EventualConsistencyPlugin } from 's3db.js';
 
 const db = new S3db({ connectionString: '...' });
 await db.connect();

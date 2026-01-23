@@ -38,7 +38,8 @@ console.log('Storage:', s3db.client.costs.storage.totalGB);
 ## Quick Start
 
 ```javascript
-import { S3db, CostsPlugin } from 's3db.js';
+import { S3db } from 's3db.js';
+import { CostsPlugin } from 's3db.js';
 
 // 1. Setup database with CostsPlugin
 const db = new S3db({

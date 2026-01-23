@@ -12,7 +12,8 @@
  * - Fixed-point encoding for 77% storage savings
  */
 
-import { S3db, VectorPlugin } from 's3db.js';
+import { S3db } from 's3db.js';
+import { VectorPlugin } from 's3db.js';
 import OpenAI from 'openai';
 
 // ============================================================================

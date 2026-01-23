@@ -9,7 +9,8 @@
 ## Basic Setup
 
 ```javascript
-import { Database, TfStatePlugin } from 's3db.js';
+import { Database } from 's3db.js';
+import { TfStatePlugin } from 's3db.js';
 
 const db = new Database({
   connectionString: process.env.S3DB_CONNECTION

@@ -18,7 +18,8 @@ await db.usePlugin(new ApiPlugin({ port: 3000 }));
 ### 1. Basic API (30 seconds)
 
 ```javascript
-import { Database, ApiPlugin } from 's3db.js';
+import { Database } from 's3db.js';
+import { ApiPlugin } from 's3db.js';
 
 const db = new Database({ connectionString: 's3://bucket/db' });
 await db.connect();

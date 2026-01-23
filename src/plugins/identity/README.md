@@ -6,7 +6,7 @@ Complete OAuth2/OpenID Connect Identity Provider for S3DB.
 
 ```javascript
 import { Database } from 's3db.js';
-import { IdentityPlugin } from 's3db.js/plugins/identity';
+import { IdentityPlugin } from 's3db.js';
 
 const db = new Database({
   connectionString: 'http://minioadmin:minioadmin@localhost:9000/myapp'

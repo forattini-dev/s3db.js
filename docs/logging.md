@@ -102,7 +102,7 @@ const db = new Database({
 Plugins inherit the database logger automatically:
 
 ```javascript
-import { ApiPlugin } from 's3db.js/plugins/api';
+import { ApiPlugin } from 's3db.js';
 
 const apiPlugin = new ApiPlugin({
   port: 3000,
@@ -314,7 +314,7 @@ const db = new Database({
 
 ```javascript
 import { Database } from 's3db.js';
-import { ApiPlugin } from 's3db.js/plugins/api';
+import { ApiPlugin } from 's3db.js';
 import { createLogger } from 's3db.js/src/concerns/logger.js';
 
 // 1. Create custom logger (optional - defaults to pretty format)

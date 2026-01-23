@@ -31,7 +31,8 @@ plugins: [new RelationPlugin({ relations: { users: { posts: { type: 'hasMany', r
 ## Quick Start
 
 ```javascript
-import { Database, RelationPlugin } from 's3db.js';
+import { Database } from 's3db.js';
+import { RelationPlugin } from 's3db.js';
 
 const db = new Database({ connectionString: 's3://...' });
 await db.connect();

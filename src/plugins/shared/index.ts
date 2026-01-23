@@ -39,3 +39,21 @@ export {
   createCompressionMiddleware,
   createSecurityMiddleware
 } from './middlewares/index.js';
+
+export type {
+  CorsConfig,
+  SecurityConfig,
+  CSPDirectives,
+  ContentSecurityPolicyConfig,
+  FrameguardConfig,
+  HstsConfig,
+  ReferrerPolicyConfig,
+  DnsPrefetchControlConfig,
+  PermittedCrossDomainPoliciesConfig,
+  XssFilterConfig,
+  PermissionsPolicyConfig,
+  LoggingConfig,
+  LoggingContext,
+  ServerInfo,
+  BaseRateLimitConfig,
+} from './types.js';

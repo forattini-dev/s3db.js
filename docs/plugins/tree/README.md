@@ -33,7 +33,8 @@ await db.usePlugin(new TreePlugin({ resources: ['categories'], driver: 'nested-s
 ## Quick Start
 
 ```javascript
-import { Database, TreePlugin } from 's3db.js';
+import { Database } from 's3db.js';
+import { TreePlugin } from 's3db.js';
 
 const db = new Database({ connectionString: 's3://...' });
 await db.connect();

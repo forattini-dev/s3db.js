@@ -40,7 +40,8 @@
 ### Code
 
 ```javascript
-import { Database, CookieFarmPlugin } from 's3db.js';
+import { Database } from 's3db.js';
+import { CookieFarmPlugin } from 's3db.js';
 
 const db = new Database({
   connectionString: process.env.S3DB_CONNECTION
@@ -110,7 +111,8 @@ try {
 ### Code
 
 ```javascript
-import { Database, CookieFarmPlugin } from 's3db.js';
+import { Database } from 's3db.js';
+import { CookieFarmPlugin } from 's3db.js';
 
 const db = new Database({
   connectionString: process.env.S3DB_CONNECTION
@@ -216,7 +218,9 @@ setInterval(async () => {
 
 ```javascript
 import {
-  Database,
+  Database
+} from 's3db.js';
+import {
   CookieFarmPlugin,
   CachePlugin,
   AuditPlugin,
@@ -458,7 +462,8 @@ process.on('SIGTERM', async () => {
 ### Code
 
 ```javascript
-import { Database, CookieFarmPlugin } from 's3db.js';
+import { Database } from 's3db.js';
+import { CookieFarmPlugin } from 's3db.js';
 
 const db = new Database({
   connectionString: process.env.S3DB_CONNECTION
@@ -617,7 +622,8 @@ Generate (10 personas)
 ### Code
 
 ```javascript
-import { Database, CookieFarmPlugin } from 's3db.js';
+import { Database } from 's3db.js';
+import { CookieFarmPlugin } from 's3db.js';
 
 const db = new Database({
   connectionString: process.env.S3DB_CONNECTION
@@ -776,7 +782,8 @@ suite.on('job.failed', ({ job, error }) => {
 Generate personas and sync to PostgreSQL:
 
 ```javascript
-import { Database, CookieFarmPlugin, ReplicatorPlugin } from 's3db.js';
+import { Database } from 's3db.js';
+import { CookieFarmPlugin, ReplicatorPlugin } from 's3db.js';
 
 const db = new Database({
   connectionString: process.env.S3DB_CONNECTION
@@ -819,7 +826,8 @@ console.log('Personas will be auto-synced to PostgreSQL!');
 ### Recipe 2: BigQuery Analytics + SQS Events
 
 ```javascript
-import { Database, CookieFarmPlugin, ReplicatorPlugin } from 's3db.js';
+import { Database } from 's3db.js';
+import { CookieFarmPlugin, ReplicatorPlugin } from 's3db.js';
 
 const db = new Database({
   connectionString: process.env.S3DB_CONNECTION

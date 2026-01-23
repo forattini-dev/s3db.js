@@ -112,7 +112,7 @@ console.log(user.password);  // Base64 ciphertext
 Direct access to encryption utilities:
 
 ```javascript
-import { encrypt, decrypt, sha256, md5 } from 's3db.js/concerns/crypto';
+import { encrypt, decrypt, sha256, md5 } from 's3db.js/src/concerns/crypto';
 
 // Encrypt
 const ciphertext = await encrypt('sensitive data', 'passphrase');
@@ -214,7 +214,7 @@ async function rotateEncryptionKey(resource, oldKey, newKey) {
 ## Encryption Errors
 
 ```javascript
-import { CryptoError } from 's3db.js/errors';
+import { CryptoError } from 's3db.js';
 
 try {
   const user = await users.get('user123');

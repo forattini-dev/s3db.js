@@ -38,7 +38,8 @@ console.log(`Tracked ${logs.length} operations`);
 ## Quick Start
 
 ```javascript
-import { S3db, AuditPlugin } from 's3db.js';
+import { S3db } from 's3db.js';
+import { AuditPlugin } from 's3db.js';
 
 const s3db = new S3db({
   connectionString: "s3://key:secret@bucket/path",

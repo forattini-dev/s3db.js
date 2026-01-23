@@ -44,7 +44,8 @@ pnpm install s3db.js hono @hono/node-server
 ### Step 2: Create S3 Database Connection
 
 ```javascript
-import { Database, IdentityPlugin } from 's3db.js';
+import { Database } from 's3db.js';
+import { IdentityPlugin } from 's3db.js';
 
 const db = new Database({
   connectionString: 'http://minioadmin:minioadmin@localhost:9000/sso-server',
@@ -89,7 +90,8 @@ console.log('✅ OAuth2/OIDC server running at http://localhost:4000');
 ### Complete Minimal Example
 
 ```javascript
-import { Database, IdentityPlugin } from 's3db.js';
+import { Database } from 's3db.js';
+import { IdentityPlugin } from 's3db.js';
 
 async function main() {
   // 1. Connect to database

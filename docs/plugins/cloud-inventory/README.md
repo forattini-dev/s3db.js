@@ -10,7 +10,7 @@
 
 **3 lines to get started:**
 ```javascript
-import { CloudInventoryPlugin, AwsInventoryDriver } from 's3db.js/plugins';
+import { CloudInventoryPlugin, AwsInventoryDriver } from 's3db.js';
 const plugin = new CloudInventoryPlugin({ clouds: [{ driver: AwsInventoryDriver, credentials: {...} }] });
 await plugin.discoverAll();
 ```
@@ -36,7 +36,8 @@ await plugin.discoverAll();
 ## Quick Start
 
 ```javascript
-import { Database, CloudInventoryPlugin } from 's3db.js';
+import { Database } from 's3db.js';
+import { CloudInventoryPlugin } from 's3db.js';
 
 const db = new Database({ connectionString: 's3://key:secret@bucket' });
 await db.connect();

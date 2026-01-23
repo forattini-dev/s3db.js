@@ -359,7 +359,7 @@ db.on('plg:cloud-inventory:change', ({ resource, changes }) => {
 ## Custom Driver Registration
 
 ```javascript
-import { registerCloudDriver, BaseCloudDriver } from 's3db.js/plugins/cloud-inventory';
+import { registerCloudDriver, BaseCloudDriver } from 's3db.js/src/plugins/cloud-inventory/index.js';
 
 class FixtureDriver extends BaseCloudDriver {
   async listResources() {

@@ -255,9 +255,10 @@ Extend functionality with plugins:
 
 ```javascript
 import { S3db } from 's3db.js';
+// Import plugins from the plugins entrypoint to keep the core bundle lean
+import { CachePlugin, TTLPlugin } from 's3db.js';
 // Import ApiPlugin from its specific path
-import { CachePlugin, TTLPlugin } from 's3db.js/plugins'; // Other plugins can stay
-import { ApiPlugin } from 's3db.js/plugins/api'; // Specific import for ApiPlugin
+import { ApiPlugin } from 's3db.js'; // Specific import for ApiPlugin
 
 const db = new S3db({
   connectionString: '...',
@@ -298,7 +299,7 @@ const db = new S3db({
 ## Error Handling
 
 ```javascript
-import { ResourceNotFound, ValidationError } from 's3db.js/errors';
+import { ResourceNotFound, ValidationError } from 's3db.js';
 
 try {
   const user = await users.get('nonexistent');
@@ -385,7 +386,7 @@ s3db delete users abc123
 
 ```javascript
 import { S3db } from 's3db.js';
-import { CachePlugin, TTLPlugin } from 's3db.js/plugins';
+import { CachePlugin, TTLPlugin } from 's3db.js';
 
 // Initialize
 const db = new S3db({

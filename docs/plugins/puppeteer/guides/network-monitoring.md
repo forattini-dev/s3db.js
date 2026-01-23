@@ -17,7 +17,7 @@ NetworkMonitor captures **ALL** network activity including:
 
 ```javascript
 import { Database } from 's3db.js';
-import { PuppeteerPlugin } from 's3db.js/plugins';
+import { PuppeteerPlugin } from 's3db.js';
 
 const db = new Database({ connectionString: '...' });
 await db.connect();

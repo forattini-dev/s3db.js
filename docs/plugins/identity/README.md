@@ -11,7 +11,8 @@
 ## ⚡ TLDR
 
 ```javascript
-import { Database, IdentityPlugin } from 's3db.js';
+import { Database } from 's3db.js';
+import { IdentityPlugin } from 's3db.js';
 
 const db = new Database({ connectionString: 's3://...' });
 await db.connect();
@@ -62,7 +63,8 @@ pnpm install s3db.js hono @hono/node-server
 ### 1. Install & Initialize
 
 ```javascript
-import { Database, IdentityPlugin } from 's3db.js';
+import { Database } from 's3db.js';
+import { IdentityPlugin } from 's3db.js';
 
 const db = new Database({
   connectionString: 'http://minioadmin:minioadmin@localhost:9000/sso-server',

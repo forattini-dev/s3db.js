@@ -43,7 +43,8 @@ console.log(results[0].highlighted);     // { title: '<mark>Machine</mark>...' }
 ## Quick Start
 
 ```javascript
-import { Database, FullTextPlugin } from 's3db.js';
+import { Database } from 's3db.js';
+import { FullTextPlugin } from 's3db.js';
 
 // Step 1: Create database
 const db = new Database({ connectionString: 's3://key:secret@bucket' });

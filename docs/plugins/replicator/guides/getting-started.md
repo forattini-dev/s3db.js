@@ -116,7 +116,8 @@ pnpm install s3db.js mongodb @aws-sdk/client-dynamodb @aws-sdk/lib-dynamodb
 ### Setup Replicator
 
 ```javascript
-import { Database, ReplicatorPlugin } from 's3db.js';
+import { Database } from 's3db.js';
+import { ReplicatorPlugin } from 's3db.js';
 
 // 1. Create database
 const db = new Database({
@@ -209,7 +210,8 @@ pnpm install s3db.js pg
 ### Step 2: Setup Database
 
 ```javascript
-import { Database, ReplicatorPlugin } from 's3db.js';
+import { Database } from 's3db.js';
+import { ReplicatorPlugin } from 's3db.js';
 
 const db = new Database({
   connectionString: 's3://key:secret@my-bucket'

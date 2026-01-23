@@ -245,7 +245,7 @@ src/plugins/spider/
 
 ### Basic Usage
 ```javascript
-import { CrawlContext, HybridFetcher } from 's3db.js/plugins/spider';
+import { CrawlContext, HybridFetcher } from 's3db.js';
 
 const context = new CrawlContext({
   userAgent: 'MyBot/1.0',

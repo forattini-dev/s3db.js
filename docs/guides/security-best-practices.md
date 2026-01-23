@@ -194,7 +194,7 @@ const users = await db.createResource({
 ### Rate Limiting
 
 ```javascript
-import { ApiPlugin } from 's3db.js/plugins';
+import { ApiPlugin } from 's3db.js';
 
 const api = new ApiPlugin({
   rateLimit: {
@@ -230,7 +230,7 @@ await users.restore('user123');
 Track all changes:
 
 ```javascript
-import { AuditPlugin } from 's3db.js/plugins';
+import { AuditPlugin } from 's3db.js';
 
 const db = new Database({
   connectionString: '...',
@@ -249,7 +249,7 @@ const db = new Database({
 Regular backups with the BackupPlugin:
 
 ```javascript
-import { BackupPlugin } from 's3db.js/plugins';
+import { BackupPlugin } from 's3db.js';
 
 const db = new Database({
   connectionString: '...',

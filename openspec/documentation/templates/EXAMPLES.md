@@ -558,7 +558,7 @@ new Plugin({ option1: value });
 ✅ **Good:**
 ```javascript
 import { Database } from 's3db.js';
-import { EncryptionPlugin } from 's3db.js/plugins';
+import { EncryptionPlugin } from 's3db.js';
 
 const db = new Database({ connectionString: 's3://key:secret@bucket' });
 const encryptionPlugin = new EncryptionPlugin({

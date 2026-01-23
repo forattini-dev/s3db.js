@@ -655,7 +655,8 @@ ${configTable}
 ## Basic Usage
 
 \`\`\`javascript
-import { Database, ${plugin.name} } from 's3db.js';
+import { Database } from 's3db.js';
+import { ${plugin.name} } from 's3db.js';
 
 const db = new Database({ connectionString: 's3://...' });
 db.use(new ${plugin.name}({

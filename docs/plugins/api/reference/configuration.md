@@ -594,7 +594,8 @@ await db.usePlugin(new ApiPlugin({
 ### Complete Example
 
 ```javascript
-import { Database, ApiPlugin } from 's3db.js';
+import { Database } from 's3db.js';
+import { ApiPlugin } from 's3db.js';
 
 const db = new Database({ connectionString: 's3://...' });
 await db.connect();

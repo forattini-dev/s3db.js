@@ -204,10 +204,11 @@ console.log(`Total users: ${allUsers.length}`);
 
 ### 5. Add plugins for a better experience (Optional)
 
-Enhance your database with powerful plugins for production-ready features:
+Enhance your database with powerful plugins for production-ready features. All plugins are available from the main `s3db.js` package:
 
 ```javascript
-import { S3db, TTLPlugin, RelationPlugin, ReplicatorPlugin, CachePlugin } from "s3db.js";
+import { S3db } from "s3db.js";
+import { RelationPlugin, TTLPlugin, ReplicatorPlugin, CachePlugin } from "s3db.js";
 
 const s3db = new S3db({
   connectionString: "s3://ACCESS_KEY:SECRET_KEY@BUCKET_NAME/databases/myapp",
@@ -580,8 +581,15 @@ client.clear();
 **Testing Example:**
 
 ```typescript
-import { describe, it, beforeEach, afterEach, expect } from 'vitest';
-import { S3db, Resource } from 's3db.js';
+import {
+  describe,
+  it,
+  beforeEach,
+  afterEach,
+  expect } from 'vitest';
+import { S3db,
+  Resource
+} from 's3db.js';
 
 interface User {
   id: string;
@@ -956,7 +964,7 @@ const db = new S3db({
 Plugins can use completely custom loggers that don't inherit from Database:
 
 ```javascript
-import { createLogger } from 's3db.js/logger';
+import { createLogger } from 's3db.js/src/concerns/logger.js';
 
 // Create custom logger
 const customLogger = createLogger({
@@ -1116,7 +1124,7 @@ npm install pino-http
 
 **Usage:**
 ```javascript
-import { APIPlugin } from 's3db.js/plugins';
+import { APIPlugin } from 's3db.js';
 
 const api = new APIPlugin({
   port: 3000,
@@ -1802,9 +1810,7 @@ Each S3db instance gets **its own executor pool**, enabling:
 Executor pool is **enabled by default** with optimized settings:
 
 ```javascript
-import { S3db } from 's3db.js'
-
-const db = new S3db({
+import { S3db } from 's3db.js';const db = new S3db({
   connectionString: 's3://bucket/database'
   // That's it! Executor pool is automatically configured with:
   // - Separate pool per database (zero contention)
@@ -1849,9 +1855,7 @@ Use the light profile for PromisePool-style throughput when you just need FIFO f
 Customize concurrency for your specific workload:
 
 ```javascript
-import { S3db } from 's3db.js'
-
-const db = new S3db({
+import { S3db } from 's3db.js';const db = new S3db({
   connectionString: 's3://bucket/database',
   executorPool: {
     concurrency: 200,         // Increase for high-throughput scenarios
@@ -2099,7 +2103,8 @@ pnpm add ejs                     # Template engine (APIPlugin - optional)
 ### Quick Example
 
 ```javascript
-import { S3db, CachePlugin, MetricsPlugin, TTLPlugin } from 's3db.js';
+import { S3db } from 's3db.js';
+import { CachePlugin, MetricsPlugin, TTLPlugin } from 's3db.js';
 
 const db = new S3db({
   connectionString: 's3://bucket/databases/myapp',

@@ -2,25 +2,105 @@ export * from './plugin.class.js';
 export * from './plugin.obj.js';
 export { CoordinatorPlugin } from './concerns/coordinator-plugin.class.js';
 
-export * from './audit.plugin.js';
-export * from './cache.plugin.js';
-export * from './costs.plugin.js';
-export * from './fulltext.plugin.js';
-export * from './metrics.plugin.js';
-export * from './s3-queue.plugin.js';
-export * from './scheduler.plugin.js';
-export * from './state-machine.plugin.js';
-export * from './ttl.plugin.js';
-export * from './vector.plugin.js';
-export * from './ml.plugin.js';
-export * from './smtp.plugin.js';
-export * from './tournament.plugin.js';
-export * from './graph.plugin.js';
+export { AuditPlugin } from './audit.plugin.js';
+export type { AuditPluginOptions, AuditRecord, AuditStats, AuditQueryOptions } from './audit.plugin.js';
+
+export { CachePlugin, resolveCacheMemoryLimit } from './cache.plugin.js';
+export type { CachePluginOptions, MemoryLimitResult } from './cache.plugin.js';
+
+export { CostsPlugin } from './costs.plugin.js';
+export type { CostsPluginOptions, CostsData } from './costs.plugin.js';
+
+export { FullTextPlugin } from './fulltext.plugin.js';
+export type { FullTextPluginOptions, SearchOptions, SearchResult, IndexStats, RebuildOptions } from './fulltext.plugin.js';
+
+export { MetricsPlugin } from './metrics.plugin.js';
+export type { MetricsPluginOptions, MetricsStats, MetricsQueryOptions, PrometheusConfig } from './metrics.plugin.js';
+
+export { CloudInventoryPlugin } from './cloud-inventory.plugin.js';
+export type { CloudInventoryPluginOptions } from './cloud-inventory.plugin.js';
+
+export { S3QueuePlugin } from './s3-queue.plugin.js';
+export type { S3QueuePluginOptions } from './s3-queue.plugin.js';
+
+export { SchedulerPlugin } from './scheduler.plugin.js';
+export type { SchedulerPluginOptions } from './scheduler.plugin.js';
+
+export { StateMachinePlugin } from './state-machine.plugin.js';
+export type { StateMachinePluginOptions, TransitionResult, TransitionHistoryEntry, TransitionHistoryOptions } from './state-machine.plugin.js';
+
+export { TTLPlugin } from './ttl.plugin.js';
+export type { TTLPluginOptions, TTLResourceConfig, TTLStats, TTLGranularity, TTLExpireStrategy } from './ttl.plugin.js';
+
+export { VectorPlugin } from './vector.plugin.js';
+export type {
+  VectorPluginOptions,
+  VectorPluginConfig,
+  VectorSearchOptions,
+  VectorSearchStats,
+  VectorSearchResult,
+  VectorSearchPagedResult,
+  ClusterOptions,
+  ClusterResult,
+  VectorFieldInfo,
+  DistanceMetric,
+  DistanceFunction,
+  FindOptimalKOptions
+} from './vector.plugin.js';
+
+export { MLPlugin } from './ml.plugin.js';
+export type { MLPluginOptions, ModelConfig, ModelStats, ModelInstance } from './ml.plugin.js';
+export { MLError, ModelConfigError, ModelNotFoundError, TrainingError, TensorFlowDependencyError } from './ml.errors.js';
+
+export { SMTPPlugin } from './smtp.plugin.js';
+export type {
+  SMTPPluginOptions,
+  SendResult,
+  EmailRecord,
+  EmailStatus,
+  SendEmailOptions,
+  EmailAttachment,
+  SMTPMode,
+  SMTPDriver
+} from './smtp.plugin.js';
+
+export { TournamentPlugin } from './tournament.plugin.js';
+export type { TournamentPluginOptions } from './tournament.plugin.js';
+
+export { GraphPlugin } from './graph.plugin.js';
+export type {
+  GraphPluginOptions,
+  EdgeRecord,
+  PathResult,
+  TraverseNode,
+  NeighborResult,
+  DegreeResult
+} from './graph.plugin.js';
+
 export * from './tree/index.js';
 
 export * from './eventual-consistency/index.js';
 
 export * from './tfstate/index.js';
+export * from './importer/index.js';
+
+export type {
+  CorsConfig,
+  SecurityConfig,
+  CSPDirectives,
+  ContentSecurityPolicyConfig,
+  FrameguardConfig,
+  HstsConfig,
+  ReferrerPolicyConfig,
+  DnsPrefetchControlConfig,
+  PermittedCrossDomainPoliciesConfig,
+  XssFilterConfig,
+  PermissionsPolicyConfig,
+  LoggingConfig,
+  LoggingContext,
+  ServerInfo,
+  BaseRateLimitConfig,
+} from './shared/types.js';
 
 type PluginClass = new (...args: unknown[]) => unknown;
 type PluginLoader = () => Promise<PluginClass>;
@@ -86,13 +166,26 @@ export const loadQueueConsumerPlugin = (): Promise<PluginClass> => lazyLoadPlugi
 export const loadWebSocketPlugin = (): Promise<PluginClass> => lazyLoadPlugin('WebSocketPlugin');
 
 export { ApiPlugin } from './api/index.js';
+export type { ApiPluginOptions } from './api/index.js';
+
 export { IdentityPlugin } from './identity/index.js';
+export type {
+  IdentityPluginOptions,
+  OnboardingStatus,
+  RegisterOAuthClientResult,
+  AuthenticateWithPasswordResult
+} from './identity/index.js';
+
 export { BackupPlugin } from './backup.plugin.js';
 export { KubernetesInventoryPlugin } from './kubernetes-inventory.plugin.js';
 export { PuppeteerPlugin } from './puppeteer.plugin.js';
 export { SpiderPlugin } from './spider.plugin.js';
 export { CrawlContext } from './spider/crawl-context.js';
 export { HybridFetcher } from './spider/hybrid-fetcher.js';
+export { RobotsParser } from './spider/robots-parser.js';
+export { SitemapParser } from './spider/sitemap-parser.js';
+export { LinkDiscoverer } from './spider/link-discoverer.js';
+export { DeepDiscovery } from './spider/deep-discovery.js';
 export { CookieFarmPlugin } from './cookie-farm.plugin.js';
 export { CookieFarmSuitePlugin } from './cookie-farm-suite.plugin.js';
 export { ReconPlugin } from './recon.plugin.js';
@@ -118,3 +211,33 @@ export {
   deleteChunkedCookie,
   isChunkedCookie
 } from './api/index.js';
+
+export type {
+  CookieOptions,
+  ChunkingOptions,
+  CookieChunkOverflowDetails
+} from './api/index.js';
+
+export {
+  HttpBadRequestError,
+  HttpValidationError,
+  HttpUnauthorizedError,
+  HttpForbiddenError,
+  HttpNotFoundError,
+  HttpMethodNotAllowedError,
+  HttpConflictError,
+  HttpUnprocessableEntityError,
+  HttpTooManyRequestsError,
+  HttpInternalServerError,
+  HttpNotImplementedError,
+  HttpServiceUnavailableError,
+  HTTP_ERRORS,
+  createHttpError
+} from './api/errors.js';
+
+export {
+  NotificationStateMachine,
+  AttemptStateMachine,
+  createNotificationStateMachine,
+  createAttemptStateMachine
+} from './api/concerns/state-machine.js';

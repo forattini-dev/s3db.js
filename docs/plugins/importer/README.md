@@ -33,7 +33,8 @@ await db.usePlugin(importer); await importer.import('./data.csv');
 ## Quick Start
 
 ```javascript
-import { Database, ImporterPlugin } from 's3db.js';
+import { Database } from 's3db.js';
+import { ImporterPlugin } from 's3db.js';
 
 const db = new Database({ connectionString: 's3://...' });
 await db.connect();

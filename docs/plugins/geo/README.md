@@ -43,7 +43,8 @@ const nearby = await locations.findNearby({ lat, lon, radius: 5 }); // ~180ms
 ## Quick Start
 
 ```javascript
-import { Database, GeoPlugin } from 's3db.js';
+import { Database } from 's3db.js';
+import { GeoPlugin } from 's3db.js';
 
 const db = new Database({ connectionString: 's3://key:secret@bucket' });
 await db.connect();

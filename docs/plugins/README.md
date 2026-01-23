@@ -71,8 +71,11 @@
 
 ## 🚀 Quick Start
 
+All plugins are available from the main `s3db.js` package.
+
 ```javascript
-import { S3db, CachePlugin, AuditPlugin, MetricsPlugin } from 's3db.js';
+import { S3db } from 's3db.js';
+import { CachePlugin, AuditPlugin, MetricsPlugin, CostsPlugin } from 's3db.js';
 
 const db = new S3db({
   connectionString: "s3://KEY:SECRET@BUCKET/path",
@@ -357,7 +360,7 @@ Lists all existing namespaces for a plugin by scanning storage.
 
 **Example**:
 ```javascript
-import { listPluginNamespaces } from 's3db.js/concerns/plugin-namespace';
+import { listPluginNamespaces } from 's3db.js/src/concerns/plugin-namespace';
 
 const storage = plugin.getStorage();
 const namespaces = await listPluginNamespaces(storage, 'recon');
@@ -375,7 +378,7 @@ Emits console warnings about namespace detection and usage.
 
 **Example**:
 ```javascript
-import { warnNamespaceUsage } from 's3db.js/concerns/plugin-namespace';
+import { warnNamespaceUsage } from 's3db.js/src/concerns/plugin-namespace';
 
 warnNamespaceUsage('ReconPlugin', 'uptime', ['default', 'stealth']);
 // Console output:
@@ -397,7 +400,7 @@ Complete namespace detection and warning flow (combines listing + warning).
 
 **Example**:
 ```javascript
-import { detectAndWarnNamespaces } from 's3db.js/concerns/plugin-namespace';
+import { detectAndWarnNamespaces } from 's3db.js/src/concerns/plugin-namespace';
 
 const namespaces = await detectAndWarnNamespaces(
   plugin.getStorage(),
@@ -424,7 +427,7 @@ Generates consistent resource names across all plugins.
 
 **Example**:
 ```javascript
-import { getNamespacedResourceName } from 's3db.js/concerns/plugin-namespace';
+import { getNamespacedResourceName } from 's3db.js/src/concerns/plugin-namespace';
 
 // Default namespace (no suffix)
 getNamespacedResourceName('plg_recon_hosts', 'default', 'plg_recon');
@@ -458,7 +461,7 @@ Validates namespace format.
 
 **Example**:
 ```javascript
-import { validateNamespace } from 's3db.js/concerns/plugin-namespace';
+import { validateNamespace } from 's3db.js/src/concerns/plugin-namespace';
 
 validateNamespace('uptime');        // OK
 validateNamespace('client-acme');   // OK
@@ -482,7 +485,7 @@ Extracts and validates namespace from plugin config.
 
 **Example**:
 ```javascript
-import { getValidatedNamespace } from 's3db.js/concerns/plugin-namespace';
+import { getValidatedNamespace } from 's3db.js/src/concerns/plugin-namespace';
 
 getValidatedNamespace({ namespace: 'uptime' });
 // 'uptime'
@@ -503,7 +506,7 @@ import {
   getValidatedNamespace,
   detectAndWarnNamespaces,
   getNamespacedResourceName
-} from 's3db.js/concerns/plugin-namespace';
+} from 's3db.js/src/concerns/plugin-namespace';
 ```
 
 #### Step 2: Validate Namespace in Constructor
@@ -562,12 +565,12 @@ async createResources() {
 ### Complete Example
 
 ```javascript
-import { Plugin } from 's3db.js/plugins/plugin.class';
+import { Plugin } from 's3db.js';
 import {
   getValidatedNamespace,
   detectAndWarnNamespaces,
   getNamespacedResourceName
-} from 's3db.js/concerns/plugin-namespace';
+} from 's3db.js/src/concerns/plugin-namespace';
 
 export class MyPlugin extends Plugin {
   static pluginName = 'myplugin';
@@ -1463,7 +1466,7 @@ Quick fix - Run all install commands:
 ### Checking Dependencies Programmatically
 
 ```javascript
-import { getPluginDependencyReport } from 's3db.js/plugins/concerns/plugin-dependencies';
+import { getPluginDependencyReport } from 's3db.js/src/plugins/concerns/plugin-dependencies.js';
 
 // Get a full report of all plugin dependencies
 const report = await getPluginDependencyReport();
@@ -1479,7 +1482,8 @@ console.log(report);
 ### Basic Plugin Usage
 
 ```javascript
-import { S3db, CachePlugin, BackupPlugin, CostsPlugin } from 's3db.js';
+import { S3db } from 's3db.js';
+import { CachePlugin, BackupPlugin, CostsPlugin } from 's3db.js';
 
 const s3db = new S3db({
   connectionString: "s3://ACCESS_KEY:SECRET_KEY@BUCKET_NAME/databases/myapp"
@@ -1658,7 +1662,8 @@ Building a plugin is easier than you think! Here's a complete plugin in ~50 line
 ### Creating a Custom Plugin
 
 ```javascript
-import { Plugin, ValidationError } from 's3db.js';
+import { ValidationError } from 's3db.js';
+import { Plugin } from 's3db.js';
 
 class MyCustomPlugin extends Plugin {
   constructor(options = {}) {
@@ -1735,7 +1740,8 @@ class MyCustomPlugin extends Plugin {
 #### Pattern 1: Multi-Driver Support
 
 ```javascript
-import { Plugin, PluginError } from 's3db.js';
+import { PluginError } from 's3db.js';
+import { Plugin } from 's3db.js';
 class FlexiblePlugin extends Plugin {
   async onSetup() {
     switch(this.config.driver) {

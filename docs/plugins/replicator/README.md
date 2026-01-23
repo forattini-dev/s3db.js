@@ -11,7 +11,8 @@
 **Real-time CDC** (Change Data Capture) replication to multiple destinations - **each operation replicated individually** in near real-time.
 
 ```javascript
-import { Database, ReplicatorPlugin } from 's3db.js';
+import { Database } from 's3db.js';
+import { ReplicatorPlugin } from 's3db.js';
 
 const db = new Database({ connectionString: 's3://...' });
 await db.connect();
@@ -92,7 +93,8 @@ pnpm install s3db.js pg
 ### 2. Setup Replicator
 
 ```javascript
-import { Database, ReplicatorPlugin } from 's3db.js';
+import { Database } from 's3db.js';
+import { ReplicatorPlugin } from 's3db.js';
 
 const db = new Database({
   connectionString: 's3://key:secret@my-bucket'

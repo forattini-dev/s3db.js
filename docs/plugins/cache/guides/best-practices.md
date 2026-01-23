@@ -64,7 +64,8 @@ Combine `CachePlugin` with `CostsPlugin` to track actual AWS cost savings:
 ### Complete Example
 
 ```javascript
-import { S3db, CachePlugin, CostsPlugin } from 's3db.js';
+import { S3db } from 's3db.js';
+import { CachePlugin, CostsPlugin } from 's3db.js';
 
 const s3db = new S3db({
   connectionString: 's3://key:secret@bucket/path',

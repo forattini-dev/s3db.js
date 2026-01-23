@@ -49,7 +49,8 @@ In multi-instance deployments, certain operations should only run on **one insta
 ### Enable Coordinator Mode
 
 ```javascript
-import { Database, S3QueuePlugin } from 's3db.js';
+import { Database } from 's3db.js';
+import { S3QueuePlugin } from 's3db.js';
 
 const db = new Database({ connectionString: 's3://...' });
 await db.connect();

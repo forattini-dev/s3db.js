@@ -72,7 +72,7 @@ If kubectl works, the plugin will work!
 
 ```javascript
 import { Database } from 's3db.js';
-import { KubernetesInventoryPlugin } from 's3db.js/plugins';
+import { KubernetesInventoryPlugin } from 's3db.js';
 
 const db = new Database({
   connectionString: 's3://key:secret@bucket/k8s-inventory'

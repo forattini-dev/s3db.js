@@ -9,7 +9,8 @@
 ## Basic Search Implementation
 
 ```javascript
-import { Database, FullTextPlugin } from 's3db.js';
+import { Database } from 's3db.js';
+import { FullTextPlugin } from 's3db.js';
 
 const db = new Database({
   connectionString: "s3://ACCESS_KEY:SECRET_KEY@BUCKET_NAME/databases/myapp"

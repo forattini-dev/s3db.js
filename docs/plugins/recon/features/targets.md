@@ -253,7 +253,8 @@ type Target = {
 ### Example: Custom API with ApiPlugin
 
 ```javascript
-import { ApiPlugin, ReconPlugin } from 's3db.js';
+import { ReconPlugin } from 's3db.js';
+import { ApiPlugin } from 's3db.js';
 
 const reconPlugin = new ReconPlugin({ ... });
 

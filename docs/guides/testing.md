@@ -27,7 +27,7 @@ Create a factory definition for each of your resources. You can place these in a
 
 ```typescript
 // tests/factories/UserFactory.ts
-import { Factory } from 's3db.js/testing';
+import { Factory } from 's3db.js';
 import { faker } from '@faker-js/faker'; // Install faker-js if you need dynamic data
 
 interface User {
@@ -64,8 +64,10 @@ Factory.define<Post>('post', {
 Once defined, you can use `Factory.create` or `Factory.createMany` to generate data.
 
 ```typescript
-import { Factory } from 's3db.js/testing';
-import { S3db } from 's3db.js';
+import {
+  Factory } from 's3db.js';
+import { S3db
+} from 's3db.js';
 
 // Assume db is an initialized S3db instance
 // Assume user and post factories are defined as above
@@ -96,7 +98,7 @@ The `Seeder` class orchestrates the creation of data across multiple resources, 
 
 ```typescript
 import { S3db } from 's3db.js';
-import { Seeder, Factory } from 's3db.js/testing';
+import { Seeder, Factory } from 's3db.js';
 
 // Assume db is your S3db instance, connected to MemoryClient
 const db = new S3db({ connectionString: 'memory://testdb' });
@@ -115,7 +117,7 @@ You can define a "seed" function that specifies how many records of each type to
 ```typescript
 // tests/seeds/initialSeed.ts
 import { S3db } => 's3db.js';
-import { Factory, Seeder } from 's3db.js/testing';
+import { Factory, Seeder } from 's3db.js';
 
 export async function initialSeed(db: S3db) {
   // Ensure factories are aware of the database context
@@ -140,8 +142,12 @@ export async function initialSeed(db: S3db) {
 ### 3. Run the Seeder in Tests
 
 ```typescript
-import { describe, it, beforeEach } from 'vitest';
-import { S3db } from 's3db.js';
+import {
+  describe,
+  it,
+  beforeEach } from 'vitest';
+import { S3db
+} from 's3db.js';
 import { initialSeed } from '../seeds/initialSeed'; // Your seed file
 
 describe('Application Features', () => {
@@ -174,8 +180,15 @@ describe('Application Features', () => {
 When using `MemoryClient`, you can save the entire state of your in-memory database and restore it later. This is incredibly fast and allows you to reset your test environment without re-running factories or seeders.
 
 ```typescript
-import { describe, it, beforeEach, afterEach, expect } from 'vitest';
-import { S3db, Resource } from 's3db.js';
+import {
+  describe,
+  it,
+  beforeEach,
+  afterEach,
+  expect } from 'vitest';
+import { S3db,
+  Resource
+} from 's3db.js';
 import { initialSeed } from '../seeds/initialSeed';
 
 describe('User Management', () => {

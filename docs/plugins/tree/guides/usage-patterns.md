@@ -9,7 +9,8 @@
 ## Basic Setup
 
 ```javascript
-import { Database, TreePlugin } from 's3db.js';
+import { Database } from 's3db.js';
+import { TreePlugin } from 's3db.js';
 
 const db = new Database({
   connectionString: 's3://key:secret@bucket/path'

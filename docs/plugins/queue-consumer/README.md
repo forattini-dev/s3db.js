@@ -32,7 +32,8 @@ await db.usePlugin(consumer); await consumer.start();
 ## Quick Start
 
 ```javascript
-import { Database, QueueConsumerPlugin } from 's3db.js';
+import { Database } from 's3db.js';
+import { QueueConsumerPlugin } from 's3db.js';
 
 const db = new Database({ connectionString: 's3://...' });
 await db.connect();

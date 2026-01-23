@@ -289,7 +289,8 @@ console.log(importStats);
 Use the BackupPlugin for advanced features like scheduling, rotation, and multi-driver support:
 
 ```javascript
-import { Database, MemoryClient, BackupPlugin } from 's3db.js';
+import { Database, MemoryClient } from 's3db.js';
+import { BackupPlugin } from 's3db.js';
 
 const client = new MemoryClient();
 const db = new Database({
@@ -647,28 +648,32 @@ Export production S3 data and test locally with MemoryClient:
 
 ```javascript
 // Step 1: Backup production database (run on server)
-import { Database, BackupPlugin } from 's3db.js';
+import { Database } from 's3db.js';
+import {
+  BackupPlugin } from 's3db.js';
 
 const prodDb = new Database({
   connectionString: process.env.PROD_S3_CONNECTION,
   plugins: [
     new BackupPlugin({
       driver: 'filesystem',
-      backupDir: '/backups',
-      compress: true
+  backupDir: '/backups',
+  compress: true
     })
   ]
 });
 
 await prodDb.connect();
 const backupPath = await prodDb.plugins.backup.backup();
-// Creates: /backups/backup-2025-10-25T14-30-00-abc123/
 
-// Step 2: Download backup to local machine
-// $ scp -r server:/backups/backup-2025-10-25T14-30-00-abc123/ ./local-backup/
 
-// Step 3: Load into MemoryClient for local testing
-import { Database, MemoryClient } from 's3db.js';
+
+
+
+
+import { Database,
+  MemoryClient
+} from 's3db.js';
 
 const localClient = new MemoryClient();
 const localDb = new Database({ client: localClient });
@@ -759,19 +764,22 @@ Seamlessly move data between development, staging, and production:
 // Scenario: Migrate staging data to new production instance
 
 // Step 1: Export from staging
-import { Database, BackupPlugin } from 's3db.js';
+import { Database } from 's3db.js';
+import {
+  BackupPlugin } from 's3db.js';
 
 const stagingDb = new Database({
-  connectionString: 's3://staging-bucket',
+  connectionString: 's3:
   plugins: [new BackupPlugin({ driver: 'filesystem' })]
 });
 await stagingDb.connect();
 
 const stagingBackup = await stagingDb.plugins.backup.backup();
-// Output: /backups/staging-backup-2025-10-25.../
 
-// Step 2: Test migration locally first (recommended!)
-import { MemoryClient } from 's3db.js';
+
+
+import { MemoryClient
+} from 's3db.js';
 
 const testClient = new MemoryClient();
 const testDb = new Database({ client: testClient });
@@ -1516,7 +1524,8 @@ const results = await Promise.all(
 A: **Yes!** MemoryClient implements the full Client interface, including BackupPlugin compatibility:
 
 ```javascript
-import { Database, MemoryClient, BackupPlugin } from 's3db.js';
+import { Database, MemoryClient } from 's3db.js';
+import { BackupPlugin } from 's3db.js';
 
 const db = new Database({ client: new MemoryClient() });
 await db.usePlugin(new BackupPlugin());

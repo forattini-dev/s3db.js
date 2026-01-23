@@ -9,7 +9,8 @@
 ## Basic Setup
 
 ```javascript
-import { Database, RelationPlugin } from 's3db.js';
+import { Database } from 's3db.js';
+import { RelationPlugin } from 's3db.js';
 
 const db = new Database({ connectionString: 's3://key:secret@bucket/path' });
 await db.connect();

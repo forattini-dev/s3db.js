@@ -31,7 +31,8 @@ draft → registration → in-progress → completed
 ### 1. Create Tournament
 
 ```javascript
-import { Database, TournamentPlugin } from 's3db.js';
+import { Database } from 's3db.js';
+import { TournamentPlugin } from 's3db.js';
 
 const db = new Database({ connectionString: 's3://...' });
 await db.connect();

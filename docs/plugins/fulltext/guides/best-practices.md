@@ -383,7 +383,8 @@ A: Yes! Works well with:
 **Q: How to test search functionality?**
 A: Create a test suite:
 ```javascript
-import { Database, FullTextPlugin, MemoryClient } from 's3db.js';
+import { Database, MemoryClient } from 's3db.js';
+import { FullTextPlugin } from 's3db.js';
 
 const db = new Database({ client: new MemoryClient() });
 await db.usePlugin(new FullTextPlugin({

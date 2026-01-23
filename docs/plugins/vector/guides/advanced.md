@@ -380,7 +380,7 @@ await products.insertMany(vectors);
 Cache expensive operations:
 
 ```javascript
-import { CachePlugin } from 's3db.js/plugins';
+import { CachePlugin } from 's3db.js';
 
 // Add caching layer
 const cache = new CachePlugin({

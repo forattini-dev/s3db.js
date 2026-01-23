@@ -83,6 +83,31 @@ Modules in `src/core/`: ResourcePersistence, ResourceQuery, ResourcePartitions, 
 | `AuditPlugin` | Track all changes |
 | `ReplicatorPlugin` | Sync to PostgreSQL/BigQuery/SQS |
 
+### Public API Exports
+
+All public types are exported from `s3db.js`. Internal types are not exported.
+
+**Core:**
+- `Database`, `Resource`, `Plugin`
+
+**Plugins (Class + Options):**
+- `AuditPlugin`, `AuditPluginOptions`, `AuditRecord`, `AuditStats`, `AuditQueryOptions`
+- `CachePlugin`, `CachePluginOptions`, `MemoryLimitResult`
+- `CostsPlugin`, `CostsPluginOptions`, `CostsData`
+- `FullTextPlugin`, `FullTextPluginOptions`, `SearchResult`, `SearchOptions`, `IndexStats`
+- `GraphPlugin`, `GraphPluginOptions`, `EdgeRecord`, `PathResult`, `TraverseNode`, `NeighborResult`, `DegreeResult`
+- `MetricsPlugin`, `MetricsPluginOptions`, `MetricsStats`, `MetricsQueryOptions`, `PrometheusConfig`
+- `StateMachinePlugin`, `StateMachinePluginOptions`, `TransitionResult`, `TransitionHistoryEntry`
+- `TTLPlugin`, `TTLPluginOptions`, `TTLResourceConfig`, `TTLStats`, `TTLGranularity`, `TTLExpireStrategy`
+- `VectorPlugin`, `VectorPluginOptions`, `VectorSearchResult`, `VectorSearchOptions`, `DistanceMetric`
+- `ApiPlugin`, `ApiPluginOptions`
+- `IdentityPlugin`, `IdentityPluginOptions`, `OnboardingStatus`, `RegisterOAuthClientResult`
+- `SMTPPlugin`, `SMTPPluginOptions`, `SendResult`, `EmailRecord`, `EmailStatus`, `SendEmailOptions`, `EmailAttachment`
+- `WebSocketPlugin`, `WebSocketServer`
+
+**Shared Types:**
+- `CorsConfig`, `SecurityConfig`, `LoggingConfig`, `ServerInfo`, `BaseRateLimitConfig`
+
 ### Connection Strings
 
 ```

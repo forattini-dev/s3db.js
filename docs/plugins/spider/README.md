@@ -31,8 +31,8 @@ await db.usePlugin(new SpiderPlugin({ patterns: { product: { match: '/products/:
 ## Quick Start
 
 ```javascript
-import { Database } from 's3db.js'
-import { SpiderPlugin } from 's3db.js/plugins'
+import { Database } from 's3db.js';
+import { SpiderPlugin } from 's3db.js';
 
 const spider = new SpiderPlugin({
   namespace: 'crawler',
@@ -156,7 +156,7 @@ const spider = new SpiderPlugin({
 ### SEO Audit
 
 ```javascript
-import { DeepDiscovery } from 's3db.js/plugins/spider'
+import { DeepDiscovery } from 's3db.js'
 
 const discovery = new DeepDiscovery()
 const report = await discovery.discover('https://example.com')
@@ -207,4 +207,3 @@ const spider = new SpiderPlugin({
 
 - [Cache Plugin](/plugins/cache/README.md) - Cache crawl results
 - [Queue Consumer Plugin](/plugins/queue-consumer/README.md) - Process URLs from SQS/RabbitMQ
-

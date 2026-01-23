@@ -9,7 +9,8 @@
 ## Basic Performance Monitoring
 
 ```javascript
-import { S3db, MetricsPlugin } from 's3db.js';
+import { S3db } from 's3db.js';
+import { MetricsPlugin } from 's3db.js';
 
 const s3db = new S3db({
   connectionString: "s3://ACCESS_KEY:SECRET_KEY@BUCKET_NAME/databases/myapp",

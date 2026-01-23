@@ -719,7 +719,9 @@ The API Plugin integrates seamlessly with the MetricsPlugin to expose Prometheus
 ### Integrated Mode Setup
 
 ```javascript
-import { Database, ApiPlugin, MetricsPlugin } from 's3db.js';
+import { Database } from 's3db.js';
+import { MetricsPlugin } from 's3db.js';
+import { ApiPlugin } from 's3db.js';
 
 const db = new Database({ connectionString: 's3://...' });
 

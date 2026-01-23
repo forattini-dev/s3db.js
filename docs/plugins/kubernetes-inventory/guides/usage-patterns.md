@@ -34,7 +34,7 @@
 
 ```javascript
 import { Database } from 's3db.js';
-import { KubernetesInventoryPlugin } from 's3db.js/plugins';
+import { KubernetesInventoryPlugin } from 's3db.js';
 
 const db = new Database({
   connectionString: 's3://key:secret@bucket/k8s-inventory'
@@ -97,7 +97,7 @@ await db.disconnect();
 
 ```javascript
 import { Database } from 's3db.js';
-import { KubernetesInventoryPlugin } from 's3db.js/plugins';
+import { KubernetesInventoryPlugin } from 's3db.js';
 
 const db = new Database({
   connectionString: 's3://key:secret@bucket/k8s-inventory'
@@ -205,7 +205,7 @@ console.log(`GCP Pods: ${gcpPods.length}`);
 
 ```javascript
 import { Database } from 's3db.js';
-import { KubernetesInventoryPlugin } from 's3db.js/plugins';
+import { KubernetesInventoryPlugin } from 's3db.js';
 
 const db = new Database({
   connectionString: 's3://key:secret@bucket/k8s-inventory'
@@ -330,7 +330,7 @@ async function validateRBACChanges(rbacId) {
 
 ```javascript
 import { Database } from 's3db.js';
-import { KubernetesInventoryPlugin } from 's3db.js/plugins';
+import { KubernetesInventoryPlugin } from 's3db.js';
 
 const db = new Database({
   connectionString: 's3://key:secret@bucket/k8s-inventory'
@@ -506,7 +506,7 @@ await investigateDeployment('my-app-deployment');
 
 ```javascript
 import { Database } from 's3db.js';
-import { KubernetesInventoryPlugin } from 's3db.js/plugins';
+import { KubernetesInventoryPlugin } from 's3db.js';
 import express from 'express';
 
 const db = new Database({

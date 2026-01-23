@@ -35,7 +35,8 @@
 **Setup time:** 2 minutes
 
 ```javascript
-import { Database, IdentityPlugin } from 's3db.js';
+import { Database } from 's3db.js';
+import { IdentityPlugin } from 's3db.js';
 
 const db = new Database({
   connectionString: 'http://minioadmin:minioadmin@localhost:9000/sso-dev',
@@ -110,7 +111,8 @@ curl http://localhost:4000/.well-known/jwks.json | jq
 **Backend code:**
 
 ```javascript
-import { Database, IdentityPlugin } from 's3db.js';
+import { Database } from 's3db.js';
+import { IdentityPlugin } from 's3db.js';
 
 const db = new Database({
   connectionString: process.env.S3_CONNECTION_STRING,
@@ -637,7 +639,8 @@ export async function getServiceToken(config) {
 **Perfect for:** SaaS platforms with multiple customers
 
 ```javascript
-import { Database, IdentityPlugin } from 's3db.js';
+import { Database } from 's3db.js';
+import { IdentityPlugin } from 's3db.js';
 
 const db = new Database({
   connectionString: process.env.S3_CONNECTION_STRING,

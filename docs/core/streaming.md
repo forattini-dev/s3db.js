@@ -118,7 +118,7 @@ writer.on('finish', () => {
 Stream only IDs for memory-efficient listing:
 
 ```javascript
-import { ResourceIdsReader } from 's3db.js/stream';
+import { ResourceIdsReader } from 's3db.js';
 
 const idsReader = new ResourceIdsReader({
   resource: users,
