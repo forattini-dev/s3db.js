@@ -1331,8 +1331,19 @@ export class Resource extends AsyncEventEmitter implements Disposable {
       }
 
       const [okUnmap, , unmappedBody] = await tryFn(() => this.schema.unmapper(parsedBody as unknown as Record<string, unknown>, mapFromMeta, pluginMapFromMeta as any));
-      const result = okUnmap ? { ...unmappedBody, id } as ResourceData : { id } as ResourceData;
-      Object.keys(result).forEach(k => { (result as any)[k] = fixValue((result as any)[k]); });
+      const unmappedBodyData = okUnmap ? (unmappedBody as unknown as StringRecord) : {};
+
+      const bodyHasUserData = Object.keys(unmappedBodyData).some(k => !k.startsWith('_') && k !== 'id');
+
+      if (bodyHasUserData) {
+        const result = { ...unmappedBodyData, id } as ResourceData;
+        Object.keys(result).forEach(k => { (result as any)[k] = fixValue((result as any)[k]); });
+        return result;
+      }
+
+      const merged = { ...unmappedMetadata, ...unmappedBodyData, id } as ResourceData;
+      Object.keys(merged).forEach(k => { (merged as any)[k] = fixValue((merged as any)[k]); });
+      const result = filterInternalFields(merged as StringRecord) as ResourceData;
       return result;
     }
 
