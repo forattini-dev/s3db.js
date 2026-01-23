@@ -50,6 +50,7 @@ import { createIdentityContextMiddleware } from './middleware/identity.js';
 import { createLoggingMiddleware } from './middleware/logging.js';
 import { createRateLimitMiddleware } from './middleware/rate-limit.js';
 import { createSecurityMiddleware } from './middleware/security.js';
+import { initCookieChunking } from './concerns/cookie-chunking.js';
 
 import type { Hono } from 'hono';
 import type {
@@ -369,6 +370,7 @@ export class ApiPlugin extends Plugin {
       throwOnError: true,
       checkVersions: true
     });
+    await initCookieChunking();
   }
 
   override async onInstall(): Promise<void> {
@@ -691,6 +693,7 @@ export {
   setChunkedCookie,
   deleteChunkedCookie,
   isChunkedCookie,
+  initCookieChunking,
   CookieChunkOverflowError,
   type CookieOptions,
   type ChunkingOptions,

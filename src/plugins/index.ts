@@ -209,7 +209,8 @@ export {
   getChunkedCookie,
   setChunkedCookie,
   deleteChunkedCookie,
-  isChunkedCookie
+  isChunkedCookie,
+  initCookieChunking
 } from './api/index.js';
 
 export type {
