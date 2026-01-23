@@ -3,9 +3,11 @@
  * Provides search tools for core docs and plugin docs using Fuse.js.
  */
 
-import { readFileSync, readdirSync, statSync, existsSync } from 'fs';
-import { join, dirname, basename, relative } from 'path';
+import { readFileSync, readdirSync, statSync, existsSync, mkdirSync, rmSync } from 'fs';
+import { join, dirname, basename } from 'path';
 import { fileURLToPath } from 'url';
+import { homedir } from 'os';
+import { execSync } from 'child_process';
 import Fuse from 'fuse.js';
 
 import type { S3dbMCPServer } from '../entrypoint.js';
@@ -14,7 +16,20 @@ import type { S3dbSearchDocsArgs, S3dbListTopicsArgs } from '../types/index.js';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 const PROJECT_ROOT = join(__dirname, '../../');
-const DOCS_ROOT = join(PROJECT_ROOT, 'docs');
+const LOCAL_DOCS_ROOT = join(PROJECT_ROOT, 'docs');
+
+const CACHE_DIR = join(homedir(), '.cache', 's3db-mcp');
+const CACHED_DOCS_ROOT = join(CACHE_DIR, 'docs');
+const REPO_URL = 'https://github.com/forattini-dev/s3db.js.git';
+
+function getDocsRoot(): string {
+  if (existsSync(LOCAL_DOCS_ROOT)) {
+    return LOCAL_DOCS_ROOT;
+  }
+  return CACHED_DOCS_ROOT;
+}
+
+let DOCS_ROOT = LOCAL_DOCS_ROOT;
 
 interface DocEntry {
   id: string;
@@ -354,7 +369,63 @@ export function createDocsSearchHandlers(server: S3dbMCPServer) {
   };
 }
 
+async function ensureDocsAvailable(): Promise<boolean> {
+  if (existsSync(LOCAL_DOCS_ROOT)) {
+    DOCS_ROOT = LOCAL_DOCS_ROOT;
+    return true;
+  }
+
+  if (existsSync(CACHED_DOCS_ROOT)) {
+    DOCS_ROOT = CACHED_DOCS_ROOT;
+    return true;
+  }
+
+  console.error('📚 Docs not found locally. Cloning from GitHub...');
+
+  try {
+    mkdirSync(CACHE_DIR, { recursive: true });
+
+    const tempDir = join(CACHE_DIR, 'repo-temp');
+
+    if (existsSync(tempDir)) {
+      rmSync(tempDir, { recursive: true, force: true });
+    }
+
+    execSync(
+      `git clone --depth 1 --filter=blob:none --sparse "${REPO_URL}" "${tempDir}"`,
+      { stdio: 'pipe' }
+    );
+
+    execSync(
+      'git sparse-checkout set docs',
+      { cwd: tempDir, stdio: 'pipe' }
+    );
+
+    const clonedDocs = join(tempDir, 'docs');
+    if (existsSync(clonedDocs)) {
+      if (existsSync(CACHED_DOCS_ROOT)) {
+        rmSync(CACHED_DOCS_ROOT, { recursive: true, force: true });
+      }
+      execSync(`mv "${clonedDocs}" "${CACHED_DOCS_ROOT}"`, { stdio: 'pipe' });
+    }
+
+    rmSync(tempDir, { recursive: true, force: true });
+
+    DOCS_ROOT = CACHED_DOCS_ROOT;
+    console.error('✅ Docs cloned successfully to', CACHED_DOCS_ROOT);
+    return true;
+  } catch (err) {
+    console.error('⚠️  Failed to clone docs:', (err as Error).message);
+    console.error('   Documentation search will be unavailable.');
+    return false;
+  }
+}
+
 export async function preloadSearch(): Promise<void> {
+  const docsAvailable = await ensureDocsAvailable();
+  if (!docsAvailable) {
+    return;
+  }
   loadCoreDocs();
   loadPluginDocs();
 }
