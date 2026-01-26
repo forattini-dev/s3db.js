@@ -53,6 +53,7 @@ function mapFieldTypeToTypeScript(fieldType: string): string {
     'number': 'number',
     'integer': 'number',
     'boolean': 'boolean',
+    'bool': 'boolean',
     'array': 'any[]',
     'object': 'Record<string, any>',
     'json': 'Record<string, any>',

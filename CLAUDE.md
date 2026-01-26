@@ -68,6 +68,7 @@ Modules in `src/core/`: ResourcePersistence, ResourceQuery, ResourcePartitions, 
 |------|---------|-------|
 | `string` | `name: 'string\|required'` | Basic |
 | `number` | `age: 'number\|min:0'` | Integer/float |
+| `boolean`/`bool` | `active: 'bool\|default:true'` | Stored as `1`/`0` |
 | `secret` | `password: 'secret'` | AES-256-GCM encrypted |
 | `embedding:N` | `vector: 'embedding:1536'` | 77% compression |
 | `ip4`/`ip6` | `ip: 'ip4'` | 44-47% compression |

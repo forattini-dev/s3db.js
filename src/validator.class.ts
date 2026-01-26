@@ -144,6 +144,9 @@ export class Validator extends FastestValidator {
         },
         number: {
           convert: true,
+        },
+        boolean: {
+          convert: true,
         }
       },
     }, options));

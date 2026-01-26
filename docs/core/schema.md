@@ -980,9 +980,13 @@ Full support for all fastest-validator types:
 {
   active: 'boolean|default:true',
   verified: 'boolean',
-  premium: 'boolean|default:false'
+  premium: 'boolean|default:false',
+  // Alias: 'bool' works the same as 'boolean'
+  enabled: 'bool|default:true'
 }
 ```
+
+> **💡 Alias:** Both `boolean` and `bool` work identically. Use whichever you prefer!
 
 ### Date
 

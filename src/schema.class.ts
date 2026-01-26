@@ -1374,7 +1374,7 @@ export class Schema {
         continue;
       }
 
-      if (defStr.includes("boolean") || defType === 'boolean') {
+      if (defStr.includes("boolean") || defStr.includes("bool") || defType === 'boolean' || defType === 'bool') {
         this.addHook("beforeMap", name, "fromBool");
         this.addHook("afterUnmap", name, "toBool");
         continue;
@@ -1674,6 +1674,10 @@ export class Schema {
           processed[key] = value.replace(/^ip6/, 'string');
           continue;
         }
+        if (value === 'bool' || value.startsWith('bool|')) {
+          processed[key] = value.replace(/^bool/, 'boolean');
+          continue;
+        }
         if (value === 'buffer' || value.startsWith('buffer|')) {
           processed[key] = 'any';
           continue;
@@ -1761,7 +1765,7 @@ export class Schema {
         }
         processed[key] = value;
       } else if (typeof value === 'object' && value !== null && !Array.isArray(value)) {
-        const validatorTypes = ['string', 'number', 'boolean', 'any', 'object', 'array', 'date', 'email', 'url', 'uuid', 'enum', 'custom', 'ip4', 'ip6', 'buffer', 'bits', 'money', 'crypto', 'decimal', 'geo:lat', 'geo:lon', 'geo:point', 'geo-lat', 'geo-lon', 'geo-point', 'secret', 'password', 'embedding'];
+        const validatorTypes = ['string', 'number', 'boolean', 'bool', 'any', 'object', 'array', 'date', 'email', 'url', 'uuid', 'enum', 'custom', 'ip4', 'ip6', 'buffer', 'bits', 'money', 'crypto', 'decimal', 'geo:lat', 'geo:lon', 'geo:point', 'geo-lat', 'geo-lon', 'geo-point', 'secret', 'password', 'embedding'];
         const typeValue = (value as Record<string, unknown>).type as string | undefined;
         const isValidValidatorType = typeof typeValue === 'string' &&
           !typeValue.includes('|') &&
@@ -1775,6 +1779,8 @@ export class Schema {
             processed[key] = { ...cleanValue, type: 'string' };
           } else if (cleanValue.type === 'ip6') {
             processed[key] = { ...cleanValue, type: 'string' };
+          } else if (cleanValue.type === 'bool') {
+            processed[key] = { ...cleanValue, type: 'boolean' };
           } else if (cleanValue.type === 'buffer') {
             processed[key] = { ...cleanValue, type: 'any' };
           } else if (cleanValue.type === 'bits' || (cleanValue.type as string)?.startsWith('bits:')) {
