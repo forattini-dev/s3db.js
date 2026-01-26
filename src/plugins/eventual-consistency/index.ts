@@ -140,7 +140,7 @@ export class EventualConsistencyPlugin extends CoordinatorPlugin<EventualConsist
    * Plugin installation hook
    */
   override async onInstall(): Promise<void> {
-    this.storage = new PluginStorage(this.database as any, 'eventual-consistency');
+    this.storage = new PluginStorage(this.database.client as any, 'eventual-consistency');
 
     await onInstall(
       this.database as any,
