@@ -37,7 +37,11 @@ describe('Validator Unit Tests', () => {
 
         expect(compiled({ active: true })).toBe(true);
         expect(compiled({ active: false })).toBe(true);
-        expect(compiled({ active: 'true' })).not.toBe(true);
+        expect(compiled({ active: 'true' })).toBe(true);
+        expect(compiled({ active: 'false' })).toBe(true);
+        expect(compiled({ active: 1 })).toBe(true);
+        expect(compiled({ active: 0 })).toBe(true);
+        expect(compiled({ active: 'invalid' })).not.toBe(true);
       });
 
       it('should validate array type', () => {
