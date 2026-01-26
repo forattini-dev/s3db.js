@@ -94,6 +94,7 @@ All public types are exported from `s3db.js`. Internal types are not exported.
 - `AuditPlugin`, `AuditPluginOptions`, `AuditRecord`, `AuditStats`, `AuditQueryOptions`
 - `CachePlugin`, `CachePluginOptions`, `MemoryLimitResult`
 - `CostsPlugin`, `CostsPluginOptions`, `CostsData`
+- `EventualConsistencyPlugin`, `EventualConsistencyPluginOptions`, `AnalyticsDataPoint`, `TopRecord`, `CohortStats`
 - `FullTextPlugin`, `FullTextPluginOptions`, `SearchResult`, `SearchOptions`, `IndexStats`
 - `GraphPlugin`, `GraphPluginOptions`, `EdgeRecord`, `PathResult`, `TraverseNode`, `NeighborResult`, `DegreeResult`
 - `MetricsPlugin`, `MetricsPluginOptions`, `MetricsStats`, `MetricsQueryOptions`, `PrometheusConfig`
