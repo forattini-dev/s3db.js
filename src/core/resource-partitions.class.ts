@@ -487,22 +487,26 @@ export class ResourcePartitions {
     await Promise.allSettled(updatePromises);
 
     const id = newData.id || oldData.id;
-    const cleanupPromises = Object.entries(partitions).map(async ([partitionName]) => {
-      const prefix = `resource=${this.resource.name}/partition=${partitionName}`;
-      const [okKeys, , keys] = await tryFn<string[]>(() => this.resource.client.getAllKeys({ prefix }));
-      if (!okKeys || !keys) {
-        return;
-      }
+    const isNewInsert = !oldData || Object.keys(oldData).length === 0;
 
-      const validKey = this.getKey({ partitionName, id, data: newData });
-      const staleKeys = keys.filter(key => key.endsWith(`/id=${id}`) && key !== validKey);
+    if (!isNewInsert) {
+      const cleanupPromises = Object.entries(partitions).map(async ([partitionName]) => {
+        const prefix = `resource=${this.resource.name}/partition=${partitionName}`;
+        const [okKeys, , keys] = await tryFn<string[]>(() => this.resource.client.getAllKeys({ prefix }));
+        if (!okKeys || !keys) {
+          return;
+        }
 
-      if (staleKeys.length > 0) {
-        await tryFn(() => this.resource.client.deleteObjects(staleKeys));
-      }
-    });
+        const validKey = this.getKey({ partitionName, id, data: newData });
+        const staleKeys = keys.filter(key => key.endsWith(`/id=${id}`) && key !== validKey);
 
-    await Promise.allSettled(cleanupPromises);
+        if (staleKeys.length > 0) {
+          await tryFn(() => this.resource.client.deleteObjects(staleKeys));
+        }
+      });
+
+      await Promise.allSettled(cleanupPromises);
+    }
   }
 
   async handleReferenceUpdate(
