@@ -76,8 +76,8 @@ export interface ResourceMetadata {
   versions: StringRecord<VersionData>;
   /** Persistent attribute index mapping - prevents data corruption on schema changes */
   schemaRegistry?: SchemaRegistry;
-  /** Persistent plugin attribute index mapping - per plugin namespace (supports both legacy numeric and new string-based formats) */
-  pluginSchemaRegistry?: StringRecord<PluginSchemaRegistry | SchemaRegistry>;
+  /** Persistent plugin attribute index mapping - per plugin namespace */
+  pluginSchemaRegistry?: StringRecord<PluginSchemaRegistry>;
 }
 
 export interface VersionData {

@@ -488,7 +488,7 @@ export class S3Client extends EventEmitter {
       const stringMetadata: Record<string, string> = {};
       if (metadata) {
         for (const [k, v] of Object.entries(metadata)) {
-          const validKey = String(k).replace(/[^a-zA-Z0-9\-_]/g, '_');
+          const validKey = String(k).replace(/[^a-zA-Z0-9\-_]/g, '_').toLowerCase();
           const { encoded } = metadataEncode(v);
           stringMetadata[validKey] = encoded;
         }
@@ -628,8 +628,9 @@ export class S3Client extends EventEmitter {
       if (metadata && typeof metadata === 'object') {
         const encodedMetadata: Record<string, string> = {};
         for (const [k, value] of Object.entries(metadata)) {
+          const validKey = String(k).replace(/[^a-zA-Z0-9\-_]/g, '_').toLowerCase();
           const { encoded } = metadataEncode(value);
-          encodedMetadata[k] = encoded;
+          encodedMetadata[validKey] = encoded;
         }
         options.Metadata = encodedMetadata;
       }

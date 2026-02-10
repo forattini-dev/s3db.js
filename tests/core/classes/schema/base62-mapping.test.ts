@@ -1,9 +1,9 @@
 
 import Schema from '#src/schema.class.js';
-import { encode as toBase62, decode as fromBase62 } from '#src/concerns/base62.js';
+import { encode as toBase62, decode as fromBase62, encodeKey } from '#src/concerns/base62.js';
 
 describe('Schema base62 mapping', () => {
-  test('assigns sequential base62 keys to attributes', () => {
+  test('assigns sequential base36 keys to attributes', () => {
     const schema = new Schema({
       name: 'base62-test',
       attributes: {
@@ -15,11 +15,11 @@ describe('Schema base62 mapping', () => {
       }
     });
 
-    expect(schema.map.name).toBe(toBase62(0));
-    expect(schema.map.email).toBe(toBase62(1));
-    expect(schema.map.age).toBe(toBase62(2));
-    expect(schema.map.active).toBe(toBase62(3));
-    expect(schema.map.password).toBe(toBase62(4));
+    expect(schema.map.name).toBe(encodeKey(0));
+    expect(schema.map.email).toBe(encodeKey(1));
+    expect(schema.map.age).toBe(encodeKey(2));
+    expect(schema.map.active).toBe(encodeKey(3));
+    expect(schema.map.password).toBe(encodeKey(4));
 
     Object.entries(schema.map).forEach(([originalKey, encodedKey]) => {
       expect(schema.reversedMap[encodedKey]).toBe(originalKey);
@@ -39,10 +39,43 @@ describe('Schema base62 mapping', () => {
 
     Object.keys(attributes).forEach((attr, index) => {
       const encoded = schema.map[attr];
-      expect(encoded).toMatch(/^[0-9a-zA-Z]+$/);
-      expect(encoded).toBe(toBase62(index));
+      expect(encoded).toMatch(/^[0-9a-z]+$/);
+      expect(encoded).toBe(encodeKey(index));
       expect(schema.reversedMap[encoded]).toBe(attr);
     });
+  });
+
+  test('generates registry indices correctly for base36 maps', () => {
+    const attributes = {};
+    for (let i = 0; i < 40; i++) {
+      attributes[`field${i}`] = 'string|optional';
+    }
+
+    const schema = new Schema({
+      name: 'registry-base36-test',
+      attributes
+    });
+
+    const { schemaRegistry } = schema.generateInitialRegistry();
+
+    expect(schemaRegistry.mapping.field10).toBe(10);
+    expect(schemaRegistry.mapping.field36).toBe(36);
+  });
+
+  test('rejects legacy base62 maps with uppercase keys', () => {
+    const attributes = {};
+    const legacyMap = {};
+    for (let i = 0; i < 40; i++) {
+      const key = `field${i}`;
+      attributes[key] = 'string|optional';
+      legacyMap[key] = toBase62(i);
+    }
+
+    expect(() => new Schema({
+      name: 'registry-base62-test',
+      attributes,
+      map: legacyMap
+    })).toThrow('Schema map contains non-base36 keys.');
   });
 });
 

@@ -17,7 +17,7 @@ import { hashPassword, compactHash } from "./concerns/password-hashing.js";
 import { ValidatorManager } from "./validator.class.js";
 import { tryFn, tryFnSync } from "./concerns/try-fn.js";
 import { SchemaError } from "./errors.js";
-import { encode as toBase62, decode as fromBase62, encodeDecimal, decodeDecimal, encodeFixedPoint, decodeFixedPoint, encodeFixedPointBatch, decodeFixedPointBatch } from "./concerns/base62.js";
+import { encode as toBase62, decode as fromBase62, encodeKey, decodeKey, encodeDecimal, decodeDecimal, encodeFixedPoint, decodeFixedPoint, encodeFixedPointBatch, decodeFixedPointBatch } from "./concerns/base62.js";
 import { encodeIPv4, decodeIPv4, encodeIPv6, decodeIPv6, isValidIPv4, isValidIPv6 } from "./concerns/ip.js";
 import { encodeBuffer, decodeBuffer, encodeBits, decodeBits } from "./concerns/binary.js";
 import { encodeGeoLat, decodeGeoLat, encodeGeoLon, decodeGeoLon, encodeGeoPoint, decodeGeoPoint } from "./concerns/geo-encoding.js";
@@ -86,8 +86,8 @@ export interface SchemaConstructorArgs {
   _pluginAttributes?: PluginAttributes;
   /** Existing schema registry from s3db.json - if provided, indices are preserved */
   schemaRegistry?: SchemaRegistry;
-  /** Existing plugin schema registry from s3db.json (accepts both legacy numeric and new string-key formats) */
-  pluginSchemaRegistry?: Record<string, PluginSchemaRegistry | SchemaRegistry>;
+  /** Existing plugin schema registry from s3db.json */
+  pluginSchemaRegistry?: Record<string, PluginSchemaRegistry>;
 }
 
 export interface SchemaExport {
@@ -137,7 +137,7 @@ export interface SchemaRegistry {
 
 /**
  * Plugin Schema Registry - Stores actual key strings for plugin attributes.
- * Unlike user attributes (which use numeric indices → base62), plugin attributes
+ * Unlike user attributes (which use numeric indices → base36), plugin attributes
  * use SHA256 hash-based keys that must be preserved exactly.
  */
 export interface PluginSchemaRegistry {
@@ -169,13 +169,13 @@ interface PluginAttributeInfo {
 
 type ValidatorFunction = (data: Record<string, unknown>) => Promise<true | Record<string, unknown>[]> | true | Record<string, unknown>[];
 
-function generateBase62Mapping(keys: string[]): MappingResult {
+function generateBase36Mapping(keys: string[]): MappingResult {
   const mapping: AttributeMapping = {};
   const reversedMapping: AttributeMapping = {};
   keys.forEach((key, index) => {
-    const base62Key = toBase62(index);
-    mapping[key] = base62Key;
-    reversedMapping[base62Key] = key;
+    const base36Key = encodeKey(index);
+    mapping[key] = base36Key;
+    reversedMapping[base36Key] = key;
   });
   return { mapping, reversedMapping };
 }
@@ -187,11 +187,6 @@ function generatePluginAttributeHash(pluginName: string, attributeName: string):
   const base62Hash = toBase62(num);
   const paddedHash = base62Hash.padStart(3, '0').substring(0, 3);
   return 'p' + paddedHash.toLowerCase();
-}
-
-function generateLegacyPluginIndexKey(pluginName: string, index: number): string {
-  const prefix = pluginName.substring(0, 2);
-  return `p${prefix}${toBase62(index)}`;
 }
 
 function generatePluginMapping(attributes: PluginAttributeInfo[]): MappingResult {
@@ -249,15 +244,15 @@ function generateMappingFromRegistry(
   for (const key of keys) {
     if (key in registry.mapping && registry.mapping[key] !== undefined) {
       const index = registry.mapping[key]!;
-      const base62Key = toBase62(index);
-      mapping[key] = base62Key;
-      reversedMapping[base62Key] = key;
+      const base36Key = encodeKey(index);
+      mapping[key] = base36Key;
+      reversedMapping[base36Key] = key;
     } else {
       const index = registry.nextIndex++;
       registry.mapping[key] = index;
-      const base62Key = toBase62(index);
-      mapping[key] = base62Key;
-      reversedMapping[base62Key] = key;
+      const base36Key = encodeKey(index);
+      mapping[key] = base36Key;
+      reversedMapping[base36Key] = key;
       changed = true;
     }
   }
@@ -284,11 +279,11 @@ function generateMappingFromRegistry(
 
 /**
  * Generate plugin attribute mapping from a persistent registry.
- * Stores actual key strings (hash-based) to preserve compatibility with legacy data.
+ * Stores actual key strings (hash-based) to preserve stability across schemas.
  */
 function generatePluginMappingFromRegistry(
   attributes: PluginAttributeInfo[],
-  existingRegistries?: Record<string, PluginSchemaRegistry | SchemaRegistry>
+  existingRegistries?: Record<string, PluginSchemaRegistry>
 ): PluginMappingFromRegistryResult {
   const now = new Date().toISOString();
   const registries: Record<string, PluginSchemaRegistry> = {};
@@ -309,32 +304,27 @@ function generatePluginMappingFromRegistry(
     const registry: PluginSchemaRegistry = { mapping: {}, burned: [] };
 
     if (existing) {
-      if (isLegacyNumericRegistry(existing)) {
-        for (const [attr, index] of Object.entries(existing.mapping)) {
-          const legacyKey = generateLegacyPluginIndexKey(pluginName, index);
-          registry.mapping[attr] = legacyKey;
-          globalUsedKeys.add(legacyKey);
-        }
-        for (const burned of existing.burned) {
-          const legacyKey = generateLegacyPluginIndexKey(pluginName, burned.index);
-          registry.burned.push({
-            key: legacyKey,
-            attribute: burned.attribute,
-            burnedAt: burned.burnedAt,
-            reason: burned.reason
-          });
-          globalUsedKeys.add(legacyKey);
-        }
-        changed = true;
-      } else {
-        registry.mapping = { ...existing.mapping };
-        registry.burned = [...existing.burned];
-        for (const key of Object.values(existing.mapping)) {
-          globalUsedKeys.add(key);
-        }
-        for (const burned of existing.burned) {
-          globalUsedKeys.add(burned.key);
-        }
+      const invalidMapping = Object.entries(existing.mapping).find(([, value]) => typeof value !== 'string');
+      if (invalidMapping) {
+        throw new SchemaError('Plugin schema registry contains non-string keys.', {
+          description: `Invalid plugin mapping entry: ${pluginName}.${invalidMapping[0]}`,
+          suggestion: 'Recreate plugin data with the current registry format.'
+        });
+      }
+      const invalidBurned = existing.burned.find(entry => typeof (entry as { key?: unknown }).key !== 'string');
+      if (invalidBurned) {
+        throw new SchemaError('Plugin schema registry contains invalid burned entries.', {
+          description: `Invalid burned entry for plugin: ${pluginName}`,
+          suggestion: 'Recreate plugin data with the current registry format.'
+        });
+      }
+      registry.mapping = { ...existing.mapping };
+      registry.burned = [...existing.burned];
+      for (const key of Object.values(existing.mapping)) {
+        globalUsedKeys.add(key);
+      }
+      for (const burned of existing.burned) {
+        globalUsedKeys.add(burned.key);
       }
     }
 
@@ -379,13 +369,6 @@ function generatePluginMappingFromRegistry(
   }
 
   return { mapping, reversedMapping, registries, changed };
-}
-
-function isLegacyNumericRegistry(registry: PluginSchemaRegistry | SchemaRegistry): registry is SchemaRegistry {
-  if ('nextIndex' in registry) return true;
-  const values = Object.values(registry.mapping);
-  if (values.length === 0) return false;
-  return typeof values[0] === 'number';
 }
 
 export const SchemaActions = {
@@ -949,6 +932,7 @@ export class Schema {
     }
 
     if (!isEmpty(map)) {
+      this._validateMapEncoding(map);
       this.map = { ...map };
       this.reversedMap = invert(this.map);
 
@@ -975,7 +959,7 @@ export class Schema {
         this._schemaRegistry = result.registry;
         if (result.changed) this._registryChanged = true;
       } else {
-        const { mapping, reversedMapping } = generateBase62Mapping(userKeys);
+        const { mapping, reversedMapping } = generateBase36Mapping(userKeys);
         this.map = mapping;
         this.reversedMap = reversedMapping;
       }
@@ -1032,6 +1016,32 @@ export class Schema {
     };
   }
 
+  private _validateMapEncoding(map: AttributeMapping): void {
+    const invalid: string[] = [];
+    const seen = new Set<string>();
+
+    for (const [attr, key] of Object.entries(map)) {
+      const encodedKey = String(key);
+      if (!/^[0-9a-z]+$/.test(encodedKey)) {
+        invalid.push(`${attr}:${encodedKey}`);
+        continue;
+      }
+      if (seen.has(encodedKey)) {
+        throw new SchemaError(`Duplicate schema map key detected: ${encodedKey}`, {
+          suggestion: 'Recreate the resource with a clean base36 mapping.'
+        });
+      }
+      seen.add(encodedKey);
+    }
+
+    if (invalid.length > 0) {
+      throw new SchemaError('Schema map contains non-base36 keys.', {
+        description: `Invalid map entries: ${invalid.slice(0, 5).join(', ')}${invalid.length > 5 ? '...' : ''}`,
+        suggestion: 'Recreate the resource with base36 mapping; legacy maps are not supported.'
+      });
+    }
+  }
+
   private _buildRegistryFromMap(legacyMap: AttributeMapping, existingRegistry?: SchemaRegistry): SchemaRegistry {
     const registry: SchemaRegistry = {
       nextIndex: existingRegistry?.nextIndex ?? 0,
@@ -1040,8 +1050,8 @@ export class Schema {
     };
 
     let maxIndex = registry.nextIndex - 1;
-    for (const [attr, base62Key] of Object.entries(legacyMap)) {
-      const index = fromBase62(base62Key);
+    for (const [attr, encodedKey] of Object.entries(legacyMap)) {
+      const index = decodeKey(encodedKey);
       if (!(attr in registry.mapping)) {
         registry.mapping[attr] = index;
       }
@@ -1071,8 +1081,8 @@ export class Schema {
     };
 
     let maxIndex = -1;
-    for (const [attr, base62Key] of Object.entries(this.map)) {
-      const index = fromBase62(base62Key);
+    for (const [attr, encodedKey] of Object.entries(this.map)) {
+      const index = decodeKey(encodedKey);
       schemaRegistry.mapping[attr] = index;
       if (Number.isFinite(index)) {
         maxIndex = Math.max(maxIndex, index);

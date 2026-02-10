@@ -36,6 +36,48 @@ export const decode = (s: string): number => {
   return negative ? -r : r;
 };
 
+const keyAlphabet = '0123456789abcdefghijklmnopqrstuvwxyz';
+const keyBase = keyAlphabet.length;
+const keyCharToValue: Record<string, number> = Object.fromEntries(
+  [...keyAlphabet].map((c, i) => [c, i])
+);
+
+/**
+ * Case-insensitive key encoder using base36 alphabet (0-9a-z).
+ * Safe for S3 metadata keys which are lowercased by AWS.
+ */
+export const encodeKey = (n: number): string => {
+  if (typeof n !== 'number' || isNaN(n)) return 'undefined';
+  if (!isFinite(n)) return 'undefined';
+  if (n === 0) return keyAlphabet[0]!;
+  if (n < 0) return '-' + encodeKey(-Math.floor(n));
+  n = Math.floor(n);
+  let s = '';
+  while (n) {
+    s = keyAlphabet[n % keyBase]! + s;
+    n = Math.floor(n / keyBase);
+  }
+  return s;
+};
+
+export const decodeKey = (s: string): number => {
+  if (typeof s !== 'string') return NaN;
+  if (s === '') return 0;
+  let negative = false;
+  let str = s;
+  if (str[0] === '-') {
+    negative = true;
+    str = str.slice(1);
+  }
+  let r = 0;
+  for (let i = 0; i < str.length; i++) {
+    const idx = keyCharToValue[str[i]!];
+    if (idx === undefined) return NaN;
+    r = r * keyBase + idx;
+  }
+  return negative ? -r : r;
+};
+
 export const encodeDecimal = (n: number): string => {
   if (typeof n !== 'number' || isNaN(n)) return 'undefined';
   if (!isFinite(n)) return 'undefined';

@@ -116,7 +116,7 @@ export interface ResourceConfig {
   /** Schema registry for stable attribute indices - loaded from s3db.json */
   schemaRegistry?: import('./schema.class.js').SchemaRegistry;
   /** Plugin schema registries for stable plugin attribute indices */
-  pluginSchemaRegistry?: Record<string, import('./schema.class.js').PluginSchemaRegistry | import('./schema.class.js').SchemaRegistry>;
+  pluginSchemaRegistry?: Record<string, import('./schema.class.js').PluginSchemaRegistry>;
   /** Defer schema/validator compilation until first CRUD operation (default: false) */
   lazySchema?: boolean;
 }
@@ -304,7 +304,7 @@ export class Resource extends AsyncEventEmitter implements Disposable {
   public database?: Database;
   public map?: StringRecord<string>;
   private _schemaRegistry?: SchemaRegistry;
-  private _pluginSchemaRegistry?: Record<string, PluginSchemaRegistry | SchemaRegistry>;
+  private _pluginSchemaRegistry?: Record<string, PluginSchemaRegistry>;
 
   private _lazySchema: boolean;
   private _schemaCompiled: boolean;

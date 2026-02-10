@@ -1,6 +1,5 @@
 import { createHash } from 'crypto';
 import jsonStableStringify from 'json-stable-stringify';
-import { encode as toBase62 } from '../concerns/base62.js';
 import type { BehaviorType } from '../behaviors/types.js';
 import type { ResourceExport } from '../resource.class.js';
 import type { HooksCollection } from '../core/resource-hooks.class.js';
@@ -216,12 +215,12 @@ export class DatabaseMetadata {
   }
 
   private _mergePluginSchemaRegistry(
-    fresh: StringRecord<PluginSchemaRegistry | SchemaRegistry> | undefined,
-    local: StringRecord<PluginSchemaRegistry | SchemaRegistry> | undefined
+    fresh: StringRecord<PluginSchemaRegistry> | undefined,
+    local: StringRecord<PluginSchemaRegistry> | undefined
   ): StringRecord<PluginSchemaRegistry> | undefined {
     if (!fresh && !local) return undefined;
-    if (!fresh) return this._convertToPluginRegistries(local);
-    if (!local) return this._convertToPluginRegistries(fresh);
+    if (!fresh) return local;
+    if (!local) return fresh;
 
     const merged: StringRecord<PluginSchemaRegistry> = {};
     const allPlugins = new Set([...Object.keys(fresh), ...Object.keys(local)]);
@@ -231,68 +230,33 @@ export class DatabaseMetadata {
       const localReg = local[pluginName];
 
       if (!freshReg && localReg) {
-        merged[pluginName] = this._toPluginRegistry(localReg, pluginName);
+        merged[pluginName] = localReg;
       } else if (freshReg && !localReg) {
-        merged[pluginName] = this._toPluginRegistry(freshReg, pluginName);
+        merged[pluginName] = freshReg;
       } else if (freshReg && localReg) {
-        merged[pluginName] = this._mergeSinglePluginRegistry(pluginName, freshReg, localReg);
+        merged[pluginName] = this._mergeSinglePluginRegistry(freshReg, localReg);
       }
     }
 
     return merged;
   }
 
-  private _convertToPluginRegistries(
-    registries: StringRecord<PluginSchemaRegistry | SchemaRegistry> | undefined
-  ): StringRecord<PluginSchemaRegistry> | undefined {
-    if (!registries) return undefined;
-    const result: StringRecord<PluginSchemaRegistry> = {};
-    for (const [name, reg] of Object.entries(registries)) {
-      result[name] = this._toPluginRegistry(reg, name);
-    }
-    return result;
-  }
-
-  private _toPluginRegistry(registry: PluginSchemaRegistry | SchemaRegistry, pluginName: string): PluginSchemaRegistry {
-    if (!('nextIndex' in registry)) {
-      return registry as PluginSchemaRegistry;
-    }
-    const numericReg = registry as SchemaRegistry;
-    const result: PluginSchemaRegistry = { mapping: {}, burned: [] };
-    for (const [attr, index] of Object.entries(numericReg.mapping)) {
-      result.mapping[attr] = this._legacyPluginKey(pluginName, index);
-    }
-    for (const burned of numericReg.burned) {
-      result.burned.push({
-        key: this._legacyPluginKey(pluginName, burned.index),
-        attribute: burned.attribute,
-        burnedAt: burned.burnedAt,
-        reason: burned.reason
-      });
-    }
-    return result;
-  }
-
   private _mergeSinglePluginRegistry(
-    pluginName: string,
-    fresh: PluginSchemaRegistry | SchemaRegistry,
-    local: PluginSchemaRegistry | SchemaRegistry
+    fresh: PluginSchemaRegistry,
+    local: PluginSchemaRegistry
   ): PluginSchemaRegistry {
-    const freshPlugin = this._toPluginRegistry(fresh, pluginName);
-    const localPlugin = this._toPluginRegistry(local, pluginName);
-
-    const mergedMapping: Record<string, string> = { ...freshPlugin.mapping };
-    for (const [attr, key] of Object.entries(localPlugin.mapping)) {
+    const mergedMapping: Record<string, string> = { ...fresh.mapping };
+    for (const [attr, key] of Object.entries(local.mapping)) {
       if (!(attr in mergedMapping)) {
         mergedMapping[attr] = key;
       }
     }
 
     const burnedByKey = new Map<string, { key: string; attribute: string; burnedAt: string; reason?: string }>();
-    for (const entry of freshPlugin.burned) {
+    for (const entry of fresh.burned) {
       burnedByKey.set(entry.key, entry);
     }
-    for (const entry of localPlugin.burned) {
+    for (const entry of local.burned) {
       if (!burnedByKey.has(entry.key)) {
         burnedByKey.set(entry.key, entry);
       }
@@ -302,11 +266,6 @@ export class DatabaseMetadata {
       mapping: mergedMapping,
       burned: Array.from(burnedByKey.values())
     };
-  }
-
-  private _legacyPluginKey(pluginName: string, index: number): string {
-    const prefix = pluginName.substring(0, 2);
-    return `p${prefix}${toBase62(index)}`;
   }
 
   private _buildLocalMetadata(): SavedMetadata {
@@ -361,7 +320,7 @@ export class DatabaseMetadata {
 
       const schema = resource.schema;
       let schemaRegistry = schema?.getSchemaRegistry?.();
-      let pluginSchemaRegistry: StringRecord<PluginSchemaRegistry | SchemaRegistry> | undefined = schema?.getPluginSchemaRegistry?.();
+      let pluginSchemaRegistry: StringRecord<PluginSchemaRegistry> | undefined = schema?.getPluginSchemaRegistry?.();
 
       if (!schemaRegistry && existingResource?.schemaRegistry) {
         schemaRegistry = existingResource.schemaRegistry;

@@ -148,7 +148,7 @@ export class DatabaseConnection {
           idGenerator: restoredIdGenerator,
           idSize: restoredIdSize,
           schemaRegistry: resourceMetadata.schemaRegistry,
-          pluginSchemaRegistry: resourceMetadata.pluginSchemaRegistry as Record<string, import('../schema.class.js').PluginSchemaRegistry | import('../schema.class.js').SchemaRegistry>
+          pluginSchemaRegistry: resourceMetadata.pluginSchemaRegistry as Record<string, import('../schema.class.js').PluginSchemaRegistry>
         });
 
         if (db._resourcesMap[name].schema?.needsRegistryPersistence()) {
