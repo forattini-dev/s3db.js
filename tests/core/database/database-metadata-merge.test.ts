@@ -197,11 +197,10 @@ describe('DatabaseMetadata Merge Logic', () => {
       expect(result).toBeUndefined();
     });
 
-    it('should convert legacy numeric registries to legacy key format', () => {
+    it('should pass through string-based plugin registries', () => {
       const local = {
         audit: {
-          nextIndex: 2,
-          mapping: { _createdAt: 0, _updatedAt: 1 },
+          mapping: { _createdAt: 'pau0', _updatedAt: 'pau1' },
           burned: []
         }
       };

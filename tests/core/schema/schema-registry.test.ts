@@ -844,8 +844,8 @@ describe('Schema Registry', () => {
       expect(schema.pluginMap['_updatedAt']).toBe('p3b4');
     });
 
-    it('should convert legacy numeric registry to string-based registry', () => {
-      const legacyPluginRegistry: Record<string, SchemaRegistry> = {
+    it('should reject legacy numeric registry with non-string keys', () => {
+      const legacyPluginRegistry = {
         audit: {
           nextIndex: 2,
           mapping: { _createdAt: 0, _updatedAt: 1 },
@@ -853,19 +853,15 @@ describe('Schema Registry', () => {
         }
       };
 
-      const schema = new Schema({
+      expect(() => new Schema({
         name: 'users',
         attributes: {
           name: 'string',
           _createdAt: { type: 'string', __plugin__: 'audit' },
           _updatedAt: { type: 'string', __plugin__: 'audit' }
         },
-        pluginSchemaRegistry: legacyPluginRegistry
-      });
-
-      const updatedPluginRegistry = schema.getPluginSchemaRegistry();
-      expect(updatedPluginRegistry?.['audit']?.mapping['_createdAt']).toBe('pau0');
-      expect(updatedPluginRegistry?.['audit']?.mapping['_updatedAt']).toBe('pau1');
+        pluginSchemaRegistry: legacyPluginRegistry as any
+      })).toThrow('Plugin schema registry contains non-string keys.');
     });
   });
 
