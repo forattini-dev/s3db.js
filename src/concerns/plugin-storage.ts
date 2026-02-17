@@ -9,6 +9,32 @@ import { DistributedSequence } from './distributed-sequence.js';
 
 const S3_METADATA_LIMIT = 2047;
 
+const SEQUENCE_GATES = new Map<string, Promise<void>>();
+
+async function withSequenceGate<T>(lockKey: string, task: () => Promise<T>): Promise<T> {
+  const previous = SEQUENCE_GATES.get(lockKey) ?? Promise.resolve();
+  const waitForPrevious = previous.catch(() => undefined);
+  let release!: () => void;
+
+  const gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+
+  const nextGate = waitForPrevious.then(() => gate);
+  SEQUENCE_GATES.set(lockKey, nextGate);
+
+  await waitForPrevious;
+
+  try {
+    return await task();
+  } finally {
+    release();
+    if (SEQUENCE_GATES.get(lockKey) === nextGate) {
+      SEQUENCE_GATES.delete(lockKey);
+    }
+  }
+}
+
 export type PluginBehavior = 'body-overflow' | 'body-only' | 'enforce-limits';
 
 export interface PluginStorageSetOptions {
@@ -927,49 +953,51 @@ export class PluginStorage {
     const startTime = this._now();
     let attempt = 0;
 
-    while (true) {
-      const payload = {
-        token,
-        acquiredAt: this._now(),
-        _expiresAt: this._now() + (ttl * 1000)
-      };
+    return withSequenceGate(lockKey, async () => {
+      while (true) {
+        const payload = {
+          token,
+          acquiredAt: this._now(),
+          _expiresAt: this._now() + (ttl * 1000)
+        };
 
-      const [ok, err] = await tryFn(() => this.set(lockKey, payload, {
-        behavior: 'body-only',
-        ifNoneMatch: '*'
-      }));
+        const [ok, err] = await tryFn(() => this.set(lockKey, payload, {
+          behavior: 'body-only',
+          ifNoneMatch: '*'
+        }));
 
-      if (ok) {
-        try {
-          return await callback();
-        } finally {
-          const current = await this.get(lockKey);
-          if (current && current.token === token) {
-            await tryFn(() => this.delete(lockKey));
+        if (ok) {
+          try {
+            return await callback();
+          } finally {
+            const current = await this.get(lockKey);
+            if (current && current.token === token) {
+              await tryFn(() => this.delete(lockKey));
+            }
           }
         }
+
+        if (!isPreconditionFailure(err as Error)) {
+          throw err;
+        }
+
+        if (timeout !== undefined && this._now() - startTime >= timeout) {
+          return null;
+        }
+
+        const current = await this.get(lockKey);
+        if (!current) continue;
+
+        if (current._expiresAt && this._now() > (current._expiresAt as number)) {
+          await tryFn(() => this.delete(lockKey));
+          continue;
+        }
+
+        attempt += 1;
+        const delay = computeBackoff(attempt, 100, 1000);
+        await sleep(delay);
       }
-
-      if (!isPreconditionFailure(err as Error)) {
-        throw err;
-      }
-
-      if (timeout !== undefined && this._now() - startTime >= timeout) {
-        return null;
-      }
-
-      const current = await this.get(lockKey);
-      if (!current) continue;
-
-      if (current._expiresAt && this._now() > (current._expiresAt as number)) {
-        await tryFn(() => this.delete(lockKey));
-        continue;
-      }
-
-      attempt += 1;
-      const delay = computeBackoff(attempt, 100, 1000);
-      await sleep(delay);
-    }
+    });
   }
 
   async getSequence(name: string, options: { resourceName?: string | null } = {}): Promise<number | null> {
