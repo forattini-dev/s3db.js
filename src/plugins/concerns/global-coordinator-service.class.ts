@@ -90,6 +90,18 @@ export interface LeaderState {
   electedAt?: number;
 }
 
+function isLeaderState(value: unknown): value is LeaderState {
+  if (!value || typeof value !== 'object') {
+    return false;
+  }
+
+  const candidate = value as Record<string, unknown>;
+  const hasLeaderId = candidate.leaderId === null || typeof candidate.leaderId === 'string';
+  const hasEpoch = typeof candidate.epoch === 'number';
+
+  return hasLeaderId && hasEpoch;
+}
+
 export interface WorkerData {
   workerId: string;
   pluginName: string;
@@ -581,7 +593,7 @@ export class GlobalCoordinatorService extends EventEmitter {
           throw new Error(`Failed to read current state for election: ${(readErr as Error)?.message || String(readErr)}`);
         }
 
-        stateCache.state = (readState.data as LeaderState | null) ?? null;
+        stateCache.state = isLeaderState(readState.data) ? readState.data : null;
         stateCache.version = readState.version;
 
         if (!stateCache.state || !stateCache.version) {
@@ -676,7 +688,7 @@ export class GlobalCoordinatorService extends EventEmitter {
         return { leaderId: null, epoch: previousEpoch };
       }
 
-      const finalState = finalStateResult.data as LeaderState | null;
+      const finalState = isLeaderState(finalStateResult.data) ? finalStateResult.data : null;
 
       return {
         leaderId: finalState?.leaderId ?? null,

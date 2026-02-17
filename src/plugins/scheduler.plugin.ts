@@ -2,7 +2,7 @@ import { CoordinatorPlugin } from "./concerns/coordinator-plugin.class.js";
 import tryFn from "../concerns/try-fn.js";
 import { idGenerator } from "../concerns/id.js";
 import { SchedulerError } from "./scheduler.errors.js";
-import { createLogger } from '../concerns/logger.js';
+import { createLogger, type Logger } from '../concerns/logger.js';
 
 interface Database {
   createResource(config: ResourceConfig): Promise<Resource>;
@@ -491,7 +491,13 @@ export class SchedulerPlugin extends CoordinatorPlugin {
       return false;
     }
 
-    const [minuteExpr, hourExpr, dayOfMonthExpr, monthExpr, dayOfWeekExpr] = parts;
+    const [minuteExpr, hourExpr, dayOfMonthExpr, monthExpr, dayOfWeekExpr] = parts as [
+      string,
+      string,
+      string,
+      string,
+      string
+    ];
 
     const minute = this._parseField(minuteExpr, 0, 59);
     if (!minute) return false;
@@ -557,7 +563,13 @@ export class SchedulerPlugin extends CoordinatorPlugin {
       return false;
     }
 
-    const [minuteExpr, hourExpr, dayOfMonthExpr, monthExpr, dayOfWeekExpr] = parts;
+    const [minuteExpr, hourExpr, dayOfMonthExpr, monthExpr, dayOfWeekExpr] = parts as [
+      string,
+      string,
+      string,
+      string,
+      string
+    ];
 
     const minute = this._parseField(minuteExpr, 0, 59);
     const hour = this._parseField(hourExpr, 0, 23);

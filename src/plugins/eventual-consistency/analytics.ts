@@ -303,8 +303,13 @@ function buildWeekStartDate(weekCohort: string): Date | null {
     return null;
   }
 
-  const year = parseInt(match[1], 10);
-  const week = parseInt(match[2], 10);
+  const [, weekYear, weekNumber] = match;
+  if (weekYear == null || weekNumber == null) {
+    return null;
+  }
+
+  const year = parseInt(weekYear, 10);
+  const week = parseInt(weekNumber, 10);
 
   if (Number.isNaN(year) || Number.isNaN(week) || week < 1 || week > 53) {
     return null;
@@ -569,9 +574,10 @@ async function tryUpdateAnalytics(
 ): Promise<[boolean, Error | null, { success: boolean; error?: string } | null]> {
   const resource = analyticsResource as UpdatableAnalyticsResource;
 
-  if (etag && typeof resource.updateConditional === 'function') {
+  if (typeof etag === 'string' && typeof resource.updateConditional === 'function') {
+    const updateConditional = resource.updateConditional;
     const [ok, err, result] = await tryFn(() =>
-      resource.updateConditional(id, mergedData, { ifMatch: etag })
+      updateConditional(id, mergedData, { ifMatch: etag })
     ) as [boolean, Error | null, { success: boolean; error?: string; data?: AnalyticsRecord } | null];
 
     if (ok) {

@@ -561,6 +561,11 @@ export async function processTicket(
     return results;
   }
 
+  if (!transactionResource) {
+    results.errors.push({ ticketId: ticket.id, error: 'Missing transaction resource on handler' });
+    return results;
+  }
+
   if (workerId) {
     try {
       const currentTicket = await ticketResource.get(ticket.id) as Ticket;

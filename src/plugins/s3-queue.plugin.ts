@@ -161,6 +161,27 @@ interface TicketData {
   _ttl?: number;
 }
 
+function asTicketData(value: unknown): TicketData | null {
+  if (!value || typeof value !== 'object') {
+    return null;
+  }
+
+  const record = value as Record<string, unknown>;
+  const status = record.status;
+
+  if (typeof record.ticketId !== 'string'
+    || typeof record.messageId !== 'string'
+    || typeof record.orderIndex !== 'number'
+    || typeof record.publishedAt !== 'number'
+    || typeof record.publishedBy !== 'string'
+    || (status !== 'available' && status !== 'claimed' && status !== 'processed')
+  ) {
+    return null;
+  }
+
+  return record as unknown as TicketData;
+}
+
 interface FailureStrategy {
   mode: 'retry' | 'dead-letter' | 'hybrid';
   maxRetries: number;
@@ -2060,7 +2081,14 @@ export class S3QueuePlugin extends CoordinatorPlugin<S3QueuePluginOptions> {
       return null;
     }
 
-    const ticketData = currentTicketSnapshot.data as TicketData;
+    const ticketData = asTicketData(currentTicketSnapshot.data);
+    if (!ticketData) {
+      this.logger.warn(
+        { ticketId: ticket.ticketId },
+        `Skipping ticket claim due to malformed ticket snapshot: ${ticket.ticketId}`
+      );
+      return null;
+    }
 
     if (ticketData.status !== 'available' || ticketData.claimedBy) {
       return null;
@@ -2172,7 +2200,14 @@ export class S3QueuePlugin extends CoordinatorPlugin<S3QueuePluginOptions> {
       return;
     }
 
-    const ticketData = currentTicketSnapshot.data as TicketData;
+    const ticketData = asTicketData(currentTicketSnapshot.data);
+    if (!ticketData) {
+      this.logger.warn(
+        { ticketId },
+        `Cannot mark ticket as processed: malformed ticket snapshot`
+      );
+      return;
+    }
 
     if (!forceOwner && ticketData.claimedBy && ticketData.claimedBy !== this.workerId) {
       return;

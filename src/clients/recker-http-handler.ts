@@ -249,6 +249,8 @@ export class ReckerHttpHandler {
       retryJitter: true,
       respectRetryAfter: true,
       ...options,
+      useReckerHandler: options.useReckerHandler ?? true,
+      failFastOnReckerFailure: options.failFastOnReckerFailure ?? false,
     };
 
     this.http2MetricsEnabled = this.options.enableHttp2Metrics;
