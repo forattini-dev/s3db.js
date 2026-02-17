@@ -131,4 +131,76 @@ describe('StateMachinePlugin - State Transitions', () => {
     const finalState = await plugin.getState('order_processing', 'order1');
     expect(finalState).toBe('shipped');
   });
+
+  it('should execute function trigger when condition is omitted', async () => {
+    const onHeartbeat = vi.fn().mockResolvedValue({ action: 'heartbeat' });
+
+    const triggerPlugin = new StateMachinePlugin({
+      logLevel: 'silent',
+      stateMachines: {
+        poller: {
+          initialState: 'waiting',
+          states: {
+            waiting: {
+              triggers: [
+                {
+                  type: 'function',
+                  action: 'heartbeat'
+                }
+              ]
+            }
+          }
+        }
+      },
+      actions: { heartbeat: onHeartbeat },
+      persistTransitions: false,
+      triggerCheckInterval: 20
+    });
+
+    await triggerPlugin.install(database);
+    await triggerPlugin.initializeEntity('poller', 'job-1', { id: 'job-1' });
+
+    await new Promise(resolve => setTimeout(resolve, 120));
+
+    expect(onHeartbeat).toHaveBeenCalled();
+    await triggerPlugin.stop();
+  });
+
+  it('should skip function trigger when condition returns false', async () => {
+    const onHeartbeat = vi.fn().mockResolvedValue({ action: 'heartbeat' });
+    const shouldRun = vi.fn().mockResolvedValue(false);
+
+    const triggerPlugin = new StateMachinePlugin({
+      logLevel: 'silent',
+      stateMachines: {
+        poller: {
+          initialState: 'waiting',
+          states: {
+            waiting: {
+              triggers: [
+                {
+                  type: 'function',
+                  action: 'heartbeat',
+                  condition: shouldRun,
+                  maxTriggers: 1
+                }
+              ]
+            }
+          }
+        }
+      },
+      actions: { heartbeat: onHeartbeat },
+      persistTransitions: false,
+      triggerCheckInterval: 20
+    });
+
+    await triggerPlugin.install(database);
+    await triggerPlugin.initializeEntity('poller', 'job-2', { id: 'job-2' });
+
+    await new Promise(resolve => setTimeout(resolve, 120));
+
+    expect(shouldRun).toHaveBeenCalled();
+    expect(onHeartbeat).not.toHaveBeenCalled();
+    await triggerPlugin.stop();
+  });
 });

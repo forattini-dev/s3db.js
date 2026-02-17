@@ -554,42 +554,134 @@ export class GlobalCoordinatorService extends EventEmitter {
       }
 
       const elected = candidateIds[0] ?? null;
+      const stateKey = this._getStateKey();
+      const maxAttempts = 8;
+      const stateCache = { state: null as LeaderState | null, version: null as string | null };
 
-      const now = Date.now();
-      const leaseEnd = now + this.config.leaseTimeout;
+      const attemptState = async (): Promise<ElectionResult> => {
+        const now = Date.now();
+        const leaseEnd = now + this.config.leaseTimeout;
+        const nextEpoch = Math.max((stateCache.state?.epoch ?? previousEpoch) + 1, previousEpoch + 1);
 
-      const epoch = previousEpoch + 1;
-      const newState: LeaderState = {
-        leaderId: elected,
-        leaderPod: elected ? this._getWorkerPod(elected) : undefined,
-        epoch,
-        leaseStart: now,
-        leaseEnd,
-        electedBy: this.workerId,
-        electedAt: now
+        const candidateState: LeaderState = {
+          leaderId: elected,
+          leaderPod: elected ? this._getWorkerPod(elected) : undefined,
+          epoch: nextEpoch,
+          leaseStart: now,
+          leaseEnd,
+          electedBy: this.workerId,
+          electedAt: now
+        };
+
+        const [readOk, readErr, readState] = await tryFn(() =>
+          this.storage!.getWithVersion(stateKey)
+        );
+
+        if (!readOk) {
+          throw new Error(`Failed to read current state for election: ${(readErr as Error)?.message || String(readErr)}`);
+        }
+
+        stateCache.state = (readState.data as LeaderState | null) ?? null;
+        stateCache.version = readState.version;
+
+        if (!stateCache.state || !stateCache.version) {
+          this.logger.debug({ namespace: this.namespace }, `[ELECTION] no state yet, attempting create`);
+
+          const [setOk, setErr] = await tryFn(() =>
+            this.storage!.setIfNotExists(
+              stateKey,
+              candidateState as unknown as Record<string, unknown>,
+              {
+                ttl: Math.ceil(this.config.leaseTimeout / 1000) + 60,
+                behavior: 'body-only'
+              }
+            )
+          );
+
+          if (!setOk) {
+            if (setErr) {
+              this.logger.debug({
+                namespace: this.namespace,
+                error: (setErr as Error).message
+              }, '[ELECTION] create attempt lost due concurrent write');
+            }
+            return { leaderId: null, epoch: previousEpoch };
+          }
+
+          this._invalidateStateCache();
+          this._log(`Leader elected (bootstrapped): ${elected}`);
+          return { leaderId: elected, epoch: nextEpoch };
+        }
+
+        if (
+          stateCache.state.leaderId === elected &&
+          stateCache.state.leaseEnd &&
+          stateCache.state.leaseEnd > now
+        ) {
+          this.logger.debug({ namespace: this.namespace }, `[ELECTION] leader already active and unchanged`);
+          return {
+            leaderId: stateCache.state.leaderId,
+            epoch: stateCache.state.epoch
+          };
+        }
+
+        const [casOk, casErr] = await tryFn(() =>
+          this.storage!.setIfVersion(
+            stateKey,
+            candidateState as unknown as Record<string, unknown>,
+            stateCache.version!,
+            {
+              ttl: Math.ceil(this.config.leaseTimeout / 1000) + 60,
+              behavior: 'body-only'
+            }
+          )
+        );
+
+        if (casOk) {
+          this._invalidateStateCache();
+          this._log(`Leader elected: ${elected}`);
+          return { leaderId: elected, epoch: nextEpoch };
+        }
+
+        if (casErr) {
+          this.logger.debug({
+            namespace: this.namespace,
+            error: (casErr as Error).message
+          }, '[ELECTION] CAS attempt failed, retrying');
+        }
+
+        return { leaderId: null, epoch: previousEpoch };
       };
 
-      this._log(`Attempting to elect leader: ${elected}`);
+      for (let attempt = 0; attempt < maxAttempts; attempt++) {
+        const electionResult = await attemptState();
+        if (electionResult.leaderId) {
+          return electionResult;
+        }
 
-      const [ok, err] = await tryFn(() =>
-        this.storage!.set(
-          this._getStateKey(),
-          newState as unknown as Record<string, unknown>,
-          {
-            ttl: Math.ceil(this.config.leaseTimeout / 1000) + 60,
-            behavior: 'body-only'
-          }
-        )
+        const retryDelay = 20 + attempt * 10 + Math.floor(Math.random() * 15);
+        this.logger.debug({ namespace: this.namespace, attempt: attempt + 1, delayMs: retryDelay }, `[ELECTION] retry`);
+        await this._sleep(retryDelay);
+      }
+
+      const [finalOk, finalErr, finalStateResult] = await tryFn(() =>
+        this.storage!.getWithVersion(stateKey)
       );
-
-      if (!ok) {
-        this._logError('Failed to store new leader state', err as Error);
+      if (!finalOk || !finalStateResult?.data) {
+        if (finalErr) {
+          this._logError('Election failed after retries', finalErr as Error);
+        } else {
+          this._logError('Election failed after retries', new Error('no-state'));
+        }
         return { leaderId: null, epoch: previousEpoch };
       }
 
-      this._invalidateStateCache();
-      this._log(`Leader elected: ${elected}`);
-      return { leaderId: elected, epoch };
+      const finalState = finalStateResult.data as LeaderState | null;
+
+      return {
+        leaderId: finalState?.leaderId ?? null,
+        epoch: finalState?.epoch ?? previousEpoch
+      };
 
     } catch (err) {
       this._logError('Election failed', err as Error);

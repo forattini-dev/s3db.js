@@ -402,36 +402,28 @@ describe('EventualConsistencyPlugin - PluginStorage Locks', () => {
       const storage = plugin.getStorage();
 
       // Create 10 locks with short TTL
-      const lockKeys = [];
-      for (let i = 0; i < 10; i++) {
-        const lockKey = `cleanup-test-${i}`;
-        lockKeys.push(lockKey);
-        await storage.acquireLock(lockKey, { ttl: 1 });
-      }
+      const lockKeys = Array.from({ length: 10 }, (_, i) => `cleanup-test-${i}`);
+      await Promise.all(
+        lockKeys.map((key) => storage.acquireLock(key, { ttl: 1 }))
+      );
 
       // Wait for lock creation to fully propagate
       await new Promise(resolve => setTimeout(resolve, 200));
 
       // Verify all locks exist
-      let lockedCount = 0;
-      for (const key of lockKeys) {
-        if (await storage.isLocked(key)) {
-          lockedCount++;
-        }
-      }
-      expect(lockedCount).toBe(10);
+      const initiallyLocked = await Promise.all(
+        lockKeys.map((key) => storage.isLocked(key))
+      );
+      expect(initiallyLocked.filter(Boolean).length).toBe(10);
 
       // Wait for TTL expiration
       await sleep(1200);
 
       // Verify all locks auto-expired (no manual cleanup needed!)
-      lockedCount = 0;
-      for (const key of lockKeys) {
-        if (await storage.isLocked(key)) {
-          lockedCount++;
-        }
-      }
-      expect(lockedCount).toBe(0);
+      const afterTtlLocked = await Promise.all(
+        lockKeys.map((key) => storage.isLocked(key))
+      );
+      expect(afterTtlLocked.filter(Boolean).length).toBe(0);
 
       // ✨ Before: Required cleanupStaleLocks() function (~78 lines)
       // ✨ After: TTL handles it automatically! (0 lines)

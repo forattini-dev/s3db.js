@@ -6,22 +6,17 @@
 import tryFn from '../../concerns/try-fn.js';
 import { TasksPool } from '../../tasks/tasks-pool.class.js';
 import { getCronManager } from '../../concerns/cron-manager.js';
-import { createLogger } from '../../concerns/logger.js';
 import { PluginError } from '../../errors.js';
 import {
   type Transaction,
   type FieldHandler,
   getCohortHoursWindow,
-  groupByCohort,
-  ensureCohortHours,
   getNestedValue,
   setNestedValue
 } from './utils.js';
-import type { NormalizedConfig, ReducerFunction } from './config.js';
-import type { PluginStorage, Lock } from './locks.js';
+import type { NormalizedConfig } from './config.js';
+import type { PluginStorage } from './locks.js';
 import { updateAnalytics, type UpdateAnalyticsConfig } from './analytics.js';
-
-const logger = createLogger({ name: 'eventual-consistency' });
 
 export type RunConsolidationCallback = (
   handler: FieldHandler,
@@ -43,6 +38,60 @@ export interface CohortStats {
   pending: number;
   applied: number;
   total: number;
+}
+
+function getTransactionQueryPageSize(config: NormalizedConfig): number {
+  return Math.max(25, Math.min(200, config.ticketScanPageSize || 100));
+}
+
+async function scanTransactionsByFilter(
+  transactionResource: NonNullable<FieldHandler['transactionResource']>,
+  filter: Record<string, any>,
+  config: NormalizedConfig,
+  onTransaction: (transaction: Transaction) => Promise<boolean | void> | (boolean | void)
+): Promise<number> {
+  const pageSize = getTransactionQueryPageSize(config);
+  let offset = 0;
+  let scanned = 0;
+
+  while (true) {
+    const batch = await transactionResource.query(filter, {
+      limit: pageSize,
+      offset
+    });
+
+    if (!Array.isArray(batch) || batch.length === 0) {
+      break;
+    }
+
+    for (const transaction of batch as Transaction[]) {
+      scanned += 1;
+      const stop = await Promise.resolve(onTransaction(transaction));
+      if (stop) {
+        return scanned;
+      }
+    }
+
+    if (batch.length < pageSize) {
+      break;
+    }
+
+    offset += pageSize;
+  }
+
+  return scanned;
+}
+
+async function countTransactionsByFilter(
+  transactionResource: NonNullable<FieldHandler['transactionResource']>,
+  filter: Record<string, any>,
+  config: NormalizedConfig
+): Promise<number> {
+  let total = 0;
+  await scanTransactionsByFilter(transactionResource, filter, config, () => {
+    total += 1;
+  });
+  return total;
 }
 
 /**
@@ -120,20 +169,24 @@ export async function runConsolidation(
       config.cohort.timezone
     );
 
-    const transactionsByHour = await Promise.all(
-      cohortHours.map(async (cohortHour) => {
-        try {
-          return await handler.transactionResource!.query({
-            cohortHour,
-            applied: false
-          }, { limit: Infinity });
-        } catch (err) {
-          return [];
-        }
-      })
-    );
+    const allTransactions: Transaction[] = [];
+    const transactionResource = handler.transactionResource as NonNullable<FieldHandler['transactionResource']>;
 
-    const allTransactions = transactionsByHour.flat();
+    for (const cohortHour of cohortHours) {
+      try {
+        await scanTransactionsByFilter(
+          transactionResource,
+          { cohortHour, applied: false },
+          config,
+          (transaction) => {
+            allTransactions.push(transaction);
+          }
+        );
+      } catch (err) {
+        // If one cohort query fails, keep processing other cohorts and continue
+        // with the transactions already collected.
+      }
+    }
 
     if (allTransactions.length === 0) {
       return result;
@@ -170,7 +223,8 @@ export async function runConsolidation(
         field: fieldName,
         analyticsConfig: config.analyticsConfig,
         cohort: config.cohort,
-        logLevel: config.logLevel
+        logLevel: config.logLevel,
+        transactionResource: handler.transactionResource
       };
       await updateAnalytics(allTransactions, handler.analyticsResource, analyticsConfig);
     }
@@ -267,7 +321,7 @@ export async function consolidateRecord(
       t => new Date(t.timestamp).getTime() > new Date(lastSet.timestamp).getTime()
     );
   } else {
-    const [recordOk, recordErr, record] = await tryFn(() =>
+    const [recordOk, , record] = await tryFn(() =>
       handler.targetResource.get(originalId)
     );
 
@@ -296,7 +350,7 @@ export async function consolidateRecord(
   }
 
   const [updateOk, updateErr] = await tryFn(async () => {
-    const [recordOk, recordErr, existingRecord] = await tryFn(() =>
+    const [recordOk, , existingRecord] = await tryFn(() =>
       handler.targetResource.get(originalId)
     );
 
@@ -360,7 +414,7 @@ export async function getConsolidatedValue(
   const initialValue = handler.initialValue;
   const reducer = handler.reducer;
 
-  const [recordOk, recordErr, record] = await tryFn(() =>
+  const [recordOk, , record] = await tryFn(() =>
     handler.targetResource.get(originalId)
   );
 
@@ -375,12 +429,22 @@ export async function getConsolidatedValue(
     baseValue = initialValue;
   }
 
-  const [txOk, txErr, pendingTransactions] = await tryFn(() =>
-    handler.transactionResource!.query({
-      originalId,
-      applied: false
-    }, { limit: Infinity })
-  ) as [boolean, Error | null, Transaction[] | null];
+  let pendingTransactions: Transaction[] = [];
+  const [txOk] = await tryFn(async () => {
+    const txs: Transaction[] = [];
+    await scanTransactionsByFilter(
+      handler.transactionResource as NonNullable<FieldHandler['transactionResource']>,
+      {
+        originalId,
+        applied: false
+      },
+      handler.config,
+      (transaction) => {
+        txs.push(transaction);
+      }
+    );
+    pendingTransactions = txs;
+  });
 
   if (!txOk || !pendingTransactions || pendingTransactions.length === 0) {
     return baseValue;
@@ -438,28 +502,36 @@ export async function getCohortStats(
   const stats: CohortStats[] = [];
 
   for (const cohortHour of cohortHours) {
-    const [pendingOk, pendingErr, pending] = await tryFn(() =>
-      handler.transactionResource!.query({
-        cohortHour,
-        applied: false
-      })
-    ) as [boolean, Error | null, Transaction[] | null];
+    const [pendingOk, , pendingCount] = await tryFn(() =>
+      countTransactionsByFilter(
+        handler.transactionResource as NonNullable<FieldHandler['transactionResource']>,
+        {
+          cohortHour,
+          applied: false
+        },
+        config
+      )
+    ) as [boolean, Error | null, number | null];
 
-    const [appliedOk, appliedErr, applied] = await tryFn(() =>
-      handler.transactionResource!.query({
-        cohortHour,
-        applied: true
-      })
-    ) as [boolean, Error | null, Transaction[] | null];
+    const [appliedOk, , appliedCount] = await tryFn(() =>
+      countTransactionsByFilter(
+        handler.transactionResource as NonNullable<FieldHandler['transactionResource']>,
+        {
+          cohortHour,
+          applied: true
+        },
+        config
+      )
+    ) as [boolean, Error | null, number | null];
 
-    const pendingCount = pendingOk && pending ? pending.length : 0;
-    const appliedCount = appliedOk && applied ? applied.length : 0;
+    const pendingTotal = pendingOk && typeof pendingCount === 'number' ? pendingCount : 0;
+    const appliedTotal = appliedOk && typeof appliedCount === 'number' ? appliedCount : 0;
 
     stats.push({
       cohort: cohortHour,
-      pending: pendingCount,
-      applied: appliedCount,
-      total: pendingCount + appliedCount
+      pending: pendingTotal,
+      applied: appliedTotal,
+      total: pendingTotal + appliedTotal
     });
   }
 
@@ -482,11 +554,18 @@ export async function recalculateRecord(
   const initialValue = handler.initialValue;
   const reducer = handler.reducer;
 
-  const [txOk, txErr, allTransactions] = await tryFn(() =>
-    handler.transactionResource!.query({
-      originalId
-    }, { limit: Infinity })
-  ) as [boolean, Error | null, Transaction[] | null];
+  const [txOk, , allTransactions] = await tryFn(async () => {
+    const txs: Transaction[] = [];
+    await scanTransactionsByFilter(
+      handler.transactionResource as NonNullable<FieldHandler['transactionResource']>,
+      { originalId },
+      handler.config,
+      (transaction) => {
+        txs.push(transaction);
+      }
+    );
+    return txs;
+  }) as [boolean, Error | null, Transaction[] | null];
 
   if (!txOk || !allTransactions || allTransactions.length === 0) {
     return initialValue;

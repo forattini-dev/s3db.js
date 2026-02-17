@@ -4,7 +4,14 @@
  */
 
 import tryFn from '../../concerns/try-fn.js';
-import { groupByCohort, ensureCohortHours, type Transaction, type FieldHandler, type AnalyticsResource } from './utils.js';
+import {
+  ensureCohortHours,
+  groupByCohort,
+  type Transaction,
+  type TransactionResource,
+  type FieldHandler,
+  type AnalyticsResource
+} from './utils.js';
 import { PluginError, AnalyticsNotEnabledError } from '../../errors.js';
 import type { AnalyticsConfig, CohortConfig } from './config.js';
 
@@ -16,7 +23,10 @@ export interface UpdateAnalyticsConfig {
   analyticsConfig: AnalyticsConfig;
   cohort: CohortConfig;
   logLevel?: string;
+  transactionResource?: TransactionResource;
 }
+
+type AnalyticsPeriod = 'hour' | 'day' | 'week' | 'month';
 
 export interface OperationBreakdown {
   [operation: string]: {
@@ -64,6 +74,252 @@ export interface GetAnalyticsOptions {
   fillGaps?: boolean;
 }
 
+type AnalyticsRecordWithEtag = AnalyticsRecord & {
+  _etag?: string;
+};
+
+interface UpdatableAnalyticsResource extends Omit<AnalyticsResource, 'query'> {
+  updateConditional?: (
+    id: string,
+    data: Partial<AnalyticsRecordWithEtag>,
+    options: { ifMatch: string }
+  ) => Promise<{ success: boolean; data?: AnalyticsRecordWithEtag; etag?: string; error?: string }>;
+  query?: (
+    query: Record<string, any>,
+    options?: {
+      limit?: number;
+      offset?: number;
+      partition?: string | null;
+      partitionValues?: Record<string, any>;
+    }
+  ) => Promise<AnalyticsRecordWithEtag[]>;
+}
+
+interface QueryableResource<T> {
+  query?: (
+    query: Record<string, any>,
+    options?: {
+      limit?: number;
+      offset?: number;
+      partition?: string | null;
+      partitionValues?: Record<string, any>;
+    }
+  ) => Promise<T[]>;
+  list?: (options?: { limit?: number; offset?: number }) => Promise<T[]>;
+}
+
+interface UpsertAnalyticsDependencies {
+  id: string;
+  period: string;
+  cohort: string;
+  existing: AnalyticsRecordWithEtag | null;
+  now: string;
+  config: UpdateAnalyticsConfig;
+  analyticsResource: AnalyticsResource;
+  summary: AnalyticsStats;
+  replaceExisting?: boolean;
+}
+
+interface UpsertAnalyticsSummaryDependencies {
+  id: string;
+  period: string;
+  cohort: string;
+  existing: AnalyticsRecordWithEtag | null;
+  now: string;
+  config: UpdateAnalyticsConfig;
+  summary: AnalyticsStats;
+  analyticsResource: AnalyticsResource;
+  replaceExisting?: boolean;
+}
+
+interface QueryOptions {
+  limit?: number;
+  offset?: number;
+  partition?: string | null;
+  partitionValues?: Record<string, any>;
+}
+
+interface AnalyticsStats {
+  transactionCount: number;
+  totalValue: number;
+  avgValue: number;
+  minValue: number;
+  maxValue: number;
+  operations: OperationBreakdown;
+  recordCount: number;
+}
+
+const MAX_ANALYTICS_UPDATE_RETRIES = 5;
+const ANALYTICS_QUERY_LIMIT = 500;
+
+const ANALYTICS_TRANSACTION_PARTITION_BY_PERIOD: Record<AnalyticsPeriod, {
+  partition: string;
+  partitionValues: (cohort: string) => Record<string, any>;
+  filter: (cohort: string) => Record<string, any>;
+}> = {
+  hour: {
+    partition: 'byCohortHour',
+    partitionValues: (cohortHour) => ({ cohortHour, applied: true }),
+    filter: (cohortHour) => ({ cohortHour, applied: true })
+  },
+  day: {
+    partition: 'byCohortDate',
+    partitionValues: (cohortDate) => ({ cohortDate, applied: true }),
+    filter: (cohortDate) => ({ cohortDate, applied: true })
+  },
+  week: {
+    partition: 'byCohortWeek',
+    partitionValues: (cohortWeek) => ({ cohortWeek, applied: true }),
+    filter: (cohortWeek) => ({ cohortWeek, applied: true })
+  },
+  month: {
+    partition: 'byCohortMonth',
+    partitionValues: (cohortMonth) => ({ cohortMonth, applied: true }),
+    filter: (cohortMonth) => ({ cohortMonth, applied: true })
+  }
+};
+
+function calculateRecordCountFromTransactions(transactions: Transaction[]): number {
+  return new Set(transactions.map((tx) => tx.originalId)).size;
+}
+
+function normalizeFilter(filter: Record<string, any>): Record<string, any> {
+  return Object.entries(filter).reduce<Record<string, any>>((result, [key, value]) => {
+    if (value !== undefined) {
+      result[key] = value;
+    }
+    return result;
+  }, {});
+}
+
+function getRecordIdentity(record: Record<string, any>): string {
+  if (record.id !== undefined && record.id !== null) {
+    return `id:${record.id}`;
+  }
+
+  if (record.originalId !== undefined && record.originalId !== null) {
+    return `originalId:${record.originalId}`;
+  }
+
+  return `raw:${JSON.stringify(record)}`;
+}
+
+function pushUniqueRecord<T>(records: T[], seen: Set<string>, record: T): void {
+  const identity = getRecordIdentity(record as Record<string, any>);
+  if (seen.has(identity)) return;
+  seen.add(identity);
+  records.push(record);
+}
+
+async function queryResourceRecords<T>(
+  resource: QueryableResource<T>,
+  filter: Record<string, any>,
+  options: QueryOptions = {}
+): Promise<T[]> {
+  const normalizedFilter = normalizeFilter(filter);
+  const limit = options.limit ?? ANALYTICS_QUERY_LIMIT;
+  const partition = options.partition ?? null;
+  const partitionValues = options.partitionValues ?? {};
+  const offsetStart = options.offset ?? 0;
+  const result: T[] = [];
+  const seen = new Set<string>();
+
+  if (typeof resource.query === 'function') {
+    let queryFailed = false;
+
+    for (let offset = offsetStart;; offset += limit) {
+      const [ok, , batch] = await tryFn(() =>
+        resource.query!(normalizedFilter, { limit, offset, partition, partitionValues })
+      ) as [boolean, Error | null, T[] | null];
+
+      if (!ok || !Array.isArray(batch)) {
+        queryFailed = true;
+        break;
+      }
+
+      const normalized = batch.filter((record) => recordsMatchFilter(record as Record<string, unknown>, normalizedFilter));
+      for (const record of normalized) {
+        pushUniqueRecord(result, seen, record);
+      }
+
+      if (batch.length < limit) {
+        return result;
+      }
+    }
+
+    if (!queryFailed) {
+      return result;
+    }
+  }
+
+  if (!resource.list) {
+    return result;
+  }
+
+  for (let offset = offsetStart;; offset += limit) {
+    const [ok, , batch] = await tryFn(() =>
+      resource.list!({ limit, offset })
+    ) as [boolean, Error | null, T[] | null];
+
+    if (!ok || !Array.isArray(batch)) {
+      break;
+    }
+
+    const normalized = batch.filter((record) => recordsMatchFilter(record as Record<string, unknown>, normalizedFilter));
+    for (const record of normalized) {
+      pushUniqueRecord(result, seen, record);
+    }
+
+    if (batch.length < limit) {
+      break;
+    }
+  }
+
+  return result;
+}
+
+async function queryTransactionsByPeriod(
+  transactionResource: TransactionResource,
+  period: AnalyticsPeriod,
+  cohort: string,
+  options: QueryOptions = {}
+): Promise<Transaction[]> {
+  const partitionConfig = ANALYTICS_TRANSACTION_PARTITION_BY_PERIOD[period];
+  return queryResourceRecords<Transaction>(
+    transactionResource,
+    partitionConfig.filter(cohort),
+    {
+      limit: options.limit,
+      offset: options.offset,
+      partition: partitionConfig.partition,
+      partitionValues: partitionConfig.partitionValues(cohort)
+    }
+  );
+}
+
+function buildWeekStartDate(weekCohort: string): Date | null {
+  const match = /^(\d{4})-W(\d{2})$/.exec(weekCohort);
+  if (!match) {
+    return null;
+  }
+
+  const year = parseInt(match[1], 10);
+  const week = parseInt(match[2], 10);
+
+  if (Number.isNaN(year) || Number.isNaN(week) || week < 1 || week > 53) {
+    return null;
+  }
+
+  const january4 = new Date(Date.UTC(year, 0, 4));
+  const dayOfWeek = january4.getUTCDay() || 7;
+  const mondayOfWeek1 = new Date(january4);
+  mondayOfWeek1.setUTCDate(january4.getUTCDate() - dayOfWeek + 1);
+  const targetDate = new Date(mondayOfWeek1);
+  targetDate.setUTCDate(mondayOfWeek1.getUTCDate() + ((week - 1) * 7));
+
+  return targetDate;
+}
+
 /**
  * Update analytics with consolidated transactions
  *
@@ -95,23 +351,60 @@ export async function updateAnalytics(
   }
 
   try {
-    const byHour = groupByCohort(transactions, 'cohortHour');
-    const cohortCount = Object.keys(byHour).length;
+    const byHour = config.transactionResource ? null : groupByCohort(transactions, 'cohortHour');
+    const now = new Date().toISOString();
+    const affectedHours = new Set(
+      transactions
+        .map((transaction) => transaction.cohortHour)
+        .filter((cohortHour): cohortHour is string => !!cohortHour)
+    );
+    const effectiveHours = (config.transactionResource && affectedHours.size > 0)
+      ? Array.from(affectedHours)
+      : Object.keys(byHour ?? {});
 
     await Promise.all(
-      Object.entries(byHour).map(([cohort, txns]) =>
-        upsertAnalytics('hour', cohort, txns, analyticsResource, config)
-      )
+      effectiveHours.map(async (cohort) => {
+        const summary = config.transactionResource
+          ? calculateAnalyticsStats(await queryTransactionsByPeriod(config.transactionResource, 'hour', cohort))
+          : calculateAnalyticsStats((byHour as Record<string, Transaction[]> | null)?.[cohort] ?? []);
+        const existing = await readAnalyticsRecord(analyticsResource, `hour-${cohort}`);
+        await upsertAnalyticsForPeriod({
+          id: `hour-${cohort}`,
+          period: 'hour',
+          cohort,
+          existing,
+          now,
+          config,
+          analyticsResource,
+          replaceExisting: Boolean(config.transactionResource),
+          summary
+        });
+      })
     );
 
     if (config.analyticsConfig.rollupStrategy === 'incremental') {
-      const uniqueHours = Object.keys(byHour);
+      const dayCohorts = new Set<string>();
+      const weekCohorts = new Set<string>();
+      const monthCohorts = new Set<string>();
 
-      await Promise.all(
-        uniqueHours.map(cohortHour =>
-          rollupAnalytics(cohortHour, analyticsResource, config)
+      for (const cohortHour of effectiveHours) {
+        const cohortDate = cohortHour.substring(0, 10);
+        dayCohorts.add(cohortDate);
+        monthCohorts.add(cohortHour.substring(0, 7));
+        weekCohorts.add(getCohortWeekFromDate(new Date(cohortDate)));
+      }
+
+      await Promise.all([
+        ...Array.from(dayCohorts).map((cohortDate) =>
+          rollupPeriod('day', cohortDate, cohortDate, analyticsResource, config)
+        ),
+        ...Array.from(weekCohorts).map((cohortWeek) =>
+          rollupPeriod('week', cohortWeek, cohortWeek, analyticsResource, config)
+        ),
+        ...Array.from(monthCohorts).map((cohortMonth) =>
+          rollupPeriod('month', cohortMonth, cohortMonth, analyticsResource, config)
         )
-      );
+      ]);
     }
   } catch (error: any) {
     throw new PluginError(`Analytics update failed for ${config.resource}.${config.field}: ${error.message}`, {
@@ -130,85 +423,194 @@ export async function updateAnalytics(
 /**
  * Upsert analytics for a specific period and cohort
  */
-async function upsertAnalytics(
-  period: string,
-  cohort: string,
-  transactions: Transaction[],
-  analyticsResource: AnalyticsResource,
-  config: UpdateAnalyticsConfig
-): Promise<void> {
-  const id = `${period}-${cohort}`;
+async function upsertAnalyticsForPeriod({
+  id,
+  period,
+  cohort,
+  existing,
+  now,
+  config,
+  summary,
+  analyticsResource,
+  replaceExisting
+}: UpsertAnalyticsDependencies): Promise<void> {
+  await upsertAnalyticsForSummary({
+    id,
+    period,
+    cohort,
+    existing,
+    now,
+    config,
+    summary,
+    analyticsResource,
+    replaceExisting
+  });
+}
 
+async function upsertAnalyticsForSummary({
+  id,
+  period,
+  cohort,
+  existing,
+  now,
+  config,
+  summary,
+  analyticsResource,
+  replaceExisting
+}: UpsertAnalyticsSummaryDependencies): Promise<void> {
+  if (summary.transactionCount === 0) return;
+
+  let attempt = 0;
+  let current = existing ? { ...existing } : null;
+  const basePayload = {
+    field: config.field,
+    period,
+    cohort,
+    ...summary,
+    consolidatedAt: now,
+    updatedAt: now
+  };
+
+  while (attempt < MAX_ANALYTICS_UPDATE_RETRIES) {
+    attempt += 1;
+
+    if (!current) {
+      const [insertOk] = await tryFn(() =>
+        analyticsResource.insert({
+          id,
+          ...basePayload
+        })
+      ) as [boolean, Error | null, AnalyticsRecord | null];
+
+      if (insertOk) return;
+
+      current = await readAnalyticsRecord(analyticsResource, id);
+      if (!current) {
+        continue;
+      }
+    }
+
+    const mergedData = replaceExisting
+      ? {
+        ...basePayload
+      }
+      : buildMergedAnalytics(current, summary, now);
+
+    const [updated, , updateResult] = await tryUpdateAnalytics(
+      analyticsResource,
+      id,
+      current._etag,
+      mergedData
+    );
+
+    if (updated) return;
+
+    if (attempt >= MAX_ANALYTICS_UPDATE_RETRIES) {
+      break;
+    }
+
+    if (updateResult?.error) {
+      current = null;
+    }
+
+    if (current) {
+      const refreshed = await readAnalyticsRecord(analyticsResource, id);
+      current = refreshed;
+  }
+}
+
+  throw new Error(`Failed to upsert analytics record ${id} after ${MAX_ANALYTICS_UPDATE_RETRIES} attempts`);
+}
+
+function calculateAnalyticsStats(transactions: Transaction[]): AnalyticsStats {
   const transactionCount = transactions.length;
-
-  const signedValues = transactions.map(t => {
-    if (t.operation === 'sub') return -t.value;
-    return t.value;
+  const signedValues = transactions.map((transaction) => {
+    return transaction.operation === 'sub' ? -transaction.value : transaction.value;
   });
 
   const totalValue = signedValues.reduce((sum, v) => sum + v, 0);
   const avgValue = totalValue / transactionCount;
   const minValue = Math.min(...signedValues);
   const maxValue = Math.max(...signedValues);
-
   const operations = calculateOperationBreakdown(transactions);
-  const recordCount = new Set(transactions.map(t => t.originalId)).size;
+  const recordCount = calculateRecordCountFromTransactions(transactions);
 
-  const now = new Date().toISOString();
+  return {
+    transactionCount,
+    totalValue,
+    avgValue,
+    minValue,
+    maxValue,
+    operations,
+    recordCount
+  };
+}
 
-  const [existingOk, existingErr, existing] = await tryFn(() =>
+async function readAnalyticsRecord(
+  analyticsResource: AnalyticsResource,
+  id: string
+): Promise<AnalyticsRecordWithEtag | null> {
+  const [ok, , analytics] = await tryFn(() =>
     analyticsResource.get(id)
-  ) as [boolean, Error | null, AnalyticsRecord | null];
+  ) as [boolean, Error | null, AnalyticsRecordWithEtag | null];
 
-  if (existingOk && existing) {
-    const newTransactionCount = existing.transactionCount + transactionCount;
-    const newTotalValue = existing.totalValue + totalValue;
-    const newAvgValue = newTotalValue / newTransactionCount;
-    const newMinValue = Math.min(existing.minValue, minValue);
-    const newMaxValue = Math.max(existing.maxValue, maxValue);
+  if (!ok || !analytics) {
+    return null;
+  }
 
-    const newOperations: OperationBreakdown = { ...existing.operations };
-    for (const [op, stats] of Object.entries(operations)) {
-      if (!newOperations[op]) {
-        newOperations[op] = { count: 0, sum: 0 };
-      }
-      newOperations[op].count += stats.count;
-      newOperations[op].sum += stats.sum;
+  return analytics;
+}
+
+async function tryUpdateAnalytics(
+  analyticsResource: AnalyticsResource,
+  id: string,
+  etag: string | undefined,
+  mergedData: Partial<AnalyticsRecord>
+): Promise<[boolean, Error | null, { success: boolean; error?: string } | null]> {
+  const resource = analyticsResource as UpdatableAnalyticsResource;
+
+  if (etag && typeof resource.updateConditional === 'function') {
+    const [ok, err, result] = await tryFn(() =>
+      resource.updateConditional(id, mergedData, { ifMatch: etag })
+    ) as [boolean, Error | null, { success: boolean; error?: string; data?: AnalyticsRecord } | null];
+
+    if (ok) {
+      return [result?.success === true, null, result ?? null];
     }
 
-    const newRecordCount = Math.max(existing.recordCount, recordCount);
-
-    await tryFn(() =>
-      analyticsResource.update(id, {
-        transactionCount: newTransactionCount,
-        totalValue: newTotalValue,
-        avgValue: newAvgValue,
-        minValue: newMinValue,
-        maxValue: newMaxValue,
-        operations: newOperations,
-        recordCount: newRecordCount,
-        updatedAt: now
-      })
-    );
-  } else {
-    await tryFn(() =>
-      analyticsResource.insert({
-        id,
-        field: config.field,
-        period,
-        cohort,
-        transactionCount,
-        totalValue,
-        avgValue,
-        minValue,
-        maxValue,
-        operations,
-        recordCount,
-        consolidatedAt: now,
-        updatedAt: now
-      })
-    );
+    return [false, err, null];
   }
+
+  const [ok, err] = await tryFn(() =>
+    analyticsResource.update(id, mergedData)
+  ) as [boolean, Error | null, AnalyticsRecord | null];
+
+  return [ok, err, ok ? { success: true } : null];
+}
+
+function buildMergedAnalytics(existing: AnalyticsRecordWithEtag, stats: AnalyticsStats, now: string): Partial<AnalyticsRecordWithEtag> {
+  const newTransactionCount = existing.transactionCount + stats.transactionCount;
+  const newTotalValue = existing.totalValue + stats.totalValue;
+
+  const newOperations: OperationBreakdown = { ...existing.operations };
+  for (const [op, operationStats] of Object.entries(stats.operations)) {
+    if (!newOperations[op]) {
+      newOperations[op] = { count: 0, sum: 0 };
+    }
+    newOperations[op].count += operationStats.count;
+    newOperations[op].sum += operationStats.sum;
+  }
+
+  return {
+    transactionCount: newTransactionCount,
+    totalValue: newTotalValue,
+    avgValue: newTotalValue / newTransactionCount,
+    minValue: Math.min(existing.minValue, stats.minValue),
+    maxValue: Math.max(existing.maxValue, stats.maxValue),
+    operations: newOperations,
+    recordCount: existing.recordCount + stats.recordCount,
+    updatedAt: now
+  };
 }
 
 /**
@@ -234,22 +636,6 @@ function calculateOperationBreakdown(transactions: Transaction[]): OperationBrea
 /**
  * Roll up hourly analytics to daily, weekly, and monthly
  */
-async function rollupAnalytics(
-  cohortHour: string,
-  analyticsResource: AnalyticsResource,
-  config: UpdateAnalyticsConfig
-): Promise<void> {
-  const cohortDate = cohortHour.substring(0, 10);
-  const cohortMonth = cohortHour.substring(0, 7);
-
-  const date = new Date(cohortDate);
-  const cohortWeek = getCohortWeekFromDate(date);
-
-  await rollupPeriod('day', cohortDate, cohortDate, analyticsResource, config);
-  await rollupPeriod('week', cohortWeek, cohortWeek, analyticsResource, config);
-  await rollupPeriod('month', cohortMonth, cohortMonth, analyticsResource, config);
-}
-
 /**
  * Get cohort week string from a date
  */
@@ -273,6 +659,18 @@ function getCohortWeekFromDate(date: Date): string {
 /**
  * Roll up analytics for a specific period
  */
+async function queryAnalyticsRecords(
+  analyticsResource: AnalyticsResource,
+  filter: Record<string, any>,
+  options: QueryOptions = {}
+): Promise<AnalyticsRecord[]> {
+  return queryResourceRecords<AnalyticsRecord>(analyticsResource as QueryableResource<AnalyticsRecord>, filter, options);
+}
+
+function recordsMatchFilter(record: Record<string, unknown>, filter: Record<string, unknown>): boolean {
+  return Object.entries(filter).every(([key, value]) => record[key] === value);
+}
+
 async function rollupPeriod(
   period: string,
   cohort: string,
@@ -280,104 +678,92 @@ async function rollupPeriod(
   analyticsResource: AnalyticsResource,
   config: UpdateAnalyticsConfig
 ): Promise<void> {
-  let sourcePeriod: string;
-  if (period === 'day') {
-    sourcePeriod = 'hour';
-  } else if (period === 'week') {
-    sourcePeriod = 'day';
-  } else if (period === 'month') {
-    sourcePeriod = 'day';
-  } else {
-    sourcePeriod = 'day';
-  }
-
-  const [ok, err, allAnalytics] = await tryFn(() =>
-    analyticsResource.list()
-  ) as [boolean, Error | null, AnalyticsRecord[] | null];
-
-  if (!ok || !allAnalytics) return;
-
-  let sourceAnalytics: AnalyticsRecord[];
-  if (period === 'week') {
-    sourceAnalytics = allAnalytics.filter(a => {
-      if (a.period !== sourcePeriod) return false;
-      const dayDate = new Date(a.cohort);
-      const dayWeek = getCohortWeekFromDate(dayDate);
-      return dayWeek === cohort;
-    });
-  } else {
-    sourceAnalytics = allAnalytics.filter(a =>
-      a.period === sourcePeriod && a.cohort.startsWith(sourcePrefix)
+  let summary: AnalyticsStats;
+  if (config.transactionResource) {
+    summary = calculateAnalyticsStats(
+      await queryTransactionsByPeriod(config.transactionResource, period as AnalyticsPeriod, cohort)
     );
-  }
+  } else {
+    const sourcePeriod = (() => {
+      if (period === 'day') return 'hour';
+      if (period === 'week') return 'day';
+      if (period === 'month') return 'day';
+      return 'day';
+    })();
 
-  if (sourceAnalytics.length === 0) return;
+    const sourceAnalytics = await queryAnalyticsRecords(
+      analyticsResource,
+      { period: sourcePeriod },
+      { partition: 'byPeriod', partitionValues: { period: sourcePeriod }, limit: ANALYTICS_QUERY_LIMIT }
+    );
 
-  const transactionCount = sourceAnalytics.reduce((sum, a) => sum + a.transactionCount, 0);
-  const totalValue = sourceAnalytics.reduce((sum, a) => sum + a.totalValue, 0);
-  const avgValue = totalValue / transactionCount;
-  const minValue = Math.min(...sourceAnalytics.map(a => a.minValue));
-  const maxValue = Math.max(...sourceAnalytics.map(a => a.maxValue));
-
-  const operations: OperationBreakdown = {};
-  for (const analytics of sourceAnalytics) {
-    for (const [op, stats] of Object.entries(analytics.operations || {})) {
-      if (!operations[op]) {
-        operations[op] = { count: 0, sum: 0 };
+    const filteredAnalytics = sourceAnalytics.filter((analyticsRecord) => {
+      if (period === 'week') {
+        const dayDate = new Date(analyticsRecord.cohort);
+        const dayWeek = getCohortWeekFromDate(dayDate);
+        return dayWeek === cohort;
       }
-      operations[op].count += stats.count;
-      operations[op].sum += stats.sum;
+      return analyticsRecord.cohort.startsWith(sourcePrefix);
+    });
+
+    if (filteredAnalytics.length === 0) return;
+
+    const transactionCount = filteredAnalytics.reduce((sum, a) => sum + a.transactionCount, 0);
+    const totalValue = filteredAnalytics.reduce((sum, a) => sum + a.totalValue, 0);
+    const avgValue = totalValue / transactionCount;
+    const minValue = Math.min(...filteredAnalytics.map(a => a.minValue));
+    const maxValue = Math.max(...filteredAnalytics.map(a => a.maxValue));
+
+    const operations: OperationBreakdown = {};
+    for (const analytics of filteredAnalytics) {
+      for (const [op, stats] of Object.entries(analytics.operations || {})) {
+        if (!operations[op]) {
+          operations[op] = { count: 0, sum: 0 };
+        }
+        operations[op].count += stats.count;
+        operations[op].sum += stats.sum;
+      }
     }
+
+    const recordCount = filteredAnalytics.reduce((sum, a) => sum + a.recordCount, 0);
+
+    summary = {
+      transactionCount,
+      totalValue,
+      avgValue: Number.isFinite(avgValue) ? avgValue : 0,
+      minValue,
+      maxValue,
+      operations,
+      recordCount
+    };
   }
 
-  const recordCount = Math.max(...sourceAnalytics.map(a => a.recordCount));
+  if (summary.transactionCount === 0) {
+    return;
+  }
 
   const id = `${period}-${cohort}`;
   const now = new Date().toISOString();
+  const existing = await readAnalyticsRecord(analyticsResource, id);
 
-  const [existingOk, existingErr, existing] = await tryFn(() =>
-    analyticsResource.get(id)
-  ) as [boolean, Error | null, AnalyticsRecord | null];
-
-  if (existingOk && existing) {
-    await tryFn(() =>
-      analyticsResource.update(id, {
-        transactionCount,
-        totalValue,
-        avgValue,
-        minValue,
-        maxValue,
-        operations,
-        recordCount,
-        updatedAt: now
-      })
-    );
-  } else {
-    await tryFn(() =>
-      analyticsResource.insert({
-        id,
-        field: config.field,
-        period,
-        cohort,
-        transactionCount,
-        totalValue,
-        avgValue,
-        minValue,
-        maxValue,
-        operations,
-        recordCount,
-        consolidatedAt: now,
-        updatedAt: now
-      })
-    );
-  }
+  await upsertAnalyticsForSummary({
+    id,
+    period,
+    cohort,
+    existing,
+    now,
+    config,
+    analyticsResource,
+    summary,
+    replaceExisting: true
+  });
 }
 
 /**
  * Fill gaps in analytics data with zeros for continuous time series
  *
  * @param data - Sparse analytics data
- * @param period - Period type ('hour', 'day', 'month')
+ * @param period - Period type ('hour', 'day', 'week', 'month')
  * @param startDate - Start date (ISO format)
  * @param endDate - End date (ISO format)
  * @returns Complete time series with gaps filled
@@ -438,6 +824,18 @@ export function fillGaps(
         result.push(dataMap.get(cohort) || { cohort, ...emptyRecord });
       }
     }
+  } else if (period === 'week') {
+    const firstWeek = buildWeekStartDate(startDate);
+    const lastWeek = buildWeekStartDate(endDate);
+
+    if (!firstWeek || !lastWeek) {
+      return result;
+    }
+
+    for (let dt = new Date(firstWeek); dt <= lastWeek; dt.setDate(dt.getDate() + 7)) {
+      const cohort = getCohortWeekFromDate(dt);
+      result.push(dataMap.get(cohort) || { cohort, ...emptyRecord });
+    }
   }
 
   return result;
@@ -493,13 +891,24 @@ export async function getAnalytics(
     return await getAnalyticsForRecord(resourceName, field, recordId, options, handler);
   }
 
-  const [ok, err, allAnalytics] = await tryFn(() =>
-    handler.analyticsResource!.list()
-  ) as [boolean, Error | null, AnalyticsRecord[] | null];
+  let allAnalytics: AnalyticsRecord[] = [];
+  const analyticsResource = handler.analyticsResource!;
+  const queryOptions: QueryOptions = {
+    limit: ANALYTICS_QUERY_LIMIT,
+    partition: 'byPeriod',
+    partitionValues: { period }
+  };
 
-  if (!ok || !allAnalytics) {
-    return [];
+  if (period !== 'hour' && date) {
+    queryOptions.partition = 'byPeriodCohort';
+    queryOptions.partitionValues = { period, cohort: date };
   }
+
+  allAnalytics = await queryAnalyticsRecords(
+    analyticsResource,
+    { period, ...(period !== 'hour' && date ? { cohort: date } : {}) },
+    queryOptions
+  );
 
   let filtered = allAnalytics.filter(a => a.period === period);
 
@@ -548,22 +957,22 @@ export async function getAnalytics(
  * Get analytics for a specific record from transactions
  */
 async function getAnalyticsForRecord(
-  resourceName: string,
-  field: string,
+  _resourceName: string,
+  _fieldName: string,
   recordId: string,
   options: GetAnalyticsOptions,
   handler: FieldHandler
 ): Promise<AnalyticsDataPoint[]> {
   const { period = 'day', date, startDate, endDate, month, year } = options;
 
-  const [okTrue, errTrue, appliedTransactions] = await tryFn(() =>
+  const [okTrue, , appliedTransactions] = await tryFn(() =>
     handler.transactionResource!.query({
       originalId: recordId,
       applied: true
     })
   ) as [boolean, Error | null, Transaction[] | null];
 
-  const [okFalse, errFalse, pendingTransactions] = await tryFn(() =>
+  const [okFalse, , pendingTransactions] = await tryFn(() =>
     handler.transactionResource!.query({
       originalId: recordId,
       applied: false
@@ -588,6 +997,8 @@ async function getAnalyticsForRecord(
       filtered = filtered.filter(t => t.cohortHour && t.cohortHour.startsWith(date));
     } else if (period === 'day') {
       filtered = filtered.filter(t => t.cohortDate === date);
+    } else if (period === 'week') {
+      filtered = filtered.filter(t => t.cohortWeek === date);
     } else if (period === 'month') {
       filtered = filtered.filter(t => t.cohortMonth && t.cohortMonth.startsWith(date));
     }
@@ -596,6 +1007,8 @@ async function getAnalyticsForRecord(
       filtered = filtered.filter(t => t.cohortHour && t.cohortHour >= startDate && t.cohortHour <= endDate);
     } else if (period === 'day') {
       filtered = filtered.filter(t => t.cohortDate && t.cohortDate >= startDate && t.cohortDate <= endDate);
+    } else if (period === 'week') {
+      filtered = filtered.filter(t => t.cohortWeek && t.cohortWeek >= startDate && t.cohortWeek <= endDate);
     } else if (period === 'month') {
       filtered = filtered.filter(t => t.cohortMonth && t.cohortMonth >= startDate && t.cohortMonth <= endDate);
     }
@@ -604,18 +1017,22 @@ async function getAnalyticsForRecord(
       filtered = filtered.filter(t => t.cohortHour && t.cohortHour.startsWith(month));
     } else if (period === 'day') {
       filtered = filtered.filter(t => t.cohortDate && t.cohortDate.startsWith(month));
+    } else if (period === 'week') {
+      filtered = filtered.filter(t => t.cohortWeek && t.cohortWeek.startsWith(month));
     }
   } else if (year) {
     if (period === 'hour') {
       filtered = filtered.filter(t => t.cohortHour && t.cohortHour.startsWith(String(year)));
     } else if (period === 'day') {
       filtered = filtered.filter(t => t.cohortDate && t.cohortDate.startsWith(String(year)));
+    } else if (period === 'week') {
+      filtered = filtered.filter(t => t.cohortWeek && t.cohortWeek.startsWith(String(year)));
     } else if (period === 'month') {
       filtered = filtered.filter(t => t.cohortMonth && t.cohortMonth.startsWith(String(year)));
     }
   }
 
-  const cohortField = period === 'hour' ? 'cohortHour' : period === 'day' ? 'cohortDate' : 'cohortMonth';
+  const cohortField = period === 'hour' ? 'cohortHour' : period === 'day' ? 'cohortDate' : period === 'week' ? 'cohortWeek' : 'cohortMonth';
   const aggregated = aggregateTransactionsByCohort(filtered, cohortField);
 
   return aggregated;

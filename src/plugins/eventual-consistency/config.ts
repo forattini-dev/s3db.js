@@ -36,7 +36,7 @@ export interface ResourceConfig {
 }
 
 export interface EventualConsistencyPluginOptions {
-  resources?: ResourceConfig[];
+  resources?: ResourceConfig[] | Record<string, (string | FieldConfig)[]>;
   mode?: ConsolidationMode;
   consolidationInterval?: number;
   consolidationWindow?: number;
@@ -48,8 +48,38 @@ export interface EventualConsistencyPluginOptions {
   ticketBatchSize?: number;
   ticketTTL?: number;
   workerClaimLimit?: number;
+  ticketMaxRetries?: number;
+  ticketRetryDelayMs?: number;
+  ticketScanPageSize?: number;
   cohort?: Partial<CohortConfig>;
   analyticsConfig?: Partial<AnalyticsConfig>;
+  coordinator?: {
+    heartbeatInterval?: number;
+    heartbeatTTL?: number;
+    epochDuration?: number;
+    workInterval?: number;
+    workerInterval?: number;
+    ticketBatchSize?: number;
+    workerClaimLimit?: number;
+    ticketMaxRetries?: number;
+    ticketRetryDelayMs?: number;
+    ticketScanPageSize?: number;
+    coordinatorWorkInterval?: number;
+    enableCoordinator?: boolean;
+  };
+  consolidation?: {
+    mode?: ConsolidationMode | string;
+    auto?: boolean;
+    autoConsolidate?: boolean;
+  };
+  analytics?: {
+    enabled?: boolean;
+  };
+  heartbeatInterval?: number;
+  heartbeatTTL?: number;
+  epochDuration?: number;
+  coordinatorWorkInterval?: number;
+  workerInterval?: number;
   logLevel?: string;
   [key: string]: any;
 }
@@ -67,6 +97,14 @@ export interface NormalizedConfig {
   ticketBatchSize: number;
   ticketTTL: number;
   workerClaimLimit: number;
+  ticketMaxRetries: number;
+  ticketRetryDelayMs: number;
+  ticketScanPageSize: number;
+  heartbeatInterval: number;
+  heartbeatTTL: number;
+  epochDuration: number;
+  coordinatorWorkInterval: number;
+  workerInterval: number;
   cohort: CohortConfig;
   analyticsConfig: AnalyticsConfig;
   logLevel?: string;
@@ -88,21 +126,81 @@ export interface FieldHandlerConfig extends NormalizedConfig {
  * @returns Normalized configuration
  */
 export function createConfig(options: EventualConsistencyPluginOptions = {}): NormalizedConfig {
-  const defaultReducer: ReducerFunction = (current, incoming) => current + incoming;
+  const normalizeNumber = (value: any, fallback: number, minimum = 0): number => {
+    const normalizedValue = Number(value);
+    if (!Number.isFinite(normalizedValue)) {
+      return fallback;
+    }
+    return Math.max(minimum, Math.floor(normalizedValue));
+  };
+
+  const normalizeMode = (mode: any): ConsolidationMode => {
+    return mode === 'sync' || mode === 'async' ? mode : 'async';
+  };
+
+  const normalizedResources = (() => {
+    if (!options.resources) return [];
+
+    if (Array.isArray(options.resources)) {
+      return options.resources;
+    }
+
+    return Object.entries(options.resources).map(([resource, rawFields]) => ({
+      resource,
+      fields: Array.isArray(rawFields) ? rawFields : []
+    }));
+  })();
+
+  const coordinatorOptions = options.coordinator || {};
+  const consolidationOptions = options.consolidation || {};
 
   return {
-    resources: options.resources || [],
-    mode: options.mode || 'async',
-    consolidationInterval: options.consolidationInterval || 60,
-    consolidationWindow: options.consolidationWindow || 24,
-    autoConsolidate: options.autoConsolidate !== false,
+    resources: normalizedResources,
+    mode: normalizeMode(options.mode || consolidationOptions.mode),
+    consolidationInterval: normalizeNumber(options.consolidationInterval, 60, 1),
+    consolidationWindow: normalizeNumber(options.consolidationWindow, 24, 1),
+    autoConsolidate:
+      options.autoConsolidate ??
+      consolidationOptions.auto ??
+      consolidationOptions.autoConsolidate ??
+      true,
     transactionRetention: options.transactionRetention ?? 7,
-    gcInterval: options.gcInterval || 3600,
-    enableAnalytics: options.enableAnalytics || false,
-    enableCoordinator: options.enableCoordinator || false,
-    ticketBatchSize: options.ticketBatchSize || 100,
-    ticketTTL: options.ticketTTL || 300000,
-    workerClaimLimit: options.workerClaimLimit || 1,
+    gcInterval: normalizeNumber(options.gcInterval, 3600, 0),
+    enableAnalytics: options.enableAnalytics ?? options.analytics?.enabled ?? false,
+    enableCoordinator: options.enableCoordinator ?? coordinatorOptions.enableCoordinator ?? true,
+    ticketBatchSize: normalizeNumber(options.ticketBatchSize ?? coordinatorOptions.ticketBatchSize, 100, 1),
+    ticketTTL: normalizeNumber(options.ticketTTL, 300000, 1),
+    workerClaimLimit: normalizeNumber(options.workerClaimLimit ?? coordinatorOptions.workerClaimLimit, 1, 1),
+    ticketMaxRetries: normalizeNumber(options.ticketMaxRetries ?? coordinatorOptions.ticketMaxRetries, 3, 0),
+    ticketRetryDelayMs: normalizeNumber(options.ticketRetryDelayMs ?? coordinatorOptions.ticketRetryDelayMs, 1000, 250),
+    ticketScanPageSize: normalizeNumber(options.ticketScanPageSize ?? coordinatorOptions.ticketScanPageSize, 100, 25),
+    heartbeatInterval: normalizeNumber(
+      options.heartbeatInterval ?? coordinatorOptions.heartbeatInterval,
+      5000,
+      1000
+    ),
+    heartbeatTTL: normalizeNumber(
+      options.heartbeatTTL ?? coordinatorOptions.heartbeatTTL,
+      3,
+      1
+    ),
+    epochDuration: normalizeNumber(
+      options.epochDuration ?? coordinatorOptions.epochDuration,
+      300000,
+      1
+    ),
+    coordinatorWorkInterval: normalizeNumber(
+      options.coordinatorWorkInterval ??
+      coordinatorOptions.coordinatorWorkInterval ??
+      coordinatorOptions.workInterval,
+      60000,
+      100
+    ),
+    workerInterval: normalizeNumber(
+      options.workerInterval ?? coordinatorOptions.workerInterval,
+      10000,
+      1
+    ),
     cohort: {
       granularity: options.cohort?.granularity || 'hour',
       timezone: options.cohort?.timezone || 'UTC'
@@ -169,6 +267,36 @@ export function logConfigWarnings(config: NormalizedConfig): void {
   if (config.consolidationInterval < 10) {
     logger.warn(
       '[EventualConsistency] Warning: consolidationInterval < 10s may cause high CPU usage'
+    );
+  }
+
+  if (config.workerInterval < 100) {
+    logger.warn(
+      '[EventualConsistency] Warning: workerInterval < 100ms may cause high resource usage in CI and memory clients'
+    );
+  }
+
+  if (config.workerClaimLimit < 1) {
+    logger.warn(
+      '[EventualConsistency] Warning: workerClaimLimit must be >= 1'
+    );
+  }
+
+  if (config.ticketMaxRetries < 0) {
+    logger.warn(
+      '[EventualConsistency] Warning: ticketMaxRetries must be >= 0'
+    );
+  }
+
+  if (config.ticketRetryDelayMs < 250) {
+    logger.warn(
+      '[EventualConsistency] Warning: ticketRetryDelayMs < 250ms may cause high churn'
+    );
+  }
+
+  if (config.ticketScanPageSize < 25 || config.ticketScanPageSize > 500) {
+    logger.warn(
+      '[EventualConsistency] Warning: ticketScanPageSize should stay within 25..500 for stable memory usage'
     );
   }
 

@@ -411,6 +411,147 @@ describe('GlobalCoordinatorService', () => {
     });
   });
 
+  describe('Election Atomicity', () => {
+    it('should converge to a single leader under concurrent elections', async () => {
+      const services = [
+        new GlobalCoordinatorService({
+          namespace: 'test-atomic-leader',
+          database: db,
+          config: {
+            heartbeatInterval: 80,
+            heartbeatJitter: 0,
+            leaseTimeout: 300,
+            workerTimeout: 500,
+            diagnosticsEnabled: false,
+            stateCacheTtl: 0
+          }
+        }),
+        new GlobalCoordinatorService({
+          namespace: 'test-atomic-leader',
+          database: db,
+          config: {
+            heartbeatInterval: 80,
+            heartbeatJitter: 0,
+            leaseTimeout: 300,
+            workerTimeout: 500,
+            diagnosticsEnabled: false,
+            stateCacheTtl: 0
+          }
+        }),
+        new GlobalCoordinatorService({
+          namespace: 'test-atomic-leader',
+          database: db,
+          config: {
+            heartbeatInterval: 80,
+            heartbeatJitter: 0,
+            leaseTimeout: 300,
+            workerTimeout: 500,
+            diagnosticsEnabled: false,
+            stateCacheTtl: 0
+          }
+        })
+      ];
+
+      await Promise.all(services.map(instance => instance.start()));
+
+      const deadlineMs = Date.now() + 2000;
+      const leaders = new Set<string>();
+      const finalEpochs = new Set<number>();
+
+      while (Date.now() < deadlineMs) {
+        const cycleLeaders = new Set(
+          (await Promise.all(services.map(instance => instance.getLeader())))
+            .filter((leader): leader is string => Boolean(leader))
+        );
+        expect(cycleLeaders.size).toBeLessThanOrEqual(1);
+
+        if (cycleLeaders.size === 1) {
+          for (const leader of cycleLeaders) {
+            leaders.add(leader);
+          }
+
+          const epochValues = await Promise.all(services.map(instance => instance.getEpoch()));
+          epochValues.forEach(epoch => {
+            if (epoch > 0) {
+              finalEpochs.add(epoch);
+            }
+          });
+
+          break;
+        }
+
+        await new Promise(resolve => setTimeout(resolve, 60));
+      }
+
+      expect(leaders.size).toBe(1);
+      expect(Array.from(leaders)[0]).toBeDefined();
+      expect(finalEpochs.size).toBeGreaterThan(0);
+      expect(finalEpochs.size).toBe(1);
+
+      await Promise.all(services.map(instance => instance.stop()));
+    });
+
+    it('should elect at most one leader when elections run concurrently', async () => {
+      const services = [
+        new GlobalCoordinatorService({
+          namespace: 'test-atomic-direct',
+          database: db,
+          config: {
+            heartbeatInterval: 80,
+            heartbeatJitter: 0,
+            leaseTimeout: 300,
+            workerTimeout: 500,
+            diagnosticsEnabled: false,
+            stateCacheTtl: 0
+          }
+        }),
+        new GlobalCoordinatorService({
+          namespace: 'test-atomic-direct',
+          database: db,
+          config: {
+            heartbeatInterval: 80,
+            heartbeatJitter: 0,
+            leaseTimeout: 300,
+            workerTimeout: 500,
+            diagnosticsEnabled: false,
+            stateCacheTtl: 0
+          }
+        }),
+        new GlobalCoordinatorService({
+          namespace: 'test-atomic-direct',
+          database: db,
+          config: {
+            heartbeatInterval: 80,
+            heartbeatJitter: 0,
+            leaseTimeout: 300,
+            workerTimeout: 500,
+            diagnosticsEnabled: false,
+            stateCacheTtl: 0
+          }
+        })
+      ];
+
+      await Promise.all(services.map(instance => instance.start()));
+      await new Promise(resolve => setTimeout(resolve, 300));
+
+      const elections = await Promise.all(
+        services.map(instance => (instance as any)._conductElection(0))
+      );
+
+      const leaderIds = elections
+        .map((election) => election.leaderId)
+        .filter(Boolean) as string[];
+
+      const electedEpochs = elections.map((election) => election.epoch);
+
+      expect(leaderIds.length).toBeGreaterThan(0);
+      expect(new Set(leaderIds).size).toBe(1);
+      expect(new Set(electedEpochs).size).toBe(1);
+
+      await Promise.all(services.map(instance => instance.stop()));
+    });
+  });
+
   describe('Worker Deduplication (v19.3+)', () => {
     it('should deduplicate workers with same workerId in single heartbeat', async () => {
       service = new GlobalCoordinatorService({

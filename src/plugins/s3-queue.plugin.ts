@@ -114,7 +114,15 @@ interface ClaimedMessage {
 interface PluginStorage {
   get(key: string): Promise<unknown>;
   set(key: string, data: unknown, options?: StorageSetOptions): Promise<void>;
+  getWithVersion(key: string): Promise<{ data: Record<string, unknown> | null; version: string | null }>;
+  setIfVersion(
+    key: string,
+    data: Record<string, unknown>,
+    version: string,
+    options?: StorageSetOptions
+  ): Promise<string | null>;
   delete(key: string): Promise<void>;
+  deleteIfVersion?(key: string, version: string): Promise<boolean>;
   listWithPrefix(prefix: string): Promise<TicketData[]>;
   acquireLock(name: string, options: LockOptions): Promise<Lock | null>;
   releaseLock(lock: Lock): Promise<void>;
@@ -574,8 +582,6 @@ export class S3QueuePlugin extends CoordinatorPlugin<S3QueuePluginOptions> {
   async _publishTickets(): Promise<number> {
     if (!this.isCoordinator) return 0;
 
-    const storage = this.getStorage() as unknown as PluginStorage;
-
     const [okQuery, errQuery, pendingMessages] = await tryFn(async () => {
       return await this.queueResource!.query({
         status: 'pending'
@@ -585,37 +591,21 @@ export class S3QueuePlugin extends CoordinatorPlugin<S3QueuePluginOptions> {
     });
 
     if (!okQuery || !pendingMessages || pendingMessages.length === 0) {
+      if (!okQuery && errQuery) {
+        this.logger.warn(
+          { error: (errQuery as Error)?.message },
+          `Failed to query pending messages for initial publish: ${(errQuery as Error)?.message}`
+        );
+      }
       return 0;
     }
 
-    let ticketsPublished = 0;
-
-    for (const msg of pendingMessages) {
-      const ticketId = `ticket/${msg.id}`;
-      const ticketData = {
-        messageId: msg.id,
-        publishedAt: Date.now(),
-        publishedBy: this.workerId,
-        ttl: this.config.visibilityTimeout
-      };
-
-      const [okPut] = await tryFn(async () => {
-        return await storage.set(
-          ticketId,
-          ticketData,
-          {
-            ttl: Math.ceil(this.config.visibilityTimeout / 1000),
-            behavior: 'body-overflow'
-          }
-        );
-      });
-
-      if (okPut) {
-        ticketsPublished++;
-      }
+    const orderedMessages = this._prepareAvailableMessages(pendingMessages, Date.now());
+    if (orderedMessages.length === 0) {
+      return 0;
     }
 
-    return ticketsPublished;
+    return await this.publishDispatchTickets(orderedMessages);
   }
 
   override async onBecomeCoordinator(): Promise<void> {
@@ -688,10 +678,9 @@ export class S3QueuePlugin extends CoordinatorPlugin<S3QueuePluginOptions> {
       5000,
       () => {
         const now = Date.now();
-        const ttl = this.config.processedCacheTTL;
 
         for (const [queueId, expiresAt] of this.processedCache.entries()) {
-          if (expiresAt <= now || expiresAt - now > ttl * 4) {
+          if (!Number.isFinite(expiresAt) || expiresAt <= now) {
             this.processedCache.delete(queueId);
           }
         }
@@ -1837,8 +1826,12 @@ export class S3QueuePlugin extends CoordinatorPlugin<S3QueuePluginOptions> {
     this.processedCache.clear();
   }
 
+  private _getProcessedCacheTTL(): number {
+    return Math.max(1000, this.config.processedCacheTTL);
+  }
+
   private async _markMessageProcessed(messageId: string): Promise<void> {
-    const ttl = Math.max(1000, this.config.processedCacheTTL);
+    const ttl = this._getProcessedCacheTTL();
     const expiresAt = Date.now() + ttl;
     this.processedCache.set(messageId, expiresAt);
 
@@ -1894,7 +1887,7 @@ export class S3QueuePlugin extends CoordinatorPlugin<S3QueuePluginOptions> {
       return false;
     }
 
-    const ttl = Math.max(1000, this.config.processedCacheTTL);
+    const ttl = this._getProcessedCacheTTL();
     this.processedCache.set(messageId, now + ttl);
     return true;
   }
@@ -2057,28 +2050,37 @@ export class S3QueuePlugin extends CoordinatorPlugin<S3QueuePluginOptions> {
 
     const ticketKey = storage.getPluginKey(null, 'tickets', ticket.ticketId);
 
-    const [okGet, errGet, currentTicket] = await tryFn(() => storage.get(ticketKey));
+    const [okGet, errGet, currentTicketSnapshot] = await tryFn(() => storage.getWithVersion(ticketKey));
 
-    if (!okGet || !currentTicket) {
+    if (!okGet || !currentTicketSnapshot?.data || !currentTicketSnapshot.version) {
+      this.logger.debug(
+        { ticketId: ticket.ticketId, error: (errGet as Error)?.message },
+        `Skipping ticket claim due to stale or missing snapshot: ${ticket.ticketId}`
+      );
       return null;
     }
 
-    const ticketData = currentTicket as TicketData;
+    const ticketData = currentTicketSnapshot.data as TicketData;
 
     if (ticketData.status !== 'available' || ticketData.claimedBy) {
       return null;
     }
 
     const [okClaim, errClaim] = await tryFn(() =>
-      storage.set(ticketKey, {
-        ...ticketData,
-        status: 'claimed',
-        claimedBy: this.workerId,
-        claimedAt: now
-      }, {
-        ttl: ticketData.ticketTTL || ticketData._ttl || 60,
-        behavior: 'body-only'
-      })
+      storage.setIfVersion(
+        ticketKey,
+        {
+          ...ticketData,
+          status: 'claimed',
+          claimedBy: this.workerId,
+          claimedAt: now
+        },
+        currentTicketSnapshot.version!,
+        {
+          ttl: ticketData.ticketTTL || ticketData._ttl || 60,
+          behavior: 'body-only'
+        }
+      )
     );
 
     if (!okClaim) {
@@ -2113,40 +2115,84 @@ export class S3QueuePlugin extends CoordinatorPlugin<S3QueuePluginOptions> {
     const storage = this.getStorage() as unknown as PluginStorage;
     const key = storage.getPluginKey(null, 'tickets', ticketId);
 
-    const [ok, err] = await tryFn(() =>
+    const [okGet, errGet, snapshot] = await tryFn(() => storage.getWithVersion(key));
+
+    if (!okGet || !snapshot?.data || !snapshot.version) {
+      if (errGet && (errGet as { code?: string }).code !== 'NoSuchKey' && (errGet as { code?: string }).code !== 'NotFound') {
+        this.logger.warn(
+          { ticketId, error: (errGet as Error)?.message },
+          `Failed to read ticket for deletion: ${(errGet as Error)?.message}`
+        );
+      }
+      return;
+    }
+
+    if (typeof storage.deleteIfVersion === 'function') {
+      const [okDelete, errDelete, deleted] = await tryFn(() =>
+        storage.deleteIfVersion!(key, snapshot.version as string)
+      );
+
+      if (!okDelete || deleted === false) {
+        if (errDelete && (errDelete as { code?: string }).code !== 'NoSuchKey' && (errDelete as { code?: string }).code !== 'NotFound') {
+          this.logger.warn(
+            { ticketId, error: (errDelete as Error)?.message },
+            `Failed to delete ticket atomically: ${(errDelete as Error)?.message}`
+          );
+        }
+      }
+      return;
+    }
+
+    const [okDelete, errDelete] = await tryFn(() =>
       storage.delete(key)
     );
 
-    if (!ok && err && (err as { code?: string }).code !== 'NoSuchKey' && (err as { code?: string }).code !== 'NotFound') {
+    if (!okDelete && errDelete && (errDelete as { code?: string }).code !== 'NoSuchKey' && (errDelete as { code?: string }).code !== 'NotFound') {
       this.logger.warn(
-        { ticketId, error: (err as Error)?.message },
-        `Failed to delete ticket: ${(err as Error)?.message}`
+        { ticketId, error: (errDelete as Error)?.message },
+        `Failed to delete ticket: ${(errDelete as Error)?.message}`
       );
     }
   }
 
-  async releaseTicket(ticketId: string): Promise<void> {
+  async releaseTicket(ticketId: string, options: { forceOwner?: boolean } = {}): Promise<void> {
+    const { forceOwner = false } = options;
     const storage = this.getStorage() as unknown as PluginStorage;
     const key = storage.getPluginKey(null, 'tickets', ticketId);
 
-    const [okGet, , ticket] = await tryFn(() => storage.get(key));
+    const [okGet, errGet, currentTicketSnapshot] = await tryFn(() => storage.getWithVersion(key));
 
-    if (!okGet || !ticket) {
+    if (!okGet || !currentTicketSnapshot?.data || !currentTicketSnapshot.version) {
+      if (errGet && (errGet as { code?: string }).code !== 'NoSuchKey' && (errGet as { code?: string }).code !== 'NotFound') {
+        this.logger.warn(
+          { ticketId, error: (errGet as Error)?.message },
+          `Failed to read ticket before release: ${(errGet as Error)?.message}`
+        );
+      }
       return;
     }
 
-    const ticketData = ticket as TicketData;
+    const ticketData = currentTicketSnapshot.data as TicketData;
+
+    if (!forceOwner && ticketData.claimedBy && ticketData.claimedBy !== this.workerId) {
+      return;
+    }
 
     const [okRelease, errRelease] = await tryFn(() =>
-      storage.set(key, {
-        ...ticketData,
-        status: 'available',
-        claimedBy: null,
-        claimedAt: null
-      }, {
-        ttl: ticketData.ticketTTL || 60,
-        behavior: 'body-only'
-      })
+      storage.setIfVersion(
+        key,
+        {
+          ...ticketData,
+          status: 'available',
+          claimedBy: null,
+          claimedAt: null
+        },
+        currentTicketSnapshot.version as string,
+        {
+          ttl: ticketData.ticketTTL || ticketData._ttl || 60,
+          behavior: 'body-only'
+        }
+      )
     );
 
     if (!okRelease) {
@@ -2189,7 +2235,7 @@ export class S3QueuePlugin extends CoordinatorPlugin<S3QueuePluginOptions> {
         }
       }
 
-      await this.releaseTicket(ticket.ticketId);
+      await this.releaseTicket(ticket.ticketId, { forceOwner: true });
       recovered++;
 
       this.logger.debug(

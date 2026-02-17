@@ -155,6 +155,16 @@ interface SchedulerJob {
   action: (database: Database, context: Record<string, unknown>) => Promise<{ processed: number; executed: number }>;
 }
 
+interface TriggerListenerRef {
+  emitter: {
+    on?: (eventName: string, handler: (...args: unknown[]) => unknown) => void;
+    off?: (eventName: string, handler: (...args: unknown[]) => unknown) => void;
+    removeListener?: (eventName: string, handler: (...args: unknown[]) => unknown) => void;
+  };
+  eventName: string;
+  handler: (...args: unknown[]) => unknown;
+}
+
 export interface StateMachinePluginOptions {
   resourceNames?: {
     transitionLog?: string;
@@ -270,6 +280,7 @@ export class StateMachinePlugin extends Plugin {
   triggerJobNames: string[];
   schedulerPlugin: (Plugin & { stop(): Promise<void> }) | null;
   _pendingEventHandlers: Set<Promise<void>>;
+  _triggerListeners: TriggerListenerRef[];
 
   private _resourceDescriptors: Record<string, ResourceDescriptor>;
 
@@ -342,6 +353,7 @@ export class StateMachinePlugin extends Plugin {
     this.triggerJobNames = [];
     this.schedulerPlugin = null;
     this._pendingEventHandlers = new Set();
+    this._triggerListeners = [];
 
     this._validateConfiguration();
   }
@@ -1300,7 +1312,9 @@ export class StateMachinePlugin extends Plugin {
               }
             }
 
-            const shouldTrigger = await trigger.condition!(entity.context, entity.entityId);
+            const shouldTrigger = trigger.condition
+              ? await trigger.condition(entity.context, entity.entityId)
+              : true;
 
             if (shouldTrigger) {
               const result = await this._executeAction(trigger.action!, entity.context, 'TRIGGER', machineId, entity.entityId);
@@ -1464,6 +1478,15 @@ export class StateMachinePlugin extends Plugin {
       }
     };
 
+    const registerListener = (emitter: TriggerListenerRef['emitter'], eventName: string, handler: (...args: unknown[]) => unknown): void => {
+      emitter.on?.(eventName, handler);
+      this._triggerListeners.push({
+        emitter,
+        eventName,
+        handler
+      });
+    };
+
     if (eventSource) {
       const baseEvent = typeof baseEventName === 'function' ? 'updated' : baseEventName;
 
@@ -1482,7 +1505,7 @@ export class StateMachinePlugin extends Plugin {
         }
       };
 
-      eventSource.on(baseEvent, wrappedHandler);
+      registerListener(eventSource as TriggerListenerRef['emitter'], baseEvent, wrappedHandler);
 
       this.logger.debug({ baseEvent, resourceName: eventSource.name, triggerName }, `Listening to resource event '${baseEvent}' from '${eventSource.name}' for trigger '${triggerName}' (async-safe)`);
     } else {
@@ -1490,11 +1513,11 @@ export class StateMachinePlugin extends Plugin {
 
       if (staticEventName.startsWith('db:')) {
         const dbEventName = staticEventName.substring(3);
-        this.database.on(dbEventName, eventHandler);
+        registerListener(this.database, dbEventName, eventHandler);
 
         this.logger.debug({ dbEventName, triggerName }, `Listening to database event '${dbEventName}' for trigger '${triggerName}'`);
       } else {
-        this.on(staticEventName, eventHandler);
+        registerListener(this, staticEventName, eventHandler);
 
         this.logger.debug({ staticEventName, triggerName }, `Listening to plugin event '${staticEventName}' for trigger '${triggerName}'`);
       }
@@ -1600,6 +1623,14 @@ export class StateMachinePlugin extends Plugin {
     }
 
     this.machines.clear();
+    for (const listener of this._triggerListeners) {
+      if (listener.emitter.off) {
+        listener.emitter.off(listener.eventName, listener.handler);
+      } else if (listener.emitter.removeListener) {
+        listener.emitter.removeListener(listener.eventName, listener.handler);
+      }
+    }
+    this._triggerListeners = [];
     this.removeAllListeners();
   }
 }

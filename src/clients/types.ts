@@ -12,7 +12,78 @@ export interface S3ClientConfig {
   executorPool?: boolean | TaskExecutorConfig | null;
 }
 
+export type HttpClientProfile = 'balanced' | 'throughput' | 'resilient';
+
+export const HTTP_CLIENT_PROFILES: Record<HttpClientProfile, Partial<HttpClientOptions>> = {
+  balanced: {
+    keepAlive: true,
+    keepAliveMsecs: 1000,
+    maxSockets: 50,
+    maxFreeSockets: 10,
+    timeout: 60000,
+    connections: 50,
+    headersTimeout: 30000,
+    bodyTimeout: 60000,
+    http2: true,
+    http2Preset: 'performance',
+    enableRetry: true,
+    retryProfile: 'dual',
+    maxRetries: 3,
+  },
+  throughput: {
+    keepAlive: true,
+    keepAliveMsecs: 1000,
+    maxSockets: 150,
+    maxFreeSockets: 20,
+    timeout: 120000,
+    connections: 150,
+    headersTimeout: 30000,
+    bodyTimeout: 120000,
+    http2: true,
+    http2Preset: 'low-latency',
+    enableRetry: true,
+    retryProfile: 'recker-only',
+    maxRetries: 2,
+  },
+  resilient: {
+    keepAlive: true,
+    keepAliveMsecs: 2000,
+    maxSockets: 50,
+    maxFreeSockets: 20,
+    timeout: 60000,
+    connections: 50,
+    headersTimeout: 30000,
+    bodyTimeout: 60000,
+    http2: true,
+    http2Preset: 'balanced',
+    retryProfile: 'sdk-only',
+    retryMode: 'adaptive',
+    retryAttempts: 4,
+  },
+};
+
 export interface HttpClientOptions {
+  /** Apply a pre-defined transport profile before custom overrides. */
+  httpClientProfile?: HttpClientProfile;
+  /**
+   * Retry ownership profile for the transport stack.
+   * - dual (default): both handler and AWS client can retry.
+   * - recker-only: retry only in Recker handler.
+   * - sdk-only: retry only in AWS client.
+   */
+  retryProfile?: 'dual' | 'recker-only' | 'sdk-only';
+  /**
+   * Request-attempt budget for the AWS client when its retry layer is active.
+   */
+  retryAttempts?: number;
+  /** Retry mode for AWS client when its retry layer is active ('standard' | 'adaptive'). */
+  retryMode?: 'standard' | 'adaptive';
+  /** Backward-compatible alias for retryProfile. */
+  retryCoordination?: 'dual' | 'recker-only' | 'aws-only';
+  /** Backward-compatible alias for retryMode. */
+  awsRetryMode?: 'standard' | 'adaptive';
+  /** Backward-compatible alias for retryAttempts. */
+  awsMaxAttempts?: number;
   connectTimeout?: number;
   headersTimeout?: number;
   bodyTimeout?: number;
@@ -42,6 +113,10 @@ export interface HttpClientOptions {
   maxRetryDelay?: number;
   retryJitter?: boolean;
   respectRetryAfter?: boolean;
+  /** Use Recker HTTP handler (defaults to true). Falls back to AWS SDK default handler on failures by default. */
+  useReckerHandler?: boolean;
+  /** If false, throw immediately when Recker handler initialization fails. */
+  failFastOnReckerFailure?: boolean;
   [key: string]: unknown;
 }
 
@@ -432,6 +507,10 @@ export interface ReckerHttpHandlerOptions {
   maxRetryDelay?: number;
   retryJitter?: boolean;
   respectRetryAfter?: boolean;
+  /** Internal alignment with HttpClientOptions.useReckerHandler. */
+  useReckerHandler?: boolean;
+  /** Internal alignment with HttpClientOptions.failFastOnReckerFailure. */
+  failFastOnReckerFailure?: boolean;
 }
 
 export interface CircuitStats {

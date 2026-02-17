@@ -31,12 +31,36 @@ export function createPartitionConfig(): PartitionConfig {
         applied: 'boolean'
       }
     },
+    byCohortDate: {
+      fields: {
+        cohortDate: 'string',
+        applied: 'boolean'
+      }
+    },
+    byCohortWeek: {
+      fields: {
+        cohortWeek: 'string',
+        applied: 'boolean'
+      }
+    },
+    byCohortMonth: {
+      fields: {
+        cohortMonth: 'string',
+        applied: 'boolean'
+      }
+    },
     byApplied: {
       fields: {
         applied: 'boolean'
       }
     },
     byOriginalId: {
+      fields: {
+        originalId: 'string',
+        applied: 'boolean'
+      }
+    },
+    byOriginalIdAndApplied: {
       fields: {
         originalId: 'string',
         applied: 'boolean'

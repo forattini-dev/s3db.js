@@ -58,7 +58,7 @@ export async function onInstall(
       continue;
     }
 
-    for (const [fieldName, handler] of resourceHandlers) {
+    for (const [, handler] of resourceHandlers) {
       handler.targetResource = targetResource;
       await completeFieldSetupFn(handler);
     }
@@ -84,7 +84,7 @@ export function watchForResource(
       const resourceHandlers = fieldHandlers.get(resourceName);
       if (!resourceHandlers) return;
 
-      for (const [fieldName, handler] of resourceHandlers) {
+      for (const [, handler] of resourceHandlers) {
         if (handler.deferredSetup) {
           handler.targetResource = resource;
           handler.deferredSetup = false;

@@ -18,6 +18,7 @@ export class ConnectionString {
   bucket: string;
   accessKeyId: string | undefined;
   secretAccessKey: string | undefined;
+  sessionToken: string | undefined;
   endpoint: string;
   keyPrefix: string;
   forcePathStyle?: boolean;
@@ -40,6 +41,7 @@ export class ConnectionString {
     this.bucket = 's3db';
     this.accessKeyId = undefined;
     this.secretAccessKey = undefined;
+    this.sessionToken = undefined;
     this.endpoint = S3_DEFAULT_ENDPOINT;
     this.keyPrefix = '';
 
@@ -118,6 +120,7 @@ export class ConnectionString {
     }
     this.secretAccessKey = pass;
     this.endpoint = S3_DEFAULT_ENDPOINT;
+    this.sessionToken = uri.searchParams.get('sessionToken') || undefined;
 
     if (["/", "", null].includes(uri.pathname)) {
       this.keyPrefix = '';
@@ -148,6 +151,7 @@ export class ConnectionString {
       });
     }
     this.secretAccessKey = pass;
+    this.sessionToken = uri.searchParams.get('sessionToken') || undefined;
 
     if (["/", "", null].includes(uri.pathname)) {
       this.bucket = 's3db';

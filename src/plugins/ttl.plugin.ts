@@ -6,7 +6,6 @@ import { PluginError } from "../errors.js";
 import type { Database } from "../database.class.js";
 import type { Resource } from "../resource.class.js";
 
-const ONE_MINUTE_SEC = 60;
 const ONE_HOUR_SEC = 3600;
 const ONE_DAY_SEC = 86400;
 const THIRTY_DAYS_SEC = 2592000;
@@ -558,6 +557,7 @@ export class TTLPlugin extends CoordinatorPlugin {
     try {
       const granularityConfig = GRANULARITIES[granularity];
       const cohorts = getExpiredCohorts(granularity, granularityConfig.cohortsToCheck);
+      const managedResourceNames = new Set(resources.map(item => item.name));
 
       this.logger.debug({ granularity, cohorts }, `Cleaning ${granularity} granularity, checking cohorts: ${cohorts.join(', ')}`);
 
@@ -567,21 +567,29 @@ export class TTLPlugin extends CoordinatorPlugin {
           partitionValues: { expiresAtCohort: cohort }
         }) as unknown as IndexEntry[];
 
-        const resourceNames = new Set(resources.map(r => r.name));
-        const filtered = expired.filter(e => resourceNames.has(e.resourceName));
+        const processableEntries: IndexEntry[] = [];
+        for (const entry of expired) {
+          const isManaged = managedResourceNames.has(entry.resourceName) && this.resourceFilter(entry.resourceName);
+          if (!isManaged) {
+            const [ok, err] = await tryFn(() => this.expirationIndex!.delete(entry.id));
+            if (!ok && err && (err as { code?: string }).code !== 'NoSuchKey' && (err as { code?: string }).code !== 'NotFound') {
+              this.logger.warn({ entryId: entry.id, error: (err as Error).message }, `Failed to remove stale TTL index entry '${entry.id}': ${(err as Error).message}`);
+            }
+            continue;
+          }
 
-        if (filtered.length > 0) {
-          this.logger.debug({ cohort, expiredCount: filtered.length }, `Found ${filtered.length} expired records in cohort ${cohort}`);
+          processableEntries.push(entry);
         }
 
-        for (let i = 0; i < filtered.length; i += this.batchSize) {
-          const batch = filtered.slice(i, i + this.batchSize);
+        if (processableEntries.length > 0) {
+          this.logger.debug({ cohort, expiredCount: processableEntries.length }, `Found ${processableEntries.length} expired records in cohort ${cohort}`);
+        }
+
+        for (let i = 0; i < processableEntries.length; i += this.batchSize) {
+          const batch = processableEntries.slice(i, i + this.batchSize);
 
           for (const entry of batch) {
-            const config = this.resources[entry.resourceName];
-            if (!config || !this.resourceFilter(entry.resourceName)) {
-              continue;
-            }
+            const config = this.resources[entry.resourceName]!;
             await this._processExpiredEntry(entry, config);
           }
         }

@@ -18,7 +18,7 @@ import { S3Client } from '#src/clients/s3-client.class.js';
 import { MemoryClient } from '#src/clients/memory-client.class.js';
 import { FileSystemClient } from '#src/clients/filesystem-client.class.js';
 
-// Default to filesystem client to avoid memory pressure during tests
+// Default to filesystem client for standard local tests
 const useFilesystemClient = (() => {
   const rawValue = String(process.env.TEST_USE_FILESYSTEM_CLIENT ?? 'true').toLowerCase();
   return !['false', '0', 'off', 'no'].includes(rawValue);
@@ -28,6 +28,14 @@ const useFilesystemClient = (() => {
 const forceMemoryClients = (() => {
   const rawValue = String(process.env.TEST_FORCE_MEMORY_CLIENT ?? 'false').toLowerCase();
   return !['false', '0', 'off', 'no'].includes(rawValue);
+})();
+
+const memoryMaxMB = (() => {
+  const rawValue = process.env.TEST_MEMORY_MAX_MB;
+  const parsed = Number.parseInt(String(rawValue), 10);
+  if (Number.isFinite(parsed) && parsed > 0) return parsed;
+
+  return 96;
 })();
 
 // Base temp directory for filesystem tests (cross-platform using os.tmpdir())
@@ -82,7 +90,7 @@ export function createClientForTest(testName, options = {}) {
       keyPrefix,
       verbose: finalOptions.verbose || false,
       // Safety valve: Limit memory per client to prevent OOM
-      maxMemoryMB: 256,
+      maxMemoryMB: memoryMaxMB,
       evictionEnabled: true
     });
   }
@@ -166,11 +174,11 @@ export function createDatabaseForTest(testName, options = {}) {
     ...restOptions
   } = options;
 
-  // Priority: explicit option > env var > default (filesystem)
+  // Priority: explicit option > env var > filesystem by default
   const shouldUseMemory = forceMemoryClient === true || (forceMemoryClients && forceFilesystemClient !== true);
   const shouldUseFilesystem = forceFilesystemClient === true || (useFilesystemClient && !shouldUseMemory);
 
-  // Use filesystem client by default (low memory usage)
+  // Use filesystem client when explicitly requested
   if (
     shouldUseFilesystem &&
     !restOptions.client &&
@@ -341,9 +349,9 @@ export function createMemoryDatabaseForTest(testName, options = {}) {
     persistPath: options.persistPath,
     verbose: options.verbose || false,
     // Safety valve: Limit memory per client to prevent OOM
-    // If a test tries to store >256MB, it will evict old data or throw,
+    // If a test tries to exceed maxMemoryMB, it will evict old data or throw,
     // saving the machine from freezing.
-    maxMemoryMB: 256,
+    maxMemoryMB: memoryMaxMB,
     evictionEnabled: true
   });
 

@@ -86,23 +86,23 @@ jobs:
           - name: scheduler
             path: tests/plugins/scheduler/
             timeout: 5
-            flags: ''
+            flags: '--no-file-parallelism'
           - name: api
             path: tests/plugins/api/
             timeout: 3
-            flags: ''
+            flags: '--no-file-parallelism'
           - name: ttl
             path: tests/plugins/ttl/
             timeout: 3
-            flags: ''
+            flags: '--no-file-parallelism'
           - name: state-machine
             path: tests/plugins/state-machine/
             timeout: 3
-            flags: ''
+            flags: '--no-file-parallelism'
           - name: s3-queue
             path: tests/plugins/s3-queue/
             timeout: 3
-            flags: ''
+            flags: '--no-file-parallelism'
     steps:
       - name: Checkout
         uses: actions/checkout@v6
@@ -130,6 +130,8 @@ jobs:
         run: pnpm vitest run ${{ matrix.suite.path }} --reporter=verbose ${{ matrix.suite.flags }}
         timeout-minutes: ${{ matrix.suite.timeout }}
         env:
+          TEST_FORCE_MEMORY_CLIENT: 'false'
+          TEST_USE_FILESYSTEM_CLIENT: 'true'
           NODE_OPTIONS: '--max-old-space-size=4096'
 
   # ============================================

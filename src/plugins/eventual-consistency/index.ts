@@ -3,10 +3,8 @@
  * @module eventual-consistency
  */
 
-import { CoordinatorPlugin } from '../concerns/coordinator-plugin.class.js';
+import { CoordinatorPlugin, type IntervalHandle } from '../concerns/coordinator-plugin.class.js';
 import { PluginStorage } from '../../concerns/plugin-storage.js';
-import { createLogger } from '../../concerns/logger.js';
-import tryFn from '../../concerns/try-fn.js';
 
 import {
   createConfig,
@@ -49,6 +47,7 @@ import {
   createTicketsForHandler,
   claimTickets,
   processTicket,
+  reclaimStaleTickets,
   type Ticket,
   type ProcessTicketResults
 } from './tickets.js';
@@ -78,8 +77,6 @@ import {
   type TopRecord
 } from './analytics.js';
 
-const logger = createLogger({ name: 'eventual-consistency' });
-
 export interface Database {
   resources: Record<string, any>;
   createResource(config: any): Promise<any>;
@@ -97,15 +94,23 @@ export class EventualConsistencyPlugin extends CoordinatorPlugin<EventualConsist
   declare config: NormalizedConfig;
   private fieldHandlers: FieldHandlers = new Map();
   private storage!: PluginStorage;
+  private _workerHandle: IntervalHandle | null = null;
   declare workerId: string;
 
   constructor(options: EventualConsistencyPluginOptions = {}) {
     const config = createConfig(options);
+    const leaseTimeout = Math.max(5000, config.heartbeatInterval * config.heartbeatTTL);
+    const workerTimeout = Math.max(5000, Math.max(config.workerInterval, leaseTimeout));
 
     super({
       name: 'EventualConsistencyPlugin',
       version: '1.0.0',
-      ...options
+      ...options,
+      heartbeatInterval: config.heartbeatInterval,
+      coordinatorWorkInterval: config.coordinatorWorkInterval,
+      heartbeatTTL: config.heartbeatTTL,
+      workerTimeout,
+      leaseTimeout
     });
 
     this.config = config;
@@ -224,8 +229,8 @@ export class EventualConsistencyPlugin extends CoordinatorPlugin<EventualConsist
    */
   async runConsolidation(
     handler: FieldHandler,
-    resourceName: string,
-    fieldName: string
+    _resourceName: string,
+    _fieldName: string
   ): Promise<ConsolidationResult> {
     return runConsolidation(
       handler,
@@ -316,31 +321,72 @@ export class EventualConsistencyPlugin extends CoordinatorPlugin<EventualConsist
    * Start coordinator mode
    */
   private async _startCoordinator(): Promise<void> {
-    await super.onStart();
+    await this.startCoordination();
+    await this._startWorkerLoop();
   }
 
   /**
    * Stop coordinator mode
    */
   private async _stopCoordinator(): Promise<void> {
-    await super.onStop();
+    this._stopWorkerLoop();
+    await this.stopCoordination();
   }
 
   /**
    * Coordinator work (runs only on leader)
    */
-  protected async doCoordinatorWork(): Promise<void> {
-    for (const [resourceName, resourceHandlers] of this.fieldHandlers) {
-      for (const [fieldName, handler] of resourceHandlers) {
-        await createTicketsForHandler(
-          handler,
-          this.config,
-          (windowHours) => getCohortHoursWindow(windowHours, this.config.cohort.timezone)
-        );
+  override async coordinatorWork(): Promise<void> {
+    for (const [, resourceHandlers] of this.fieldHandlers) {
+      for (const [, handler] of resourceHandlers) {
+        if (!handler.ticketResource) {
+          continue;
+        }
+
+        try {
+          await reclaimStaleTickets(handler.ticketResource, this.config);
+        } catch (err) {
+          this.logger.warn({ error: (err as Error).message }, `Failed to reclaim stale tickets: ${(err as Error).message}`);
+        }
+
+        try {
+          await createTicketsForHandler(
+            handler,
+            this.config,
+            (windowHours) => getCohortHoursWindow(windowHours, this.config.cohort.timezone)
+          );
+        } catch (err) {
+          this.logger.warn({ error: (err as Error).message }, `Failed to create tickets: ${(err as Error).message}`);
+        }
       }
     }
 
     await cleanupStaleLocks(this.storage as unknown as IPluginStorage, this.config);
+  }
+
+  private async _startWorkerLoop(): Promise<void> {
+    if (this._workerHandle) return;
+
+    this._workerHandle = await this._scheduleInterval(
+      () => this._runWorkerLoop(),
+      this.config.workerInterval,
+      `eventual-consistency-worker-${this.workerId}`
+    );
+  }
+
+  private _stopWorkerLoop(): void {
+    if (!this._workerHandle) return;
+
+    this._clearIntervalHandle(this._workerHandle);
+    this._workerHandle = null;
+  }
+
+  private async _runWorkerLoop(): Promise<void> {
+    try {
+      await this.doWorkerWork();
+    } catch (error) {
+      this.logger.warn({ error: (error as Error).message }, `Worker loop failed: ${(error as Error).message}`);
+    }
   }
 
   /**
@@ -350,15 +396,18 @@ export class EventualConsistencyPlugin extends CoordinatorPlugin<EventualConsist
     for (const [resourceName, resourceHandlers] of this.fieldHandlers) {
       for (const [fieldName, handler] of resourceHandlers) {
         if (!handler.ticketResource) continue;
+        try {
+          const tickets = await claimTickets(
+            handler.ticketResource,
+            this.workerId,
+            this.config
+          );
 
-        const tickets = await claimTickets(
-          handler.ticketResource,
-          this.workerId,
-          this.config
-        );
-
-        for (const ticket of tickets) {
-          await processTicket(ticket, handler, this.database as any);
+          for (const ticket of tickets) {
+            await processTicket(ticket, handler, this.database as any, this.workerId, this.config);
+          }
+        } catch (err) {
+          this.logger.warn({ resource: resourceName, field: fieldName, error: (err as Error).message }, 'Worker loop handler failed');
         }
       }
     }

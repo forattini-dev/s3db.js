@@ -47,7 +47,7 @@ export interface CleanupResult {
  */
 export async function cleanupStaleLocks(
   storage: PluginStorage,
-  config: { logLevel?: string }
+  _config: { logLevel?: string }
 ): Promise<CleanupResult> {
   const result: CleanupResult = { cleaned: 0, errors: 0 };
 
@@ -62,7 +62,7 @@ export async function cleanupStaleLocks(
   const now = Date.now();
 
   for (const key of lockKeys) {
-    const [lockOk, lockErr, lockData] = await tryFn(() =>
+    const [lockOk, , lockData] = await tryFn(() =>
       storage.get(key)
     ) as [boolean, Error | null, LockData | null];
 

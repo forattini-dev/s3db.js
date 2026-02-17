@@ -23,9 +23,7 @@ describe('S3QueuePlugin - Concurrent Workers', () => {
 
   afterEach(async () => {
     // Stop all plugins
-    for (const plugin of plugins) {
-      await plugin.stop();
-    }
+    await Promise.all(plugins.map((plugin) => plugin.stop()));
 
     if (database) {
       await database.disconnect();
@@ -50,12 +48,12 @@ describe('S3QueuePlugin - Concurrent Workers', () => {
     const processingTimes = {};
 
     // Enqueue 10 messages
-    for (let i = 0; i < 10; i++) {
-      await resource.enqueue({
+    await Promise.all(
+      Array.from({ length: 10 }, (_, i) => resource.enqueue({
         name: `Task ${i}`,
         data: `Data ${i}`
-      });
-    }
+      }))
+    );
 
     // Start processing with 3 workers
     await resource.startProcessing(async (task) => {
@@ -114,12 +112,12 @@ describe('S3QueuePlugin - Concurrent Workers', () => {
     const worker2Processed = [];
 
     // Enqueue messages (reduced to 10 for faster tests)
-    for (let i = 0; i < 10; i++) {
-      await resource.enqueue({
+    await Promise.all(
+      Array.from({ length: 10 }, (_, i) => resource.enqueue({
         name: `Task ${i}`,
         data: `Data ${i}`
-      });
-    }
+      }))
+    );
 
     // Start both workers simultaneously
     await Promise.all([
@@ -162,6 +160,91 @@ describe('S3QueuePlugin - Concurrent Workers', () => {
     const stats = await resource.queueStats();
     expect(stats.completed).toBeGreaterThanOrEqual(7);  // At least some messages completed
   });
+
+  test('should process with 3 concurrent consumers without duplicate processing', async () => {
+    const plugin1 = new S3QueuePlugin({
+      logLevel: 'silent',
+      resource: 'tasks',
+      autoStart: false,
+      pollInterval: 20,
+      visibilityTimeout: 5000,
+      concurrency: 1
+    });
+
+    const plugin2 = new S3QueuePlugin({
+      logLevel: 'silent',
+      resource: 'tasks',
+      autoStart: false,
+      pollInterval: 20,
+      visibilityTimeout: 5000,
+      concurrency: 1
+    });
+
+    const plugin3 = new S3QueuePlugin({
+      logLevel: 'silent',
+      resource: 'tasks',
+      autoStart: false,
+      pollInterval: 20,
+      visibilityTimeout: 5000,
+      concurrency: 1
+    });
+
+    await plugin1.install(database);
+    await plugin2.install(database);
+    await plugin3.install(database);
+    plugins.push(plugin1, plugin2, plugin3);
+
+    const messageCount = 30;
+    const processed: string[] = [];
+
+    await Promise.all(
+      Array.from({ length: messageCount }, (_, i) => resource.enqueue({
+        name: `Task ${i}`,
+        data: `Data ${i}`
+      }))
+    );
+
+    await Promise.all([
+      plugin1.startProcessing(async (task) => {
+        await new Promise(resolve => setTimeout(resolve, 10));
+        processed.push(task.name as string);
+        return { worker: 1 };
+      }, { concurrency: 1 }),
+      plugin2.startProcessing(async (task) => {
+        await new Promise(resolve => setTimeout(resolve, 10));
+        processed.push(task.name as string);
+        return { worker: 2 };
+      }, { concurrency: 1 }),
+      plugin3.startProcessing(async (task) => {
+        await new Promise(resolve => setTimeout(resolve, 10));
+        processed.push(task.name as string);
+        return { worker: 3 };
+      }, { concurrency: 1 })
+    ]);
+
+    const start = Date.now();
+    const timeoutMs = 12000;
+    while (Date.now() - start < timeoutMs) {
+      const stats = await resource.queueStats();
+      if (stats.completed >= messageCount) {
+        break;
+      }
+      await new Promise(resolve => setTimeout(resolve, 100));
+    }
+
+    await Promise.all([
+      plugin1.stopProcessing(),
+      plugin2.stopProcessing(),
+      plugin3.stopProcessing()
+    ]);
+
+    const uniqueProcessed = [...new Set(processed)];
+    expect(uniqueProcessed).toHaveLength(messageCount);
+    expect(processed).toHaveLength(messageCount);
+
+    const stats = await resource.queueStats();
+    expect(stats.completed).toBe(messageCount);
+  }, 20000);
 
   test.skip('should handle visibility timeout correctly', async () => {
     const plugin = new S3QueuePlugin({
@@ -225,12 +308,12 @@ describe('S3QueuePlugin - Concurrent Workers', () => {
     const workerActivity = {};
 
     // Enqueue 20 messages (reduced for faster tests)
-    for (let i = 0; i < 20; i++) {
-      await resource.enqueue({
+    await Promise.all(
+      Array.from({ length: 20 }, (_, i) => resource.enqueue({
         name: `Task ${i}`,
         data: `Data ${i}`
-      });
-    }
+      }))
+    );
 
     const startTime = Date.now();
 
@@ -290,12 +373,12 @@ describe('S3QueuePlugin - Concurrent Workers', () => {
     plugins.push(plugin);
 
     // Enqueue 10 messages
-    for (let i = 0; i < 10; i++) {
-      await resource.enqueue({
+    await Promise.all(
+      Array.from({ length: 10 }, (_, i) => resource.enqueue({
         name: `Task ${i}`,
         data: i % 3 === 0 ? 'fail' : 'success'  // Every 3rd task will fail
-      });
-    }
+      }))
+    );
 
     await resource.startProcessing(async (task) => {
       if (task.data === 'fail') {
@@ -382,13 +465,13 @@ describe('S3QueuePlugin - Concurrent Workers', () => {
     const processedOrder = [];
 
     // Enqueue messages with timestamps
-    for (let i = 0; i < 5; i++) {
-      await resource.enqueue({
+    await Promise.all(
+      Array.from({ length: 5 }, (_, i) => resource.enqueue({
         name: `Task ${i}`,
         data: `Data ${i}`,
         order: i
-      });
-    }
+      }))
+    );
 
     await resource.startProcessing(async (task) => {
       processedOrder.push(task.order);

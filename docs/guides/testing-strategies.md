@@ -5,12 +5,13 @@ real S3-compatible storage as well as the new coverage expectations.
 
 ## Quick Start
 
-- `pnpm run test:quick` – memory-backed smoke tests (fast feedback).
-- `pnpm run test:js` – full JavaScript suite (uses configured backend).
+- `pnpm run test` – full suite using `filesystem` client (default).
+- `pnpm run test:fs` – explicit alias for full filesystem suites.
+- `pnpm run test:quick` – short memory-backed smoke tests (`TEST_FORCE_MEMORY_CLIENT=true`).
+- `pnpm run test:memory` – full memory-backed suite.
 - `pnpm run test:coverage` – enforces ≥90 % coverage and runs in-band.
 
-> **Tip:** The memory client is still available for targeted unit tests, but
-> critical integration suites now require an S3-compatible backend.
+> **Tip:** O client de memória deve ser usado em perfis curtos de validação. O padrão de execução local é `filesystem` para evitar pressão de memória em loops longos.
 
 ## S3-Compatible Testing
 

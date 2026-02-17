@@ -4,11 +4,14 @@ import { cpus } from 'os';
 
 const cpuCount = cpus().length;
 const isCI = process.env.CI === 'true';
+const isMemoryMode = process.env.TEST_FORCE_MEMORY_CLIENT === 'true';
 
 // Concurrency strategy:
 // - CI: 2 threads (GitHub Actions limit)
 // - Local: 50% of cores, max 4 (prevent UI freeze)
-const maxThreads = isCI ? 2 : Math.min(4, Math.max(1, Math.floor(cpuCount / 2)));
+const maxThreads = isMemoryMode
+  ? 1
+  : (isCI ? 2 : Math.min(4, Math.max(1, Math.floor(cpuCount / 2))));
 
 // Exclusions shared between core and plugins
 const coreExclusions = [
@@ -76,8 +79,9 @@ export default defineConfig({
     retry: isCI ? 2 : 0,
 
     pool: 'forks',
+    maxWorkers: maxThreads,
     isolate: true,
-    fileParallelism: true,
+    fileParallelism: !isMemoryMode,
 
     environment: 'node',
     setupFiles: ['./tests/vitest.setup.ts'],

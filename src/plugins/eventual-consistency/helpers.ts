@@ -45,7 +45,7 @@ export interface EventualConsistencyPlugin {
 export function addHelperMethods(
   resource: TargetResource,
   plugin: EventualConsistencyPlugin,
-  config: NormalizedConfig
+  _config: NormalizedConfig
 ): void {
   const defaultField = getDefaultField(resource);
 

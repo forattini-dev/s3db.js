@@ -72,6 +72,7 @@ memory://mybucket/prefix/path
 |-----------|------|-------------|
 | `region` | string | AWS region (default: us-east-1) |
 | `forcePathStyle` | boolean | Force path-style URLs |
+| `sessionToken` | string | Optional session token for temporary credentials |
 
 ### Compression Options
 
@@ -200,7 +201,8 @@ const db = new Database({
   bucket: 'mybucket',
   region: 'us-east-1',
   accessKeyId: process.env.AWS_ACCESS_KEY_ID,
-  secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY
+  secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY,
+  sessionToken: process.env.AWS_SESSION_TOKEN,
 });
 ```
 
@@ -265,6 +267,7 @@ console.log(conn.clientOptions); // { region: "us-east-1" }
 | `region` | AWS region |
 | `accessKeyId` | Access key |
 | `secretAccessKey` | Secret key |
+| `sessionToken` | Optional session token (STS) |
 | `endpoint` | S3 endpoint URL |
 | `keyPrefix` | Key prefix (path after bucket) |
 | `forcePathStyle` | Path-style URLs flag |

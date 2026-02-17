@@ -78,6 +78,7 @@ export interface DatabaseOptions {
   region?: string;
   accessKeyId?: string;
   secretAccessKey?: string;
+  sessionToken?: string;
   endpoint?: string;
   forcePathStyle?: boolean;
   client?: Client;
@@ -277,12 +278,13 @@ export class Database extends SafeEventEmitter {
   private _initializeClient(options: DatabaseOptions): void {
     let connectionString = options.connectionString;
     if (!connectionString && (options.bucket || options.accessKeyId || options.secretAccessKey)) {
-      const { bucket, region, accessKeyId, secretAccessKey, endpoint, forcePathStyle } = options;
+      const { bucket, region, accessKeyId, secretAccessKey, sessionToken, endpoint, forcePathStyle } = options;
 
       if (endpoint) {
         const url = new URL(endpoint);
         if (accessKeyId) url.username = encodeURIComponent(accessKeyId);
         if (secretAccessKey) url.password = encodeURIComponent(secretAccessKey);
+        if (sessionToken) url.searchParams.set('sessionToken', sessionToken);
         url.pathname = `/${bucket || 's3db'}`;
 
         if (forcePathStyle) {
@@ -293,6 +295,7 @@ export class Database extends SafeEventEmitter {
       } else if (accessKeyId && secretAccessKey) {
         const params = new URLSearchParams();
         params.set('region', region || 'us-east-1');
+        if (sessionToken) params.set('sessionToken', sessionToken);
         if (forcePathStyle) {
           params.set('forcePathStyle', 'true');
         }

@@ -83,8 +83,8 @@ const client = new S3Client({
   httpClientOptions: {
     keepAlive: true,
     keepAliveMsecs: 1000,
-    maxSockets: 500,
-    maxFreeSockets: 100,
+    maxSockets: 50,
+    maxFreeSockets: 10,
     timeout: 60000
   }
 });
@@ -107,11 +107,27 @@ const client = new S3Client({
 |--------|---------|-------------|
 | `keepAlive` | `true` | Enable HTTP connection reuse |
 | `keepAliveMsecs` | `1000` | Keep-alive duration (ms) |
-| `maxSockets` | `500` | Maximum concurrent connections |
-| `maxFreeSockets` | `100` | Free connections in pool |
-| `timeout` | `60000` | Request timeout (60 seconds) |
+| `maxSockets` | `50` | Alias for `connections` (max simultaneous pooled sockets) |
+| `connections` | `undefined` | Direct Recker pool size (defaults to `maxSockets`) |
+| `maxFreeSockets` | `10` | Free connections in pool |
+| `timeout` | `60000` | Request timeout (ms) |
+| `headersTimeout` | `30000` | Header/read timeout from socket (ms) |
+| `bodyTimeout` | `60000` | Full request timeout from socket (ms) |
+| `connectTimeout` | `10000` | TCP connect timeout (ms) |
+| `pipelining` | `10` | Max number of pipelined requests per connection |
+| `maxRequestsPerClient` | `100` | Max in-flight requests per pooled client |
+| `http2` | `true` | Enable HTTP/2 transport |
+| `http2Preset` | `'performance'` | `'balanced' \| 'performance' \| 'low-latency' \| 'low-memory'` |
+| `enableRetry` | `true` | Retry transient failures in Recker |
+| `maxRetries` | `3` | Recker retry attempts (attempts, not including first try) |
+| `httpClientProfile` | `undefined` | Named profile (`balanced`, `throughput`, `resilient`) |
+| `retryProfile` | `'dual'` | Retry ownership (`dual`, `recker-only`, `sdk-only`) |
+| `retryAttempts` | `undefined` | SDK retry attempts (only when `retryProfile` is `sdk-only` or when `retryMode` is set) |
+| `retryMode` | `undefined` | SDK retry mode (`standard` or `adaptive`) |
+| `useReckerHandler` | `true` | Use Recker as the AWS request handler |
+| `failFastOnReckerFailure` | `false` | Throw if Recker initialization fails |
 
-**Performance Tip:** The default configuration supports high concurrency (500 max sockets). For resource-constrained environments, reduce `maxSockets` to 10-50.
+**Performance tip:** default in this client is optimized for stable high-throughput workloads, but `maxSockets`/`connections` are intentionally conservative. Tune upward for bursty, low-latency workloads.
 
 ---
 
@@ -126,16 +142,34 @@ const client = new Client({
   connectionString: 's3://...',
   // Default settings (optimized for high concurrency):
   httpClientOptions: {
+    httpClientProfile: 'balanced',
     keepAlive: true,         // Connection reuse enabled
     keepAliveMsecs: 1000,    // 1 second keep-alive
-    maxSockets: 500,         // High concurrency support
-    maxFreeSockets: 100,     // Better connection reuse
+    maxSockets: 50,          // Baseline concurrent connection pool
+    maxFreeSockets: 10,      // Better connection reuse
+    connections: 50,         // Recker-level pool cap (same as maxSockets by default)
     timeout: 60000           // 60 second timeout
   }
 });
 ```
 
 ### Custom Configurations
+
+### Profiles
+
+Use a named profile as a baseline:
+
+```javascript
+const client = new S3Client({
+  connectionString: 's3://...',
+  httpClientOptions: {
+    httpClientProfile: 'resilient', // balanced | throughput | resilient
+    retryProfile: 'sdk-only', // optional explicit override
+  },
+});
+```
+
+Profiles are also exported as `HTTP_CLIENT_PROFILES` if you want to merge/inspect them in app code.
 
 **High-Throughput Applications:**
 ```javascript
@@ -582,6 +616,22 @@ const client = new Client({
 **IAM Role (no credentials):**
 ```javascript
 's3://my-bucket/databases/myapp'
+```
+
+**STS temporary credentials (session token):**
+```javascript
+const sessionToken = encodeURIComponent(process.env.AWS_SESSION_TOKEN);
+'s3://ACCESS_KEY:SECRET_KEY@my-bucket/databases/myapp?sessionToken=' + sessionToken
+```
+
+**Force fallback to AWS SDK request handler:**
+```javascript
+const client = new Client({
+  connectionString: 's3://ACCESS_KEY:SECRET_KEY@my-bucket/databases/myapp',
+  httpClientOptions: {
+    useReckerHandler: false,
+  },
+});
 ```
 
 ---

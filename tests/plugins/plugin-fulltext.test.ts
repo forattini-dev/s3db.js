@@ -295,9 +295,7 @@ describe('Full-Text Plugin', () => {
         { id: 'user-search-4', name: 'Anna Oliveira', email: 'anna@example.com', description: 'User interface designer', department: 'Design' }
       ];
 
-      for (const user of testUsers) {
-        await users.insert(user);
-      }
+      await Promise.all(testUsers.map((user) => users.insert(user)));
 
       const testProducts = [
         { id: 'prod-1', name: 'Laptop Dell Inspiron', description: 'Development notebook', content: 'Intel i7 processor, 16GB RAM', category: 'Electronics' },
@@ -305,9 +303,7 @@ describe('Full-Text Plugin', () => {
         { id: 'prod-3', name: 'Mechanical Keyboard', description: 'Keyboard for programmers', content: 'Cherry MX Blue switches', category: 'Accessories' }
       ];
 
-      for (const product of testProducts) {
-        await products.insert(product);
-      }
+      await Promise.all(testProducts.map((product) => products.insert(product)));
     });
 
     test('should perform basic text search', async () => {
@@ -430,9 +426,7 @@ describe('Full-Text Plugin', () => {
         { id: 'user-options-2', name: 'Mary Santos', email: 'mary@example.com', description: 'Business analyst', department: 'RH' }
       ];
 
-      for (const user of testUsers) {
-        await users.insert(user);
-      }
+      await Promise.all(testUsers.map((user) => users.insert(user)));
     });
 
     test('should search in specific fields', async () => {
@@ -514,9 +508,7 @@ describe('Full-Text Plugin', () => {
         { id: 'user-index-2', name: 'Index User 2', email: 'index2@example.com', description: 'Another test user', department: 'IT' }
       ];
 
-      for (const user of testUsers) {
-        await users.insert(user);
-      }
+      await Promise.all(testUsers.map((user) => users.insert(user)));
     });
 
     test('should get index statistics', async () => {
@@ -603,9 +595,7 @@ describe('Full-Text Plugin', () => {
         { id: 'user-partition-3', name: 'Partition User 3', email: 'partition3@example.com', description: 'TI user', department: 'IT' }
       ];
 
-      for (const user of testUsers) {
-        await users.insert(user);
-      }
+      await Promise.all(testUsers.map((user) => users.insert(user)));
     });
 
     test('should index data with partition information', async () => {

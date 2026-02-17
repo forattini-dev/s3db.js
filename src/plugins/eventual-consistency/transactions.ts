@@ -10,7 +10,6 @@ import {
   getCohortInfo,
   generateTransactionId
 } from './utils.js';
-import type { FieldHandlerConfig } from './config.js';
 
 export interface CreateTransactionOptions {
   source?: string;
@@ -107,8 +106,11 @@ export async function flushPendingTransactions(handler: FieldHandler): Promise<n
 
   let flushed = 0;
   const errors: Error[] = [];
+  const remaining = new Map<string, Array<Transaction>>();
 
   for (const [key, transactions] of handler.pendingTransactions) {
+    const failedTransactions: Transaction[] = [];
+
     for (const txn of transactions) {
       const [ok, err] = await tryFn(() =>
         handler.transactionResource!.insert(txn)
@@ -118,11 +120,16 @@ export async function flushPendingTransactions(handler: FieldHandler): Promise<n
         flushed++;
       } else {
         errors.push(err as Error);
+        failedTransactions.push(txn);
       }
+    }
+
+    if (failedTransactions.length > 0) {
+      remaining.set(key, failedTransactions);
     }
   }
 
-  handler.pendingTransactions.clear();
+  handler.pendingTransactions = remaining;
 
   if (errors.length > 0) {
     throw new Error(`Failed to flush ${errors.length} transactions: ${errors[0]?.message}`);

@@ -217,8 +217,8 @@ importers:
         specifier: ^2.0.0
         version: 2.11.2(puppeteer-extra@3.3.6(puppeteer-core@24.36.0)(puppeteer@24.36.0(typescript@5.9.3)))
       recker:
-        specifier: 1.0.72
-        version: 1.0.72(ioredis@5.9.2)(ws@8.19.0)
+        specifier: 1.0.75
+        version: 1.0.75(ioredis@5.9.2)(ws@8.19.0)
       tuiuiu.js:
         specifier: ^1.0.53
         version: 1.0.53
@@ -3933,6 +3933,11 @@ packages:
   multistream@4.1.0:
     resolution: {integrity: sha512-J1XDiAmmNpRCBfIWJv+n0ymC4ABcf/Pl+5YvC5B/D2f/2+8PtHvCNxMPKiQcZyi922Hq69J2YOpb1pTywfifyw==}
 
+  nanoid@3.3.11:
+    resolution: {integrity: sha512-N8SpfPUnUp1bK+PMYW8qSWdl9U+wwNWI4QKxOYDy9JAro3WMX7p2OeVRF9v+347pnakNevPmiHhNmZ2HbFA76w==}
+    engines: {node: ^10 || ^12 || ^13.7 || ^14 || >=15.0.1}
+    hasBin: true
+
   napi-build-utils@2.0.0:
     resolution: {integrity: sha512-GEbrYkbfF7MoNaoh2iGG84Mnf/WZfB0GdGEsM8wz7Expx/LlWf5U8t9nvJKXSp3qr5IsEbK04cBGhol/KwOsWA==}
 
@@ -4477,8 +4482,8 @@ packages:
     resolution: {integrity: sha512-/vxpCXddiX8NGfGO/mTafwjq4aFa/71pvamip0++IQk3zG8cbCj0fifNPrjjF1XMXUne91jL9OoxmdykoEtifQ==}
     engines: {node: '>= 10.13.0'}
 
-  recker@1.0.72:
-    resolution: {integrity: sha512-HshDMZyQPfjDln6sYz7BHe75mw5fCBo6lks730FkRqHBOsCXTnCAofsZHfOiLACo9u378aWsYcoH1cf3DWzKsw==}
+  recker@1.0.75:
+    resolution: {integrity: sha512-aJQTpY2QPfFbKR8300Vioje5Qug7Sj3dfD82XLfGEu8s0t8iTptuGfGyXT3ZWZs2sSGwKzXqkonPErwKK0+R4A==}
     engines: {node: '>=18'}
     hasBin: true
     peerDependencies:
@@ -11112,6 +11117,8 @@ snapshots:
       once: 1.4.0
       readable-stream: 3.6.2
 
+  nanoid@3.3.11: {}
+
   napi-build-utils@2.0.0: {}
 
   negotiator@0.6.4: {}
@@ -11425,6 +11432,7 @@ snapshots:
 
   postcss@8.5.6:
     dependencies:
+      nanoid: 3.3.11
       picocolors: 1.1.1
       source-map-js: 1.2.1
 
@@ -11708,7 +11716,7 @@ snapshots:
     dependencies:
       resolve: 1.22.11
 
-  recker@1.0.72(ioredis@5.9.2)(ws@8.19.0):
+  recker@1.0.75(ioredis@5.9.2)(ws@8.19.0):
     dependencies:
       '@maxmind/geoip2-node': 6.3.4
       cli-args-parser: 1.0.6

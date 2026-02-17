@@ -33,15 +33,22 @@ export interface Transaction {
   source?: string;
   applied?: boolean;
   createdAt?: string;
+  _etag?: string;
 }
 
 export interface TransactionResource {
   insert(data: Partial<Transaction>): Promise<Transaction>;
   get(id: string): Promise<Transaction>;
   update(id: string, data: Partial<Transaction>): Promise<Transaction>;
+  updateConditional?: (id: string, data: Partial<Transaction>, options: { ifMatch: string }) => Promise<{
+    success: boolean;
+    data?: Transaction;
+    etag?: string;
+    error?: string;
+  }>;
   delete(id: string): Promise<void>;
   list(options?: { limit?: number }): Promise<Transaction[]>;
-  query(query: Record<string, any>, options?: { limit?: number }): Promise<Transaction[]>;
+  query(query: Record<string, any>, options?: { limit?: number; offset?: number }): Promise<Transaction[]>;
 }
 
 export interface AnalyticsResource {
@@ -49,14 +56,31 @@ export interface AnalyticsResource {
   get(id: string): Promise<any>;
   update(id: string, data: any): Promise<any>;
   list(options?: { limit?: number }): Promise<any[]>;
+  updateConditional?: (
+    id: string,
+    data: any,
+    options: { ifMatch: string }
+  ) => Promise<{
+    success: boolean;
+    data?: any;
+    etag?: string;
+    error?: string;
+  }>;
+  query?(query: Record<string, any>, options?: { limit?: number; offset?: number }): Promise<any[]>;
 }
 
 export interface TicketResource {
   insert(data: any): Promise<any>;
   get(id: string): Promise<any>;
   update(id: string, data: any): Promise<any>;
+  updateConditional?(id: string, data: any, options: { ifMatch: string }): Promise<{
+    success: boolean;
+    data?: any;
+    etag?: string;
+    error?: string;
+  }>;
   delete(id: string): Promise<void>;
-  query(query: Record<string, any>, options?: { limit?: number }): Promise<any[]>;
+  query(query: Record<string, any>, options?: { limit?: number; offset?: number }): Promise<any[]>;
 }
 
 export interface FieldHandler {

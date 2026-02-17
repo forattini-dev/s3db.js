@@ -66,6 +66,11 @@ describe('ConnectionString Class - Complete Journey', () => {
     expect(conn.clientOptions.baz).toBe('qux');
   });
 
+  test('should parse sessionToken query param for temporary AWS credentials', () => {
+    const conn = new ConnectionString('https://user:pass@s3.amazonaws.com/bucket?sessionToken=TEMP%2BTOKEN');
+    expect(conn.sessionToken).toBe('TEMP+TOKEN');
+  });
+
   test('ConnectionString S3 defineS3 else branch (single segment)', () => {
     const s3Conn = new ConnectionString('s3://user:pass@bucket/prefix');
     expect(s3Conn.keyPrefix).toBe('prefix');

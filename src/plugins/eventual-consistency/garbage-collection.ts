@@ -8,7 +8,7 @@ import { TasksPool } from '../../tasks/tasks-pool.class.js';
 import { getCronManager } from '../../concerns/cron-manager.js';
 import type { FieldHandler, Transaction } from './utils.js';
 import type { NormalizedConfig } from './config.js';
-import type { PluginStorage, Lock } from './locks.js';
+import type { PluginStorage } from './locks.js';
 
 export type RunGCCallback = (
   handler: FieldHandler,
@@ -90,7 +90,7 @@ export async function runGarbageCollection(
     const cutoffDate = new Date(now - retentionMs);
     const cutoffIso = cutoffDate.toISOString();
 
-    const [ok, err, oldTransactions] = await tryFn(() =>
+    const [ok, , oldTransactions] = await tryFn(() =>
       transactionResource!.query({
         applied: true,
         timestamp: { '<': cutoffIso }

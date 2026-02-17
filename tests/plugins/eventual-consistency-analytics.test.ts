@@ -327,6 +327,47 @@ describe('EventualConsistencyPlugin Analytics', () => {
     expect(totalSum).toBe(150); // Cumulative
   });
 
+  it('should keep recordCount and rollups consistent with repeated consolidations', async () => {
+    // Insert wallet
+    await wallets.insert({ id: 'w1', userId: 'u1', balance: 0 });
+
+    // First batch of two transactions in hour/day
+    await wallets.add('w1', 'balance', 100);
+    await wallets.add('w1', 'balance', 50);
+    await wallets.consolidate('w1', 'balance');
+
+    // Second batch for same record (same bucket expected)
+    await wallets.add('w1', 'balance', 25);
+    await wallets.consolidate('w1', 'balance');
+
+    const analyticsResource = database.resources.plg_wallets_an_balance;
+    const allAnalytics = await analyticsResource.list();
+    const txResource = database.resources.plg_wallets_tx_balance;
+    const txns = await txResource.list();
+
+    const byHour = new Map<string, number>();
+    const byDay = new Map<string, number>();
+
+    for (const txn of txs) {
+      byHour.set(txn.cohortHour, (byHour.get(txn.cohortHour) ?? 0) + 1);
+      byDay.set(txn.cohortDate, (byDay.get(txn.cohortDate) ?? 0) + 1);
+    }
+
+    for (const [hour, expectedTransactionCount] of byHour.entries()) {
+      const hourAnalytics = allAnalytics.find(a => a.period === 'hour' && a.cohort === hour);
+      expect(hourAnalytics).toBeDefined();
+      expect(hourAnalytics!.recordCount).toBe(1);
+      expect(hourAnalytics!.transactionCount).toBe(expectedTransactionCount);
+    }
+
+    for (const [day, expectedTransactionCount] of byDay.entries()) {
+      const dayAnalytics = allAnalytics.find(a => a.period === 'day' && a.cohort === day);
+      expect(dayAnalytics).toBeDefined();
+      expect(dayAnalytics!.recordCount).toBe(1);
+      expect(dayAnalytics!.transactionCount).toBe(expectedTransactionCount);
+    }
+  });
+
   it('should fill gaps in daily analytics', async () => {
     // Insert wallet and add transactions only on specific days
     await wallets.insert({ id: 'w1', userId: 'u1', balance: 0 });

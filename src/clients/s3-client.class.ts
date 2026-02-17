@@ -23,10 +23,12 @@ import { ConnectionString } from '../connection-string.class.js';
 import { mapAwsError, UnknownError } from '../errors.js';
 import { TasksPool } from '../tasks/tasks-pool.class.js';
 import { AdaptiveTuning } from '../concerns/adaptive-tuning.js';
+import { HTTP_CLIENT_PROFILES } from './types.js';
 import type {
   Logger,
   S3ClientConfig,
   HttpClientOptions,
+  HttpClientProfile,
   TaskExecutorConfig,
   AutotuneConfig,
   MonitoringConfig,
@@ -194,9 +196,27 @@ export class S3Client extends EventEmitter {
     return normalized;
   }
 
-  private _normalizeHttpHandlerOptions(): ReckerHttpHandlerOptions {
-    const options = this.httpClientOptions;
+  private _normalizedHttpClientOptions(): HttpClientOptions {
     const raw = this._rawHttpClientOptions;
+    const profile = typeof raw.httpClientProfile === 'string'
+      ? HTTP_CLIENT_PROFILES[raw.httpClientProfile as HttpClientProfile]
+      : null;
+
+    if (!profile) {
+      return this.httpClientOptions;
+    }
+
+    return {
+      ...this.httpClientOptions,
+      ...profile,
+      ...raw,
+    };
+  }
+
+  private _normalizeHttpHandlerOptions(): ReckerHttpHandlerOptions {
+    const options = this._normalizedHttpClientOptions();
+    const raw = options;
+    const retryProfile = (raw.retryProfile || raw.retryCoordination || 'dual').replace('aws-only', 'sdk-only') as 'dual' | 'recker-only' | 'sdk-only';
     const connections = typeof raw.connections === 'number'
       ? raw.connections
       : raw.maxSockets;
@@ -213,6 +233,12 @@ export class S3Client extends EventEmitter {
     }
     if (bodyTimeout !== undefined) {
       normalized.bodyTimeout = bodyTimeout;
+    }
+    if (retryProfile === 'sdk-only') {
+      normalized.enableRetry = false;
+    }
+    if (retryProfile === 'recker-only' && normalized.enableRetry === undefined) {
+      normalized.enableRetry = true;
     }
 
     return normalized;
@@ -415,19 +441,44 @@ export class S3Client extends EventEmitter {
   }
 
   createClient(): AwsS3Client {
-    this.httpHandler = new ReckerHttpHandler(this._normalizeHttpHandlerOptions());
+    const normalizedHttpHandlerOptions = this._normalizeHttpHandlerOptions();
+    const normalizedHttpClientOptions = this._normalizedHttpClientOptions();
+    const retryProfile = (normalizedHttpClientOptions.retryProfile || normalizedHttpClientOptions.retryCoordination || 'dual').replace('aws-only', 'sdk-only') as 'dual' | 'recker-only' | 'sdk-only';
+    const useReckerHandler = normalizedHttpClientOptions.useReckerHandler ?? true;
+    const failFastOnReckerFailure = normalizedHttpClientOptions.failFastOnReckerFailure ?? false;
+    const requestHandlerConfig = { ...normalizedHttpHandlerOptions };
+    requestHandlerConfig.useReckerHandler = useReckerHandler;
+    requestHandlerConfig.failFastOnReckerFailure = failFastOnReckerFailure;
+
+    if (useReckerHandler) {
+      try {
+        this.httpHandler = new ReckerHttpHandler(requestHandlerConfig);
+      } catch (error) {
+        if (failFastOnReckerFailure) {
+          throw error;
+        }
+      }
+    }
 
     const options: {
       region: string;
       endpoint: string;
-      requestHandler: ReckerHttpHandler;
+      requestHandler?: ReckerHttpHandler;
+      maxAttempts?: number;
+      retryMode?: 'standard' | 'adaptive';
       forcePathStyle?: boolean;
-      credentials?: { accessKeyId: string; secretAccessKey: string };
+      credentials?: {
+        accessKeyId: string;
+        secretAccessKey: string;
+        sessionToken?: string;
+      };
     } = {
       region: this.config.region,
       endpoint: this.config.endpoint,
-      requestHandler: this.httpHandler,
     };
+    if (this.httpHandler) {
+      options.requestHandler = this.httpHandler;
+    }
 
     if (this.config.forcePathStyle) options.forcePathStyle = true;
 
@@ -435,7 +486,22 @@ export class S3Client extends EventEmitter {
       options.credentials = {
         accessKeyId: this.config.accessKeyId,
         secretAccessKey: this.config.secretAccessKey!,
+        ...(this.config.sessionToken ? { sessionToken: this.config.sessionToken } : {}),
       };
+    }
+
+    if (retryProfile === 'recker-only') {
+      options.maxAttempts = 1;
+    } else if (typeof normalizedHttpClientOptions.retryAttempts === 'number' && normalizedHttpClientOptions.retryAttempts > 0) {
+      options.maxAttempts = Math.max(1, Math.trunc(normalizedHttpClientOptions.retryAttempts));
+    } else if (typeof normalizedHttpClientOptions.awsMaxAttempts === 'number' && normalizedHttpClientOptions.awsMaxAttempts > 0) {
+      options.maxAttempts = Math.max(1, Math.trunc(normalizedHttpClientOptions.awsMaxAttempts));
+    }
+
+    if (normalizedHttpClientOptions.retryMode !== undefined) {
+      options.retryMode = normalizedHttpClientOptions.retryMode;
+    } else if (normalizedHttpClientOptions.awsRetryMode !== undefined) {
+      options.retryMode = normalizedHttpClientOptions.awsRetryMode;
     }
 
     const client = new AwsS3Client(options as any);

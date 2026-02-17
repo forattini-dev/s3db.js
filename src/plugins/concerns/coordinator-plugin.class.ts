@@ -2,7 +2,6 @@ import { Plugin, PluginConfig } from '../plugin.class.js';
 import { getCronManager } from '../../concerns/cron-manager.js';
 import { createLogger, S3DBLogger } from '../../concerns/logger.js';
 import type { GlobalCoordinatorService, LeaderChangeEvent } from './global-coordinator-service.class.js';
-import type { Database } from '../../database.class.js';
 
 let workerCounter = 0;
 
@@ -555,7 +554,7 @@ export class CoordinatorPlugin<TOptions extends CoordinatorConfig = CoordinatorC
     intervalMs: number,
     name: string
   ): Promise<IntervalHandle> {
-    const cronManager = getCronManager();
+    const cronManager = this.database?.cronManager ?? getCronManager();
 
     if (cronManager && !cronManager.disabled) {
       await cronManager.scheduleInterval(
@@ -596,7 +595,7 @@ export class CoordinatorPlugin<TOptions extends CoordinatorConfig = CoordinatorC
     if (!handle) return;
 
     if (handle.type === 'cron') {
-      const cronManager = getCronManager();
+      const cronManager = this.database?.cronManager ?? getCronManager();
       if (cronManager && handle.jobName) {
         cronManager.stop(handle.jobName);
       }

@@ -68,4 +68,28 @@ describe('TTLPlugin v2 - Hard Delete Strategy', () => {
 
     expect(statsAfter.totalDeleted).toBeGreaterThan(statsBefore.totalDeleted);
   });
+
+  test('should remove stale TTL index entries for unmanaged resources', async () => {
+    const indexResource = db.resources[(plugin as any).indexResourceName];
+    const staleEntryId = 'stale-entry-legacy';
+    const now = new Date();
+
+    await indexResource.insert({
+      id: staleEntryId,
+      resourceName: 'legacy_resource',
+      recordId: 'legacy-1',
+      expiresAtCohort: now.toISOString().substring(0, 16),
+      expiresAtTimestamp: now.getTime() - 1000,
+      granularity: 'minute',
+      createdAt: Date.now()
+    });
+
+    const before = await indexResource.get(staleEntryId).catch(() => null);
+    expect(before).toBeDefined();
+
+    await plugin.runCleanup();
+
+    const after = await indexResource.get(staleEntryId).catch(() => null);
+    expect(after).toBeNull();
+  });
 });

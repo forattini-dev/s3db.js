@@ -1,6 +1,7 @@
 import { S3QueuePlugin } from '#src/plugins/s3-queue.plugin.js';
 import { createDatabaseForTest } from '#tests/config.js';
 import { MemoryClient } from '../../src/clients/memory-client.class.js';
+import { getCronManager } from '../../src/concerns/cron-manager.js';
 
 describe('S3QueuePlugin - Edge Cases', () => {
   let database;
@@ -277,6 +278,159 @@ describe('S3QueuePlugin - Edge Cases', () => {
 
       // Should have stopped cleanly
       expect(plugin.isRunning).toBe(false);
+    });
+  });
+
+  describe('Processed cache edge cases', () => {
+    test('does not drop valid dedup marker during cleanup', async () => {
+      const resource = await database.createResource({
+        name: 'tasks',
+        attributes: {
+          id: 'string|optional',
+          name: 'string|required'
+        }
+      });
+
+      const plugin = new S3QueuePlugin({
+        resource: 'tasks',
+        autoStart: false,
+        logLevel: 'silent',
+        processedCacheTTL: 2000
+      });
+
+      await plugin.install(database);
+
+      const cronManager = getCronManager();
+      const scheduleCalls = new Map<string, () => Promise<void> | void>();
+      const spy = vi.spyOn(cronManager, 'scheduleInterval').mockImplementation(async (_ms, fn, name) => {
+        scheduleCalls.set(name, fn as () => Promise<void> | void);
+        return {
+          start: vi.fn(),
+          stop: vi.fn(),
+          destroy: vi.fn(),
+          run: vi.fn()
+        } as unknown as { start: () => void; stop: () => void; destroy: () => void; run: () => Promise<void> };
+      });
+
+      try {
+        await plugin.startProcessing(async () => ({ processed: true }));
+
+        const cleanupName = `queue-cache-cleanup-${plugin.workerId}`;
+        const cleanup = scheduleCalls.get(cleanupName);
+        expect(cleanup).toBeDefined();
+
+        plugin['processedCache'].set('message-keep', Date.now() + plugin.config.processedCacheTTL * 10);
+        await cleanup!();
+
+        expect(plugin['processedCache'].has('message-keep')).toBe(true);
+      } finally {
+        await plugin.stopProcessing();
+        spy.mockRestore();
+      }
+    });
+  });
+
+  describe('Coordinator ticket atomicity', () => {
+    test('should claim tickets through versioned storage updates', async () => {
+      const resource = await database.createResource({
+        name: 'tasks',
+        attributes: {
+          id: 'string|optional',
+          name: 'string|required'
+        }
+      });
+
+      const plugin = new S3QueuePlugin({
+        resource: 'tasks',
+        autoStart: false,
+        logLevel: 'silent'
+      });
+
+      await plugin.install(database);
+
+      try {
+        await resource.enqueue({ name: 'Task 1' });
+
+        const queueResource = database.resources['tasks_queue'];
+        const queueEntries = await queueResource.list();
+        const published = await (plugin as any).publishDispatchTickets(queueEntries);
+        expect(published).toBeGreaterThan(0);
+
+        const tickets = await (plugin as any).getAvailableTickets();
+        expect(tickets).toHaveLength(1);
+
+        const storage = (plugin as any).getStorage();
+        const setIfVersionSpy = vi.spyOn(storage, 'setIfVersion');
+
+        await (plugin as any).claimFromTicket(tickets[0]);
+
+        expect(setIfVersionSpy).toHaveBeenCalled();
+        expect(setIfVersionSpy).toHaveBeenCalledWith(
+          expect.any(String),
+          expect.objectContaining({ status: 'claimed' }),
+          expect.any(String),
+          expect.objectContaining({ behavior: 'body-only' })
+        );
+      } finally {
+        await plugin.stop();
+      }
+    });
+
+    test('should not release ticket claimed by another worker unless forced', async () => {
+      const resource = await database.createResource({
+        name: 'tasks',
+        attributes: {
+          id: 'string|optional',
+          name: 'string|required'
+        }
+      });
+
+      const plugin = new S3QueuePlugin({
+        resource: 'tasks',
+        autoStart: false,
+        logLevel: 'silent'
+      });
+
+      await plugin.install(database);
+
+      try {
+        await resource.enqueue({ name: 'Task 2' });
+
+        const queueResource = database.resources['tasks_queue'];
+        const queueEntries = await queueResource.list();
+        const published = await (plugin as any).publishDispatchTickets(queueEntries);
+        expect(published).toBeGreaterThan(0);
+
+        const tickets = await (plugin as any).getAvailableTickets();
+        expect(tickets).toHaveLength(1);
+
+        const storage = (plugin as any).getStorage();
+        const ticket = tickets[0];
+        const ticketKey = storage.getPluginKey(null, 'tickets', ticket.ticketId);
+
+        await storage.set(ticketKey, {
+          ...ticket,
+          status: 'claimed',
+          claimedBy: 'external-worker',
+          claimedAt: Date.now()
+        }, {
+          behavior: 'body-only'
+        });
+
+        await (plugin as any).releaseTicket(ticket.ticketId);
+
+        const currentAfterRelease = await storage.get(ticketKey) as Record<string, unknown>;
+        expect(currentAfterRelease.claimedBy).toBe('external-worker');
+        expect(currentAfterRelease.status).toBe('claimed');
+
+        await (plugin as any).releaseTicket(ticket.ticketId, { forceOwner: true });
+
+        const currentAfterForcedRelease = await storage.get(ticketKey) as Record<string, unknown>;
+        expect(currentAfterForcedRelease.claimedBy).toBeNull();
+        expect(currentAfterForcedRelease.status).toBe('available');
+      } finally {
+        await plugin.stop();
+      }
     });
   });
 });

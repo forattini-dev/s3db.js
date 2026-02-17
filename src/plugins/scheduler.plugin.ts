@@ -4,13 +4,6 @@ import { idGenerator } from "../concerns/id.js";
 import { SchedulerError } from "./scheduler.errors.js";
 import { createLogger } from '../concerns/logger.js';
 
-interface Logger {
-  info(obj: unknown, msg?: string): void;
-  warn(obj: unknown, msg?: string): void;
-  error(obj: unknown, msg?: string): void;
-  debug(obj: unknown, msg?: string): void;
-}
-
 interface Database {
   createResource(config: ResourceConfig): Promise<Resource>;
   resources: Record<string, Resource>;
@@ -36,6 +29,11 @@ interface PartitionConfig {
 interface QueryOptions {
   limit?: number;
   offset?: number;
+}
+
+interface CronFieldParseResult {
+  values: Set<number>;
+  wildcard: boolean;
 }
 
 interface PluginStorage {
@@ -171,6 +169,60 @@ export class SchedulerPlugin extends CoordinatorPlugin {
   declare workerId: string;
   declare isCoordinator: boolean;
 
+  private readonly _cronShortcutMap = new Map([
+    ['@yearly', '0 0 1 1 *'],
+    ['@annually', '0 0 1 1 *'],
+    ['@monthly', '0 0 1 * *'],
+    ['@weekly', '0 0 * * 0'],
+    ['@daily', '0 0 * * *'],
+    ['@hourly', '0 * * * *']
+  ]);
+
+  private readonly _dayOfWeekNames: Record<string, number> = {
+    sun: 0,
+    sunday: 0,
+    mon: 1,
+    monday: 1,
+    tue: 2,
+    tues: 2,
+    tuesday: 2,
+    wed: 3,
+    wednesday: 3,
+    thu: 4,
+    thursday: 4,
+    fri: 5,
+    friday: 5,
+    sat: 6,
+    saturday: 6
+  };
+
+  private readonly _monthNames: Record<string, number> = {
+    jan: 1,
+    january: 1,
+    feb: 2,
+    february: 2,
+    mar: 3,
+    march: 3,
+    apr: 4,
+    april: 4,
+    may: 5,
+    jun: 6,
+    june: 6,
+    jul: 7,
+    july: 7,
+    aug: 8,
+    august: 8,
+    sep: 9,
+    sept: 9,
+    september: 9,
+    oct: 10,
+    october: 10,
+    nov: 11,
+    november: 11,
+    dec: 12,
+    december: 12
+  };
+
   config: SchedulerConfig;
   jobs: Map<string, JobData> = new Map();
   activeJobs: Map<string, string> = new Map();
@@ -263,16 +315,283 @@ export class SchedulerPlugin extends CoordinatorPlugin {
     }
   }
 
+  private _buildRange(min: number, max: number): Set<number> {
+    const values = new Set<number>();
+    for (let i = min; i <= max; i++) {
+      values.add(i);
+    }
+    return values;
+  }
+
+  private _normalizeCronExpression(expr: string): string | null {
+    const normalized = String(expr).trim().toLowerCase();
+    if (!normalized) {
+      return null;
+    }
+
+    return this._cronShortcutMap.get(normalized) || normalized;
+  }
+
+  private _parseFieldValue(
+    value: string,
+    min: number,
+    max: number,
+    namedValues: Record<string, number> = {}
+  ): number | null {
+    const raw = String(value).trim().toLowerCase();
+
+    if (raw === '*' || raw === '?') {
+      return null;
+    }
+
+    const named = namedValues[raw];
+    if (named !== undefined) {
+      if (named < min || named > max) {
+        return null;
+      }
+      return named;
+    }
+
+    const parsed = Number(raw);
+    if (!Number.isInteger(parsed) || parsed < min || parsed > max) {
+      return null;
+    }
+
+    return parsed;
+  }
+
+  private _parseField(
+    expression: string,
+    min: number,
+    max: number,
+    namedValues: Record<string, number> = {}
+  ): CronFieldParseResult | null {
+    const normalized = String(expression).trim().toLowerCase();
+    if (!normalized) {
+      return null;
+    }
+
+    if (normalized === '*' || normalized === '?') {
+      return {
+        values: this._buildRange(min, max),
+        wildcard: true
+      };
+    }
+
+    const tokens = normalized.split(',').map((token) => token.trim()).filter(Boolean);
+    if (tokens.length === 0) {
+      return null;
+    }
+
+    const values = new Set<number>();
+
+    for (const token of tokens) {
+      if (token.includes('/')) {
+        const [range, stepValue, ...rangeExtras] = token.split('/');
+        if (!stepValue || rangeExtras.length > 0) {
+          return null;
+        }
+
+        const step = Number(stepValue);
+        if (!Number.isInteger(step) || step <= 0) {
+          return null;
+        }
+
+        const base = (range || '*').trim().toLowerCase();
+
+        if (base === '*' || base === '') {
+          for (let i = min; i <= max; i += step) {
+            values.add(i);
+          }
+          continue;
+        }
+
+        const rangeParts = base.split('-');
+        if (rangeParts.length !== 2) {
+          return null;
+        }
+
+        const [startToken, endToken] = rangeParts;
+        if (!startToken || !endToken) {
+          return null;
+        }
+
+        const start = this._parseFieldValue(startToken, min, max, namedValues);
+        const end = this._parseFieldValue(endToken, min, max, namedValues);
+        if (start === null || end === null) {
+          return null;
+        }
+
+        const lo = Math.min(start, end);
+        const hi = Math.max(start, end);
+
+        for (let i = lo; i <= hi; i += step) {
+          values.add(i);
+        }
+        continue;
+      }
+
+      if (token.includes('-')) {
+        const rangeParts = token.split('-');
+        if (rangeParts.length !== 2) {
+          return null;
+        }
+
+        const [startToken, endToken] = rangeParts;
+        if (!startToken || !endToken) {
+          return null;
+        }
+
+        const start = this._parseFieldValue(startToken, min, max, namedValues);
+        const end = this._parseFieldValue(endToken, min, max, namedValues);
+
+        if (start === null || end === null) {
+          return null;
+        }
+
+        const lo = Math.min(start, end);
+        const hi = Math.max(start, end);
+
+        for (let i = lo; i <= hi; i++) {
+          values.add(i);
+        }
+        continue;
+      }
+
+      const parsed = this._parseFieldValue(token, min, max, namedValues);
+      if (parsed === null) {
+        return null;
+      }
+
+      values.add(parsed);
+    }
+
+    if (values.size === 0) {
+      return null;
+    }
+
+    return {
+      values,
+      wildcard: false
+    };
+  }
+
   private _isValidCronExpression(expr: string): boolean {
-    if (typeof expr !== 'string') return false;
+    if (typeof expr !== 'string') {
+      return false;
+    }
 
-    const shortcuts = ['@yearly', '@annually', '@monthly', '@weekly', '@daily', '@hourly'];
-    if (shortcuts.includes(expr)) return true;
+    const normalized = this._normalizeCronExpression(expr);
+    if (!normalized) {
+      return false;
+    }
 
-    const parts = expr.trim().split(/\s+/);
-    if (parts.length !== 5) return false;
+    const parts = normalized.split(/\s+/);
+    if (parts.length !== 5) {
+      return false;
+    }
+
+    const [minuteExpr, hourExpr, dayOfMonthExpr, monthExpr, dayOfWeekExpr] = parts;
+
+    const minute = this._parseField(minuteExpr, 0, 59);
+    if (!minute) return false;
+
+    const hour = this._parseField(hourExpr, 0, 23);
+    if (!hour) return false;
+
+    const dayOfMonth = this._parseField(dayOfMonthExpr, 1, 31);
+    if (!dayOfMonth) return false;
+
+    const month = this._parseField(monthExpr, 1, 12, this._monthNames);
+    if (!month) return false;
+
+    const dayOfWeek = this._parseField(dayOfWeekExpr, 0, 6, this._dayOfWeekNames);
+    if (!dayOfWeek) return false;
 
     return true;
+  }
+
+  private _getDateParts(date: Date, timezone: string): { year: number; month: number; day: number; hour: number; minute: number; weekday: number } | null {
+    try {
+      const formatter = new Intl.DateTimeFormat('en-US', {
+        timeZone: timezone,
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+        hour: '2-digit',
+        minute: '2-digit',
+        weekday: 'short',
+        hourCycle: 'h23'
+      });
+
+      const parts = formatter.formatToParts(date);
+      const values = parts.reduce((acc, part) => {
+        acc[part.type] = part.value;
+        return acc;
+      }, {} as Record<string, string>);
+
+      const weekdayName = (values.weekday || '').toLowerCase().slice(0, 3);
+
+      return {
+        year: Number(values.year),
+        month: Number(values.month),
+        day: Number(values.day),
+        hour: Number(values.hour),
+        minute: Number(values.minute),
+        weekday: this._dayOfWeekNames[weekdayName] ?? 0
+      };
+    } catch {
+      this.logger.warn({ scheduleTimezone: timezone }, `Invalid schedule timezone, using local timezone fallback.`);
+      return null;
+    }
+  }
+
+  private _hasCronMatchInTimezone(schedule: string, date: Date, timezone: string): boolean {
+    const normalized = this._normalizeCronExpression(schedule);
+    if (!normalized) {
+      return false;
+    }
+
+    const parts = normalized.split(/\s+/);
+    if (parts.length !== 5) {
+      return false;
+    }
+
+    const [minuteExpr, hourExpr, dayOfMonthExpr, monthExpr, dayOfWeekExpr] = parts;
+
+    const minute = this._parseField(minuteExpr, 0, 59);
+    const hour = this._parseField(hourExpr, 0, 23);
+    const dayOfMonth = this._parseField(dayOfMonthExpr, 1, 31);
+    const month = this._parseField(monthExpr, 1, 12, this._monthNames);
+    const dayOfWeek = this._parseField(dayOfWeekExpr, 0, 6, this._dayOfWeekNames);
+
+    if (!minute || !hour || !dayOfMonth || !month || !dayOfWeek) {
+      return false;
+    }
+
+    const timezoneParts = this._getDateParts(date, timezone);
+    if (!timezoneParts) {
+      return false;
+    }
+
+    const minuteMatch = minute.values.has(timezoneParts.minute);
+    const hourMatch = hour.values.has(timezoneParts.hour);
+    const monthMatch = month.values.has(timezoneParts.month);
+
+    const dayOfMonthExprIsWildcard = dayOfMonth.wildcard;
+    const dayOfWeekExprIsWildcard = dayOfWeek.wildcard;
+    const domMatch = dayOfMonth.values.has(timezoneParts.day);
+    const dowMatch = dayOfWeek.values.has(timezoneParts.weekday);
+
+    const dateMatch = dayOfMonthExprIsWildcard && dayOfWeekExprIsWildcard
+      ? true
+      : dayOfMonthExprIsWildcard
+        ? dowMatch
+        : dayOfWeekExprIsWildcard
+          ? domMatch
+          : (domMatch || dowMatch);
+
+    return minuteMatch && hourMatch && monthMatch && dateMatch;
   }
 
   override async onInstall(): Promise<void> {
@@ -312,7 +631,7 @@ export class SchedulerPlugin extends CoordinatorPlugin {
   private async _createJobHistoryResource(): Promise<void> {
     if (!this.database) return;
 
-    const [ok] = await tryFn(() => this.database!.createResource({
+    await tryFn(() => this.database!.createResource({
       name: this.config.jobHistoryResource,
       attributes: {
         id: 'string|required',
@@ -392,10 +711,22 @@ export class SchedulerPlugin extends CoordinatorPlugin {
     }
   }
 
-  private _calculateNextRun(schedule: string): Date {
+  private _calculateNextRun(schedule: string, timezone: string = this.config.timezone): Date {
     const now = new Date();
+    const normalized = this._normalizeCronExpression(schedule);
 
-    if (schedule === '@yearly' || schedule === '@annually') {
+    if (!normalized) {
+      const fallback = new Date(now);
+      fallback.setSeconds(0, 0);
+      fallback.setMilliseconds(0);
+      fallback.setTime(fallback.getTime() + 60 * 1000);
+      if (this._isTestEnvironment()) {
+        fallback.setTime(fallback.getTime() + 1000);
+      }
+      return fallback;
+    }
+
+    if (normalized === '0 0 1 1 *') {
       const next = new Date(now);
       next.setFullYear(next.getFullYear() + 1);
       next.setMonth(0, 1);
@@ -403,57 +734,71 @@ export class SchedulerPlugin extends CoordinatorPlugin {
       return next;
     }
 
-    if (schedule === '@monthly') {
+    if (normalized === '0 0 1 * *') {
       const next = new Date(now);
       next.setMonth(next.getMonth() + 1, 1);
       next.setHours(0, 0, 0, 0);
       return next;
     }
 
-    if (schedule === '@weekly') {
+    if (normalized === '0 0 * * 0') {
       const next = new Date(now);
       next.setDate(next.getDate() + (7 - next.getDay()));
       next.setHours(0, 0, 0, 0);
       return next;
     }
 
-    if (schedule === '@daily') {
+    if (normalized === '0 0 * * *') {
       const next = new Date(now);
       next.setDate(next.getDate() + 1);
       next.setHours(0, 0, 0, 0);
       return next;
     }
 
-    if (schedule === '@hourly') {
+    if (normalized === '0 * * * *') {
       const next = new Date(now);
       next.setHours(next.getHours() + 1, 0, 0, 0);
       return next;
     }
 
-    const [minute, hour] = schedule.split(/\s+/);
-
-    const next = new Date(now);
-    next.setMinutes(parseInt(minute ?? '0') || 0);
-    next.setSeconds(0);
-    next.setMilliseconds(0);
-
-    if (hour !== '*') {
-      next.setHours(parseInt(hour ?? '0'));
+    const parts = normalized.split(/\s+/);
+    if (parts.length !== 5) {
+      const fallback = new Date(now);
+      fallback.setSeconds(0, 0);
+      fallback.setMilliseconds(0);
+      fallback.setTime(fallback.getTime() + 60 * 1000);
+      return fallback;
     }
 
-    if (next <= now) {
-      if (hour !== '*') {
-        next.setDate(next.getDate() + 1);
-      } else {
-        next.setHours(next.getHours() + 1);
+    const [minuteExpr, hourExpr, dayOfMonthExpr, monthExpr, dayOfWeekExpr] = parts;
+
+    if (this._isValidCronExpression(normalized)) {
+      const candidate = new Date(now);
+      candidate.setSeconds(0, 0);
+      candidate.setMilliseconds(0);
+      candidate.setTime(candidate.getTime() + 60 * 1000);
+
+      for (let attempt = 0; attempt < 60 * 24 * 366; attempt++) {
+        if (this._hasCronMatchInTimezone(
+          `${minuteExpr} ${hourExpr} ${dayOfMonthExpr} ${monthExpr} ${dayOfWeekExpr}`,
+          candidate,
+          timezone
+        )) {
+          return candidate;
+        }
+        candidate.setTime(candidate.getTime() + 60 * 1000);
       }
+
+      // Safety fallback in case timezone resolution fails unexpectedly
+      candidate.setTime(candidate.getTime() + 60 * 1000);
+      return candidate;
     }
 
-    if (this._isTestEnvironment()) {
-      next.setTime(next.getTime() + 1000);
-    }
-
-    return next;
+    const fallback = new Date(now);
+    fallback.setSeconds(0, 0);
+    fallback.setMilliseconds(0);
+    fallback.setTime(fallback.getTime() + 60 * 1000);
+    return fallback;
   }
 
   _calculateNextRunFromConfig(config: { enabled?: boolean; schedule?: string; timezone?: string } = {}): Date | null {
@@ -466,7 +811,7 @@ export class SchedulerPlugin extends CoordinatorPlugin {
       return null;
     }
 
-    const nextRun = this._calculateNextRun(schedule);
+    const nextRun = this._calculateNextRun(schedule, config.timezone || this.config.timezone);
 
     if (config.timezone) {
       try {
@@ -500,7 +845,7 @@ export class SchedulerPlugin extends CoordinatorPlugin {
     const lock = await storage.acquireLock(lockName, {
       ttl: Math.ceil(job.timeout / 1000) + 60,
       timeout: 0,
-      workerId: process.pid ? String(process.pid) : 'unknown'
+      workerId: this.workerId
     });
 
     if (!lock) {
@@ -691,7 +1036,7 @@ export class SchedulerPlugin extends CoordinatorPlugin {
     }
   }
 
-  async runJob(jobName: string, context: Record<string, unknown> = {}): Promise<void> {
+  async runJob(jobName: string, _context: Record<string, unknown> = {}): Promise<void> {
     const job = this.jobs.get(jobName);
     if (!job) {
       throw new SchedulerError(`Job '${jobName}' not found`, {
