@@ -35,6 +35,7 @@ describe('S3QueuePlugin - Process Messages', () => {
       logLevel: 'silent',
       resource: 'emails',
       autoStart: false,
+      autoAcknowledge: true,
       pollInterval: 100,  // Fast polling for tests
       visibilityTimeout: 5000
     });
