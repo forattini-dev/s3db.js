@@ -685,7 +685,7 @@ export class FileSystemClient extends EventEmitter {
       NextContinuationToken: response.NextContinuationToken,
       KeyCount: contents.length,
       MaxKeys: response.MaxKeys,
-      Prefix: this.keyPrefix ? undefined : response.Prefix,
+      Prefix: response.Prefix ? this._stripKeyPrefix(response.Prefix) : undefined,
       Delimiter: response.Delimiter,
       StartAfter: response.StartAfter
     };
@@ -696,6 +696,8 @@ export class FileSystemClient extends EventEmitter {
   }
 
   destroy(): void {
+    this.removeAllListeners();
+
     if (this.storage && typeof this.storage.destroy === 'function') {
       this.storage.destroy();
     }

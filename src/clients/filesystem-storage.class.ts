@@ -1030,9 +1030,11 @@ export class FileSystemStorage {
     const commonPrefixes = new Set<string>();
     let processed = 0;
     let lastKeyInPage: string | null = null;
+    let hasMoreKeys = false;
 
     for (const entry of filteredKeys) {
       if (processed >= maxKeys) {
+        hasMoreKeys = true;
         break;
       }
 
@@ -1040,6 +1042,8 @@ export class FileSystemStorage {
       if (prefixEntry) {
         if (!commonPrefixes.has(prefixEntry)) {
           commonPrefixes.add(prefixEntry);
+          processed++;
+          lastKeyInPage = entry.key;
         }
         continue;
       }
@@ -1058,7 +1062,6 @@ export class FileSystemStorage {
       lastKeyInPage = entry.key;
     }
 
-    const hasMoreKeys = filteredKeys.length > contents.length;
     const nextContinuationToken = hasMoreKeys && lastKeyInPage
       ? this._encodeContinuationToken(lastKeyInPage)
       : null;
