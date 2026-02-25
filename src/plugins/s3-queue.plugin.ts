@@ -15,14 +15,17 @@ interface Logger {
 
 interface Database {
   createResource(config: ResourceConfig): Promise<Resource>;
+  deleteResource?: (name: string) => Promise<void>;
   resources: Record<string, Resource>;
 }
 
 interface Resource {
   name: string;
   get(id: string): Promise<QueueEntry>;
+  delete(id: string): Promise<void>;
   insert(data: Record<string, unknown>): Promise<Record<string, unknown>>;
   query(filter: Record<string, unknown>, options?: QueryOptions): Promise<QueueEntry[]>;
+  deleteMany?: (ids: string[]) => Promise<{ deleted: number; errors?: number }>;
   count(filter?: Record<string, unknown>): Promise<number>;
   updateConditional(id: string, data: Record<string, unknown>, options: { ifMatch: string }): Promise<{ success: boolean; data?: QueueEntry; etag?: string; error?: string }>;
   enqueue?: (data: Record<string, unknown>, options?: EnqueueOptions) => Promise<Record<string, unknown>>;
@@ -32,6 +35,9 @@ interface Resource {
   extendQueueVisibility?: (queueId: string, extraMilliseconds: number, options?: { lockToken?: string }) => Promise<boolean>;
   renewQueueLock?: (queueId: string, lockToken: string, extraMilliseconds: number) => Promise<boolean>;
   clearQueueCache?: () => void;
+  countQueue?: (status?: QueueMessageStatusQuery) => Promise<number>;
+  truncateQueue?: (options?: QueuePurgeOptions) => Promise<QueuePurgeResult>;
+  deleteQueue?: (options?: QueueDeleteOptions) => Promise<QueueDeleteResult>;
 }
 
 interface ResourceConfig {
@@ -84,6 +90,29 @@ interface QueueStats {
   dead: number;
 }
 
+type QueueMessageStatus = 'pending' | 'processing' | 'completed' | 'failed' | 'dead';
+type QueueMessageStatusQuery = QueueMessageStatus | 'all';
+
+interface QueuePurgeOptions {
+  includeDeadLetter?: boolean;
+}
+
+interface QueuePurgeResult {
+  queueDeleted: number;
+  deadLetterDeleted: number;
+}
+
+interface QueueDeleteOptions extends QueuePurgeOptions {
+  stopProcessing?: boolean;
+  clearTickets?: boolean;
+}
+
+interface QueueDeleteResult extends QueuePurgeResult {
+  removedTickets: number;
+  queueResourceDeleted: boolean;
+  deadLetterResourceDeleted: boolean;
+}
+
 interface ProcessingOptions {
   concurrency?: number;
 }
@@ -95,6 +124,8 @@ interface MessageContext {
   lockToken: string;
   visibleUntil: number;
   renewLock: (extraMilliseconds?: number) => Promise<boolean>;
+  ack: (result?: unknown) => Promise<void>;
+  nack: (error?: Error | string) => Promise<void>;
 }
 
 type MessageHandler = (record: Record<string, unknown>, context: MessageContext) => Promise<unknown>;
@@ -221,6 +252,9 @@ export interface S3QueuePluginOptions extends CoordinatorConfig {
   epochDuration?: number;
   ticketBatchSize?: number;
   dispatchInterval?: number;
+  consumerJitterMs?: number;
+  retryJitterMs?: number;
+  autoAcknowledge?: boolean;
 }
 
 interface S3QueueConfig {
@@ -250,6 +284,9 @@ interface S3QueueConfig {
   queueResourceName: string;
   enableCoordinator: boolean;
   heartbeatTTL: number;
+  consumerJitterMs: number;
+  retryJitterMs: number;
+  autoAcknowledge: boolean;
 }
 
 export class S3QueuePlugin extends CoordinatorPlugin<S3QueuePluginOptions> {
@@ -327,6 +364,9 @@ export class S3QueuePlugin extends CoordinatorPlugin<S3QueuePluginOptions> {
       dispatchInterval = 100,
       coldStartDuration = 0,
       skipColdStart = false,
+      consumerJitterMs = 0,
+      retryJitterMs = 0,
+      autoAcknowledge = false,
       ...rest
     } = this.options;
 
@@ -390,7 +430,10 @@ export class S3QueuePlugin extends CoordinatorPlugin<S3QueuePluginOptions> {
       maxPollInterval: maxPollInterval ?? pollInterval,
       queueResourceName: this.queueResourceName,
       enableCoordinator,
-      heartbeatTTL
+      heartbeatTTL,
+      consumerJitterMs: Math.max(0, Math.floor(consumerJitterMs)),
+      retryJitterMs: Math.max(0, Math.floor(retryJitterMs)),
+      autoAcknowledge
     };
 
     if (this.config.failureStrategy.deadLetterQueue) {
@@ -579,6 +622,10 @@ export class S3QueuePlugin extends CoordinatorPlugin<S3QueuePluginOptions> {
       return await plugin.getStats();
     };
 
+    resource.countQueue = async function(status: QueueMessageStatusQuery = 'pending'): Promise<number> {
+      return await plugin.countQueue(status);
+    };
+
     resource.startProcessing = async function(handler: MessageHandler, options: ProcessingOptions = {}): Promise<void> {
       return await plugin.startProcessing(handler, options);
     };
@@ -598,6 +645,257 @@ export class S3QueuePlugin extends CoordinatorPlugin<S3QueuePluginOptions> {
     resource.clearQueueCache = function(): void {
       plugin.clearProcessedCache();
     };
+
+    resource.truncateQueue = async function(options: QueuePurgeOptions = {}): Promise<QueuePurgeResult> {
+      return await plugin.truncateQueue(options);
+    };
+
+    resource.deleteQueue = async function(options: QueueDeleteOptions = {}): Promise<QueueDeleteResult> {
+      return await plugin.deleteQueue(options);
+    };
+  }
+
+  async truncateQueue({ includeDeadLetter = false }: QueuePurgeOptions = {}): Promise<QueuePurgeResult> {
+    const queueDeleted = await this._truncateResource(this.queueResource, this.queueResourceName);
+    const deadLetterDeleted = includeDeadLetter
+      ? await this._truncateResource(this.deadLetterResourceObj, this.deadLetterResourceName || 'dead-letter')
+      : 0;
+
+    return {
+      queueDeleted,
+      deadLetterDeleted
+    };
+  }
+
+  async deleteQueue({
+    includeDeadLetter = true,
+    stopProcessing = true,
+    clearTickets = true
+  }: QueueDeleteOptions = {}): Promise<QueueDeleteResult> {
+    if (stopProcessing && this.isRunning) {
+      await this.stopProcessing();
+    }
+
+    const [baseResult, removedTickets] = await Promise.all([
+      this.truncateQueue({ includeDeadLetter }),
+      clearTickets ? this._clearAllTickets() : Promise.resolve(0)
+    ]);
+
+    const [queueResourceDeleted, deadLetterResourceDeleted] = await Promise.all([
+      this._deletePhysicalQueueResource({
+        name: this.queueResourceName,
+        aliases: [this.queueResourceAlias]
+      }),
+      includeDeadLetter
+        ? this._deletePhysicalQueueResource({
+          name: this.deadLetterResourceName,
+          aliases: this.deadLetterResourceAlias ? [this.deadLetterResourceAlias] : []
+        })
+        : Promise.resolve(false)
+    ]);
+
+    this.clearProcessedCache();
+    this.messageLocks.clear();
+
+    this.queueResource = null;
+    if (includeDeadLetter) {
+      this.deadLetterResourceObj = null;
+      this.deadLetterResourceName = null;
+    }
+
+    return {
+      ...baseResult,
+      removedTickets,
+      queueResourceDeleted,
+      deadLetterResourceDeleted
+    };
+  }
+
+  private async _deletePhysicalQueueResource({
+    name,
+    aliases
+  }: {
+    name: string | null;
+    aliases: string[];
+  }): Promise<boolean> {
+    if (!this.database || !name) {
+      return false;
+    }
+
+    const candidates = Array.from(new Set([name, ...aliases].filter((entry): entry is string => !!entry)));
+
+    let deletedInStore = false;
+    const db = this.database as Database & { deleteResource?: (name: string) => Promise<void> };
+
+    if (typeof db.deleteResource === 'function') {
+      for (const candidate of candidates) {
+        const [ok, err] = await tryFn(() => db.deleteResource!(candidate));
+        if (ok) {
+          deletedInStore = true;
+          continue;
+        }
+
+        if (err && (err as { code?: string }).code !== 'NoSuchKey' && (err as { code?: string }).code !== 'NotFound') {
+          this.logger.warn(
+            { resourceName: candidate, error: (err as Error).message || err },
+            `Failed to delete queue resource '${candidate}' from database`
+          );
+        }
+      }
+    }
+
+    let deletedFromMemory = false;
+    for (const candidate of candidates) {
+      if ((this.database._resourcesMap as Record<string, unknown>)[candidate]) {
+        delete (this.database._resourcesMap as Record<string, unknown>)[candidate];
+        deletedFromMemory = true;
+      }
+      if ((this.database.resources as Record<string, unknown>)[candidate]) {
+        delete (this.database.resources as Record<string, unknown>)[candidate];
+        deletedFromMemory = true;
+      }
+    }
+
+    return deletedInStore || deletedFromMemory;
+  }
+
+  private async _clearAllTickets(): Promise<number> {
+    const storage = this.getStorage() as unknown as PluginStorage;
+    const prefix = 'tickets/';
+
+    const [okTickets, errTickets, tickets] = await tryFn(() => storage.listWithPrefix(prefix));
+    if (!okTickets || !tickets || tickets.length === 0) {
+      if (!okTickets && errTickets && (errTickets as { code?: string }).code !== 'NoSuchKey' && (errTickets as { code?: string }).code !== 'NotFound') {
+        this.logger.warn(
+          { error: (errTickets as Error).message || errTickets },
+          `Failed to list queue tickets: ${(errTickets as Error).message || errTickets}`
+        );
+      }
+      return 0;
+    }
+
+    let removed = 0;
+    for (const ticket of tickets) {
+      const ticketData = asTicketData(ticket);
+      if (!ticketData?.ticketId) {
+        continue;
+      }
+
+      const key = storage.getPluginKey(null, 'tickets', ticketData.ticketId);
+      const [okDelete, errDelete] = await tryFn(() => storage.delete(key));
+      if (okDelete) {
+        removed++;
+      } else if (errDelete && (errDelete as { code?: string }).code !== 'NoSuchKey' && (errDelete as { code?: string }).code !== 'NotFound') {
+        this.logger.warn(
+          { ticketId: ticketData.ticketId, error: (errDelete as Error).message || errDelete },
+          `Failed to delete queue ticket: ${(errDelete as Error).message || errDelete}`
+        );
+      }
+    }
+
+    return removed;
+  }
+
+  private async _truncateResource(resource: Resource | null, label: string): Promise<number> {
+    if (!resource) return 0;
+
+    let total = 0;
+    const batchSize = Math.max(1, this.config.pollBatchSize * 2);
+    const hasDeleteMany = typeof (resource.deleteMany as unknown) === 'function';
+
+    while (true) {
+      const [ok, err, rows] = await tryFn(() =>
+        resource!.query({}, { limit: batchSize })
+      );
+
+      if (!ok) {
+        this.logger.warn(
+          { resourceName: label, error: (err as Error).message || err },
+          `Failed to list queue entries for truncation: ${(err as Error).message || err}`
+        );
+        return total;
+      }
+
+      if (!rows || rows.length === 0) {
+        return total;
+      }
+
+      const ids = rows
+        .map((row) => row.id)
+        .filter((id): id is string => typeof id === 'string' && id.length > 0);
+
+      if (ids.length === 0) {
+        return total;
+      }
+
+      let deletedThisBatch = 0;
+
+      if (hasDeleteMany) {
+        const [okDelete, errDelete, result] = await tryFn(() =>
+          (resource as unknown as { deleteMany: (ids: string[]) => Promise<{ deleted: number; errors: number }> }).deleteMany(ids)
+        );
+
+        if (okDelete) {
+          if (typeof result?.deleted === 'number') {
+            deletedThisBatch = result.deleted;
+            total += deletedThisBatch;
+          } else {
+            deletedThisBatch = ids.length;
+            total += deletedThisBatch;
+          }
+        } else {
+          deletedThisBatch = await this._deleteResourceEntriesByIds(resource, ids);
+          total += deletedThisBatch;
+
+          if (errDelete && (errDelete as { code?: string }).code !== 'NoSuchKey' && (errDelete as { code?: string }).code !== 'NotFound') {
+            this.logger.warn(
+              { resourceName: label, error: (errDelete as Error).message || errDelete },
+              `deleteMany failed during truncation for '${label}'; fallback per-id deletion used`
+            );
+          }
+        }
+      } else {
+        deletedThisBatch = await this._deleteResourceEntriesByIds(resource, ids);
+        total += deletedThisBatch;
+      }
+
+      await this._clearProcessedMarkers(ids);
+
+      if (deletedThisBatch === 0) {
+        this.logger.warn(
+          { resourceName: label },
+          `No entries were deleted during truncation batch for '${label}'; stopping to avoid infinite loop`
+        );
+        return total;
+      }
+
+      if (rows.length < batchSize) {
+        return total;
+      }
+    }
+  }
+
+  private async _deleteResourceEntriesByIds(resource: Resource, ids: string[]): Promise<number> {
+    let deleted = 0;
+    for (const id of ids) {
+      const [okDelete, errDelete] = await tryFn(() => resource.delete(id));
+      if (!okDelete) {
+        if (errDelete && (errDelete as { code?: string }).code !== 'NoSuchKey' && (errDelete as { code?: string }).code !== 'NotFound') {
+          this.logger.warn(
+            { resourceName: resource.name, id, error: (errDelete as Error).message || errDelete },
+            `Failed to delete queue entry '${id}' during truncation`
+          );
+        }
+        continue;
+      }
+
+      deleted++;
+    }
+    return deleted;
+  }
+
+  private async _clearProcessedMarkers(ids: string[]): Promise<void> {
+    await Promise.all(ids.map((id) => this._clearProcessedMarker(id)));
   }
 
   async _publishTickets(): Promise<number> {
@@ -1144,25 +1442,37 @@ export class S3QueuePlugin extends CoordinatorPlugin<S3QueuePluginOptions> {
 
   async processMessage(message: ClaimedMessage, handler: MessageHandler): Promise<void> {
     const startTime = Date.now();
+    await this._sleepWithJitter(this.config.consumerJitterMs, this.config.visibilityTimeout - 1);
 
-    const context: MessageContext = {
-      queueId: message.queueId,
-      attempts: message.attempts,
-      workerId: this.workerId,
-      lockToken: message.lockToken,
-      visibleUntil: message.visibleUntil,
-      renewLock: async (extraMilliseconds?: number) => {
-        return await this.renewLock(message.queueId, message.lockToken, extraMilliseconds);
+    let settled = false;
+
+    const markFailure = async (error: Error): Promise<string> => {
+      if (settled) {
+        return 'failed';
       }
+
+      settled = true;
+      const finalStatus = await this._handleProcessingFailure(message, error);
+      this._emitOutcome(finalStatus, message, {
+        error: error.message
+      });
+
+      if (this.config.onError) {
+        await this.config.onError(error, message.record);
+      }
+
+      return finalStatus;
     };
 
-    try {
-      const result = await handler(message.record, context);
+    const markCompleted = async (result: unknown): Promise<void> => {
+      if (settled) {
+        return;
+      }
 
+      settled = true;
       await this.completeMessage(message, result);
 
       const duration = Date.now() - startTime;
-
       const eventPayload = {
         queueId: message.queueId,
         originalId: message.record.id,
@@ -1177,17 +1487,47 @@ export class S3QueuePlugin extends CoordinatorPlugin<S3QueuePluginOptions> {
       if (this.config.onComplete) {
         await this.config.onComplete(message.record, result);
       }
+    };
 
-    } catch (error) {
-      const finalStatus = await this._handleProcessingFailure(message, error as Error);
-
-      this._emitOutcome(finalStatus, message, {
-        error: (error as Error)?.message
-      });
-
-      if (this.config.onError) {
-        await this.config.onError(error as Error, message.record);
+    const context: MessageContext = {
+      queueId: message.queueId,
+      attempts: message.attempts,
+      workerId: this.workerId,
+      lockToken: message.lockToken,
+      visibleUntil: message.visibleUntil,
+      renewLock: async (extraMilliseconds?: number) => {
+        return await this.renewLock(message.queueId, message.lockToken, extraMilliseconds);
+      },
+      ack: async (result?: unknown) => {
+        await markCompleted(result);
+      },
+      nack: async (error?: Error | string) => {
+        await markFailure(
+          error instanceof Error ? error : new Error(error || 'Message processing rejected by handler')
+        );
       }
+    };
+
+    try {
+      const result = await handler(message.record, context);
+      if (this.config.autoAcknowledge) {
+        await markCompleted(result);
+      } else if (!settled) {
+        await markFailure(new QueueError('Message not acknowledged', {
+          pluginName: 'S3QueuePlugin',
+          operation: 'onMessage',
+          queueName: this.config.resource,
+          statusCode: 409,
+          retriable: true,
+          suggestion: 'Call context.ack() when autoAcknowledge=false, or enable autoAcknowledge in plugin options.'
+        }));
+      }
+    } catch (error) {
+      if (settled) {
+        return;
+      }
+
+      await markFailure(error as Error);
     }
   }
 
@@ -1215,15 +1555,33 @@ export class S3QueuePlugin extends CoordinatorPlugin<S3QueuePluginOptions> {
 
   async retryMessage(message: ClaimedMessage, attempts: number, error: string): Promise<void> {
     const backoff = Math.min(Math.pow(2, attempts) * 1000, 30000);
+    const jitter = this._nextJitterDelay(this.config.retryJitterMs);
 
     await this._updateQueueEntryWithLock(message, {
       status: 'pending',
-      visibleAt: Date.now() + backoff,
+      visibleAt: Date.now() + backoff + jitter,
       claimedBy: null,
       claimedAt: null,
       lockToken: null,
       error
     }, { clearProcessedMarker: true });
+  }
+
+  private _nextJitterDelay(maxDelayMs: number): number {
+    const maxDelay = Math.max(0, Math.floor(maxDelayMs));
+    if (!Number.isFinite(maxDelay) || maxDelay <= 0) {
+      return 0;
+    }
+    return Math.floor(Math.random() * (maxDelay + 1));
+  }
+
+  private async _sleepWithJitter(maxDelayMs: number, capMs?: number): Promise<void> {
+    const resolvedCap = Math.max(0, capMs ?? maxDelayMs);
+    const delay = Math.min(this._nextJitterDelay(maxDelayMs), resolvedCap);
+    if (delay <= 0) {
+      return;
+    }
+    await this._sleep(delay);
   }
 
   async moveToDeadLetter(message: ClaimedMessage, error: string): Promise<void> {
@@ -1253,6 +1611,17 @@ export class S3QueuePlugin extends CoordinatorPlugin<S3QueuePluginOptions> {
   }
 
   async getStats(): Promise<QueueStats> {
+    if (!this.queueResource) {
+      return {
+        total: 0,
+        pending: 0,
+        processing: 0,
+        completed: 0,
+        failed: 0,
+        dead: 0
+      };
+    }
+
     const statusKeys: Array<'pending' | 'processing' | 'completed' | 'failed' | 'dead'> = ['pending', 'processing', 'completed', 'failed', 'dead'];
     const stats: QueueStats = {
       total: 0,
@@ -1294,6 +1663,27 @@ export class S3QueuePlugin extends CoordinatorPlugin<S3QueuePluginOptions> {
     }
 
     return stats;
+  }
+
+  async countQueue(status: QueueMessageStatusQuery = 'pending'): Promise<number> {
+    if (!this.queueResource) {
+      return 0;
+    }
+
+    const filter = status === 'all' ? undefined : { status };
+    const [ok, err, count] = await tryFn(() =>
+      this.queueResource!.count(filter || {})
+    );
+
+    if (!ok) {
+      this.logger.warn(
+        { status, error: (err as Error).message },
+        `Failed to count queue messages with status ${status}: ${(err as Error).message}`
+      );
+      return 0;
+    }
+
+    return (count as number) || 0;
   }
 
   async createDeadLetterResource(): Promise<void> {

@@ -86,10 +86,10 @@ S3Queue creates three S3DB resources for each queue:
     │
     ├─► Execute handler: onMessage(task, context)
     │
-    └─► Result:
-        ├─► Success → Mark completed
-        ├─► Error → Retry or dead letter
-        └─► Timeout → Becomes visible again
+    ├─► If `autoAcknowledge` is enabled (disabled by default), success result marks completion.
+    ├─► If disabled, handler must call `context.ack()`/`context.nack()`.
+    ├─► Error/rejection or `context.nack()` → Retry or dead letter
+    └─► Missing ack/nack while autoAcknowledge is false → treated as failure
 
 7️⃣  COMPLETE
     │
@@ -251,6 +251,18 @@ const stats = await tasks.queueStats();
 console.log(stats);
 ```
 
+#### `resource.countQueue(status?)`
+
+Count messages in the queue with optional status filter.
+
+```javascript
+const pending = await tasks.countQueue();           // default: 'pending'
+const total = await tasks.countQueue('all');
+const dead = await tasks.countQueue('dead');
+```
+
+Status options: `'pending' | 'processing' | 'completed' | 'failed' | 'dead' | 'all'`.
+
 #### `resource.startProcessing(handler, options?)`
 
 Start processing with a custom handler.
@@ -290,6 +302,50 @@ Clear the local in-memory deduplication cache (useful during debugging or when t
 await tasks.clearQueueCache();
 ```
 
+#### `resource.truncateQueue(options?)`
+
+Remove all current queue entries (`pending`, `processing`, `completed`, `failed`, `dead`), without stopping workers.
+
+```javascript
+const result = await tasks.truncateQueue({ includeDeadLetter: true });
+console.log(result);
+// { queueDeleted: 2, deadLetterDeleted: 1 }
+```
+
+Options:
+
+- `includeDeadLetter?: boolean` (default: `false`)  
+  also clear the dead-letter resource configured for this queue plugin.
+
+#### `resource.deleteQueue(options?)`
+
+Perform a full queue cleanup: stop processing, truncate selected queue tables, clear active dispatch tickets, and unregister the internal queue resources.
+
+```javascript
+const result = await tasks.deleteQueue();
+console.log(result);
+// { queueDeleted: 2, deadLetterDeleted: 1, removedTickets: 3 }
+// or when resource deletion succeeds:
+// { queueDeleted: 2, deadLetterDeleted: 1, removedTickets: 3, queueResourceDeleted: true, deadLetterResourceDeleted: true }
+```
+
+Options:
+
+- `includeDeadLetter?: boolean` (default: `true`)  
+  also clear the dead-letter resource.
+- `stopProcessing?: boolean` (default: `true`)  
+  stop workers before cleanup.
+- `clearTickets?: boolean` (default: `true`)  
+  remove pending dispatch tickets stored in plugin cache storage.
+
+Return data:
+
+- `queueDeleted`: number of queue entries removed.
+- `deadLetterDeleted`: number of dead-letter entries removed.
+- `removedTickets`: number of dispatch tickets cleared.
+- `queueResourceDeleted`: whether the queue resource was removed from database registry.
+- `deadLetterResourceDeleted`: whether the dead-letter resource was removed from database registry.
+
 ### Handler Context
 
 The `onMessage` handler receives a context object:
@@ -298,10 +354,15 @@ The `onMessage` handler receives a context object:
 onMessage: async (record, context) => {
   console.log(context);
   // {
+  //   queueId: 'queue-entry-id',
   //   workerId: 'worker-abc123',
   //   attempts: 1,
   //   maxAttempts: 3,
-  //   queueId: 'queue-entry-id'
+  //   lockToken: 'lock-token',
+  //   visibleUntil: 1710000000000,
+  //   renewLock: async (extraMilliseconds) => true,
+  //   ack: async (result) => {},
+  //   nack: async (error) => {}
   // }
 }
 ```
@@ -408,4 +469,3 @@ function updateDashboard() {
 ```
 
 ---
-
