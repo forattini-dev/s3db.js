@@ -8,6 +8,7 @@ import { filterProtectedFields } from '../utils/response-formatter.js';
 import { guardMiddleware } from '../utils/guards.js';
 import type { GuardsConfig } from '../utils/guards.js';
 import { generateRecordETag, validateIfMatch, validateIfNoneMatch } from '../utils/etag.js';
+import { ValidationError } from '../../../errors.js';
 
 const logger: Logger = createLogger({ name: 'ResourceRoutes', level: 'info' });
 
@@ -44,7 +45,7 @@ export interface ResourceLike {
   insert(data: Record<string, unknown>, options?: { user?: unknown; request?: unknown }): Promise<Record<string, unknown>>;
   update(id: string, data: Record<string, unknown>, options?: { user?: unknown; request?: unknown }): Promise<Record<string, unknown>>;
   delete(id: string): Promise<void>;
-  count(): Promise<number>;
+  count(options?: { partition?: string | null; partitionValues?: Record<string, unknown> }): Promise<number>;
 }
 
 export interface DatabaseLike {
@@ -100,6 +101,34 @@ function parsePopulateValues(raw: unknown): string[] {
     .flatMap(value => String(value).split(','))
     .map(value => value.trim())
     .filter(Boolean);
+}
+
+function parsePartitionValues(raw: unknown): Record<string, unknown> | undefined {
+  if (raw === undefined || raw === null) return undefined;
+
+  const value = typeof raw === 'string'
+    ? (() => {
+      try {
+        return JSON.parse(raw);
+      } catch {
+        throw new ValidationError('Invalid partitionValues parameter', {
+          field: 'partitionValues',
+          statusCode: 400,
+          suggestion: 'Pass partitionValues as a JSON object, e.g. {"country":"BR"}'
+        });
+      }
+    })()
+    : raw;
+
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw new ValidationError('Invalid partitionValues parameter', {
+      field: 'partitionValues',
+      statusCode: 400,
+      suggestion: 'partitionValues must be an object'
+    });
+  }
+
+  return value as Record<string, unknown>;
 }
 
 function addPopulatePath(tree: IncludesTree, parts: string[]): void {
@@ -306,9 +335,7 @@ export function createResourceRoutes(resource: ResourceLike, version: string, co
       const limit = parseInt(query.limit || '100') || 100;
       const offset = parseInt(query.offset || '0') || 0;
       const partition = query.partition;
-      const partitionValues = query.partitionValues
-        ? JSON.parse(query.partitionValues)
-        : undefined;
+      const partitionValues = parsePartitionValues(query.partitionValues);
 
       const populateValues = parsePopulateValues(query.populate);
       let populateIncludes: Record<string, unknown> | null = null;
@@ -345,8 +372,17 @@ export function createResourceRoutes(resource: ResourceLike, version: string, co
 
       if (guardPartitionFilters.length > 0 && guardPartitionFilters[0]) {
         const { partitionName, partitionFields } = guardPartitionFilters[0];
-        items = await resource.listPartition({ partition: partitionName, partitionValues: partitionFields, limit, offset });
-        total = items.length;
+        const partitionValuesFromGuard = parsePartitionValues(partitionFields);
+        items = await resource.listPartition({
+          partition: partitionName,
+          partitionValues: partitionValuesFromGuard,
+          limit,
+          offset
+        });
+        total = await resource.count({
+          partition: partitionName,
+          partitionValues: partitionValuesFromGuard
+        });
       } else if (Object.keys(filters).length > 0) {
         items = await resource.query(filters, { limit, offset });
         total = items.length;
@@ -357,10 +393,13 @@ export function createResourceRoutes(resource: ResourceLike, version: string, co
           limit,
           offset
         });
-        total = items.length;
+        total = await resource.count({
+          partition,
+          partitionValues
+        });
       } else {
         items = await resource.list({ limit, offset });
-        total = items.length;
+        total = await resource.count();
       }
 
       if (populateIncludes && relationsPlugin && items && items.length > 0) {
@@ -412,9 +451,7 @@ export function createResourceRoutes(resource: ResourceLike, version: string, co
       const id = c.req.param('id');
       const query = c.req.query();
       const partition = query.partition;
-      const partitionValues = query.partitionValues
-        ? JSON.parse(query.partitionValues)
-        : undefined;
+      const partitionValues = parsePartitionValues(query.partitionValues);
       const populateValues = parsePopulateValues(query.populate);
       let populateIncludes: Record<string, unknown> | null = null;
 

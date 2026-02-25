@@ -770,7 +770,6 @@ export class ResourcePersistence {
     const { id: validatedId, ...validatedAttributes } = data;
     const oldData = { ...originalData, id };
     const newData = { ...validatedAttributes, id };
-    await this.resource.handlePartitionReferenceUpdates(oldData, newData);
 
     const mappedData = await this.schema.mapper(validatedAttributes);
     mappedData._v = String(this.version);
