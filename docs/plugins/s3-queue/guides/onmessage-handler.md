@@ -34,12 +34,39 @@ onMessage: async (message, context) => {
 
 ```javascript
 {
-  workerId: 'worker-1',        // Which worker is processing
-  attempt: 1,                   // Current attempt number (1, 2, 3...)
-  queuedAt: '2024-01-15T...',  // When message was enqueued
-  claimedAt: '2024-01-15T...', // When message was claimed
-  metadata: {...}               // Original S3DB metadata
+  queueId: 'queue-entry-id',      // Internal queue entry id
+  attempts: 1,                    // Current attempt number (1, 2, 3...)
+  workerId: 'worker-1',           // Which worker is processing
+  lockToken: 'lock-token',        // Current lock token (for advanced flows)
+  visibleUntil: 1710000000000,    // Visibility timeout deadline (ms epoch)
+  renewLock: async (extraMs?: number) => true // Extend visibility while processing
 }
+```
+
+### Auto acknowledgment mode
+
+`S3QueuePlugin` supports two acknowledgement modes:
+
+- `autoAcknowledge: true` (default: `false`) → plugin marks the message completed automatically after `onMessage` resolves.
+- `autoAcknowledge: false` → your handler must call one of:
+  - `context.ack(result?)` to complete.
+  - `context.nack(error?)` to fail/retry according to failure strategy.
+
+If `autoAcknowledge` is disabled and neither method is called, the plugin treats it as a processing failure.
+
+```javascript
+const queue = new S3QueuePlugin({
+  resource: 'orders',
+  autoAcknowledge: false,
+  onMessage: async (order, context) => {
+    try {
+      await processOrder(order);
+      await context.ack({ status: 'done', orderId: order.id });
+    } catch (error) {
+      await context.nack(error);
+    }
+  }
+});
 ```
 
 ### Examples: Different Message Processing Scenarios
@@ -83,7 +110,7 @@ import { S3Client, PutObjectCommand } from '@aws-sdk/client-s3';
 const imageQueue = new S3QueuePlugin({
   resource: 'images',
   onMessage: async (image, context) => {
-    console.log(`Processing image ${image.filename} (attempt ${context.attempt})`);
+    console.log(`Processing image ${image.filename} (attempt ${context.attempts})`);
 
     // Download original image
     const buffer = await downloadImage(image.url);
@@ -235,7 +262,7 @@ const orderQueue = new S3QueuePlugin({
   concurrency: 10,
 
   onMessage: async (order, context) => {
-    console.log(`Processing order ${order.id} (attempt ${context.attempt})`);
+    console.log(`Processing order ${order.id} (attempt ${context.attempts})`);
 
     // Step 1: Validate inventory
     const inventory = await checkInventory(order.items);
@@ -323,7 +350,9 @@ const orderQueue = new S3QueuePlugin({
 
 The `onMessage` function can return:
 
-1. **Nothing (undefined)**: Message is marked as completed
+1. **Nothing (undefined)**:
+   - with `autoAcknowledge: true` → message is marked as completed
+   - with `autoAcknowledge: false` → message stays pending unless `context.ack()` is called
 
 ```javascript
 onMessage: async (msg) => {
@@ -400,7 +429,7 @@ onMessage: async (msg, context) => {
     return { success: true };
   } catch (error) {
     // Log the error
-    console.error(`Failed on attempt ${context.attempt}:`, error);
+    console.error(`Failed on attempt ${context.attempts}:`, error);
 
     // Re-throw to trigger retry
     throw error;
@@ -408,17 +437,17 @@ onMessage: async (msg, context) => {
 }
 ```
 
-**Tip:** Use `context.attempt` to implement custom retry logic:
+**Tip:** Use `context.attempts` to implement custom retry logic:
 
 ```javascript
 onMessage: async (msg, context) => {
   // Use different strategy on later attempts
-  const timeout = context.attempt === 1 ? 5000 : 30000;
+  const timeout = context.attempts === 1 ? 5000 : 30000;
 
   try {
     return await processWithTimeout(msg, timeout);
   } catch (error) {
-    if (error.code === 'RATE_LIMIT' && context.attempt < 3) {
+    if (error.code === 'RATE_LIMIT' && context.attempts < 3) {
       // Wait longer for rate limit errors
       await sleep(10000);
       throw error; // Retry

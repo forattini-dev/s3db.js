@@ -1105,6 +1105,9 @@ A: Messages become visible again after visibility timeout and get reprocessed.
 **Q: Can I manually retry failed messages?**
 A: Yes! Query the dead letter queue and re-enqueue messages.
 
+**Q: What is the difference between `truncateQueue()` and `deleteQueue()`?**
+A: `truncateQueue()` only removes queue/dead-letter entries. `deleteQueue()` also clears active tickets, stops workers (by default), and unregisters the internal queue resources so subsequent operations start from a fresh state.
+
 **Q: Does it preserve message order?**
 A: No. Messages are processed in parallel. Use `concurrency: 1` for sequential processing.
 

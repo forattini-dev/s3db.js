@@ -12,6 +12,9 @@ new S3QueuePlugin({
     // Your processing logic
     return result;
   },
+  consumerJitterMs: 200,          // Random delay 0..200ms before each handler call
+  retryJitterMs: 400,             // Extra random backoff on retry visibility calculation
+  autoAcknowledge: false,         // Complete automatically after handler returns successfully
 
   // === Concurrency ===
   concurrency: 3,                 // Number of parallel workers
@@ -48,6 +51,9 @@ Key tuning knobs:
 - `recoveryInterval` – controls how often the plugin scans for stalled messages.
 - `recoveryBatchSize` – limits how many stalled entries are recovered per sweep.
 - `processedCacheTTL` – how long dedup markers live across workers.
+- `consumerJitterMs` – random delay before processing each claimed message (in ms).
+- `retryJitterMs` – extra jitter added when a message is retried (in ms).
+- `autoAcknowledge` – when `true`, message is completed automatically after `onMessage` resolves; default is `false` and requires `context.ack()`/`context.nack()`.
 
 > 🧭 Custom names are respected. If you pass `queueResource: 'tasks_queue'` or `deadLetterResource: 'dead_tasks'`, the plugin keeps those aliases available under `database.resources` while still provisioning the namespaced `plg_*` helpers it uses internally. To opt into namespacing for overrides, prefix them with `plg_...`.
 
@@ -391,4 +397,3 @@ const exportQueue = new S3QueuePlugin({
 
 await db.usePlugin(exportQueue);
 ```
-

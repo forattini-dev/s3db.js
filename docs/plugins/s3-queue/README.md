@@ -346,6 +346,30 @@ await tasks.enqueue({
 - **Scale to multiple pods**: [Performance & Scalability Guide](./guides/performance-scalability.md)
 - **Troubleshoot issues**: [Patterns & Best Practices Guide](./guides/patterns-best-practices.md)
 
+### Queue Cleanup / Deletion
+
+To reset only pending data, use `truncateQueue()`.
+
+```javascript
+const result = await tasks.truncateQueue({
+  includeDeadLetter: true
+});
+
+console.log(result);
+// { queueDeleted: 10, deadLetterDeleted: 2 }
+```
+
+To fully delete queue resources (and optionally dead-letter data), use `deleteQueue()`.
+
+```javascript
+const result = await tasks.deleteQueue();
+
+console.log(result);
+// { queueDeleted: 10, deadLetterDeleted: 2, removedTickets: 5, queueResourceDeleted: true, deadLetterResourceDeleted: true }
+```
+
+The `deleteQueue` method clears runtime state and removes internal queue resources so the queue starts from a clean baseline.
+
 ---
 
 ## See Also

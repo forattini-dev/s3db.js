@@ -281,6 +281,184 @@ describe('S3QueuePlugin - Edge Cases', () => {
     });
   });
 
+  describe('Queue maintenance methods', () => {
+    test('should truncate queue and dead-letter entries', async () => {
+      const resource = await database.createResource({
+        name: 'tasks',
+        attributes: {
+          id: 'string|optional',
+          name: 'string|required'
+        }
+      });
+
+      const plugin = new S3QueuePlugin({
+        resource: 'tasks',
+        autoStart: false,
+        deadLetterResource: 'tasks_dead'
+      });
+
+      await plugin.install(database);
+
+      await resource.enqueue({ name: 'Task 1' });
+      await resource.enqueue({ name: 'Task 2' });
+
+      const queueResource = database.resources['tasks_queue'];
+      const deadLetterResource = database.resources['tasks_dead'];
+
+      await deadLetterResource.insert({
+        id: 'dl-1',
+        originalId: 'dl-origin',
+        queueId: 'queue-origin',
+        data: { name: 'dead' },
+        error: 'manual dead letter',
+        attempts: 1,
+        createdAt: new Date().toISOString()
+      });
+
+      const result = await (resource as unknown as {
+        truncateQueue: (options?: { includeDeadLetter?: boolean }) => Promise<{ queueDeleted: number; deadLetterDeleted: number }>;
+      }).truncateQueue({ includeDeadLetter: true });
+
+      expect(result.queueDeleted).toBeGreaterThanOrEqual(2);
+      expect(result.deadLetterDeleted).toBe(1);
+      expect((await queueResource.list()).length).toBe(0);
+      expect((await deadLetterResource.list()).length).toBe(0);
+    });
+
+    test('deleteQueue should stop workers and clear queue state', async () => {
+      const resource = await database.createResource({
+        name: 'tasks',
+        attributes: {
+          id: 'string|optional',
+          name: 'string|required'
+        }
+      });
+
+      const plugin = new S3QueuePlugin({
+        resource: 'tasks',
+        autoStart: false,
+        deadLetterResource: 'tasks_dead'
+      });
+
+      await plugin.install(database);
+      await plugin.startProcessing(async () => ({ done: true }));
+
+      await resource.enqueue({ name: 'Task 3' });
+      await resource.enqueue({ name: 'Task 4' });
+
+      const result = await (resource as unknown as {
+        deleteQueue: (options?: {
+          includeDeadLetter?: boolean;
+          stopProcessing?: boolean;
+          clearTickets?: boolean;
+        }) => Promise<{
+          queueDeleted: number;
+          deadLetterDeleted: number;
+          removedTickets: number;
+          queueResourceDeleted: boolean;
+          deadLetterResourceDeleted: boolean;
+        }>; 
+      }).deleteQueue();
+
+      expect(plugin.isRunning).toBe(false);
+      expect(result.removedTickets).toBeGreaterThanOrEqual(0);
+      expect(result.queueResourceDeleted).toBe(true);
+      expect(result.deadLetterResourceDeleted).toBe(true);
+      expect(database.resources['tasks_queue']).toBeUndefined();
+      expect(database.resources['tasks_dead']).toBeUndefined();
+      expect(database.resources[plugin.queueResourceName]).toBeUndefined();
+    });
+
+    test('deleteQueue can skip dead-letter cleanup and still remove queue resources', async () => {
+      const resource = await database.createResource({
+        name: 'tasks',
+        attributes: {
+          id: 'string|optional',
+          name: 'string|required'
+        }
+      });
+
+      const plugin = new S3QueuePlugin({
+        resource: 'tasks',
+        autoStart: false,
+        deadLetterResource: 'tasks_dead'
+      });
+
+      await plugin.install(database);
+      await resource.enqueue({ name: 'Task 5' });
+      await resource.enqueue({ name: 'Task 6' });
+
+      const queueResource = database.resources['tasks_queue'];
+      const deadLetterResource = database.resources['tasks_dead'];
+      await deadLetterResource.insert({
+        id: 'dl-2',
+        originalId: 'task-dead',
+        queueId: 'queue-origin',
+        data: { name: 'dead' },
+        error: 'manual dead letter',
+        attempts: 2,
+        createdAt: new Date().toISOString()
+      });
+
+      const result = await (resource as unknown as {
+        deleteQueue: (options?: {
+          includeDeadLetter?: boolean;
+          stopProcessing?: boolean;
+          clearTickets?: boolean;
+        }) => Promise<{
+          queueDeleted: number;
+          deadLetterDeleted: number;
+          removedTickets: number;
+          queueResourceDeleted: boolean;
+          deadLetterResourceDeleted: boolean;
+        }>;
+      }).deleteQueue({ includeDeadLetter: false, clearTickets: false });
+
+      expect(result.deadLetterDeleted).toBe(0);
+      expect(result.queueResourceDeleted).toBe(true);
+      expect(result.deadLetterResourceDeleted).toBe(false);
+      expect((await queueResource.list()).length).toBe(0);
+      expect((await database.resources['tasks_dead'].list()).length).toBe(1);
+      expect(database.resources[plugin.queueResourceName]).toBeUndefined();
+      expect(database.resources['tasks_dead']).toBeDefined();
+    });
+
+    test('truncateQueue remains safe even when resources are missing', async () => {
+      const resource = await database.createResource({
+        name: 'tasks',
+        attributes: {
+          id: 'string|optional',
+          name: 'string|required'
+        }
+      });
+
+      const plugin = new S3QueuePlugin({
+        resource: 'tasks',
+        autoStart: false
+      });
+
+      await plugin.install(database);
+
+      const queueResource = database.resources['tasks_queue'];
+      delete database.resources[plugin.queueResourceName];
+
+      const result = await (resource as unknown as {
+        truncateQueue: (options?: { includeDeadLetter?: boolean }) => Promise<{ queueDeleted: number; deadLetterDeleted: number }>;
+        deleteQueue: (options?: { includeDeadLetter?: boolean }) => Promise<{ queueResourceDeleted: boolean; deadLetterResourceDeleted: boolean }>;
+      }).truncateQueue({ includeDeadLetter: true });
+
+      expect(result.queueDeleted).toBe(0);
+      expect(result.deadLetterDeleted).toBe(0);
+      expect(queueResource).toBeDefined();
+
+      const deleteResult = await (resource as unknown as {
+        deleteQueue: (options?: { includeDeadLetter?: boolean }) => Promise<{ queueResourceDeleted: boolean; deadLetterResourceDeleted: boolean }>;
+      }).deleteQueue({ includeDeadLetter: true });
+
+      expect(deleteResult.queueResourceDeleted).toBe(true);
+    });
+  });
+
   describe('Processed cache edge cases', () => {
     test('does not drop valid dedup marker during cleanup', async () => {
       const resource = await database.createResource({
