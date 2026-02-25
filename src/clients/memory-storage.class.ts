@@ -472,9 +472,12 @@ export class MemoryStorage {
     const commonPrefixes = new Set<string>();
     let processed = 0;
     let lastKeyInPage: string | null = null;
+    let hasMoreKeys = false;
 
-    for (const key of filteredKeys) {
+    for (let index = 0; index < filteredKeys.length; index++) {
+      const key = filteredKeys[index]!;
       if (processed >= maxKeys) {
+        hasMoreKeys = true;
         break;
       }
 
@@ -482,6 +485,8 @@ export class MemoryStorage {
       if (prefixEntry) {
         if (!commonPrefixes.has(prefixEntry)) {
           commonPrefixes.add(prefixEntry);
+          processed++;
+          lastKeyInPage = key;
         }
         continue;
       }
@@ -498,7 +503,6 @@ export class MemoryStorage {
       lastKeyInPage = key;
     }
 
-    const hasMoreKeys = filteredKeys.length > contents.length;
     const nextContinuationToken = hasMoreKeys && lastKeyInPage
       ? this._encodeContinuationToken(lastKeyInPage)
       : null;
@@ -573,6 +577,11 @@ export class MemoryStorage {
     }
 
     this._trackMemory(totalBytes);
+    if (this.currentMemoryBytes > this.maxMemoryBytes) {
+      this._evictIfNeeded(0);
+    }
+
+    this._stats.peakMemoryBytes = this.currentMemoryBytes;
 
     this.logger.debug({ objectCount: this.objects.size }, `Restored snapshot with ${this.objects.size} objects`);
   }
@@ -726,6 +735,11 @@ export class MemoryStorage {
   clear(): void {
     this.objects.clear();
     this.currentMemoryBytes = 0;
+    this._stats = {
+      evictions: 0,
+      evictedBytes: 0,
+      peakMemoryBytes: 0
+    };
     this.logger.debug('Cleared all objects');
   }
 

@@ -592,8 +592,13 @@ export class MemoryClient extends EventEmitter {
     return this.storage.getStats();
   }
 
-  destroy(): void {
-    // MemoryClient doesn't have cleanup, but interface requires it
+  async destroy(): Promise<void> {
+    const taskManager = this.taskManager as { destroy?: () => Promise<void> | void };
+    if (typeof taskManager.destroy === 'function') {
+      await taskManager.destroy();
+    }
+
+    this.removeAllListeners();
   }
 
   private _encodeMetadata(metadata?: Record<string, unknown>): Record<string, string> | undefined {
@@ -693,7 +698,7 @@ export class MemoryClient extends EventEmitter {
       NextContinuationToken: response.NextContinuationToken,
       KeyCount: contents.length,
       MaxKeys: response.MaxKeys,
-      Prefix: this.keyPrefix ? undefined : response.Prefix,
+      Prefix: response.Prefix ? this._stripKeyPrefix(response.Prefix) : undefined,
       Delimiter: response.Delimiter,
       StartAfter: response.StartAfter
     };
