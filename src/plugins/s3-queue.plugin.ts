@@ -13,12 +13,6 @@ interface Logger {
   debug(obj: unknown, msg?: string): void;
 }
 
-interface Database {
-  createResource(config: ResourceConfig): Promise<Resource>;
-  deleteResource?: (name: string) => Promise<void>;
-  resources: Record<string, Resource>;
-}
-
 interface Resource {
   name: string;
   get(id: string): Promise<QueueEntry>;
@@ -725,7 +719,9 @@ export class S3QueuePlugin extends CoordinatorPlugin<S3QueuePluginOptions> {
     const candidates = Array.from(new Set([name, ...aliases].filter((entry): entry is string => !!entry)));
 
     let deletedInStore = false;
-    const db = this.database as Database & { deleteResource?: (name: string) => Promise<void> };
+    const db = this.database as unknown as {
+      deleteResource?: (name: string) => Promise<void>;
+    };
 
     if (typeof db.deleteResource === 'function') {
       for (const candidate of candidates) {
