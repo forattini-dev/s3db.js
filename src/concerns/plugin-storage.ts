@@ -1,4 +1,4 @@
-import { metadataEncode, metadataDecode } from './metadata-encoding.js';
+import { metadataEncode } from './metadata-encoding.js';
 import { calculateEffectiveLimit, calculateUTF8Bytes } from './calculator.js';
 import { tryFn } from './try-fn.js';
 import { idGenerator } from './id.js';
@@ -12,11 +12,19 @@ const S3_METADATA_LIMIT = 2047;
 const SEQUENCE_GATES = new Map<string, Promise<void>>();
 
 function isMissingObjectError(error: unknown): boolean {
-  const candidate = error as { name?: string; code?: string; statusCode?: number; $metadata?: { httpStatusCode?: number } };
-  const errorCode = candidate?.name || candidate?.code;
+  const candidate = error as {
+    name?: string;
+    code?: string;
+    Code?: string;
+    statusCode?: number;
+    $metadata?: { httpStatusCode?: number };
+  };
+  const errorCode = candidate?.name || candidate?.code || candidate?.Code;
   const statusCode = candidate?.statusCode || candidate?.$metadata?.httpStatusCode;
   return errorCode === 'NoSuchKey' || errorCode === 'NotFound' || statusCode === 404;
 }
+
+type ObjectParseMode = 'throw' | 'null';
 
 async function withSequenceGate<T>(lockKey: string, task: () => Promise<T>): Promise<T> {
   const previous = SEQUENCE_GATES.get(lockKey) ?? Promise.resolve();
@@ -305,13 +313,7 @@ export class PluginStorage {
     const [ok, err, response] = await tryFn<GetObjectResponse>(() => this.client.getObject(key));
 
     if (!ok || !response) {
-      const error = err as { name?: string; code?: string; Code?: string; statusCode?: number } | undefined;
-      if (
-        error?.name === 'NoSuchKey' ||
-        error?.code === 'NoSuchKey' ||
-        error?.Code === 'NoSuchKey' ||
-        error?.statusCode === 404
-      ) {
+      if (isMissingObjectError(err)) {
         return null;
       }
       throw new PluginStorageError(`Failed to retrieve plugin data`, {
@@ -323,36 +325,12 @@ export class PluginStorage {
       });
     }
 
-    const metadata = response.Metadata || {};
-    const parsedMetadata = this._parseMetadataValues(metadata);
-
-    let data: Record<string, unknown> = parsedMetadata;
-
-    if (response.Body) {
-      const [parseOk, parseErr, result] = await tryFn(async () => {
-        const bodyContent = await this._readBodyAsString(response.Body);
-
-        if (bodyContent && bodyContent.trim()) {
-          const body = JSON.parse(bodyContent);
-          return { ...parsedMetadata, ...body };
-        }
-        return parsedMetadata;
-      });
-
-      if (!parseOk || !result) {
-        throw new PluginStorageError(`Failed to parse JSON body`, {
-          pluginSlug: this.pluginSlug,
-          key,
-          operation: 'get',
-          original: parseErr,
-          suggestion: 'Body content may be corrupted. Check S3 object integrity'
-        });
-      }
-
-      data = result;
+    const data = await this._readStoredObjectData(key, response, 'get', 'throw');
+    if (!data) {
+      return null;
     }
 
-    const expiresAt = (data._expiresat || data._expiresAt) as number | undefined;
+    const expiresAt = this._extractExpiresAt(data);
     if (expiresAt) {
       if (this._now() > expiresAt) {
         await this.delete(key);
@@ -399,6 +377,61 @@ export class PluginStorage {
       parsed[key] = value;
     }
     return parsed;
+  }
+
+  private async _readStoredObjectData(
+    key: string,
+    response: GetObjectResponse,
+    operation: string,
+    parseMode: ObjectParseMode = 'throw'
+  ): Promise<Record<string, unknown> | null> {
+    const parsedMetadata = this._parseMetadataValues(response.Metadata || {});
+    let data: Record<string, unknown> = parsedMetadata;
+
+    if (!response.Body) {
+      return data;
+    }
+
+    const [parseOk, parseErr, result] = await tryFn(async () => {
+      const bodyContent = await this._readBodyAsString(response.Body);
+
+      if (!bodyContent || !bodyContent.trim()) {
+        return parsedMetadata;
+      }
+
+      const body = JSON.parse(bodyContent);
+      return { ...parsedMetadata, ...body };
+    });
+
+    if (!parseOk || !result) {
+      if (parseMode === 'null') {
+        return null;
+      }
+
+      throw new PluginStorageError(`Failed to parse JSON body`, {
+        pluginSlug: this.pluginSlug,
+        key,
+        operation,
+        original: parseErr,
+        suggestion: 'Body content may be corrupted'
+      });
+    }
+
+    data = result;
+    return data;
+  }
+
+  private _extractExpiresAt(data: Record<string, unknown> | null): number | null {
+    if (!data) {
+      return null;
+    }
+
+    const candidate = data._expiresat ?? data._expiresAt;
+    if (typeof candidate === 'number' && Number.isFinite(candidate)) {
+      return candidate;
+    }
+
+    return null;
   }
 
   private async _readBodyAsString(body: GetObjectBody | undefined): Promise<string> {
@@ -539,30 +572,13 @@ export class PluginStorage {
       return true;
     }
 
-    const metadata = response.Metadata || {};
-    const parsedMetadata = this._parseMetadataValues(metadata);
-
-    let data: Record<string, unknown> = parsedMetadata;
-
-    if (response.Body) {
-      const [parseOk, , result] = await tryFn<Record<string, unknown>>(async () => {
-        const bodyContent = await this._readBodyAsString(response.Body);
-        if (bodyContent && bodyContent.trim()) {
-          const body = JSON.parse(bodyContent);
-          return { ...parsedMetadata, ...body };
-        }
-        return parsedMetadata;
-      });
-
-      if (!parseOk || !result) {
-        return true;
-      }
-
-      data = result;
+    const data = await this._readStoredObjectData(key, response, 'isExpired', 'null');
+    if (data === null) {
+      return true;
     }
 
-    const expiresAt = (data._expiresat || data._expiresAt) as number | undefined;
-    if (!expiresAt) {
+    const expiresAt = this._extractExpiresAt(data);
+    if (expiresAt === null) {
       return false;
     }
 
@@ -576,29 +592,8 @@ export class PluginStorage {
       return null;
     }
 
-    const metadata = response.Metadata || {};
-    const parsedMetadata = this._parseMetadataValues(metadata);
-
-    let data: Record<string, unknown> = parsedMetadata;
-
-    if (response.Body) {
-      const [parseOk, , result] = await tryFn<Record<string, unknown>>(async () => {
-        const bodyContent = await this._readBodyAsString(response.Body);
-        if (bodyContent && bodyContent.trim()) {
-          const body = JSON.parse(bodyContent);
-          return { ...parsedMetadata, ...body };
-        }
-        return parsedMetadata;
-      });
-
-      if (!parseOk || !result) {
-        return null;
-      }
-
-      data = result;
-    }
-
-    const expiresAt = (data._expiresat || data._expiresAt) as number | undefined;
+    const data = await this._readStoredObjectData(key, response, 'getTTL', 'null');
+    const expiresAt = this._extractExpiresAt(data);
     if (!expiresAt) {
       return null;
     }
@@ -608,17 +603,26 @@ export class PluginStorage {
   }
 
   async touch(key: string, additionalSeconds: number): Promise<boolean> {
-    const [ok, , response] = await tryFn<HeadObjectResponse>(() => this.client.headObject(key));
+    const [ok, headErr, response] = await tryFn<HeadObjectResponse>(() => this.client.headObject(key));
 
     if (!ok || !response) {
-      return false;
+      if (isMissingObjectError(headErr)) {
+        return false;
+      }
+
+      throw new PluginStorageError(`Failed to refresh plugin TTL`, {
+        pluginSlug: this.pluginSlug,
+        key,
+        operation: 'touch',
+        original: headErr,
+        suggestion: 'Check if the key exists and S3 permissions are correct'
+      });
     }
 
-    const metadata = response.Metadata || {};
-    const parsedMetadata = this._parseMetadataValues(metadata);
+    const parsedMetadata = this._parseMetadataValues(response.Metadata || {});
+    const expiresAt = this._extractExpiresAt(parsedMetadata);
 
-    const expiresAt = (parsedMetadata._expiresat || parsedMetadata._expiresAt) as number | undefined;
-    if (!expiresAt) {
+    if (expiresAt === null) {
       return false;
     }
 
@@ -726,13 +730,7 @@ export class PluginStorage {
     const [ok, err, response] = await tryFn<GetObjectResponse>(() => this.client.getObject(key));
 
     if (!ok || !response) {
-      const error = err as { name?: string; code?: string; Code?: string; statusCode?: number } | undefined;
-      if (
-        error?.name === 'NoSuchKey' ||
-        error?.code === 'NoSuchKey' ||
-        error?.Code === 'NoSuchKey' ||
-        error?.statusCode === 404
-      ) {
+      if (isMissingObjectError(err)) {
         return { data: null, version: null };
       }
       throw new PluginStorageError(`Failed to retrieve plugin data with version`, {
@@ -744,35 +742,13 @@ export class PluginStorage {
       });
     }
 
-    const metadata = response.Metadata || {};
-    const parsedMetadata = this._parseMetadataValues(metadata);
-    let data: Record<string, unknown> = parsedMetadata;
-
-    if (response.Body) {
-      const [parseOk, parseErr, result] = await tryFn(async () => {
-        const bodyContent = await this._readBodyAsString(response.Body);
-        if (bodyContent && bodyContent.trim()) {
-          const body = JSON.parse(bodyContent);
-          return { ...parsedMetadata, ...body };
-        }
-        return parsedMetadata;
-      });
-
-      if (!parseOk || !result) {
-        throw new PluginStorageError(`Failed to parse JSON body`, {
-          pluginSlug: this.pluginSlug,
-          key,
-          operation: 'getWithVersion',
-          original: parseErr,
-          suggestion: 'Body content may be corrupted'
-        });
-      }
-
-      data = result;
+    const data = await this._readStoredObjectData(key, response, 'getWithVersion', 'throw');
+    if (!data) {
+      return { data: null, version: null };
     }
 
     // Check expiration
-    const expiresAt = (data._expiresat || data._expiresAt) as number | undefined;
+    const expiresAt = this._extractExpiresAt(data);
     if (expiresAt && this._now() > expiresAt) {
       await this.delete(key);
       return { data: null, version: null };
@@ -783,9 +759,23 @@ export class PluginStorage {
     delete data._expiresAt;
 
     // Extract ETag from response - need to get it from headObject since getObject may not return it
-    const [headOk, , headResponse] = await tryFn<HeadObjectResponse & { ETag?: string }>(() =>
+    const [headOk, headErr, headResponse] = await tryFn<HeadObjectResponse & { ETag?: string }>(() =>
       this.client.headObject(key)
     );
+    if (!headOk || !headResponse) {
+      if (isMissingObjectError(headErr)) {
+        return { data: null, version: null };
+      }
+
+      throw new PluginStorageError(`Failed to load object version`, {
+        pluginSlug: this.pluginSlug,
+        key,
+        operation: 'getWithVersion',
+        original: headErr,
+        suggestion: 'Check object permissions and storage health'
+      });
+    }
+
     const version = headOk && headResponse ? (headResponse as any).ETag ?? null : null;
 
     return { data, version };
