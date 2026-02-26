@@ -5,6 +5,7 @@ import { Readable } from 'stream';
 import { tryFn } from '../concerns/try-fn.js';
 import { MetadataLimitError, ResourceError, ValidationError } from '../errors.js';
 import { createLogger } from '../concerns/logger.js';
+import { normalizeEtagHeader } from './client-compat.js';
 import type { LogLevel } from '../types/common.types.js';
 import type {
   Logger,
@@ -93,18 +94,6 @@ export class MemoryStorage {
 
   private _formatEtag(etag: string): string {
     return `"${etag}"`;
-  }
-
-  private _normalizeEtagHeader(headerValue: string | undefined | null): string[] {
-    if (headerValue === undefined || headerValue === null) {
-      return [];
-    }
-
-    return String(headerValue)
-      .split(',')
-      .map(value => value.trim())
-      .filter(Boolean)
-      .map(value => value.replace(/^W\//i, '').replace(/^['"]|['"]$/g, ''));
   }
 
   private _encodeContinuationToken(key: string): string {
@@ -199,7 +188,7 @@ export class MemoryStorage {
 
     const existing = this.objects.get(key);
     if (ifMatch !== undefined) {
-      const expectedEtags = this._normalizeEtagHeader(ifMatch);
+      const expectedEtags = normalizeEtagHeader(ifMatch);
       const currentEtag = existing ? existing.etag : null;
       const matches = expectedEtags.length > 0 && currentEtag ? expectedEtags.includes(currentEtag) : false;
 
@@ -216,7 +205,7 @@ export class MemoryStorage {
     }
 
     if (ifNoneMatch !== undefined) {
-      const normalized = this._normalizeEtagHeader(ifNoneMatch);
+      const normalized = normalizeEtagHeader(ifNoneMatch);
       const targetValue = existing ? existing.etag : null;
       const shouldFail =
         (ifNoneMatch === '*' && Boolean(existing)) ||

@@ -24,6 +24,7 @@ import { mapAwsError, UnknownError } from '../errors.js';
 import { TasksPool } from '../tasks/tasks-pool.class.js';
 import { AdaptiveTuning } from '../concerns/adaptive-tuning.js';
 import { HTTP_CLIENT_PROFILES } from './types.js';
+import { normalizeHttpClientRetryConfig } from './client-compat.js';
 import type {
   Logger,
   S3ClientConfig,
@@ -216,7 +217,7 @@ export class S3Client extends EventEmitter {
   private _normalizeHttpHandlerOptions(): ReckerHttpHandlerOptions {
     const options = this._normalizedHttpClientOptions();
     const raw = options;
-    const retryProfile = (raw.retryProfile || raw.retryCoordination || 'dual').replace('aws-only', 'sdk-only') as 'dual' | 'recker-only' | 'sdk-only';
+    const { retryProfile } = normalizeHttpClientRetryConfig(raw);
     const connections = typeof raw.connections === 'number'
       ? raw.connections
       : raw.maxSockets;
@@ -443,7 +444,7 @@ export class S3Client extends EventEmitter {
   createClient(): AwsS3Client {
     const normalizedHttpHandlerOptions = this._normalizeHttpHandlerOptions();
     const normalizedHttpClientOptions = this._normalizedHttpClientOptions();
-    const retryProfile = (normalizedHttpClientOptions.retryProfile || normalizedHttpClientOptions.retryCoordination || 'dual').replace('aws-only', 'sdk-only') as 'dual' | 'recker-only' | 'sdk-only';
+    const { retryProfile, maxAttempts, retryMode } = normalizeHttpClientRetryConfig(normalizedHttpClientOptions);
     const useReckerHandler = normalizedHttpClientOptions.useReckerHandler ?? true;
     const failFastOnReckerFailure = normalizedHttpClientOptions.failFastOnReckerFailure ?? false;
     const requestHandlerConfig = { ...normalizedHttpHandlerOptions };
@@ -492,16 +493,12 @@ export class S3Client extends EventEmitter {
 
     if (retryProfile === 'recker-only') {
       options.maxAttempts = 1;
-    } else if (typeof normalizedHttpClientOptions.retryAttempts === 'number' && normalizedHttpClientOptions.retryAttempts > 0) {
-      options.maxAttempts = Math.max(1, Math.trunc(normalizedHttpClientOptions.retryAttempts));
-    } else if (typeof normalizedHttpClientOptions.awsMaxAttempts === 'number' && normalizedHttpClientOptions.awsMaxAttempts > 0) {
-      options.maxAttempts = Math.max(1, Math.trunc(normalizedHttpClientOptions.awsMaxAttempts));
+    } else if (typeof maxAttempts === 'number') {
+      options.maxAttempts = maxAttempts;
     }
 
-    if (normalizedHttpClientOptions.retryMode !== undefined) {
-      options.retryMode = normalizedHttpClientOptions.retryMode;
-    } else if (normalizedHttpClientOptions.awsRetryMode !== undefined) {
-      options.retryMode = normalizedHttpClientOptions.awsRetryMode;
+    if (retryMode !== undefined) {
+      options.retryMode = retryMode;
     }
 
     const client = new AwsS3Client(options as any);

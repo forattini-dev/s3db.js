@@ -12,6 +12,7 @@ import { idGenerator } from '../concerns/id.js';
 import { MetadataLimitError, ResourceError, ValidationError } from '../errors.js';
 import { getCronManager, type CronManager } from '../concerns/cron-manager.js';
 import { createLogger } from '../concerns/logger.js';
+import { normalizeEtagHeader } from './client-compat.js';
 import type { LogLevel } from '../types/common.types.js';
 import type {
   Logger,
@@ -205,18 +206,6 @@ export class FileSystemStorage {
 
   private _formatEtag(etag: string): string {
     return `"${etag}"`;
-  }
-
-  private _normalizeEtagHeader(headerValue: string | undefined | null): string[] {
-    if (headerValue === undefined || headerValue === null) {
-      return [];
-    }
-
-    return String(headerValue)
-      .split(',')
-      .map(value => value.trim())
-      .filter(Boolean)
-      .map(value => value.replace(/^W\//i, '').replace(/^['"]|['"]$/g, ''));
   }
 
   private _encodeContinuationToken(key: string): string {
@@ -632,7 +621,7 @@ export class FileSystemStorage {
         }
 
         const currentMeta = await this._readMetadata(key);
-        const expectedEtags = this._normalizeEtagHeader(ifMatch);
+        const expectedEtags = normalizeEtagHeader(ifMatch);
         const matches = expectedEtags.includes(currentMeta.etag);
 
         if (!matches) {
@@ -661,7 +650,7 @@ export class FileSystemStorage {
 
         if (exists && ifNoneMatch !== '*') {
           const currentMeta = await this._readMetadata(key);
-          const normalized = this._normalizeEtagHeader(ifNoneMatch);
+          const normalized = normalizeEtagHeader(ifNoneMatch);
           if (normalized.includes(currentMeta.etag)) {
             throw new ResourceError(`Precondition failed: ETag matches for key "${key}"`, {
               bucket: this.bucket,
