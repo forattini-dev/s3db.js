@@ -6,6 +6,7 @@ describe('TTLPlugin v2 - Soft Delete Strategy', () => {
   let db;
   let sessions;
   let plugin;
+  let suffix;
 
   beforeAll(async () => {
     db = createDatabaseForTest('ttl-v2-soft-delete');
@@ -31,6 +32,7 @@ describe('TTLPlugin v2 - Soft Delete Strategy', () => {
     });
 
     await plugin.install(db);
+    suffix = Math.floor(Math.random() * 1e6).toString(36);
   });
 
   afterAll(async () => {
@@ -39,12 +41,12 @@ describe('TTLPlugin v2 - Soft Delete Strategy', () => {
   });
 
   test('should soft-delete expired session', async () => {
-    await sessions.insert({ id: 'session-expire-1', token: 'token-1' });
+    await sessions.insert({ id: `session-expire-${suffix}`, token: 'token-1' });
 
     await sleep(1500);
     await plugin.runCleanup();
 
-    const session = await sessions.get('session-expire-1');
+    const session = await sessions.get(`session-expire-${suffix}`);
     expect(session).toBeDefined();
     expect(session.deletedat).toBeDefined();
     expect(session.isdeleted).toBe('true');
@@ -52,18 +54,18 @@ describe('TTLPlugin v2 - Soft Delete Strategy', () => {
   });
 
   test('should not delete non-expired session', async () => {
-    await sessions.insert({ id: 'session-active-1', token: 'token-2' });
+    await sessions.insert({ id: `session-active-${suffix}`, token: 'token-2' });
 
     await plugin.runCleanup();
 
-    const session = await sessions.get('session-active-1');
+    const session = await sessions.get(`session-active-${suffix}`);
     expect(session).toBeDefined();
     expect(session.deletedat).toBeUndefined();
     expect(session.isdeleted).toBeUndefined();
   });
 
   test('should update stats after soft-delete', async () => {
-    await sessions.insert({ id: 'session-stats-1', token: 'token-3' });
+    await sessions.insert({ id: `session-stats-${suffix}`, token: 'token-3' });
 
     await sleep(1500);
 

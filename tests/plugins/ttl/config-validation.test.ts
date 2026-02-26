@@ -7,7 +7,6 @@ describe('TTLPlugin v2 - Configuration and Validation', () => {
     const plugin = new TTLPlugin({
       logLevel: 'silent',
       batchSize: 50,
-      logLevel: 'silent',
       resources: {
         sessions: {
           ttl: 3600,

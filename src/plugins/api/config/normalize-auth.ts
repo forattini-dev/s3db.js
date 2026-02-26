@@ -5,6 +5,9 @@ export interface PathRule {
   pattern?: string;
   required?: boolean;
   methods?: string[];
+  roles?: string | string[];
+  scopes?: string | string[];
+  allowServiceAccounts?: boolean;
 }
 
 export interface DriverEntry {
@@ -18,7 +21,7 @@ export interface DriverConfig {
 }
 
 export interface AuthOptions {
-  drivers?: Array<string | DriverEntry>;
+  drivers?: Array<string | DriverEntry> | Record<string, unknown>;
   driver?: string | { driver: string; config?: DriverConfig };
   config?: DriverConfig;
   pathRules?: PathRule[];
@@ -37,6 +40,36 @@ export interface NormalizedAuthConfig {
   createResource: boolean;
   resource: string | null;
   driver: string | null;
+}
+
+function normalizeDriverName(name: string): string {
+  const driverName = String(name).trim();
+  if (!driverName) {
+    return '';
+  }
+
+  const lowered = driverName.toLowerCase();
+  if (lowered === 'api-key' || lowered === 'api_key' || lowered === 'apikey') {
+    return 'api-key';
+  }
+
+  if (lowered === 'jwt' || lowered === 'basic' || lowered === 'oauth2' || lowered === 'oidc' || lowered === 'oauth2-server') {
+    return lowered;
+  }
+
+  return lowered;
+}
+
+function normalizeDriverConfig(value: unknown): DriverConfig | null {
+  if (!value) {
+    return {};
+  }
+
+  if (value && typeof value === 'object' && !Array.isArray(value)) {
+    return value as DriverConfig;
+  }
+
+  return null;
 }
 
 export function normalizeAuthConfig(authOptions: AuthOptions | null | undefined = {}, logger: Logger | null = null): NormalizedAuthConfig {
@@ -66,9 +99,12 @@ export function normalizeAuthConfig(authOptions: AuthOptions | null | undefined 
 
   const seen = new Set<string>();
 
-  const addDriver = (name: string | undefined, driverConfig: DriverConfig = {}): void => {
-    if (!name) return;
-    const driverName = String(name).trim();
+  const addDriver = (name: string | undefined, driverConfig: DriverConfig = {}, normalizeName = true): void => {
+    if (!name) {
+      return;
+    }
+
+    const driverName = normalizeName ? normalizeDriverName(name) : name.trim();
     if (!driverName || seen.has(driverName)) return;
     seen.add(driverName);
 
@@ -83,13 +119,23 @@ export function normalizeAuthConfig(authOptions: AuthOptions | null | undefined 
     });
   };
 
-  if (Array.isArray(authOptions.drivers)) {
-    for (const entry of authOptions.drivers) {
+  const authDrivers = authOptions.drivers;
+  if (Array.isArray(authDrivers)) {
+    for (const entry of authDrivers) {
       if (typeof entry === 'string') {
         addDriver(entry, {});
-      } else if (entry && typeof entry === 'object') {
-        addDriver(entry.driver, entry.config || {});
+      } else if (entry && typeof entry === 'object' && 'driver' in entry) {
+        addDriver((entry as DriverEntry).driver, (entry as DriverEntry).config || {});
       }
+    }
+  } else if (authDrivers && typeof authDrivers === 'object' && !Array.isArray(authDrivers)) {
+    for (const [name, cfg] of Object.entries(authDrivers)) {
+      const driverConfig = normalizeDriverConfig(cfg);
+      if (!driverConfig) {
+        continue;
+      }
+
+      addDriver(name, driverConfig, false);
     }
   }
 
@@ -102,5 +148,12 @@ export function normalizeAuthConfig(authOptions: AuthOptions | null | undefined 
   }
 
   normalized.driver = normalized.drivers.length > 0 ? normalized.drivers[0]!.driver : null;
+
+  if (logger) {
+    logger.debug({
+      authOptions: normalized
+    }, 'Normalized auth config');
+  }
+
   return normalized;
 }

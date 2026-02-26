@@ -108,15 +108,38 @@ describe('JWT Authentication', () => {
       expect(result).toBeNull();
     });
 
-    test.skip('returns null for expired token', async () => {
-      const uniqueSecret = `${TEST_SECRET}-expire-${Date.now()}`;
+    test('returns null for expired token', async () => {
+      vi.useFakeTimers();
+      const now = Date.now();
+      const uniqueSecret = `${TEST_SECRET}-expire-${now}`;
       const payload = { id: 'user123' };
       const token = createToken(payload, uniqueSecret, '1s');
 
-      await new Promise(resolve => setTimeout(resolve, 1100));
+      vi.setSystemTime(new Date(now));
+      expect(verifyToken(token, uniqueSecret)).not.toBeNull();
 
+      vi.setSystemTime(new Date(now + 1_200));
       const result = verifyToken(token, uniqueSecret);
       expect(result).toBeNull();
+
+      vi.useRealTimers();
+    });
+
+    test('re-checks cache with current time and rejects expired token', () => {
+      vi.useFakeTimers();
+      const now = Date.now();
+      const uniqueSecret = `${TEST_SECRET}-cache-${now}`;
+      const token = createToken({ id: 'user123' }, uniqueSecret, '1s');
+
+      vi.setSystemTime(new Date(now));
+      const first = verifyToken(token, uniqueSecret);
+      expect(first).not.toBeNull();
+
+      vi.setSystemTime(new Date(now + 1_100));
+      const second = verifyToken(token, uniqueSecret);
+      expect(second).toBeNull();
+
+      vi.useRealTimers();
     });
 
     test('returns null for malformed token', () => {
@@ -134,6 +157,46 @@ describe('JWT Authentication', () => {
       const tamperedToken = `${parts[0]}.${tamperedPayload}.${parts[2]}`;
 
       expect(verifyToken(tamperedToken, TEST_SECRET)).toBeNull();
+    });
+
+    test('rejects token with invalid algorithm in header', () => {
+      const token = createToken({ id: 'user123' }, TEST_SECRET, '1h');
+      const parts = token.split('.');
+      const tamperedHeader = Buffer.from(JSON.stringify({ alg: 'HS512', typ: 'JWT' })).toString('base64url');
+      const tamperedToken = `${tamperedHeader}.${parts[1]}.${parts[2]}`;
+
+      expect(verifyToken(tamperedToken, TEST_SECRET)).toBeNull();
+    });
+
+    test('returns null for token with nbf in the future', () => {
+      const futureNbf = Math.floor(Date.now() / 1000) + 120;
+      const token = createToken({ id: 'user123', nbf: futureNbf }, TEST_SECRET, '1h');
+
+      expect(verifyToken(token, TEST_SECRET)).toBeNull();
+    });
+
+    test('validates issuer when provided', () => {
+      const token = createToken(
+        { id: 'user123' },
+        TEST_SECRET,
+        '1h',
+        { issuer: 'api.test' }
+      );
+
+      expect(verifyToken(token, TEST_SECRET, { issuer: 'api.test' })).toBeDefined();
+      expect(verifyToken(token, TEST_SECRET, { issuer: 'other.test' })).toBeNull();
+    });
+
+    test('validates audience when provided', () => {
+      const token = createToken(
+        { id: 'user123' },
+        TEST_SECRET,
+        '1h',
+        { audience: ['web', 'mobile'] }
+      );
+
+      expect(verifyToken(token, TEST_SECRET, { audience: 'web' })).toBeDefined();
+      expect(verifyToken(token, TEST_SECRET, { audience: 'unknown' })).toBeNull();
     });
 
     test('caches verified tokens', () => {

@@ -1,5 +1,4 @@
 import type { Context, Next, MiddlewareHandler } from 'hono';
-import type { Logger } from '../../../concerns/logger.js';
 import type { DatabaseLike } from './resource-manager.js';
 import { createJWTHandler, createToken, verifyToken, type JWTConfig } from './jwt-auth.js';
 import { createApiKeyHandler, generateApiKey, type ApiKeyConfig } from './api-key-auth.js';
@@ -8,6 +7,19 @@ import { createOAuth2Handler, type OAuth2Config } from './oauth2-auth.js';
 import { OIDCClient } from './oidc-client.js';
 import { unauthorized } from '../utils/response-formatter.js';
 import { getCookie } from 'hono/cookie';
+
+function normalizeMethodName(method: string): string {
+  if (!method || typeof method !== 'string') {
+    return '';
+  }
+
+  const lowered = method.trim().toLowerCase();
+  if (lowered === 'api-key' || lowered === 'api_key' || lowered === 'apikey') {
+    return 'apiKey';
+  }
+
+  return lowered;
+}
 
 export interface AuthMiddlewareOptions {
   methods?: string[];
@@ -45,13 +57,15 @@ export async function createAuthMiddleware(options: AuthMiddlewareOptions): Prom
     throw new Error('createAuthMiddleware: database parameter is required');
   }
 
-  if (methods.length === 0) {
+  const normalizedMethods = [...new Set(methods.map((method) => normalizeMethodName(method)))];
+
+  if (normalizedMethods.length === 0) {
     return async (c: Context, next: Next) => await next();
   }
 
   const middlewares: AuthMethodEntry[] = [];
 
-  if (methods.includes('jwt') && jwtConfig.secret) {
+  if (normalizedMethods.includes('jwt') && jwtConfig.secret) {
     const jwtHandler = await createJWTHandler(jwtConfig, database);
     middlewares.push({
       name: 'jwt',
@@ -59,7 +73,7 @@ export async function createAuthMiddleware(options: AuthMiddlewareOptions): Prom
     });
   }
 
-  if (methods.includes('apiKey')) {
+  if (normalizedMethods.includes('apiKey')) {
     const apiKeyHandler = await createApiKeyHandler(apiKeyConfig, database);
     middlewares.push({
       name: 'apiKey',
@@ -67,7 +81,7 @@ export async function createAuthMiddleware(options: AuthMiddlewareOptions): Prom
     });
   }
 
-  if (methods.includes('basic')) {
+  if (normalizedMethods.includes('basic')) {
     const basicHandler = await createBasicAuthHandler(basicConfig, database);
     middlewares.push({
       name: 'basic',
@@ -75,7 +89,7 @@ export async function createAuthMiddleware(options: AuthMiddlewareOptions): Prom
     });
   }
 
-  if (methods.includes('oauth2') && oauth2Config.issuer) {
+  if (normalizedMethods.includes('oauth2') && oauth2Config.issuer) {
     const oauth2Handler = await createOAuth2Handler(oauth2Config, database);
     middlewares.push({
       name: 'oauth2',
@@ -109,7 +123,6 @@ export async function createAuthMiddleware(options: AuthMiddlewareOptions): Prom
 
   return async (c: Context, next: Next): Promise<Response | void> => {
     let attempted = false;
-    let lastErrorResponse: Response | null = null;
 
     const hasCredentials = (name: string): boolean => {
       if (name === 'jwt') {
@@ -124,7 +137,7 @@ export async function createAuthMiddleware(options: AuthMiddlewareOptions): Prom
         return false;
       }
 
-      if (name === 'apiKey') {
+    if (name === 'apiKey') {
         const headerName = apiKeyConfig.headerName || 'X-API-Key';
         if (c.req.header(headerName)) return true;
 
@@ -175,7 +188,6 @@ export async function createAuthMiddleware(options: AuthMiddlewareOptions): Prom
           : (typeof (result as { _status?: number })?._status === 'number' ? (result as { _status?: number })._status : null);
 
         if (statusCode === 401 || statusCode === 403) {
-          lastErrorResponse = result as Response;
           continue;
         }
 
@@ -193,13 +205,9 @@ export async function createAuthMiddleware(options: AuthMiddlewareOptions): Prom
       }
 
       const response = unauthorized(
-        `Authentication required. Supported methods: ${methods.join(', ')}`
+        `Authentication required. Supported methods: ${normalizedMethods.join(', ')}`
       );
       return c.json(response, (response as { _status: number })._status as Parameters<typeof c.json>[1]);
-    }
-
-    if (lastErrorResponse) {
-      return lastErrorResponse;
     }
 
     if (optional) {
@@ -207,7 +215,7 @@ export async function createAuthMiddleware(options: AuthMiddlewareOptions): Prom
     }
 
     const response = unauthorized(
-      `Authentication required. Supported methods: ${methods.join(', ')}`
+      `Authentication required. Supported methods: ${normalizedMethods.join(', ')}`
     );
     return c.json(response, (response as { _status: number })._status as Parameters<typeof c.json>[1]);
   };

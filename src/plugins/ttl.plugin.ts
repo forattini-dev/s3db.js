@@ -664,20 +664,27 @@ export class TTLPlugin extends CoordinatorPlugin {
       const managedResourceNames = new Set(resources.map(item => item.name));
       const state = this._cohortScanState[granularity];
       const processedCohorts = cohorts.filter((cohort) => !state.lookup.has(cohort));
-      const hasFallbackCohort = processedCohorts.length === 0 && cohorts[0] !== undefined;
-      const cohortsToProcess = hasFallbackCohort ? [cohorts[0] as string] : processedCohorts;
+      const cohortsToProcess = processedCohorts.length > 0
+        ? processedCohorts
+        : cohorts.slice(0, 1);
+      const validCohortsToProcess = cohortsToProcess.filter((cohort): cohort is string => cohort !== undefined);
+      const hasFallbackCohort = processedCohorts.length === 0;
+      const cohortsToProcessFinal = validCohortsToProcess;
       const scannedEntryIds = new Set<string>();
 
       if (hasFallbackCohort) {
         this.logger.debug(
-          { granularity, cohort: cohorts[0] },
+          { granularity, cohort: cohortsToProcessFinal[0] },
           `Using cohort fallback for ${granularity} cleanup`
         );
       }
 
-      this.logger.debug({ granularity, cohorts: cohortsToProcess }, `Cleaning ${granularity} granularity, checking cohorts: ${cohortsToProcess.join(', ')}`);
+      this.logger.debug(
+        { granularity, cohorts: cohortsToProcessFinal },
+        `Cleaning ${granularity} granularity, checking cohorts: ${cohortsToProcessFinal.join(', ')}`
+      );
 
-      for (const cohort of cohortsToProcess) {
+      for (const cohort of cohortsToProcessFinal) {
         const alreadyTracked = state.lookup.has(cohort);
         if (!alreadyTracked) {
           state.lookup.add(cohort);

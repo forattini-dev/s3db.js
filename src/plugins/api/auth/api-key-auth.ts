@@ -21,6 +21,7 @@ export interface ApiKeyConfig {
 export interface UserRecord {
   id: string;
   active?: boolean;
+  isActive?: boolean;
   [key: string]: unknown;
 }
 
@@ -98,7 +99,7 @@ export async function createApiKeyHandler(
 
       const user = users[0]!;
 
-      if (user.active === false) {
+      if (user.active === false || user.isActive === false) {
         const response = unauthorized('User account is inactive');
         return c.json(response, (response as { _status: number })._status as ContentfulStatusCode);
       }

@@ -346,7 +346,24 @@ export class RouteContext {
   }
 
   hasScope(scope: string): boolean {
-    return this.user?.scopes?.includes(scope) || false;
+    const scopes = this.user?.scopes;
+    if (!Array.isArray(scopes)) {
+      return false;
+    }
+
+    if (scopes.includes(scope)) {
+      return true;
+    }
+
+    const wildcards = scopes.filter((s): s is string => typeof s === 'string' && s.endsWith(':*'));
+    for (const wildcard of wildcards) {
+      const prefix = wildcard.slice(0, -2);
+      if (scope.startsWith(`${prefix}:`)) {
+        return true;
+      }
+    }
+
+    return scopes.includes('*');
   }
 
   hasAnyScope(...scopes: string[]): boolean {

@@ -25,6 +25,15 @@ export interface BaseAuthStrategyOptions {
   logger?: Logger;
 }
 
+function normalizeDriverName(driverName: string): string {
+  const lowered = String(driverName || '').trim().toLowerCase();
+  if (lowered === 'api-key' || lowered === 'api_key' || lowered === 'apikey') {
+    return 'apiKey';
+  }
+
+  return lowered;
+}
+
 export class BaseAuthStrategy {
   protected drivers: DriverDefinition[];
   protected authResource: ResourceLike | undefined;
@@ -54,10 +63,14 @@ export class BaseAuthStrategy {
     };
 
     for (const driverDef of this.drivers) {
-      const driverName = driverDef.driver;
+      const driverName = normalizeDriverName(driverDef.driver || '');
       const driverConfig = driverDef.config || {};
 
-      if (driverNames && !driverNames.includes(driverName)) {
+      const normalizedFilter = driverNames
+        ? new Set(driverNames.map((name) => normalizeDriverName(name)))
+        : null;
+
+      if (normalizedFilter && !normalizedFilter.has(driverName)) {
         continue;
       }
 

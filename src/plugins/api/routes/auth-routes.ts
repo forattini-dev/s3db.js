@@ -1,3 +1,4 @@
+import { timingSafeEqual } from 'crypto';
 import { Hono } from 'hono';
 import type { Context, MiddlewareHandler } from 'hono';
 import type { ContentfulStatusCode } from 'hono/utils/http-status';
@@ -5,7 +6,7 @@ import { asyncHandler } from '../utils/error-handler.js';
 import * as formatter from '../utils/response-formatter.js';
 import { createToken } from '../auth/jwt-auth.js';
 import { generateApiKey } from '../auth/api-key-auth.js';
-import { hashPassword } from '../../../concerns/password-hashing.js';
+import { hashPassword, isBcryptHash, verifyPassword } from '../../../concerns/password-hashing.js';
 
 export interface AuthResource {
   name: string;
@@ -24,9 +25,21 @@ export interface AuthUser {
   username?: string;
   role?: string;
   active?: boolean;
+  isActive?: boolean;
   apiKey?: string;
   lastLoginAt?: string;
   [key: string]: unknown;
+}
+
+function secureStringEquals(a: string, b: string): boolean {
+  const left = Buffer.from(a);
+  const right = Buffer.from(b);
+  const maxLength = Math.max(left.length, right.length);
+  const leftPadded = Buffer.alloc(maxLength);
+  const rightPadded = Buffer.alloc(maxLength);
+  left.copy(leftPadded);
+  right.copy(rightPadded);
+  return timingSafeEqual(leftPadded, rightPadded);
 }
 
 export interface RegistrationConfig {
@@ -354,7 +367,7 @@ export function createAuthRoutes(authResource: AuthResource, config: AuthRoutesC
 
       const user = users[0]!;
 
-      if (user.active !== undefined && !user.active) {
+      if (user.active === false || user.isActive === false) {
         const response = formatter.unauthorized('User account is inactive');
         return c.json(response, response._status as ContentfulStatusCode);
       }
@@ -387,13 +400,20 @@ export function createAuthRoutes(authResource: AuthResource, config: AuthRoutesC
         return c.json(response, response._status as ContentfulStatusCode);
       }
 
-      const isBcryptHash = storedPassword.startsWith('$') || (storedPassword.length === 53 && !storedPassword.includes(':'));
-
-      if (isBcryptHash) {
-        const { verifyPassword } = await import('../../../concerns/password-hashing.js');
+      if (isBcryptHash(storedPassword)) {
         isValid = await verifyPassword(password, storedPassword);
       } else {
-        isValid = storedPassword === password;
+        if (typeof password !== 'string') {
+          const response = formatter.unauthorized('Invalid credentials');
+          return c.json(response, response._status as ContentfulStatusCode);
+        }
+
+        if (typeof storedPassword !== 'string') {
+          const response = formatter.unauthorized('Invalid credentials');
+          return c.json(response, response._status as ContentfulStatusCode);
+        }
+
+        isValid = secureStringEquals(password, storedPassword);
       }
 
       if (!isValid) {

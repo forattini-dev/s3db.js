@@ -212,7 +212,7 @@ export async function createOAuth2Handler(
 
     const token = authHeader.substring(7);
 
-    const tryJwtVerify = async (): Promise<OAuth2User> => {
+    const tryJwtVerify = async (): Promise<OAuth2User | null> => {
       const jwks = await getJWKS();
       const verifyOptions: {
         issuer: string;
@@ -255,6 +255,11 @@ export async function createOAuth2Handler(
       }
 
       if (user) {
+        const isActive = user.active !== false;
+        if (!isActive) {
+          return null;
+        }
+
         return {
           ...user,
           scopes: user.scopes || scopes,
@@ -346,6 +351,11 @@ export async function createOAuth2Handler(
         }
 
         if (user) {
+          const isActive = user.active !== false;
+          if (!isActive) {
+            return null;
+          }
+
           return {
             ...user,
             scopes: user.scopes || scopes,

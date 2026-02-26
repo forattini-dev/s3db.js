@@ -62,7 +62,7 @@ export function validatePathAuth(pathAuth: unknown): void {
     throw new Error('pathAuth must be an array of rules');
   }
 
-  const validDrivers: AuthDriverName[] = ['jwt', 'apiKey', 'basic', 'oauth2', 'oidc'];
+  const validDrivers: string[] = ['jwt', 'apiKey', 'basic', 'oauth2', 'oidc', 'api-key', 'apikey'];
 
   for (const [index, rule] of pathAuth.entries()) {
     if (!rule.pattern || typeof rule.pattern !== 'string') {
@@ -83,7 +83,12 @@ export function validatePathAuth(pathAuth: unknown): void {
 
     if (rule.drivers) {
       for (const driver of rule.drivers) {
-        if (!validDrivers.includes(driver as AuthDriverName)) {
+        const rawDriver = String(driver || '').trim().toLowerCase();
+        const normalizedDriver = rawDriver === 'api-key' || rawDriver === 'api_key' || rawDriver === 'apikey'
+          ? 'apiKey'
+          : String(driver);
+
+        if (!validDrivers.includes(normalizedDriver)) {
           throw new Error(
             `pathAuth[${index}]: invalid driver '${driver}'. ` +
             `Valid drivers: ${validDrivers.join(', ')}`

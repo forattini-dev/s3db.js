@@ -1,11 +1,10 @@
+import { timingSafeEqual } from 'crypto';
 import type { Context, Next } from 'hono';
 import type { ContentfulStatusCode } from 'hono/utils/http-status';
-import type { Logger } from '../../../concerns/logger.js';
-import type { ResourceLike, DatabaseLike } from './resource-manager.js';
+import type { DatabaseLike } from './resource-manager.js';
 import { unauthorized } from '../utils/response-formatter.js';
 import { createLogger } from '../../../concerns/logger.js';
-import { verifyPassword } from '../../../concerns/password-hashing.js'; // Changed: import comparePassword
-import tryFn from '../../../concerns/try-fn.js';
+import { isBcryptHash, verifyPassword } from '../../../concerns/password-hashing.js';
 import { getCookie } from 'hono/cookie';
 import { BasicAuthResourceManager } from './resource-manager.js';
 
@@ -29,7 +28,7 @@ export interface BasicAuthConfig {
   usernameField?: string;
   passwordField?: string;
   realm?: string;
-  passphrase?: string; // No longer needed for bcrypt, but keep for compatibility if secret type still used for some custom field.
+  passphrase?: string;
   optional?: boolean;
   adminUser?: AdminUserConfig | null;
   cookieName?: string | null;
@@ -39,7 +38,35 @@ export interface BasicAuthConfig {
 export interface UserRecord {
   id: string;
   active?: boolean;
+  isActive?: boolean;
   [key: string]: unknown;
+}
+
+function secureStringEquals(a: string, b: string): boolean {
+  const left = Buffer.from(a);
+  const right = Buffer.from(b);
+  const maxLength = Math.max(left.length, right.length);
+  const leftPadded = Buffer.alloc(maxLength);
+  const rightPadded = Buffer.alloc(maxLength);
+  left.copy(leftPadded);
+  right.copy(rightPadded);
+  return timingSafeEqual(leftPadded, rightPadded);
+}
+
+async function verifyAdminPassword(candidate: string, expected: string): Promise<boolean> {
+  if (!expected) {
+    return false;
+  }
+
+  if (isBcryptHash(expected)) {
+    return verifyPassword(candidate, expected);
+  }
+
+  if (!candidate) {
+    return false;
+  }
+
+  return secureStringEquals(candidate, expected);
 }
 
 export function parseBasicAuth(authHeader: string | null | undefined): BasicCredentials | null {
@@ -90,7 +117,7 @@ export async function createBasicAuthHandler(
           const users = await authResource.query({ [tokenField]: token }, { limit: 1 }) as UserRecord[];
           if (users && users.length > 0) {
             const user = users[0]!;
-            if (user.active === false) {
+            if (user.active === false || user.isActive === false) {
               const response = unauthorized('User account is inactive');
               return c.json(response, (response as { _status: number })._status as ContentfulStatusCode);
             }
@@ -99,7 +126,9 @@ export async function createBasicAuthHandler(
             return await next();
           }
         }
-      } catch (_) { /* ignore */ }
+      } catch {
+        // ignore cookie auth errors
+      }
     }
 
     if (!authHeader) {
@@ -119,13 +148,17 @@ export async function createBasicAuthHandler(
     const { username, password } = credentials;
 
     if (adminUser && adminUser.enabled === true) {
-      if (username === adminUser.username && password === adminUser.password) {
+      const usernameMatches = secureStringEquals(username, adminUser.username || '');
+      const passwordMatches = await verifyAdminPassword(password, adminUser.password || '');
+      if (usernameMatches && passwordMatches) {
         c.set('user', {
           id: 'root',
           username: adminUser.username,
           email: adminUser.username,
           scopes: adminUser.scopes || ['admin'],
-          authMethod: 'basic-admin'
+          authMethod: 'basic-admin',
+          isActive: true,
+          active: true
         });
         c.set('authMethod', 'basic');
         return await next();
@@ -141,7 +174,6 @@ export async function createBasicAuthHandler(
       }
 
       const user = users[0]!;
-
       const storedPassword = user[passwordField] as string | undefined;
       if (!storedPassword) {
         c.header('WWW-Authenticate', `Basic realm="${realm}"`);
@@ -149,14 +181,14 @@ export async function createBasicAuthHandler(
         return c.json(response, (response as { _status: number })._status as ContentfulStatusCode);
       }
 
-      const isValid = await verifyPassword(password, storedPassword); // Changed: use comparePassword
+      const isValid = await verifyPassword(password, storedPassword);
       if (!isValid) {
         c.header('WWW-Authenticate', `Basic realm="${realm}"`);
         const response = unauthorized('Invalid credentials');
         return c.json(response, (response as { _status: number })._status as ContentfulStatusCode);
       }
 
-      if (user.active === false) {
+      if (user.active === false || user.isActive === false) {
         c.header('WWW-Authenticate', `Basic realm="${realm}"`);
         const response = unauthorized('User account is inactive');
         return c.json(response, (response as { _status: number })._status as ContentfulStatusCode);

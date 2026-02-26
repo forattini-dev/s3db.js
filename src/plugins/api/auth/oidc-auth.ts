@@ -372,12 +372,135 @@ function applyUserMapping(
         sub: claims.sub,
         provider: defaults.provider,
         createdAt: defaults.now,
-        claims: { ...claims }
+        claims: getPersistedOidcClaims(claims)
       }
     };
   }
 
   return user;
+}
+
+function safeClaimSummary(claims: IdTokenClaims): Record<string, unknown> {
+  return {
+    iss: claims.iss,
+    aud: claims.aud,
+    sub: typeof claims.sub === 'string' ? claims.sub.slice(0, 10) + '...' : claims.sub,
+    exp: claims.exp,
+    iat: claims.iat,
+    nbf: claims.nbf,
+    issuer: claims.iss,
+    claimCount: Object.keys(claims).length
+  };
+}
+
+const OIDC_METADATA_CLAIM_ALLOWLIST = new Set([
+  'sub',
+  'iss',
+  'aud',
+  'email',
+  'name',
+  'preferred_username',
+  'username',
+  'role',
+  'roles',
+  'groups',
+  'tenant_id',
+  'organization',
+  'org',
+  'department',
+  'title'
+]);
+
+const OIDC_METADATA_CLAIM_SENSITIVE_KEYS = new Set([
+  'at_hash',
+  'c_hash',
+  's_hash',
+  'nonce',
+  'sid',
+  'azp',
+  'auth_time',
+  'amr',
+  'acr',
+  'jti',
+  'access_token',
+  'refresh_token',
+  'code',
+  'phone_number',
+  'phone_number_verified',
+  'address',
+  'locale',
+  'zoneinfo',
+  'birthdate',
+  'gender',
+  'updated_at',
+  'nbf'
+]);
+
+const OIDC_METADATA_MAX_STRING_LENGTH = 200;
+const OIDC_METADATA_MAX_ARRAY_LENGTH = 10;
+
+function sanitizeClaimValueForMetadata(value: unknown): unknown {
+  if (value == null) return value;
+  if (Array.isArray(value)) {
+    return value
+      .slice(0, OIDC_METADATA_MAX_ARRAY_LENGTH)
+      .map(item => sanitizeClaimValueForMetadata(item));
+  }
+
+  if (typeof value === 'string') {
+    return value.length > OIDC_METADATA_MAX_STRING_LENGTH
+      ? `${value.slice(0, OIDC_METADATA_MAX_STRING_LENGTH)}...`
+      : value;
+  }
+
+  if (typeof value === 'number' || typeof value === 'boolean') {
+    return value;
+  }
+
+  if (typeof value === 'object' && value.constructor === Object) {
+    const sanitized: Record<string, unknown> = {};
+    for (const [claimKey, claimValue] of Object.entries(value)) {
+      if (OIDC_METADATA_CLAIM_SENSITIVE_KEYS.has(claimKey)) {
+        continue;
+      }
+      sanitized[claimKey] = sanitizeClaimValueForMetadata(claimValue);
+    }
+    return sanitized;
+  }
+
+  return undefined;
+}
+
+function getPersistedOidcClaims(claims: IdTokenClaims): Record<string, unknown> {
+  const normalizedClaims: Record<string, unknown> = {};
+  for (const [claimKey, claimValue] of Object.entries(claims)) {
+    if (OIDC_METADATA_CLAIM_SENSITIVE_KEYS.has(claimKey)) {
+      continue;
+    }
+
+    if (OIDC_METADATA_CLAIM_ALLOWLIST.has(claimKey)) {
+      const normalizedValue = sanitizeClaimValueForMetadata(claimValue);
+      if (normalizedValue !== undefined) {
+        normalizedClaims[claimKey] = normalizedValue;
+      }
+      continue;
+    }
+
+    const safeString = typeof claimValue === 'string' && claimValue.length <= OIDC_METADATA_MAX_STRING_LENGTH;
+    const safeNumber = typeof claimValue === 'number';
+    const safeBoolean = typeof claimValue === 'boolean';
+    const safeSimpleArray = Array.isArray(claimValue) && claimValue.length <= OIDC_METADATA_MAX_ARRAY_LENGTH;
+    if (!(safeString || safeNumber || safeBoolean || safeSimpleArray)) {
+      continue;
+    }
+
+    const normalizedValue = sanitizeClaimValueForMetadata(claimValue);
+    if (normalizedValue !== undefined) {
+      normalizedClaims[claimKey] = normalizedValue;
+    }
+  }
+
+  return normalizedClaims;
 }
 
 async function getOrCreateUser(
@@ -387,11 +510,6 @@ async function getOrCreateUser(
   context: Context,
   hookExecutor: HookExecutor
 ): Promise<GetOrCreateUserResult> {
-  console.error('\n\n========== GET OR CREATE USER CALLED ==========');
-  console.error('Claims received:', JSON.stringify(claims, null, 2));
-  console.error('Config:', JSON.stringify(config, null, 2));
-  console.error('==============================================\n\n');
-
   const {
     autoCreateUser = true,
     userIdClaim = 'sub',
@@ -399,14 +517,12 @@ async function getOrCreateUser(
     lookupFields = ['email', 'preferred_username']
   } = config;
 
-  logger.info({
-    allClaims: claims,
-    claimKeys: Object.keys(claims),
+  logger.debug({
+    ...safeClaimSummary(claims),
     userIdClaim,
-    userIdValue: claims[userIdClaim],
     fallbackIdClaims,
     lookupFields
-  }, '[OIDC] DEBUG: Received ID Token claims');
+  }, '[OIDC] Received OIDC claims for user resolution');
 
   const candidateIds: string[] = [];
   if (userIdClaim && claims[userIdClaim]) {
@@ -442,7 +558,7 @@ async function getOrCreateUser(
     const fields = Array.isArray(lookupFields) ? lookupFields : [lookupFields];
     logger.info({
       lookupFields: fields,
-      attemptedQueries: fields.map(f => ({ field: f, value: claims[f], hasValue: !!claims[f] }))
+      attemptedQueries: fields.map(f => ({ field: f, hasValue: !!claims[f] }))
     }, '[OIDC] DEBUG: Attempting query lookups');
 
     for (const field of fields) {
@@ -453,7 +569,7 @@ async function getOrCreateUser(
         continue;
       }
       const results = await usersResource.query({ [field]: value }, { limit: 1 }) as OIDCUser[];
-      logger.info({ field, value, resultsCount: results.length }, '[OIDC] Query result');
+      logger.info({ field, resultsCount: results.length }, '[OIDC] Query result');
       if (results.length > 0) {
         user = results[0] ?? null;
         break;
@@ -494,7 +610,7 @@ async function getOrCreateUser(
           sub: claims.sub,
           provider: config.issuer,
           lastSync: now,
-          claims: { ...claims }
+          claims: getPersistedOidcClaims(claims)
         }
       }
     };
@@ -591,7 +707,7 @@ async function getOrCreateUser(
           sub: claims.sub,
           provider: config.issuer,
           createdAt: now,
-          claims: { ...claims }
+          claims: getPersistedOidcClaims(claims)
         }
       }
     };

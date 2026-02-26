@@ -2,6 +2,14 @@ import { applyBasePath, normalizeBasePath } from './base-path.js';
 import startCase from 'lodash-es/startCase.js';
 import { findBestMatch, type PathAuthRule as PathMatcherRule } from './path-matcher.js';
 
+function normalizeDriverNameForAuth(driverName: string): string {
+  const lowered = String(driverName || '').trim().toLowerCase();
+  if (lowered === 'api-key' || lowered === 'api_key' || lowered === 'apikey') {
+    return 'apiKey';
+  }
+  return String(driverName).trim();
+}
+
 const CUSTOM_ROUTES_TAG = 'Custom Routes';
 const CUSTOM_ROUTE_METHOD_REGEX = /^(GET|POST|PUT|PATCH|DELETE|HEAD|OPTIONS)\s+(.+)$/i;
 
@@ -817,7 +825,9 @@ export function generateResourcePaths(
   const security: Array<Record<string, string[]>> = [];
   if (requiresAuth) {
     if (authMethods.includes('jwt')) security.push({ bearerAuth: [] });
-    if (authMethods.includes('apiKey')) security.push({ apiKeyAuth: [] });
+    if (authMethods.some((method) => normalizeDriverNameForAuth(method) === 'apiKey')) {
+      security.push({ apiKeyAuth: [] });
+    }
     if (authMethods.includes('basic')) security.push({ basicAuth: [] });
     if (authMethods.includes('oidc')) security.push({ oidcAuth: [] });
   }
@@ -1794,8 +1804,12 @@ For detailed information about each endpoint, see the sections below.`;
     };
   }
 
-  const apiKeyDriver = driverEntries.find((driver) => driver?.driver === 'apiKey');
-  if (apiKeyDriver || driverNames.includes('apiKey')) {
+  const hasApiKeyAuth = driverNames.some((driverName) => normalizeDriverNameForAuth(driverName) === 'apiKey');
+  const apiKeyDriver = driverEntries.find((driver) => (
+    normalizeDriverNameForAuth((driver?.driver || driver?.type || '')) === 'apiKey'
+  ));
+
+  if (apiKeyDriver || hasApiKeyAuth) {
     const headerName = apiKeyDriver?.config?.headerName || 'X-API-Key';
     const resourceName = apiKeyDriver?.config?.resource || 'users';
     const queryParam = apiKeyDriver?.config?.queryParam;
