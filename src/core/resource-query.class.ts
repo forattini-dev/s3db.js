@@ -203,7 +203,15 @@ export class ResourceQuery {
       return a.partition.localeCompare(b.partition);
     });
 
-    return { partition: candidates[0].partition, partitionValues: candidates[0].partitionValues };
+    const bestCandidate = candidates[0];
+    if (!bestCandidate) {
+      return null;
+    }
+
+    return {
+      partition: bestCandidate.partition,
+      partitionValues: bestCandidate.partitionValues
+    };
   }
 
   get client(): S3Client {
