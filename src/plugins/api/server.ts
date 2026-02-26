@@ -173,7 +173,7 @@ export class ApiServer {
   private middlewareChain: MiddlewareChain | null = null;
   router: Router | null = null;
   private healthManager: HealthManager | null = null;
-  private inFlightRequests = new Set<string>();
+  private inFlightRequests = new Set<symbol>();
   private acceptingRequests = true;
   events: ApiEventEmitter;
   metrics: MetricsCollector;
@@ -337,7 +337,7 @@ export class ApiServer {
         logger: this.logger,
         httpLogger: this.options.httpLogger,
         database: this.options.database as ConstructorParameters<typeof MiddlewareChain>[0]['database'],
-        inFlightRequests: this.inFlightRequests as unknown as Set<symbol>,
+        inFlightRequests: this.inFlightRequests,
         acceptingRequests: () => this.acceptingRequests,
         corsMiddleware: this.cors as ConstructorParameters<typeof MiddlewareChain>[0]['corsMiddleware']
       });
@@ -553,6 +553,8 @@ export class ApiServer {
       this._signalHandlersSetup = false;
       bumpProcessMaxListeners(-2);
     }
+
+    this.inFlightRequests.clear();
   }
 
   getInfo(): { isRunning: boolean; port: number; host: string; resources: number } {

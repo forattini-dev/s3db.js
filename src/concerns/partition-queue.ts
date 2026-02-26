@@ -38,6 +38,7 @@ export interface PartitionQueueOptions {
   maxRetries?: number;
   retryDelay?: number;
   persistence?: QueuePersistence | null;
+  maxFailureHistory?: number;
 }
 
 export interface QueueStats {
@@ -54,6 +55,9 @@ export class PartitionQueue extends EventEmitter {
   queue: QueueItem[];
   processing: boolean;
   failures: QueueItem[];
+  private maxFailureHistory: number;
+  private retryTimers: Map<string, ReturnType<typeof setTimeout>>;
+  private stopped: boolean;
 
   constructor(options: PartitionQueueOptions = {}) {
     super();
@@ -63,9 +67,21 @@ export class PartitionQueue extends EventEmitter {
     this.queue = [];
     this.processing = false;
     this.failures = [];
+    this.maxFailureHistory = options.maxFailureHistory === undefined ? 1_000 : Math.max(0, Math.trunc(options.maxFailureHistory));
+    this.retryTimers = new Map();
+    this.stopped = false;
   }
 
   async enqueue(operation: PartitionOperation): Promise<string> {
+    if (this.stopped) {
+      throw new PartitionDriverError('Partition queue is stopped', {
+        driver: 'PartitionQueue',
+        operation: 'enqueue',
+        availableOperations: ['create', 'update', 'delete'],
+        suggestion: 'Restart the queue before enqueueing new operations'
+      });
+    }
+
     const item: QueueItem = {
       id: `${Date.now()}-${Math.random()}`,
       operation,
@@ -88,11 +104,11 @@ export class PartitionQueue extends EventEmitter {
   }
 
   async process(): Promise<void> {
-    if (this.processing || this.queue.length === 0) return;
+    if (this.processing || this.queue.length === 0 || this.stopped) return;
 
     this.processing = true;
 
-    while (this.queue.length > 0) {
+    while (!this.stopped && this.queue.length > 0) {
       const item = this.queue.shift()!;
 
       const [ok, error] = await tryFn(async () => {
@@ -113,15 +129,21 @@ export class PartitionQueue extends EventEmitter {
           const delay = this.retryDelay * Math.pow(2, item.retries - 1);
           item.status = 'retrying';
 
-          setTimeout(() => {
+          const timeoutId = setTimeout(() => {
+            this.retryTimers.delete(item.id);
+            if (this.stopped) return;
             this.queue.push(item);
             if (!this.processing) this.process();
           }, delay);
+          this.retryTimers.set(item.id, timeoutId);
 
           this.emit('retry', { item, error, delay });
         } else {
           item.status = 'failed';
           this.failures.push(item);
+          if (this.failures.length > this.maxFailureHistory) {
+            this.failures.splice(0, this.failures.length - this.maxFailureHistory);
+          }
           this.emit('failure', { item, error });
 
           if (this.persistence) {
@@ -132,6 +154,34 @@ export class PartitionQueue extends EventEmitter {
     }
 
     this.processing = false;
+  }
+
+  stop(): void {
+    this.stopped = true;
+    this.processing = false;
+    this.queue = [];
+    this.failures = [];
+
+    for (const timeoutId of this.retryTimers.values()) {
+      clearTimeout(timeoutId);
+    }
+    this.retryTimers.clear();
+  }
+
+  resume(): void {
+    this.stopped = false;
+    if (!this.processing && this.queue.length > 0) {
+      setImmediate(() => this.process());
+    }
+  }
+
+  clear(): void {
+    this.queue = [];
+    this.failures = [];
+    for (const timeoutId of this.retryTimers.values()) {
+      clearTimeout(timeoutId);
+    }
+    this.retryTimers.clear();
   }
 
   async executeOperation(item: QueueItem): Promise<void> {
@@ -158,7 +208,7 @@ export class PartitionQueue extends EventEmitter {
   }
 
   async recover(): Promise<void> {
-    if (!this.persistence) return;
+    if (!this.persistence || this.stopped) return;
 
     const items = await this.persistence.getPending();
     this.queue.push(...items);

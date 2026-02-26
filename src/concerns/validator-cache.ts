@@ -22,6 +22,12 @@ export interface ValidatorCacheStats {
   hitRate: number;
 }
 
+export interface ValidatorCachePolicy {
+  maxEntries?: number;
+  maxAgeMs?: number;
+  autoPrune?: boolean;
+}
+
 export interface CacheMemoryUsage {
   estimatedKB: number;
   estimatedMB: number;
@@ -32,6 +38,58 @@ const validatorCache = new Map<string, CachedValidator>();
 
 let cacheHits = 0;
 let cacheMisses = 0;
+let maxCacheEntries = 5_000;
+let maxCacheAgeMs = 5 * 60 * 1000;
+let autoPruneEnabled = true;
+
+const DEFAULT_MAX_ENTRIES = 5_000;
+const DEFAULT_MAX_AGE_MS = 5 * 60 * 1000;
+
+function pruneCandidates(maxAgeMs = maxCacheAgeMs): string[] {
+  const now = Date.now();
+  const removable: [string, CachedValidator][] = [];
+
+  for (const [fingerprint, cached] of validatorCache.entries()) {
+    if (cached.refCount === 0 && (now - cached.lastAccessedAt) >= maxAgeMs) {
+      removable.push([fingerprint, cached]);
+    }
+  }
+
+  removable.sort((a, b) => a[1].lastAccessedAt - b[1].lastAccessedAt);
+  return removable.map(([fingerprint]) => fingerprint);
+}
+
+export function configureValidatorCache(policy: ValidatorCachePolicy = {}): void {
+  if (policy.maxEntries !== undefined) {
+    if (!Number.isFinite(policy.maxEntries) || policy.maxEntries < 0) {
+      throw new TypeError('Validator cache maxEntries must be a non-negative finite number');
+    }
+    maxCacheEntries = Math.trunc(policy.maxEntries);
+  }
+
+  if (policy.maxAgeMs !== undefined) {
+    if (!Number.isFinite(policy.maxAgeMs) || policy.maxAgeMs < 0) {
+      throw new TypeError('Validator cache maxAgeMs must be a non-negative finite number');
+    }
+    maxCacheAgeMs = Math.trunc(policy.maxAgeMs);
+  }
+
+  if (policy.autoPrune !== undefined) {
+    autoPruneEnabled = policy.autoPrune;
+  }
+
+  if (autoPruneEnabled) {
+    evictUnusedValidators();
+  }
+}
+
+export function getValidatorCachePolicy(): ValidatorCachePolicy {
+  return {
+    maxEntries: maxCacheEntries,
+    maxAgeMs: maxCacheAgeMs,
+    autoPrune: autoPruneEnabled
+  };
+}
 
 export function generateSchemaFingerprint(attributes: Record<string, unknown>, options: ValidatorOptions = {}): string {
   const normalized = {
@@ -65,6 +123,18 @@ export function cacheValidator(fingerprint: string, validator: unknown): void {
     return;
   }
 
+  if (autoPruneEnabled && maxCacheEntries > 0) {
+    evictUnusedValidators(maxCacheAgeMs);
+  }
+
+  if (maxCacheEntries > 0 && validatorCache.size >= maxCacheEntries) {
+    const pruneOrder = pruneCandidates(maxCacheAgeMs);
+    for (const staleFingerprint of pruneOrder) {
+      if (validatorCache.size < maxCacheEntries) break;
+      validatorCache.delete(staleFingerprint);
+    }
+  }
+
   validatorCache.set(fingerprint, {
     validator,
     refCount: 1,
@@ -81,7 +151,7 @@ export function releaseValidator(fingerprint: string): void {
   cached.refCount = Math.max(0, cached.refCount - 1);
 }
 
-export function evictUnusedValidators(maxAgeMs: number = 5 * 60 * 1000): number {
+export function evictUnusedValidators(maxAgeMs: number = maxCacheAgeMs): number {
   const now = Date.now();
   let evicted = 0;
 
@@ -93,6 +163,12 @@ export function evictUnusedValidators(maxAgeMs: number = 5 * 60 * 1000): number 
   }
 
   return evicted;
+}
+
+export function resetValidatorCachePolicy(): void {
+  maxCacheEntries = DEFAULT_MAX_ENTRIES;
+  maxCacheAgeMs = DEFAULT_MAX_AGE_MS;
+  autoPruneEnabled = true;
 }
 
 export function getCacheStats(): ValidatorCacheStats {
