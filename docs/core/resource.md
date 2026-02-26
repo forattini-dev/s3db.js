@@ -1041,7 +1041,9 @@ const allUsers = await users.getAll();
 console.log(`Total users: ${allUsers.length}`);
 ```
 
-**Equivalent to:** `users.list()`
+**Semantics:** Returns all documents (equivalent to `list()` with no pagination), but with internal batched retrieval:
+- IDs are read in pages to cover large datasets
+- Records are fetched in parallelized batches
 
 **Returns:** Array of all documents
 
@@ -1078,11 +1080,10 @@ const page = await users.page({
 });
 
 console.log('Items:', page.items);
-console.log('Total:', page.total);
+console.log('Total:', page.totalItems);
 console.log('Page:', page.page);
-console.log('Pages:', page.pages);
-console.log('Has next:', page.hasNext);
-console.log('Has prev:', page.hasPrev);
+console.log('Total pages:', page.totalPages);
+console.log('Has more:', page.hasMore);
 ```
 
 **Options:**
@@ -1099,13 +1100,18 @@ console.log('Has prev:', page.hasPrev);
 ```typescript
 {
   items: Array<Document>;   // Page items
-  total: number;            // Total items
-  offset: number;           // Current offset
-  size: number;             // Page size
-  page: number;             // Current page (1-indexed)
-  pages: number;            // Total pages
-  hasNext: boolean;         // Has next page
-  hasPrev: boolean;         // Has previous page
+  totalItems: number | null;   // Total items (null when skipCount = true)
+  page: number;                 // 0-based page index
+  pageSize: number;             // Requested size used internally (at least 1)
+  totalPages: number | null;    // Null when count is skipped
+  hasMore: boolean;             // Whether more items are available
+  _debug: {                     // Internal pagination trace
+    requestedSize: number;
+    requestedOffset: number;
+    actualItemsReturned: number;
+    skipCount: boolean;
+    hasTotalItems: boolean;
+  };
 }
 ```
 
@@ -1135,14 +1141,16 @@ const results = await users.query(
 // Exact match
 { status: 'active' }
 
-// Nested fields
-{ 'profile.country': 'US' }
-
 // Multiple conditions (AND)
 { status: 'active', age: 25 }
 ```
 
-**Performance:** O(n) scan - use partitions for O(1) queries
+**Partition-aware execution:**
+- If you pass `partition` + `partitionValues`, query starts directly from that partition and filters in memory only inside that scope.
+- If you do not pass `partition`, `query()` automatically infers the best matching partition from the filter (when filter keys match configured partition fields), and narrows the scan to that partition prefix.
+- If no suitable partition can be inferred, behavior remains full scan with in-memory filtering.
+
+**Performance:** Typically O(1) index list calls when partition inference is possible; O(n) scan when not.
 
 **Returns:** Array of matching documents
 

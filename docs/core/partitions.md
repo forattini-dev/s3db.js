@@ -69,9 +69,32 @@ const activeUSUsers = await users.listPartition('byStatusAndCountry', {
 // With options
 const results = await users.listPartition('byStatus', { status: 'active' }, {
   limit: 100,
-  startAfter: 'lastId'
+  offset: 100
 });
 ```
+
+### Query planner + query() integration
+
+`query()` can use partitions automatically when you pass filters that match partition fields.
+
+```javascript
+// If a `byStatus` partition exists, this becomes a partition-scoped query internally
+await users.query({ status: 'active' });
+
+// Explicit partition still works and remains explicit
+await users.query(
+  { status: 'active', country: 'US' },
+  { partition: 'byStatusAndCountry', partitionValues: { status: 'active', country: 'US' } }
+);
+```
+
+Rules used by the planner:
+- Uses only exact match filters (no operators)
+- Matches against configured partition fields (`fields` in partition definition)
+- Chooses the most selective partition match from available candidates
+- Supports partial values for composite partitions (e.g. one field of two)
+
+When no matching partition can be inferred, `query()` falls back to full listing + filtering.
 
 ### getFromPartition
 
@@ -249,8 +272,8 @@ partitions: {
 
 | Operation | Without Partition | With Partition |
 |-----------|-------------------|----------------|
-| Query by status | O(n) LIST calls | O(1) LIST call |
-| Query by status + country | O(n) LIST calls | O(1) LIST call |
+| Query by status | O(n) LIST calls (fallback) | O(1) LIST call (inferred or explicit partition) |
+| Query by status + country | O(n) LIST calls (fallback) | O(1) LIST call (inferred or explicit partition) |
 | Insert | 1 PUT | 1 PUT + n partition PUTs |
 | Update (partition field) | 1 PUT | 1 PUT + DEL/PUT per partition |
 | Delete | 1 DELETE | 1 DELETE + n partition DELETEs |
