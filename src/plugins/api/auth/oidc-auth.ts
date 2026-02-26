@@ -257,11 +257,6 @@ interface OIDCStateStoreEntry {
   expires: number;
 }
 
-interface OIDCStateStoreGlobalShape {
-  __oidc_state_store?: Map<string, OIDCStateStoreEntry>;
-  __oidc_state_mapping?: Map<string, string>;
-}
-
 const OIDC_STATE_TTL_MS = 10 * 60 * 1000;
 const OIDC_STATE_CLEANUP_INTERVAL_MS = 60 * 1000;
 const OIDC_STATE_MAX_ENTRIES = 5000;
@@ -881,29 +876,16 @@ export async function createOIDCHandler(
   const signingKey = derivedKeys.signing;
 
   const sessionCache = new WeakMap<Context, SessionData>();
+  const stateStoreContainer: OIDCStateStoreContainer = {
+    store: new Map(),
+    mapping: new Map()
+  };
 
   const hookExecutor = createHookExecutor(config as unknown as Parameters<typeof createHookExecutor>[0], logger);
   let stateStoreCleanupTimer: ReturnType<typeof setInterval> | null = null;
 
   function generateSessionId(): string {
     return crypto.randomBytes(32).toString('base64url');
-  }
-
-  function getOIDCStateContainer(): OIDCStateStoreContainer {
-    const globalStore = globalThis as OIDCStateStoreGlobalShape & Record<string, unknown>;
-
-    if (!globalStore.__oidc_state_store) {
-      globalStore.__oidc_state_store = new Map();
-    }
-
-    if (!globalStore.__oidc_state_mapping) {
-      globalStore.__oidc_state_mapping = new Map();
-    }
-
-    return {
-      store: globalStore.__oidc_state_store,
-      mapping: globalStore.__oidc_state_mapping
-    };
   }
 
   function removeStateMappingsById(mapping: Map<string, string>, stateId: string): void {
@@ -954,7 +936,7 @@ export async function createOIDCHandler(
       return stateStoreCleanupTimer;
     }
 
-    const container = getOIDCStateContainer();
+    const container = stateStoreContainer;
     stateStoreCleanupTimer = setInterval(() => {
       try {
         pruneOIDCStateStore(container);
@@ -964,6 +946,9 @@ export async function createOIDCHandler(
         }, '[OIDC] Failed to prune OIDC state store');
       }
     }, OIDC_STATE_CLEANUP_INTERVAL_MS);
+    if (typeof (stateStoreCleanupTimer as ReturnType<typeof setInterval> & { unref?: () => void }).unref === 'function') {
+      (stateStoreCleanupTimer as ReturnType<typeof setInterval> & { unref?: () => void }).unref();
+    }
 
     return stateStoreCleanupTimer;
   }
@@ -973,13 +958,18 @@ export async function createOIDCHandler(
       return;
     }
 
-    pruneOIDCStateStore(getOIDCStateContainer());
+    pruneOIDCStateStore(stateStoreContainer);
+    stateStoreContainer.store.clear();
+    stateStoreContainer.mapping.clear();
     clearInterval(stateStoreCleanupTimer);
+    if (typeof (stateStoreCleanupTimer as ReturnType<typeof setInterval> & { unref?: () => void }).unref === 'function') {
+      (stateStoreCleanupTimer as ReturnType<typeof setInterval> & { unref?: () => void }).unref?.();
+    }
     stateStoreCleanupTimer = null;
   }
 
   function putOIDCState(state: string, stateJWT: string): string {
-    const container = getOIDCStateContainer();
+    const container = stateStoreContainer;
     const stateId = idGenerator();
 
     container.store.set(stateId, {
@@ -995,7 +985,7 @@ export async function createOIDCHandler(
   }
 
   function consumeOIDCState(state: string): string | null {
-    const container = getOIDCStateContainer();
+    const container = stateStoreContainer;
     const now = Date.now();
     const stateParts = state.split(':');
     const stateValue = stateParts[0] || '';
@@ -1966,8 +1956,9 @@ export async function createOIDCHandler(
 
   const destroyableMiddleware: MiddlewareHandler & { destroy?: () => void } = middleware;
   destroyableMiddleware.destroy = () => {
-    if (rateLimiter && (rateLimiter as MiddlewareHandler & { destroy?: () => void }).destroy) {
-      (rateLimiter as MiddlewareHandler & { destroy?: () => void }).destroy();
+    const destroyableRateLimiter = rateLimiter as MiddlewareHandler & { destroy?: () => void } | null;
+    if (destroyableRateLimiter?.destroy) {
+      destroyableRateLimiter.destroy();
     }
 
     stopOIDCStateStoreCleanup();

@@ -142,7 +142,7 @@ export function createDriverRateLimiter(config: DriverRateLimiterConfig = {}): M
     keyPrefix = 'ratelimit',
     keyGenerator = null,
     skipSuccessfulRequests = false,
-    handler = null,
+    handler: limitHandler = null,
     enabled = true
   } = config;
 
@@ -174,8 +174,8 @@ export function createDriverRateLimiter(config: DriverRateLimiterConfig = {}): M
       c.header('X-RateLimit-Remaining', '0');
       c.header('X-RateLimit-Reset', String(Date.now() + retryAfter));
 
-      if (handler && typeof handler === 'function') {
-        return handler(c, { retryAfter: retryAfterSeconds });
+      if (limitHandler && typeof limitHandler === 'function') {
+        return limitHandler(c, { retryAfter: retryAfterSeconds });
       }
 
       return c.json({

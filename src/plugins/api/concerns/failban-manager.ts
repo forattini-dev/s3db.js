@@ -131,6 +131,7 @@ export class FailbanManager {
   private geoCache: Map<string, string | null>;
   private geoReader: GeoReader | null;
   private cleanupTask: CronTask | null;
+  private cleanupJobName: string;
 
   constructor(options: FailbanOptions = {}) {
     if (options.logger) {
@@ -182,6 +183,7 @@ export class FailbanManager {
     this.geoCache = new Map();
     this.geoReader = null;
     this.cleanupTask = null;
+    this.cleanupJobName = `failban-cleanup:${Date.now()}`;
   }
 
   private _resolveResourceNames(): ResolvedResourceNames {
@@ -359,6 +361,11 @@ export class FailbanManager {
   }
 
   private async _setupCleanupTimer(): Promise<void> {
+    if (this.cleanupTask) {
+      this.cleanupTask.stop();
+      this.cleanupTask = null;
+    }
+
     const cronManager = getCronManager();
     this.cleanupTask = await cronManager.schedule(
       '0 * * * * *',
@@ -383,7 +390,8 @@ export class FailbanManager {
           this.logger.info({ cleaned }, 'Cleaned expired bans from cache');
         }
       },
-      'failban-cleanup'
+      this.cleanupJobName,
+      { replace: true }
     );
   }
 
@@ -745,6 +753,14 @@ export class FailbanManager {
     this.memoryCache.clear();
     this.geoCache.clear();
 
+    const closableGeoReader = this.geoReader as unknown as { close?: () => void };
+    if (closableGeoReader && typeof closableGeoReader.close === 'function') {
+      try {
+        closableGeoReader.close();
+      } catch {
+        // no-op
+      }
+    }
     if (this.geoReader) {
       this.geoReader = null;
     }
