@@ -4,12 +4,19 @@ import { tryFn } from './try-fn.js';
 import { idGenerator } from './id.js';
 import { streamToString } from '../stream/index.js';
 import { PluginStorageError, MetadataLimitError, BehaviorError } from '../errors.js';
-import { DistributedLock, computeBackoff, sleep, isPreconditionFailure, StorageAdapter, LockHandle, AcquireOptions } from './distributed-lock.js';
+import { DistributedLock, computeBackoff, sleep, isPreconditionFailure, isValidLockPayload, isExpiredLockPayload, StorageAdapter, LockHandle, AcquireOptions } from './distributed-lock.js';
 import { DistributedSequence } from './distributed-sequence.js';
 
 const S3_METADATA_LIMIT = 2047;
 
 const SEQUENCE_GATES = new Map<string, Promise<void>>();
+
+function isMissingObjectError(error: unknown): boolean {
+  const candidate = error as { name?: string; code?: string; statusCode?: number; $metadata?: { httpStatusCode?: number } };
+  const errorCode = candidate?.name || candidate?.code;
+  const statusCode = candidate?.statusCode || candidate?.$metadata?.httpStatusCode;
+  return errorCode === 'NoSuchKey' || errorCode === 'NotFound' || statusCode === 404;
+}
 
 async function withSequenceGate<T>(lockKey: string, task: () => Promise<T>): Promise<T> {
   const previous = SEQUENCE_GATES.get(lockKey) ?? Promise.resolve();
@@ -702,13 +709,7 @@ export class PluginStorage {
     const [ok, err, response] = await tryFn(() => this.set(key, data, { ...options, ifNoneMatch: '*' }));
 
     if (!ok) {
-      const error = err as { name?: string; code?: string; statusCode?: number } | undefined;
-      // PreconditionFailed (412) or similar means key already exists
-      if (
-        error?.name === 'PreconditionFailed' ||
-        error?.code === 'PreconditionFailed' ||
-        error?.statusCode === 412
-      ) {
+      if (isPreconditionFailure(err as Error)) {
         return null;
       }
       throw err;
@@ -799,13 +800,7 @@ export class PluginStorage {
     const [ok, err, response] = await tryFn(() => this.set(key, data, { ...options, ifMatch: version }));
 
     if (!ok) {
-      const error = err as { name?: string; code?: string; statusCode?: number } | undefined;
-      // PreconditionFailed (412) means version mismatch
-      if (
-        error?.name === 'PreconditionFailed' ||
-        error?.code === 'PreconditionFailed' ||
-        error?.statusCode === 412
-      ) {
+      if (isPreconditionFailure(err as Error)) {
         return null;
       }
       throw err;
@@ -820,15 +815,28 @@ export class PluginStorage {
    */
   async deleteIfVersion(key: string, version: string): Promise<boolean> {
     // First verify the version matches
-    const [headOk, , headResponse] = await tryFn<HeadObjectResponse & { ETag?: string }>(() =>
+    const [headOk, headErr, headResponse] = await tryFn<HeadObjectResponse & { ETag?: string }>(() =>
       this.client.headObject(key)
     );
 
     if (!headOk || !headResponse) {
-      return false;
+      if (isMissingObjectError(headErr)) {
+        return false;
+      }
+      throw new PluginStorageError(`Failed to verify current version before delete`, {
+        pluginSlug: this.pluginSlug,
+        key,
+        operation: 'deleteIfVersion',
+        original: headErr,
+        suggestion: 'Check object existence and client permissions'
+      });
     }
 
     const currentVersion = (headResponse as any).ETag;
+    if (!currentVersion) {
+      return false;
+    }
+
     if (currentVersion !== version) {
       return false;
     }
@@ -988,7 +996,7 @@ export class PluginStorage {
         const current = await this.get(lockKey);
         if (!current) continue;
 
-        if (current._expiresAt && this._now() > (current._expiresAt as number)) {
+        if (!isValidLockPayload(current) || isExpiredLockPayload(current, this._now())) {
           await tryFn(() => this.delete(lockKey));
           continue;
         }

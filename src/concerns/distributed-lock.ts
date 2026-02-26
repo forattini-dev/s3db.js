@@ -27,7 +27,7 @@ export interface LockHandle {
 }
 
 export interface LockInfo {
-  workerId: string;
+  workerId?: string;
   token: string;
   acquiredAt: number;
   _expiresAt: number;
@@ -87,6 +87,28 @@ export function isPreconditionFailure(err: PreconditionError | null | undefined)
   const errorCode = originalError?.code || originalError?.Code || originalError?.name;
   const statusCode = originalError?.statusCode || originalError?.$metadata?.httpStatusCode;
   return errorCode === 'PreconditionFailed' || statusCode === 412;
+}
+
+export function isValidLockPayload(value: unknown): value is LockInfo {
+  if (!value || typeof value !== 'object') return false;
+
+  const candidate = value as Record<string, unknown>;
+  return (
+    typeof candidate.token === 'string' &&
+    typeof candidate.acquiredAt === 'number' &&
+    Number.isFinite(candidate.acquiredAt) &&
+    (!('_expiresAt' in candidate) || (
+      typeof candidate._expiresAt === 'number' && Number.isFinite(candidate._expiresAt)
+    ))
+  );
+}
+
+export function isExpiredLockPayload(lock: LockInfo, now: number): boolean {
+  if (!('_expiresAt' in lock)) {
+    return false;
+  }
+
+  return typeof lock._expiresAt === 'number' && now > lock._expiresAt;
 }
 
 export class DistributedLock {
@@ -153,7 +175,7 @@ export class DistributedLock {
         continue;
       }
 
-      if (current._expiresAt && Date.now() > current._expiresAt) {
+      if (!isValidLockPayload(current) || isExpiredLockPayload(current, Date.now())) {
         await tryFn(() => this.storage.delete(key));
         continue;
       }
@@ -222,12 +244,36 @@ export class DistributedLock {
   async isLocked(lockName: string): Promise<boolean> {
     const key = this.keyGenerator(lockName);
     const lock = await this.storage.get(key);
-    return lock !== null;
+
+    if (!isValidLockPayload(lock) || isExpiredLockPayload(lock, Date.now())) {
+      if (lock) {
+        await tryFn(() => this.storage.delete(key));
+      }
+      return false;
+    }
+
+    return true;
   }
 
   async getLockInfo(lockName: string): Promise<LockInfo | null> {
     const key = this.keyGenerator(lockName);
-    return this.storage.get(key);
+    const lock = await this.storage.get(key);
+
+    if (!isValidLockPayload(lock) || isExpiredLockPayload(lock, Date.now())) {
+      if (lock) {
+        await tryFn(() => this.storage.delete(key));
+      }
+      return null;
+    }
+
+    if (!('workerId' in lock)) {
+      return {
+        ...lock,
+        workerId: 'unknown'
+      };
+    }
+
+    return lock;
   }
 }
 
