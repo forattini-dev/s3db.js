@@ -152,7 +152,7 @@ export function createDriverRateLimiter(config: DriverRateLimiterConfig = {}): M
 
   const store = new RateLimitStore({ windowMs });
 
-  return async (c: Context, next: Next): Promise<void | Response> => {
+  const handler: MiddlewareHandler & { destroy?: () => void } = async (c: Context, next: Next): Promise<void | Response> => {
     let key: string;
     if (keyGenerator && typeof keyGenerator === 'function') {
       key = await keyGenerator(c);
@@ -203,6 +203,12 @@ export function createDriverRateLimiter(config: DriverRateLimiterConfig = {}): M
     c.header('X-RateLimit-Limit', String(maxAttempts));
     c.header('X-RateLimit-Remaining', String(remaining));
   };
+
+  handler.destroy = () => {
+    store.stop();
+  };
+
+  return handler;
 }
 
 export type AuthDriverType = 'oidc' | 'jwt' | 'basic' | 'apikey';

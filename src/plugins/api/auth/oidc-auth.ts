@@ -252,6 +252,20 @@ export interface StateData {
   expires: number;
 }
 
+interface OIDCStateStoreEntry {
+  data: string;
+  expires: number;
+}
+
+interface OIDCStateStoreGlobalShape {
+  __oidc_state_store?: Map<string, OIDCStateStoreEntry>;
+  __oidc_state_mapping?: Map<string, string>;
+}
+
+const OIDC_STATE_TTL_MS = 10 * 60 * 1000;
+const OIDC_STATE_CLEANUP_INTERVAL_MS = 60 * 1000;
+const OIDC_STATE_MAX_ENTRIES = 5000;
+
 export interface TokenResponse {
   access_token: string;
   id_token: string;
@@ -282,7 +296,7 @@ export interface GetOrCreateUserResult {
 }
 
 export interface OIDCHandlerResult {
-  middleware: MiddlewareHandler;
+  middleware: MiddlewareHandler & { destroy?: () => void };
   routes: Record<string, string>;
   config: OIDCConfig;
   utils: OIDCUtils;
@@ -293,6 +307,11 @@ export interface OIDCUtils {
   getCachedSession: (c: Context) => Promise<SessionData | null>;
   deleteSession: (c: Context) => Promise<void>;
 }
+
+type OIDCStateStoreContainer = {
+  store: Map<string, OIDCStateStoreEntry>;
+  mapping: Map<string, string>;
+};
 
 /**
  * Validate OIDC configuration at startup
@@ -864,9 +883,156 @@ export async function createOIDCHandler(
   const sessionCache = new WeakMap<Context, SessionData>();
 
   const hookExecutor = createHookExecutor(config as unknown as Parameters<typeof createHookExecutor>[0], logger);
+  let stateStoreCleanupTimer: ReturnType<typeof setInterval> | null = null;
 
   function generateSessionId(): string {
     return crypto.randomBytes(32).toString('base64url');
+  }
+
+  function getOIDCStateContainer(): OIDCStateStoreContainer {
+    const globalStore = globalThis as OIDCStateStoreGlobalShape & Record<string, unknown>;
+
+    if (!globalStore.__oidc_state_store) {
+      globalStore.__oidc_state_store = new Map();
+    }
+
+    if (!globalStore.__oidc_state_mapping) {
+      globalStore.__oidc_state_mapping = new Map();
+    }
+
+    return {
+      store: globalStore.__oidc_state_store,
+      mapping: globalStore.__oidc_state_mapping
+    };
+  }
+
+  function removeStateMappingsById(mapping: Map<string, string>, stateId: string): void {
+    for (const [state, mappedStateId] of mapping.entries()) {
+      if (mappedStateId === stateId) {
+        mapping.delete(state);
+      }
+    }
+  }
+
+  function pruneOIDCStateStore(container: OIDCStateStoreContainer): void {
+    const now = Date.now();
+    const { store, mapping } = container;
+
+    for (const [stateId, entry] of store.entries()) {
+      if (!entry || entry.expires <= now) {
+        store.delete(stateId);
+      }
+    }
+
+    for (const [state, stateId] of mapping.entries()) {
+      if (!store.has(stateId)) {
+        mapping.delete(state);
+      }
+    }
+
+    if (store.size > OIDC_STATE_MAX_ENTRIES) {
+      const excessEntries = store.size - OIDC_STATE_MAX_ENTRIES;
+      let removed = 0;
+      const iterator = store.keys();
+
+      while (removed < excessEntries) {
+        const nextState = iterator.next();
+        if (nextState.done) {
+          break;
+        }
+
+        const stateId = nextState.value;
+        store.delete(stateId);
+        removeStateMappingsById(mapping, stateId);
+        removed++;
+      }
+    }
+  }
+
+  function ensureOIDCStateStoreCleanup(): ReturnType<typeof setInterval> {
+    if (stateStoreCleanupTimer) {
+      return stateStoreCleanupTimer;
+    }
+
+    const container = getOIDCStateContainer();
+    stateStoreCleanupTimer = setInterval(() => {
+      try {
+        pruneOIDCStateStore(container);
+      } catch (error) {
+        logger.warn({
+          error: (error as Error).message
+        }, '[OIDC] Failed to prune OIDC state store');
+      }
+    }, OIDC_STATE_CLEANUP_INTERVAL_MS);
+
+    return stateStoreCleanupTimer;
+  }
+
+  function stopOIDCStateStoreCleanup(): void {
+    if (!stateStoreCleanupTimer) {
+      return;
+    }
+
+    pruneOIDCStateStore(getOIDCStateContainer());
+    clearInterval(stateStoreCleanupTimer);
+    stateStoreCleanupTimer = null;
+  }
+
+  function putOIDCState(state: string, stateJWT: string): string {
+    const container = getOIDCStateContainer();
+    const stateId = idGenerator();
+
+    container.store.set(stateId, {
+      data: stateJWT,
+      expires: Date.now() + OIDC_STATE_TTL_MS
+    });
+    container.mapping.set(state, stateId);
+
+    ensureOIDCStateStoreCleanup();
+    pruneOIDCStateStore(container);
+
+    return stateId;
+  }
+
+  function consumeOIDCState(state: string): string | null {
+    const container = getOIDCStateContainer();
+    const now = Date.now();
+    const stateParts = state.split(':');
+    const stateValue = stateParts[0] || '';
+    const stateIdFromParam = stateParts.length > 1 ? stateParts[1] : null;
+
+    if (stateIdFromParam) {
+      const byId = container.store.get(stateIdFromParam);
+      if (byId && byId.expires > now) {
+        container.store.delete(stateIdFromParam);
+        removeStateMappingsById(container.mapping, stateIdFromParam);
+        return byId.data;
+      }
+    }
+
+    if (!stateValue) {
+      pruneOIDCStateStore(container);
+      return null;
+    }
+
+    const mappedStateId = container.mapping.get(stateValue);
+    if (!mappedStateId) {
+      pruneOIDCStateStore(container);
+      return null;
+    }
+
+    const mappedState = container.store.get(mappedStateId);
+    if (!mappedState || mappedState.expires <= now) {
+      container.store.delete(mappedStateId);
+      container.mapping.delete(stateValue);
+      pruneOIDCStateStore(container);
+      return null;
+    }
+
+    container.store.delete(mappedStateId);
+    container.mapping.delete(stateValue);
+
+    return mappedState.data;
   }
 
   const issuerNoSlash = `${issuer || ''}`.replace(/\/$/, '');
@@ -1278,17 +1444,7 @@ export async function createOIDCHandler(
 
       let stateId: string | null = null;
       if (useServerSideState) {
-        stateId = idGenerator();
-        const globalStore = (globalThis as Record<string, unknown>);
-        if (!globalStore.__oidc_state_store) globalStore.__oidc_state_store = new Map();
-        if (!globalStore.__oidc_state_mapping) globalStore.__oidc_state_mapping = new Map();
-
-        (globalStore.__oidc_state_store as Map<string, { data: string; expires: number }>).set(stateId, {
-          data: stateJWT,
-          expires: Date.now() + 600000
-        });
-
-        (globalStore.__oidc_state_mapping as Map<string, string>).set(state, stateId);
+        stateId = putOIDCState(state, stateJWT);
 
         logger.warn({
           baseURL: config.baseURL,
@@ -1371,39 +1527,10 @@ export async function createOIDCHandler(
     }
 
     let stateCookie = getCookie(c, `${cookieName}_state`);
-    let stateSource = 'cookie';
-    let extractedStateId: string | null = null;
-
     if (!stateCookie && state) {
-      const stateParts = state.split(':');
-      const stateValue = stateParts[0] || '';
-      const stateIdFromParam = stateParts.length > 1 ? stateParts[1] : null;
-      const globalStore = (globalThis as Record<string, unknown>);
-
-      if (stateIdFromParam && globalStore.__oidc_state_store) {
-        const stored = (globalStore.__oidc_state_store as Map<string, { data: string; expires: number }>).get(stateIdFromParam);
-        if (stored && stored.expires > Date.now()) {
-          stateCookie = stored.data;
-          stateSource = 'server-side';
-          extractedStateId = stateIdFromParam;
-
-          (globalStore.__oidc_state_store as Map<string, unknown>).delete(stateIdFromParam);
-        }
-      }
-
-      if (!stateCookie && globalStore.__oidc_state_mapping && globalStore.__oidc_state_store) {
-        const mappedStateId = (globalStore.__oidc_state_mapping as Map<string, string>).get(stateValue);
-        if (mappedStateId) {
-          const stored = (globalStore.__oidc_state_store as Map<string, { data: string; expires: number }>).get(mappedStateId);
-          if (stored && stored.expires > Date.now()) {
-            stateCookie = stored.data;
-            stateSource = 'server-side';
-            extractedStateId = mappedStateId;
-
-            (globalStore.__oidc_state_store as Map<string, unknown>).delete(mappedStateId);
-            (globalStore.__oidc_state_mapping as Map<string, unknown>).delete(stateValue);
-          }
-        }
+      const recovered = consumeOIDCState(state);
+      if (recovered) {
+        stateCookie = recovered;
       }
     }
 
@@ -1837,8 +1964,17 @@ export async function createOIDCHandler(
     }
   };
 
+  const destroyableMiddleware: MiddlewareHandler & { destroy?: () => void } = middleware;
+  destroyableMiddleware.destroy = () => {
+    if (rateLimiter && (rateLimiter as MiddlewareHandler & { destroy?: () => void }).destroy) {
+      (rateLimiter as MiddlewareHandler & { destroy?: () => void }).destroy();
+    }
+
+    stopOIDCStateStoreCleanup();
+  };
+
   return {
-    middleware,
+    middleware: destroyableMiddleware,
     routes: {
       [loginPath || '/auth/login']: 'Login (redirect to SSO)',
       [callbackPath || '/auth/callback']: 'OAuth2 callback',
