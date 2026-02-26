@@ -28,7 +28,11 @@ import {
   releaseValidator,
   getCacheStats,
   getCacheMemoryUsage,
-  evictUnusedValidators
+  evictUnusedValidators,
+  configureValidatorCache,
+  getValidatorCachePolicy,
+  resetValidatorCachePolicy,
+  ValidatorCachePolicy
 } from "./concerns/validator-cache.js";
 
 export type AttributeValue = string | number | boolean | null | undefined | Record<string, unknown> | unknown[];
@@ -1867,6 +1871,18 @@ export class Schema {
 
   static evictUnusedValidators(maxAgeMs?: number): number {
     return evictUnusedValidators(maxAgeMs);
+  }
+
+  static configureValidatorCache(policy: ValidatorCachePolicy): void {
+    configureValidatorCache(policy);
+  }
+
+  static getValidatorCachePolicy(): ReturnType<typeof getValidatorCachePolicy> {
+    return getValidatorCachePolicy();
+  }
+
+  static resetValidatorCachePolicy(): void {
+    resetValidatorCachePolicy();
   }
 }
 
