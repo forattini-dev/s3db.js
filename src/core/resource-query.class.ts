@@ -114,11 +114,96 @@ export interface QueryOptions {
   partitionValues?: StringRecord;
 }
 
+interface PartitionPlannerCandidate {
+  partition: string;
+  partitionValues: StringRecord;
+  matchCount: number;
+  totalFields: number;
+}
+
 export class ResourceQuery {
   resource: Resource;
 
   constructor(resource: Resource) {
     this.resource = resource;
+  }
+
+  private isUsablePartitionFilterValue(value: unknown): boolean {
+    return value !== undefined && value !== null;
+  }
+
+  private buildPlannerCandidateForPartition(
+    filter: StringRecord,
+    partitionName: string,
+    partitionDef: PartitionDefinition
+  ): PartitionPlannerCandidate | null {
+    const fields = partitionDef?.fields || {};
+    const partitionValues: StringRecord = {};
+    let matchCount = 0;
+    const totalFields = Object.keys(fields).length;
+
+    for (const [fieldName, rule] of Object.entries(fields)) {
+      if (!Object.prototype.hasOwnProperty.call(filter, fieldName)) {
+        continue;
+      }
+
+      const value = filter[fieldName];
+      if (!this.isUsablePartitionFilterValue(value)) {
+        continue;
+      }
+
+      partitionValues[fieldName] = this.resource.applyPartitionRule(value, rule);
+      matchCount++;
+    }
+
+    if (matchCount === 0) {
+      return null;
+    }
+
+    return {
+      partition: partitionName,
+      partitionValues,
+      matchCount,
+      totalFields
+    };
+  }
+
+  private resolvePartitionFromFilter(filter: StringRecord): { partition: string; partitionValues: StringRecord } | null {
+    const partitionEntries = Object.entries(this.partitions);
+    if (partitionEntries.length === 0) {
+      return null;
+    }
+
+    const candidates: PartitionPlannerCandidate[] = [];
+
+    for (const [partitionName, partitionDef] of partitionEntries) {
+      if (!partitionDef || !partitionDef.fields || Object.keys(partitionDef.fields).length === 0) {
+        continue;
+      }
+
+      const candidate = this.buildPlannerCandidateForPartition(filter, partitionName, partitionDef);
+      if (candidate) {
+        candidates.push(candidate);
+      }
+    }
+
+    if (candidates.length === 0) {
+      return null;
+    }
+
+    candidates.sort((a, b) => {
+      if (b.matchCount !== a.matchCount) {
+        return b.matchCount - a.matchCount;
+      }
+
+      if (a.totalFields !== b.totalFields) {
+        return a.totalFields - b.totalFields;
+      }
+
+      return a.partition.localeCompare(b.partition);
+    });
+
+    return { partition: candidates[0].partition, partitionValues: candidates[0].partitionValues };
   }
 
   get client(): S3Client {
@@ -387,15 +472,48 @@ export class ResourceQuery {
   }
 
   async getAll(): Promise<ResourceData[]> {
-    const [ok, err, ids] = await tryFn<string[]>(() => this.listIds());
-    if (!ok || !ids) throw err;
-    const results: ResourceData[] = [];
-    for (const id of ids) {
-      const [ok2, , item] = await tryFn<ResourceData>(() => this.resource.get(id));
-      if (ok2 && item) {
-        results.push(item);
+    const ids: string[] = [];
+    let offset = 0;
+    const pageSize = 1000;
+
+    while (true) {
+      const [okIds, errIds, page] = await tryFn<string[]>(() => this.listIds({ limit: pageSize, offset }));
+      if (!okIds || !page) throw errIds;
+
+      ids.push(...page);
+      if (page.length < pageSize) {
+        break;
       }
+
+      offset += page.length;
     }
+
+    if (ids.length === 0) {
+      return [];
+    }
+
+    const results: ResourceData[] = [];
+    const batchSize = 100;
+    for (let i = 0; i < ids.length; i += batchSize) {
+      const batchIds = ids.slice(i, i + batchSize);
+
+      const operations = batchIds.map((id) => async () => {
+        const [ok, err, item] = await tryFn<ResourceData>(() => this.resource.get(id));
+        if (ok && item) return item;
+        return this.handleResourceError(err as Error, id, 'getAll');
+      });
+
+      const { results: batchResults } = await this.resource._executeBatchHelper(operations, {
+        onItemError: (error, index) => {
+          const batchId = batchIds[index];
+          this.resource.emit('error', error, batchId);
+          this.resource.observers.map((x) => x.emit('error', this.resource.name, error, batchId));
+        }
+      });
+
+      results.push(...batchResults.filter((item): item is ResourceData => item !== null));
+    }
+
     return results;
   }
 
@@ -438,14 +556,25 @@ export class ResourceQuery {
       return await this.list({ partition, partitionValues, limit, offset });
     }
 
+    let queryPartition = partition;
+    let queryPartitionValues = partitionValues;
+
+    if (!partition) {
+      const plannedPartition = this.resolvePartitionFromFilter(filter);
+      if (plannedPartition) {
+        queryPartition = plannedPartition.partition;
+        queryPartitionValues = plannedPartition.partitionValues;
+      }
+    }
+
     const results: ResourceData[] = [];
     let currentOffset = offset;
     const batchSize = Math.min(limit, 50);
 
     while (results.length < limit) {
       const batch = await this.list({
-        partition,
-        partitionValues,
+        partition: queryPartition,
+        partitionValues: queryPartitionValues,
         limit: batchSize,
         offset: currentOffset
       });
