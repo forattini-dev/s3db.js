@@ -664,11 +664,11 @@ export class TTLPlugin extends CoordinatorPlugin {
       const managedResourceNames = new Set(resources.map(item => item.name));
       const state = this._cohortScanState[granularity];
       const processedCohorts = cohorts.filter((cohort) => !state.lookup.has(cohort));
-      const usedFallback = processedCohorts.length === 0;
-      const cohortsToProcess = usedFallback ? [cohorts[0]] : processedCohorts;
+      const hasFallbackCohort = processedCohorts.length === 0 && cohorts[0] !== undefined;
+      const cohortsToProcess = hasFallbackCohort ? [cohorts[0] as string] : processedCohorts;
       const scannedEntryIds = new Set<string>();
 
-      if (usedFallback) {
+      if (hasFallbackCohort) {
         this.logger.debug(
           { granularity, cohort: cohorts[0] },
           `Using cohort fallback for ${granularity} cleanup`
