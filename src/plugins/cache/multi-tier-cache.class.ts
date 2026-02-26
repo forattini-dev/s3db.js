@@ -25,7 +25,7 @@ export interface TierInfo {
 export interface MultiTierCacheConfig extends CacheConfig {
   drivers?: DriverConfig[];
   promoteOnHit?: boolean;
-  strategy?: 'write-through' | 'lazy-promotion';
+  strategy?: 'write-through' | 'lazy-promotion' | 'write-behind' | 'cache-aside';
   fallbackOnError?: boolean;
   logLevel?: string;
 }
@@ -94,6 +94,8 @@ export class MultiTierCache extends Cache {
   }: MultiTierCacheConfig) {
     super();
 
+    const normalizedStrategy = MultiTierCache.normalizeStrategy(strategy);
+
     if (!Array.isArray(drivers) || drivers.length === 0) {
       throw new CacheError('MultiTierCache requires at least one driver', {
         operation: 'constructor',
@@ -111,7 +113,7 @@ export class MultiTierCache extends Cache {
 
     this.config = {
       promoteOnHit,
-      strategy,
+      strategy: normalizedStrategy,
       fallbackOnError,
       logLevel
     };
@@ -141,6 +143,27 @@ export class MultiTierCache extends Cache {
     if ((this.logger as { isLevelEnabled?: (level: string) => boolean }).isLevelEnabled?.('info')) {
       this.logger.info('[MultiTierCache] Initialized with %d drivers', this.drivers.length);
     }
+  }
+
+  private static normalizeStrategy(strategy: string | undefined): 'write-through' | 'lazy-promotion' {
+    const normalized = String(strategy || 'write-through').trim().toLowerCase();
+
+    if (normalized === 'write-through' || normalized === 'lazy-promotion') {
+      return normalized;
+    }
+
+    if (normalized === 'write-behind' || normalized === 'cache-aside') {
+      return 'write-through';
+    }
+
+    throw new CacheError('Invalid multi-tier cache strategy', {
+      operation: 'constructor',
+      driver: 'MultiTierCache',
+      strategy,
+      suggestion: "Use 'write-through' or 'lazy-promotion'",
+      statusCode: 400,
+      retriable: false
+    });
   }
 
   private _log(...args: unknown[]): void {

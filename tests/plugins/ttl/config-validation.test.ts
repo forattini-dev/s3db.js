@@ -21,6 +21,38 @@ describe('TTLPlugin v2 - Configuration and Validation', () => {
     expect(plugin.resources.sessions).toBeDefined();
   });
 
+  test('should reject invalid batchSize values', () => {
+    expect(() => new TTLPlugin({
+      logLevel: 'silent',
+      batchSize: 0,
+      resources: {}
+    })).toThrow('[TTLPlugin] Invalid batchSize');
+
+    expect(() => new TTLPlugin({
+      logLevel: 'silent',
+      batchSize: -10,
+      resources: {}
+    })).toThrow('[TTLPlugin] Invalid batchSize');
+
+    expect(() => new TTLPlugin({
+      logLevel: 'silent',
+      batchSize: 0.5,
+      resources: {}
+    })).toThrow('[TTLPlugin] Invalid batchSize');
+
+    expect(() => new TTLPlugin({
+      logLevel: 'silent',
+      batchSize: 20000,
+      resources: {}
+    })).toThrow('[TTLPlugin] Invalid batchSize');
+
+    expect(() => new TTLPlugin({
+      logLevel: 'silent',
+      batchSize: '100' as unknown as number,
+      resources: {}
+    })).toThrow('[TTLPlugin] Invalid batchSize');
+  });
+
   test('should allow resource with only TTL (uses _createdAt)', async () => {
     const db = createDatabaseForTest('ttl-validation-ttl-only');
     await db.connect();

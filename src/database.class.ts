@@ -479,7 +479,13 @@ export class Database extends SafeEventEmitter {
   }
 
   async createResource(config: CreateResourceConfig): Promise<Resource> {
-    return this._resourcesModule.createResource(config);
+    await this._hooksModule.executeHooks('beforeCreateResource', { config });
+
+    const resource = await this._resourcesModule.createResource(config);
+
+    await this._hooksModule.executeHooks('afterCreateResource', { resource, config });
+
+    return resource;
   }
 
   async listResources(): Promise<ResourceExport[]> {

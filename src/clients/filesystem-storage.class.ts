@@ -363,8 +363,7 @@ export class FileSystemStorage {
         const [ok, , metaData] = await tryFn<StorageObjectData>(() => this._readMetadata(entry.key));
         if (!ok) continue;
 
-        const expiresAt = (metaData as StorageObjectData).expiresAt;
-        if (expiresAt && expiresAt < now) {
+        if (this._isExpired(metaData as StorageObjectData, now)) {
           await this.delete(entry.key);
           cleaned++;
         }
@@ -457,6 +456,22 @@ export class FileSystemStorage {
       compressedSize,
       compressionRatio: (compressedSize / originalSize).toFixed(3)
     };
+  }
+
+  private _isExpired(metadata: StorageObjectData, now: number = Date.now()): boolean {
+    return this.enableTTL && metadata.expiresAt !== undefined && metadata.expiresAt !== null && metadata.expiresAt < now;
+  }
+
+  private async _ensureNotExpired(key: string, metadata: StorageObjectData, operation: string): Promise<void> {
+    if (!this._isExpired(metadata)) {
+      return;
+    }
+
+    await this.delete(key);
+    throw this._mapFilesystemError(
+      { code: 'ENOENT', message: 'Object has expired' } as NodeJS.ErrnoException,
+      { key, path: this._getObjectPath(key), operation }
+    );
   }
 
   private _decompressBody(buffer: Buffer, isCompressed?: boolean): Buffer {
@@ -742,14 +757,7 @@ export class FileSystemStorage {
     }
 
     const metadata = metaData as StorageObjectData;
-
-    if (this.enableTTL && metadata.expiresAt && metadata.expiresAt < Date.now()) {
-      await this.delete(key);
-      throw this._mapFilesystemError(
-        { code: 'ENOENT', message: 'Object has expired' } as NodeJS.ErrnoException,
-        { key, path: objectPath, operation: 'get' }
-      );
-    }
+    await this._ensureNotExpired(key, metadata, 'get');
 
     const [okBody, errBody, bodyBuffer] = await tryFn<Buffer>(() => readFile(objectPath));
     if (!okBody) {
@@ -812,6 +820,8 @@ export class FileSystemStorage {
 
     const metadata = metaData as StorageObjectData;
 
+    await this._ensureNotExpired(key, metadata, 'head');
+
     this.logger.debug({ key }, `HEAD ${key}`);
 
     return {
@@ -841,6 +851,7 @@ export class FileSystemStorage {
     }
 
     const sourceMeta = await this._readMetadata(from);
+    await this._ensureNotExpired(from, sourceMeta, 'copy');
 
     let finalMetadata = { ...sourceMeta.metadata };
     if (metadataDirective === 'REPLACE' && metadata) {
@@ -864,6 +875,7 @@ export class FileSystemStorage {
       size: sourceMeta.size,
       contentEncoding: sourceMeta.contentEncoding,
       contentLength: sourceMeta.contentLength,
+      expiresAt: sourceMeta.expiresAt,
       body: sourceMeta.body
     };
 
@@ -1049,6 +1061,17 @@ export class FileSystemStorage {
       }
 
       const [ok, , metaData] = await tryFn<StorageObjectData>(() => this._readMetadata(entry.key));
+      if (!ok) {
+        continue;
+      }
+
+      if (this._isExpired(metaData as StorageObjectData, Date.now())) {
+        await this.delete(entry.key).catch(() => {
+          this.logger.debug({ key: entry.key }, 'Failed to cleanup expired object during list');
+        });
+        continue;
+      }
+
       const etag = ok ? (metaData as StorageObjectData).etag : this._generateETag(Buffer.alloc(0));
 
       contents.push({

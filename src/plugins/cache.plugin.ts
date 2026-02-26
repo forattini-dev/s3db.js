@@ -55,7 +55,7 @@ interface ResourceSchema {
 }
 
 interface PartitionDefinition {
-  fields?: string[];
+  fields?: string[] | Record<string, unknown>;
   [key: string]: unknown;
 }
 
@@ -151,7 +151,7 @@ export interface CachePluginOptions {
   driver?: string | CacheDriver;
   drivers?: DriverConfig[];
   promoteOnHit?: boolean;
-  strategy?: 'write-through' | 'write-behind' | 'cache-aside';
+  strategy?: 'write-through' | 'lazy-promotion' | 'write-behind' | 'cache-aside';
   fallbackOnError?: boolean;
   ttl?: number;
   maxSize?: number;
@@ -274,7 +274,7 @@ export class CachePlugin extends Plugin {
 
     const cacheOptions = this.options as CachePluginOptions;
     const {
-      driver = 's3',
+      driver = 'memory',
       drivers,
       promoteOnHit = true,
       strategy = 'write-through',
@@ -295,6 +295,8 @@ export class CachePlugin extends Plugin {
       retryDelay = 100
     } = cacheOptions;
 
+    const normalizedStrategy = this.resolveMultiTierStrategy(strategy);
+
     const isMultiTier = Array.isArray(drivers) && drivers.length > 0;
 
     this.config = {
@@ -302,7 +304,7 @@ export class CachePlugin extends Plugin {
       drivers,
       isMultiTier,
       promoteOnHit,
-      strategy,
+      strategy: normalizedStrategy,
       fallbackOnError,
       config: {
         ttl,
@@ -395,7 +397,12 @@ export class CachePlugin extends Plugin {
 
   installDatabaseHooks(): void {
     this.database.addHook('afterCreateResource', async (context: Record<string, unknown>) => {
-      const resource = (context as any).resource as Resource;
+      const contextValue = (context as any)?.resource || (context as unknown as Resource);
+      if (!contextValue || typeof contextValue.name !== 'string') {
+        return;
+      }
+      const resource = contextValue as Resource;
+
       if (this.shouldCacheResource(resource.name)) {
         this.installResourceHooksForResource(resource);
       }
@@ -530,15 +537,16 @@ export class CachePlugin extends Plugin {
         }
 
         const result = await resource.query(filter, options);
+        const normalizedOptions = { ...options };
+        delete normalizedOptions.partition;
+        delete normalizedOptions.partitionValues;
+        delete normalizedOptions.skipCache;
 
         if (forceRefresh && shouldStore(result)) {
           const key = await keyFor('query', {
             params: {
               filter,
-              options: {
-                limit: options.limit,
-                offset: options.offset
-              }
+              options: normalizedOptions
             },
             partition: options.partition as string | null,
             partitionValues: options.partitionValues as Record<string, unknown> | null
@@ -645,11 +653,17 @@ export class CachePlugin extends Plugin {
   }
 
   private async _createSingleDriver(driverName: string, config: DriverSpecificConfig): Promise<CacheDriver> {
-    if (driverName === 'memory') {
+    const normalizedDriver = this.normalizeCacheDriver(driverName);
+
+    if (normalizedDriver === 'memory') {
       return new MemoryCache(config) as unknown as CacheDriver;
-    } else if (driverName === 'redis') {
+    }
+
+    if (normalizedDriver === 'redis') {
       return new RedisCache(config) as unknown as CacheDriver;
-    } else if (driverName === 'filesystem') {
+    }
+
+    if (normalizedDriver === 'filesystem') {
       if (this.config.partitionAware) {
         return new PartitionAwareFilesystemCache({
           directory: (config as any).directory || '/tmp/s3db-cache',
@@ -661,12 +675,22 @@ export class CachePlugin extends Plugin {
       } else {
         return new FilesystemCache(config as any) as unknown as CacheDriver;
       }
-    } else {
+    }
+
+    if (normalizedDriver === 's3') {
       return new S3Cache({
         client: this.database.client,
         ...config
       }) as unknown as CacheDriver;
     }
+
+    throw new CacheError('Invalid cache driver after normalization', {
+      operation: 'driver',
+      driver: driverName,
+      suggestion: 'Use one of: memory, redis, filesystem, s3',
+      statusCode: 400,
+      retriable: false
+    });
   }
 
   private async _createMultiTierDriver(): Promise<CacheDriver> {
@@ -743,14 +767,12 @@ export class CachePlugin extends Plugin {
     resource.cacheNamespaces = resource.cacheNamespaces || {};
     resource.cacheNamespaces[instanceKey] = cacheNamespace;
 
-    if (!Object.prototype.hasOwnProperty.call(resource, 'cache')) {
-      Object.defineProperty(resource, 'cache', {
-        value: cacheNamespace,
-        writable: true,
-        configurable: true,
-        enumerable: false
-      });
-    }
+    Object.defineProperty(resource, 'cache', {
+      value: cacheNamespace,
+      writable: true,
+      configurable: true,
+      enumerable: false
+    });
 
     if (typeof resource.getCacheDriver !== 'function') {
       Object.defineProperty(resource, 'getCacheDriver', {
@@ -784,8 +806,13 @@ export class CachePlugin extends Plugin {
     resource.cacheKeyResolvers = resource.cacheKeyResolvers || {};
     resource.cacheKeyResolvers[instanceKey] = computeCacheKey;
 
-    if (!resource.cacheKeyFor) {
-      resource.cacheKeyFor = computeCacheKey;
+    if (typeof resource.cacheKeyFor !== 'function') {
+      Object.defineProperty(resource, 'cacheKeyFor', {
+        value: computeCacheKey,
+        writable: true,
+        configurable: true,
+        enumerable: false
+      });
     }
 
     if (typeof resource.getCacheKeyResolver !== 'function') {
@@ -850,10 +877,14 @@ export class CachePlugin extends Plugin {
           key = await resolveCacheKey({ action: method, partition: partition as string | null, partitionValues: partitionValues as Record<string, unknown> | null });
         } else if (method === 'query') {
           const filter = (ctx.args[0] || {}) as Record<string, unknown>;
-          const options = (ctx.args[1] || {}) as Record<string, unknown>;
+          const options = { ...(ctx.args[1] || {}) } as Record<string, unknown>;
+          const queryOptions = { ...options };
+          delete queryOptions.partition;
+          delete queryOptions.partitionValues;
+          delete queryOptions.skipCache;
           key = await resolveCacheKey({
             action: method,
-            params: { filter, options: { limit: options.limit, offset: options.offset } },
+            params: { filter, options: queryOptions },
             partition: options.partition as string | null,
             partitionValues: options.partitionValues as Record<string, unknown> | null
           });
@@ -1111,9 +1142,16 @@ export class CachePlugin extends Plugin {
 
     for (const [partitionName, partitionDef] of Object.entries(schema.partitions)) {
       const typedPartitionDef = partitionDef as PartitionDefinition;
-      if (typedPartitionDef.fields) {
+      const fields = typedPartitionDef.fields;
+      const fieldNames = Array.isArray(fields)
+        ? fields
+        : fields && typeof fields === 'object'
+          ? Object.keys(fields as Record<string, unknown>)
+          : [];
+
+      if (fieldNames.length > 0) {
         const values: Record<string, unknown> = {};
-        for (const field of typedPartitionDef.fields) {
+        for (const field of fieldNames) {
           if (data[field] !== undefined) {
             values[field] = data[field];
           }
@@ -1125,6 +1163,57 @@ export class CachePlugin extends Plugin {
     }
 
     return partitionValues;
+  }
+
+  private normalizeCacheDriver(driverName: string): 'memory' | 'redis' | 'filesystem' | 's3' {
+    if (typeof driverName !== 'string') {
+      throw new CacheError('Invalid cache driver', {
+        operation: 'driver',
+        driver: 'CachePlugin',
+        suggestion: 'Use one of: memory, redis, filesystem, s3',
+        statusCode: 400,
+        retriable: false
+      });
+    }
+
+    const normalized = driverName.trim().toLowerCase();
+
+    if (normalized === 'memory' || normalized === 'redis' || normalized === 'filesystem' || normalized === 's3') {
+      return normalized;
+    }
+
+    throw new CacheError('Unknown cache driver', {
+      operation: 'driver',
+      driver: driverName,
+      suggestion: 'Use one of: memory, redis, filesystem, s3',
+      statusCode: 400,
+      retriable: false
+    });
+  }
+
+  private resolveMultiTierStrategy(strategy: string | undefined): 'write-through' | 'lazy-promotion' {
+    const normalized = String(strategy || 'write-through').trim().toLowerCase();
+
+    if (normalized === 'write-through' || normalized === 'lazy-promotion') {
+      return normalized;
+    }
+
+    if (normalized === 'write-behind' || normalized === 'cache-aside') {
+      this.logger.warn(
+        { strategy },
+        `Cache strategy '${strategy}' is deprecated. Falling back to 'write-through'.`
+      );
+      return 'write-through';
+    }
+
+    throw new CacheError('Invalid cache strategy', {
+      operation: 'strategy',
+      driver: 'CachePlugin',
+      strategy,
+      suggestion: "Use 'write-through' or 'lazy-promotion'",
+      statusCode: 400,
+      retriable: false
+    });
   }
 
   async getCacheStats(): Promise<{ size: number; keys: string[]; driver: string; stats: CacheDriverStats | null } | null> {

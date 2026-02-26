@@ -16,6 +16,8 @@ const ONE_DAY_MS = 86400000;
 const ONE_WEEK_MS = 604800000;
 
 const SECONDS_TO_MS = 1000;
+const MIN_BATCH_SIZE = 1;
+const MAX_BATCH_SIZE = 10000;
 
 export type TTLGranularity = 'minute' | 'hour' | 'day' | 'week';
 export type TTLExpireStrategy = 'soft-delete' | 'hard-delete' | 'archive' | 'callback';
@@ -189,6 +191,17 @@ export class TTLPlugin extends CoordinatorPlugin {
       resourceAllowlist,
       resourceBlocklist
     } = opts;
+
+    if (!Number.isInteger(batchSize) || batchSize < MIN_BATCH_SIZE || batchSize > MAX_BATCH_SIZE) {
+      throw new PluginError('[TTLPlugin] Invalid batchSize', {
+        pluginName: 'TTLPlugin',
+        operation: 'constructor',
+        statusCode: 400,
+        retriable: false,
+        suggestion: `batchSize must be an integer between ${MIN_BATCH_SIZE} and ${MAX_BATCH_SIZE}`,
+        batchSize
+      });
+    }
 
     this.resources = resources as Record<string, TTLResourceConfig>;
     this.resourceFilter = this._buildResourceFilter({ resourceFilter, resourceAllowlist, resourceBlocklist } as any);
@@ -410,6 +423,21 @@ export class TTLPlugin extends CoordinatorPlugin {
       return result;
     });
 
+    if (typeof resource.update === 'function') {
+      (this as any).addMiddleware(resource, 'update', async (next: Function, id: string, data: Record<string, unknown>, options?: unknown) => {
+        const updatedRecord = await next(id, data, options);
+
+        if (!updatedRecord) {
+          return updatedRecord;
+        }
+
+        await this._removeFromIndex(resourceName, id);
+        await this._addToIndex(resourceName, updatedRecord as Record<string, unknown>, config);
+
+        return updatedRecord;
+      });
+    }
+
     this.logger.debug({ resourceName }, `Setup hooks for resource "${resourceName}"`);
   }
 
@@ -613,7 +641,8 @@ export class TTLPlugin extends CoordinatorPlugin {
   private async _processExpiredEntry(entry: IndexEntry, config: TTLResourceConfig): Promise<void> {
     try {
       if (!this.database.resources[entry.resourceName]) {
-        this.logger.warn({ resourceName: entry.resourceName }, `Resource "${entry.resourceName}" not found during cleanup, skipping`);
+        this.logger.warn({ resourceName: entry.resourceName }, `Resource "${entry.resourceName}" not found during cleanup, removing stale index entry`);
+        await this._removeFromIndex(entry.resourceName, entry.recordId);
         return;
       }
 
@@ -649,10 +678,23 @@ export class TTLPlugin extends CoordinatorPlugin {
         case 'callback':
           const shouldDelete = await config.callback!(record as Record<string, unknown>, resource);
           this.stats.totalCallbacks++;
-          if (shouldDelete) {
-            await this._hardDelete(resource, record as Record<string, unknown>);
-            this.stats.totalDeleted++;
+
+          if (typeof shouldDelete !== 'boolean') {
+            throw new PluginError('[TTLPlugin] Callback must return a boolean', {
+              pluginName: 'TTLPlugin',
+              operation: 'onExpireCallback',
+              statusCode: 400,
+              retriable: false,
+              suggestion: 'Return true to delete/expire the record, or false to keep it for another retry.'
+            });
           }
+
+          if (!shouldDelete) {
+            return;
+          }
+
+          await this._hardDelete(resource, record as Record<string, unknown>);
+          this.stats.totalDeleted++;
           break;
       }
 

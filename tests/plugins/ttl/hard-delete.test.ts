@@ -92,4 +92,54 @@ describe('TTLPlugin v2 - Hard Delete Strategy', () => {
     const after = await indexResource.get(staleEntryId).catch(() => null);
     expect(after).toBeNull();
   });
+
+  test('should remove stale TTL index entries when managed resource is missing from database', async () => {
+    const scopedDb = createDatabaseForTest('ttl-v2-orphan-resource');
+    await scopedDb.connect();
+
+    const scopedResource = await scopedDb.createResource({
+      name: 'ephemeral_files',
+      attributes: { id: 'string|optional', filename: 'string' }
+    });
+
+    const scopedPlugin = new TTLPlugin({
+      logLevel: 'silent',
+      resources: {
+        ephemeral_files: {
+          ttl: 1,
+          onExpire: 'hard-delete'
+        }
+      }
+    });
+
+    await scopedPlugin.install(scopedDb);
+
+    const indexResource = scopedDb.resources[(scopedPlugin as any).indexResourceName];
+    const now = new Date();
+    const entryId = 'ephemeral_files:missing-resource';
+
+    await scopedResource.insert({ id: 'missing-resource', filename: 'lost.txt' });
+
+    await indexResource.insert({
+      id: entryId,
+      resourceName: 'ephemeral_files',
+      recordId: 'missing-resource',
+      expiresAtCohort: now.toISOString().substring(0, 16),
+      expiresAtTimestamp: now.getTime() - 1000,
+      granularity: 'minute',
+      createdAt: Date.now()
+    });
+
+    const originalResource = scopedDb.resources.ephemeral_files;
+    delete (scopedDb as any).resources.ephemeral_files;
+
+    await scopedPlugin.runCleanup();
+
+    const after = await indexResource.get(entryId).catch(() => null);
+    expect(after).toBeNull();
+
+    scopedDb.resources.ephemeral_files = originalResource;
+    await scopedPlugin.uninstall();
+    await scopedDb.disconnect();
+  });
 });

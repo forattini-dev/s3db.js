@@ -129,6 +129,13 @@ describe('PluginStorage - TTL Features', () => {
       }
     });
 
+    test('should treat invalid lock payload as unlocked', async () => {
+      const lockKey = storage.getPluginKey(null, 'locks', 'task1');
+      await storage.set(lockKey, { bad: true, payload: 'not-a-lock' });
+
+      expect(await storage.isLocked('task1')).toBe(false);
+    });
+
     test('should support custom workerId', async () => {
       const lock = await storage.acquireLock('task1', {
         ttl: 30,

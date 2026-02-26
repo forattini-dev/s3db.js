@@ -5,6 +5,7 @@
 
 import { CoordinatorPlugin, type IntervalHandle } from '../concerns/coordinator-plugin.class.js';
 import { PluginStorage } from '../../concerns/plugin-storage.js';
+import { PluginError } from '../../errors.js';
 
 import {
   createConfig,
@@ -90,11 +91,33 @@ export interface CoordinatorConfig {
   leaderTTL?: number;
 }
 
+interface WorkerLoopSummary {
+  ticketsClaimed: number;
+  recordsProcessed: number;
+  transactionsApplied: number;
+  ticketsWithErrors: number;
+  handlerErrors: number;
+}
+
 export class EventualConsistencyPlugin extends CoordinatorPlugin<EventualConsistencyPluginOptions> {
   declare config: NormalizedConfig;
   private fieldHandlers: FieldHandlers = new Map();
   private storage!: PluginStorage;
   private _workerHandle: IntervalHandle | null = null;
+  private _workerLoopRunning = false;
+  private _workerLoopLastSummary: WorkerLoopSummary | null = null;
+  private _workerLoopLastRunAt = 0;
+  private _workerLoopLastRunDurationMs = 0;
+  private _workerLoopRunCount = 0;
+  private _workerLoopFailureCount = 0;
+  private _workerLoopTotals = {
+    ticketsClaimed: 0,
+    recordsProcessed: 0,
+    transactionsApplied: 0,
+    ticketsWithErrors: 0,
+    handlerErrors: 0
+  };
+  private _workerLoopLastError: string | null = null;
   declare workerId: string;
 
   constructor(options: EventualConsistencyPluginOptions = {}) {
@@ -145,6 +168,16 @@ export class EventualConsistencyPlugin extends CoordinatorPlugin<EventualConsist
    * Plugin installation hook
    */
   override async onInstall(): Promise<void> {
+    if (!this.database?.client) {
+      throw new PluginError('EventualConsistencyPlugin requires a configured database client', {
+        pluginName: 'EventualConsistencyPlugin',
+        operation: 'onInstall',
+        statusCode: 400,
+        retriable: false,
+        suggestion: 'Install/connect the database before initializing the plugin.'
+      });
+    }
+
     this.storage = new PluginStorage(this.database.client as any, 'eventual-consistency');
 
     await onInstall(
@@ -382,17 +415,53 @@ export class EventualConsistencyPlugin extends CoordinatorPlugin<EventualConsist
   }
 
   private async _runWorkerLoop(): Promise<void> {
+    if (this._workerLoopRunning) return;
+
+    this._workerLoopRunning = true;
+    const runStartedAt = Date.now();
+    this._workerLoopRunCount += 1;
+    this._workerLoopLastError = null;
+
     try {
-      await this.doWorkerWork();
+      const workerSummary = await this.doWorkerWork();
+      this._workerLoopLastSummary = workerSummary;
+      this._workerLoopTotals.ticketsClaimed += workerSummary.ticketsClaimed;
+      this._workerLoopTotals.recordsProcessed += workerSummary.recordsProcessed;
+      this._workerLoopTotals.transactionsApplied += workerSummary.transactionsApplied;
+      this._workerLoopTotals.ticketsWithErrors += workerSummary.ticketsWithErrors;
+      this._workerLoopTotals.handlerErrors += workerSummary.handlerErrors;
     } catch (error) {
+      this._workerLoopFailureCount += 1;
+      this._workerLoopLastError = (error as Error).message;
       this.logger.warn({ error: (error as Error).message }, `Worker loop failed: ${(error as Error).message}`);
+    } finally {
+      this._workerLoopRunning = false;
+      const runEndedAt = Date.now();
+      this._workerLoopLastRunAt = runEndedAt;
+      this._workerLoopLastRunDurationMs = runEndedAt - runStartedAt;
+      this._workerLoopLastSummary = this._workerLoopLastSummary ?? {
+        ticketsClaimed: 0,
+        recordsProcessed: 0,
+        transactionsApplied: 0,
+        ticketsWithErrors: 0,
+        handlerErrors: 0
+      };
+      this._workerLoopLastSummary = { ...this._workerLoopLastSummary };
     }
   }
 
   /**
    * Worker work (runs on all instances)
    */
-  protected async doWorkerWork(): Promise<void> {
+  protected async doWorkerWork(): Promise<WorkerLoopSummary> {
+    const summary: WorkerLoopSummary = {
+      ticketsClaimed: 0,
+      recordsProcessed: 0,
+      transactionsApplied: 0,
+      ticketsWithErrors: 0,
+      handlerErrors: 0
+    };
+
     for (const [resourceName, resourceHandlers] of this.fieldHandlers) {
       for (const [fieldName, handler] of resourceHandlers) {
         if (!handler.ticketResource) continue;
@@ -402,15 +471,41 @@ export class EventualConsistencyPlugin extends CoordinatorPlugin<EventualConsist
             this.workerId,
             this.config
           );
+          summary.ticketsClaimed += tickets.length;
 
           for (const ticket of tickets) {
-            await processTicket(ticket, handler, this.database as any, this.workerId, this.config);
+            const result = await processTicket(ticket, handler, this.database as any, this.workerId, this.config);
+            summary.recordsProcessed += result.recordsProcessed;
+            summary.transactionsApplied += result.transactionsApplied;
+            if (result.errors.length > 0) {
+              summary.ticketsWithErrors += 1;
+            }
           }
         } catch (err) {
+          summary.handlerErrors += 1;
           this.logger.warn({ resource: resourceName, field: fieldName, error: (err as Error).message }, 'Worker loop handler failed');
         }
       }
     }
+
+    return summary;
+  }
+
+  private _getWorkerStatus(): Record<string, any> {
+    return {
+      enabled: !!this.config.enableCoordinator,
+      active: this.config.enableCoordinator ? !!this._workerHandle : false,
+      running: this._workerLoopRunning,
+      leader: this.currentLeaderId,
+      isLeader: this.isCoordinator,
+      runs: this._workerLoopRunCount,
+      failures: this._workerLoopFailureCount,
+      lastRunAt: this._workerLoopLastRunAt || null,
+      lastRunDurationMs: this._workerLoopLastRunAt ? this._workerLoopLastRunDurationMs : null,
+      lastError: this._workerLoopLastError,
+      total: this._workerLoopTotals,
+      lastSummary: this._workerLoopLastSummary
+    };
   }
 
   // ============================================
@@ -652,6 +747,7 @@ export class EventualConsistencyPlugin extends CoordinatorPlugin<EventualConsist
       enableCoordinator: this.config.enableCoordinator,
       enableAnalytics: this.config.enableAnalytics,
       consolidationInterval: this.config.consolidationInterval,
+      worker: this._getWorkerStatus(),
       handlers,
       workerId: this.workerId
     };

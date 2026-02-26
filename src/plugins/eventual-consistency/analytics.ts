@@ -95,6 +95,21 @@ interface UpdatableAnalyticsResource extends Omit<AnalyticsResource, 'query'> {
   ) => Promise<AnalyticsRecordWithEtag[]>;
 }
 
+function isQueryUnsupportedError(error: unknown): boolean {
+  if (!error || typeof error !== 'object' || !('message' in error)) {
+    return false;
+  }
+
+  const message = String((error as Error).message || '').toLowerCase();
+  return (
+    message.includes('not supported') ||
+    message.includes('not implemented') ||
+    message.includes('unsupported') ||
+    message.includes('query is not a function') ||
+    message.includes('method not found')
+  );
+}
+
 interface QueryableResource<T> {
   query?: (
     query: Record<string, any>,
@@ -225,16 +240,26 @@ async function queryResourceRecords<T>(
   const seen = new Set<string>();
 
   if (typeof resource.query === 'function') {
-    let queryFailed = false;
-
     for (let offset = offsetStart;; offset += limit) {
-      const [ok, , batch] = await tryFn(() =>
+      const [ok, queryErr, batch] = await tryFn(() =>
         resource.query!(normalizedFilter, { limit, offset, partition, partitionValues })
       ) as [boolean, Error | null, T[] | null];
 
       if (!ok || !Array.isArray(batch)) {
-        queryFailed = true;
-        break;
+        if (queryErr && resource.list && isQueryUnsupportedError(queryErr)) {
+          break;
+        }
+
+        throw new PluginError('Failed to query analytics records', {
+          pluginName: 'EventualConsistencyPlugin',
+          operation: 'queryResourceRecords',
+          statusCode: 500,
+          retriable: true,
+          suggestion: 'Ensure query() is available for this analytics backend or remove filter/query dependencies.',
+          resourceFilter: normalizedFilter,
+          original: queryErr,
+          listFallbackUnavailable: !resource.list
+        });
       }
 
       const normalized = batch.filter((record) => recordsMatchFilter(record as Record<string, unknown>, normalizedFilter));
@@ -246,10 +271,6 @@ async function queryResourceRecords<T>(
         return result;
       }
     }
-
-    if (!queryFailed) {
-      return result;
-    }
   }
 
   if (!resource.list) {
@@ -257,12 +278,20 @@ async function queryResourceRecords<T>(
   }
 
   for (let offset = offsetStart;; offset += limit) {
-    const [ok, , batch] = await tryFn(() =>
+    const [ok, err, batch] = await tryFn(() =>
       resource.list!({ limit, offset })
     ) as [boolean, Error | null, T[] | null];
 
     if (!ok || !Array.isArray(batch)) {
-      break;
+      throw new PluginError('Failed to list analytics records', {
+        pluginName: 'EventualConsistencyPlugin',
+        operation: 'queryResourceRecords',
+        statusCode: 500,
+        retriable: true,
+        suggestion: 'Verify resource permissions and list() availability.',
+        resourceFilter: normalizedFilter,
+        original: err
+      });
     }
 
     const normalized = batch.filter((record) => recordsMatchFilter(record as Record<string, unknown>, normalizedFilter));
@@ -478,6 +507,7 @@ async function upsertAnalyticsForSummary({
 
   while (attempt < MAX_ANALYTICS_UPDATE_RETRIES) {
     attempt += 1;
+    let mergedData: Partial<AnalyticsRecordWithEtag> | null = null;
 
     if (!current) {
       const [insertOk] = await tryFn(() =>
@@ -495,10 +525,10 @@ async function upsertAnalyticsForSummary({
       }
     }
 
-    const mergedData = replaceExisting
+    mergedData = replaceExisting
       ? {
-        ...basePayload
-      }
+          ...basePayload
+        }
       : buildMergedAnalytics(current, summary, now);
 
     const [updated, , updateResult] = await tryUpdateAnalytics(
@@ -510,19 +540,27 @@ async function upsertAnalyticsForSummary({
 
     if (updated) return;
 
-    if (attempt >= MAX_ANALYTICS_UPDATE_RETRIES) {
-      break;
-    }
-
-    if (updateResult?.error) {
-      current = null;
-    }
-
     if (current) {
+      if (attempt >= MAX_ANALYTICS_UPDATE_RETRIES) {
+        break;
+      }
+
+      if (updateResult?.error) {
+        current = null;
+      }
+
       const refreshed = await readAnalyticsRecord(analyticsResource, id);
       current = refreshed;
+      continue;
+    }
+
+    const freshCurrent = await readAnalyticsRecord(analyticsResource, id);
+    if (!freshCurrent) {
+      continue;
+    }
+
+    current = freshCurrent;
   }
-}
 
   throw new Error(`Failed to upsert analytics record ${id} after ${MAX_ANALYTICS_UPDATE_RETRIES} attempts`);
 }
