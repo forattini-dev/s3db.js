@@ -94,6 +94,35 @@ describe('StateMachinePlugin - Error Handling', () => {
     expect(errorPlugin.database).toBe(mockDb);
   });
 
+  it('should normalize nested machine config using config wrapper', async () => {
+    const wrapperPlugin = new StateMachinePlugin({
+      stateMachines: {
+        wrapped: {
+          initialState: 'stale',
+          states: {
+            stale: {}
+          },
+          config: {
+            initialState: 'idle',
+            states: {
+              idle: { on: { START: 'running' } },
+              running: { type: 'final' }
+            }
+          }
+        }
+      },
+      persistTransitions: false,
+      logLevel: 'silent'
+    });
+
+    await wrapperPlugin.install(database);
+    expect(wrapperPlugin.getMachineDefinition('wrapped')).toBeDefined();
+    await expect(wrapperPlugin.send('wrapped', 'entity-1', 'START')).resolves.toMatchObject({
+      from: 'idle',
+      to: 'running'
+    });
+  });
+
   it('should handle resource creation errors', async () => {
     const mockDb = {
       createResource: vi.fn().mockRejectedValue(new Error('Resource creation failed')),
@@ -101,9 +130,53 @@ describe('StateMachinePlugin - Error Handling', () => {
     };
 
     // Should not throw even if resource creation fails
-    await expect(plugin._createStateResources.call({ 
-      database: mockDb, 
-      config: plugin.config 
-    })).resolves.toBeUndefined();
+    const originalDb = plugin.database;
+    plugin.database = mockDb;
+
+    await expect(plugin._createStateResources()).resolves.toBeUndefined();
+
+    plugin.database = originalDb;
+  });
+
+  it('should keep in-memory state aligned with persistence failure', async () => {
+    await plugin.initializeEntity('order_processing', 'order1');
+
+    const stateResource = database.resources[plugin.config.stateResource];
+    vi.spyOn(stateResource, 'update').mockRejectedValue(new Error('State update failed'));
+    vi.spyOn(stateResource, 'insert').mockRejectedValue(new Error('State insert failed'));
+
+    await expect(
+      plugin.send('order_processing', 'order1', 'CONFIRM')
+    ).rejects.toThrow('Failed to persist entity state transition');
+
+    const inMemoryState = await plugin.getState('order_processing', 'order1');
+    const persisted = await stateResource.get('order_processing_order1');
+
+    expect(inMemoryState).toBe('pending');
+    expect(persisted.currentState).toBe('pending');
+  });
+
+  it('should delete entity state and history without persistence resources', async () => {
+    const detachedPlugin = new StateMachinePlugin({
+      logLevel: 'silent',
+      stateMachines: {
+        simple: {
+          initialState: 'pending',
+          states: {
+            pending: { on: { DONE: 'done' } },
+            done: { type: 'final' }
+          }
+        }
+      },
+      persistTransitions: true
+    });
+
+    const mockDb = {
+      createResource: vi.fn().mockResolvedValue({}),
+      resources: {}
+    };
+
+    await detachedPlugin.install(mockDb);
+    await expect(detachedPlugin.deleteEntity('simple', 'entity-1')).resolves.toBeUndefined();
   });
 });

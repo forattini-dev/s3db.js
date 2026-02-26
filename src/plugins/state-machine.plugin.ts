@@ -312,6 +312,13 @@ export class StateMachinePlugin extends Plugin {
     } = smOptions;
 
     const resourceNamesOption = resourceNames || {};
+    const normalizedStateMachines = Object.entries(stateMachines).reduce<Record<string, MachineConfig>>(
+      (acc, [machineName, machineConfig]) => {
+        acc[machineName] = this._getMachineConfig(machineConfig);
+        return acc;
+      },
+      {}
+    );
 
     this._resourceDescriptors = {
       transitionLog: {
@@ -327,7 +334,7 @@ export class StateMachinePlugin extends Plugin {
     this.resourceNames = this._resolveResourceNames();
 
     this.config = {
-      stateMachines,
+      stateMachines: normalizedStateMachines,
       actions,
       guards,
       persistTransitions,
@@ -399,6 +406,40 @@ export class StateMachinePlugin extends Plugin {
     }
   }
 
+  private _getStateResource(): Resource | null {
+    if (!this.config.persistTransitions || !this.database?.resources) {
+      return null;
+    }
+
+    return (this.database.resources[this.config.stateResource] as Resource | undefined) || null;
+  }
+
+  private _getTransitionLogResource(): Resource | null {
+    if (!this.config.persistTransitions || !this.database?.resources) {
+      return null;
+    }
+
+    return (this.database.resources[this.config.transitionLogResource] as Resource | undefined) || null;
+  }
+
+  private _getMachineConfig(machineConfig: MachineConfig): MachineConfig {
+    const nestedConfig = (machineConfig as { config?: MachineConfig }).config;
+
+    if (!nestedConfig || nestedConfig === machineConfig) {
+      return machineConfig;
+    }
+
+    if (typeof nestedConfig === 'object') {
+      return {
+        ...machineConfig,
+        ...nestedConfig,
+        config: undefined
+      } as MachineConfig;
+    }
+
+    return machineConfig;
+  }
+
   private _validateConfiguration(): void {
     if (!this.config.stateMachines || Object.keys(this.config.stateMachines).length === 0) {
       throw new StateMachineError('At least one state machine must be defined', {
@@ -457,7 +498,7 @@ export class StateMachinePlugin extends Plugin {
   }
 
   private async _createStateResources(): Promise<void> {
-    const [logOk] = await tryFn(() => this.database.createResource({
+    const [logOk, logErr] = await tryFn(() => this.database.createResource({
       name: this.config.transitionLogResource,
       attributes: {
         id: 'string|required',
@@ -477,7 +518,14 @@ export class StateMachinePlugin extends Plugin {
       }
     }));
 
-    const [stateOk] = await tryFn(() => this.database.createResource({
+    if (!logOk && !this._getTransitionLogResource()) {
+      this.logger.warn({
+        machineResource: this.config.transitionLogResource,
+        error: (logErr as Error)?.message
+      }, `Failed to create transition log resource for state machine plugin: ${(logErr as Error)?.message || 'unknown error'}`);
+    }
+
+    const [stateOk, stateErr] = await tryFn(() => this.database.createResource({
       name: this.config.stateResource,
       attributes: {
         id: 'string|required',
@@ -491,6 +539,13 @@ export class StateMachinePlugin extends Plugin {
       },
       behavior: 'body-overflow'
     }));
+
+    if (!stateOk && !this._getStateResource()) {
+      this.logger.warn({
+        machineResource: this.config.stateResource,
+        error: (stateErr as Error)?.message
+      }, `Failed to create state resource for state machine plugin: ${(stateErr as Error)?.message || 'unknown error'}`);
+    }
   }
 
   async send(machineId: string, entityId: string, event: string, context: Record<string, unknown> = {}): Promise<TransitionResult> {
@@ -528,23 +583,33 @@ export class StateMachinePlugin extends Plugin {
         const guardName = stateConfig.guards[event];
         const guard = this.config.guards[guardName];
 
-        if (guard) {
-          const [guardOk, guardErr, guardResult] = await tryFn(() =>
-            guard(context, event, { database: this.database as unknown as Database, machineId, entityId })
-          );
+        if (!guard) {
+          throw new StateMachineError(`Guard '${guardName}' not found`, {
+            operation: 'guard-not-found',
+            machineId,
+            entityId,
+            event,
+            currentState,
+            guardName,
+            suggestion: 'Register the guard in plugin options and ensure the state transition references a valid guard'
+          });
+        }
 
-          if (!guardOk || !guardResult) {
-            throw new StateMachineError(`Transition blocked by guard '${guardName}'`, {
-              operation: 'send',
-              machineId,
-              entityId,
-              event,
-              currentState,
-              guardName,
-              guardError: (guardErr as Error)?.message || 'Guard returned false',
-              suggestion: 'Check guard conditions or modify the context to satisfy guard requirements'
-            });
-          }
+        const [guardOk, guardErr, guardResult] = await tryFn(() =>
+          guard(context, event, { database: this.database as unknown as Database, machineId, entityId })
+        );
+
+        if (!guardOk || !guardResult) {
+          throw new StateMachineError(`Transition blocked by guard '${guardName}'`, {
+            operation: 'guard',
+            machineId,
+            entityId,
+            event,
+            currentState,
+            guardName,
+            guardError: (guardErr as Error)?.message || 'Guard returned false',
+            suggestion: 'Check guard conditions or modify the context to satisfy guard requirements'
+          });
         }
       }
 
@@ -588,8 +653,14 @@ export class StateMachinePlugin extends Plugin {
   ): Promise<unknown> {
     const action = this.config.actions[actionName];
     if (!action) {
-      this.logger.warn({ actionName, machineId, entityId }, `Action '${actionName}' not found`);
-      return undefined;
+      throw new StateMachineError(`Action '${actionName}' not found`, {
+        operation: 'action-not-found',
+        machineId,
+        entityId,
+        actionName,
+        event,
+        suggestion: 'Register the action in plugin options and ensure the state transition references a valid action'
+      });
     }
 
     const machine = this.machines.get(machineId);
@@ -711,17 +782,84 @@ export class StateMachinePlugin extends Plugin {
     const now = new Date().toISOString();
 
     const machine = this.machines.get(machineId)!;
-    machine.currentStates.set(entityId, toState);
+    const transitionId = `${machineId}_${entityId}_${timestamp}`;
+    const stateId = `${machineId}_${entityId}`;
+    const stateData = {
+      machineId,
+      entityId,
+      currentState: toState,
+      context,
+      lastTransition: transitionId,
+      updatedAt: now
+    };
 
-    if (this.config.persistTransitions) {
-      const transitionId = `${machineId}_${entityId}_${timestamp}`;
+    const stateResource = this._getStateResource();
+    const transitionLogResource = this._getTransitionLogResource();
 
+    if (stateResource) {
+      let persisted = false;
+      let lastStateErr: Error | undefined;
+
+      for (let attempt = 0; attempt < this.config.retryAttempts; attempt++) {
+        let [updateOk, updateErr] = await tryFn(() => stateResource.update(stateId, stateData));
+
+        if (!updateOk) {
+          const [insertOk, insertErr] = await tryFn(() =>
+            stateResource.insert({
+              id: stateId,
+              ...stateData
+            })
+          );
+
+          if (!insertOk) {
+            lastStateErr = insertErr as Error;
+
+            if (attempt < this.config.retryAttempts - 1) {
+              const delay = this.config.retryDelay * Math.pow(2, attempt);
+              await new Promise(resolve => setTimeout(resolve, delay));
+              continue;
+            }
+          }
+
+          updateOk = insertOk;
+          updateErr = insertErr;
+        }
+
+        if (updateOk) {
+          persisted = true;
+          break;
+        }
+
+        lastStateErr = updateErr as Error;
+      }
+
+      if (!persisted) {
+        throw new StateMachineError('Failed to persist entity state transition', {
+          operation: 'transition-state-persist',
+          machineId,
+          entityId,
+          fromState,
+          targetState: toState,
+          event,
+          original: lastStateErr,
+          suggestion: 'Check state resource configuration and database permissions'
+        });
+      }
+    } else if (this.config.persistTransitions) {
+      this.logger.warn({
+        machineId,
+        entityId,
+        reason: 'state resource unavailable'
+      }, 'State resource is unavailable. Continuing with in-memory state only.');
+    }
+
+    if (transitionLogResource) {
       let logOk = false;
       let lastLogErr: Error | undefined;
 
       for (let attempt = 0; attempt < this.config.retryAttempts; attempt++) {
         const [ok, err] = await tryFn(() =>
-          this.database.resources[this.config.transitionLogResource]!.insert({
+          transitionLogResource.insert({
             id: transitionId,
             machineId,
             entityId,
@@ -748,33 +886,16 @@ export class StateMachinePlugin extends Plugin {
       }
 
       if (!logOk && lastLogErr) {
-        this.logger.warn({ machineId, entityId, attempts: this.config.retryAttempts, error: lastLogErr.message }, `Failed to log transition after ${this.config.retryAttempts} attempts: ${lastLogErr.message}`);
-      }
-
-      const stateId = `${machineId}_${entityId}`;
-      const stateData = {
-        machineId,
-        entityId,
-        currentState: toState,
-        context,
-        lastTransition: transitionId,
-        updatedAt: now
-      };
-
-      const [updateOk] = await tryFn(() =>
-        this.database.resources[this.config.stateResource]!.update(stateId, stateData)
-      );
-
-      if (!updateOk) {
-        const [insertOk, insertErr] = await tryFn(() =>
-          this.database.resources[this.config.stateResource]!.insert({ id: stateId, ...stateData })
-        );
-
-        if (!insertOk) {
-          this.logger.warn({ machineId, entityId, stateId, error: (insertErr as Error).message }, `Failed to upsert state: ${(insertErr as Error).message}`);
-        }
+        this.logger.warn({
+          machineId,
+          entityId,
+          attempts: this.config.retryAttempts,
+          error: lastLogErr.message
+        }, `Failed to log transition after ${this.config.retryAttempts} attempts: ${lastLogErr.message}`);
       }
     }
+
+    machine.currentStates.set(entityId, toState);
   }
 
   private async _acquireTransitionLock(machineId: string, entityId: string): Promise<Lock | null> {
@@ -848,10 +969,10 @@ export class StateMachinePlugin extends Plugin {
       return machine.currentStates.get(entityId)!;
     }
 
-    if (this.config.persistTransitions) {
+    if (this.config.persistTransitions && this._getStateResource()) {
       const stateId = `${machineId}_${entityId}`;
       const [ok, , stateRecord] = await tryFn<StateRecord>(() =>
-        this.database.resources[this.config.stateResource]!.get(stateId) as unknown as Promise<StateRecord>
+        this._getStateResource()!.get(stateId) as unknown as Promise<StateRecord>
       );
 
       if (ok && stateRecord) {
@@ -893,9 +1014,15 @@ export class StateMachinePlugin extends Plugin {
     }
 
     const { limit = 50, offset = 0 } = options;
+    const transitionLogResource = this._getTransitionLogResource();
+
+    if (!transitionLogResource) {
+      this.logger.warn({ machineId, entityId }, 'Transition log resource unavailable');
+      return [];
+    }
 
     const [ok, err, transitions] = await tryFn<TransitionRecord[]>(() =>
-      this.database.resources[this.config.transitionLogResource]!.query({
+      transitionLogResource.query({
         machineId,
         entityId
       }, {
@@ -937,28 +1064,33 @@ export class StateMachinePlugin extends Plugin {
     if (this.config.persistTransitions) {
       const now = new Date().toISOString();
       const stateId = `${machineId}_${entityId}`;
+      const stateResource = this._getStateResource();
 
-      const [ok, err] = await tryFn(() =>
-        this.database.resources[this.config.stateResource]!.insert({
-          id: stateId,
-          machineId,
-          entityId,
-          currentState: initialState,
-          context,
-          lastTransition: null,
-          updatedAt: now
-        })
-      );
+      if (!stateResource) {
+        this.logger.warn({ machineId, entityId }, 'State resource unavailable during initializeEntity. Initial state will be kept in memory only.');
+      } else {
+        const [ok, err] = await tryFn(() =>
+          stateResource.insert({
+            id: stateId,
+            machineId,
+            entityId,
+            currentState: initialState,
+            context,
+            lastTransition: null,
+            updatedAt: now
+          })
+        );
 
-      if (!ok && err && !(err as Error).message?.includes('already exists')) {
-        throw new StateMachineError('Failed to initialize entity state', {
-          operation: 'initializeEntity',
-          machineId,
-          entityId,
-          initialState,
-          original: err,
-          suggestion: 'Check state resource configuration and database permissions'
-        });
+        if (!ok && err && !(err as Error).message?.includes('already exists')) {
+          throw new StateMachineError('Failed to initialize entity state', {
+            operation: 'initializeEntity',
+            machineId,
+            entityId,
+            initialState,
+            original: err,
+            suggestion: 'Check state resource configuration and database permissions'
+          });
+        }
       }
     }
 
@@ -987,13 +1119,24 @@ export class StateMachinePlugin extends Plugin {
 
     machine.currentStates.delete(entityId);
 
-    await tryFn(() =>
-      this.database.resources[this.config.stateResource]?.delete(stateId)
-    );
+    const stateResource = this._getStateResource();
+    if (stateResource) {
+      await tryFn(() =>
+        stateResource.delete(stateId)
+      );
+    }
 
     if (this.config.persistTransitions) {
+      const transitionLogResource = this._getTransitionLogResource();
+
+      if (!transitionLogResource) {
+        this.logger.debug({ machineId, entityId }, 'Skipping transition history cleanup because transition log resource is unavailable');
+        this.emit('plg:state-machine:entity-deleted', { machineId, entityId });
+        return;
+      }
+
       const [ok, , transitions] = await tryFn<TransitionRecord[]>(() =>
-        this.database.resources[this.config.transitionLogResource]?.query({
+        transitionLogResource.query({
           machineId,
           entityId
         }) as unknown as Promise<TransitionRecord[]>
@@ -1003,7 +1146,7 @@ export class StateMachinePlugin extends Plugin {
         await Promise.all(
           transitions.map(t =>
             tryFn(() =>
-              this.database.resources[this.config.transitionLogResource]?.delete(t.id)
+              transitionLogResource.delete(t.id)
             )
           )
         );
@@ -1074,8 +1217,15 @@ export class StateMachinePlugin extends Plugin {
       return entities;
     }
 
+    const stateResource = this._getStateResource();
+
+    if (!stateResource) {
+      this.logger.warn({ machineId, stateName, reason: 'state resource unavailable' }, `Failed to query entities in state '${stateName}'`);
+      return [];
+    }
+
     const [ok, err, records] = await tryFn<StateRecord[]>(() =>
-      this.database.resources[this.config.stateResource]!.query({
+      stateResource.query({
         machineId,
         currentState: stateName
       }) as unknown as Promise<StateRecord[]>
@@ -1100,9 +1250,14 @@ export class StateMachinePlugin extends Plugin {
     }
 
     const stateId = `${machineId}_${entityId}`;
+    const stateResource = this._getStateResource();
+
+    if (!stateResource) {
+      return;
+    }
 
     const [ok, , stateRecord] = await tryFn<StateRecord>(() =>
-      this.database.resources[this.config.stateResource]!.get(stateId) as unknown as Promise<StateRecord>
+      stateResource.get(stateId) as unknown as Promise<StateRecord>
     );
 
     if (ok && stateRecord) {
@@ -1110,7 +1265,7 @@ export class StateMachinePlugin extends Plugin {
       triggerCounts[triggerName] = (triggerCounts[triggerName] || 0) + 1;
 
       await tryFn(() =>
-        this.database.resources[this.config.stateResource]!.patch(stateId, { triggerCounts })
+        stateResource.patch(stateId, { triggerCounts })
       );
     }
   }
@@ -1526,7 +1681,7 @@ export class StateMachinePlugin extends Plugin {
 
   private async _attachStateMachinesToResources(): Promise<void> {
     for (const [machineName, machineConfig] of Object.entries(this.config.stateMachines)) {
-      const resourceConfig = (machineConfig as MachineConfig).config || machineConfig;
+      const resourceConfig = this._getMachineConfig(machineConfig);
 
       if (!resourceConfig.resource) {
         this.logger.debug({ machineName }, `Machine '${machineName}' has no resource configured, skipping attachment`);
