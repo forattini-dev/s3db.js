@@ -8,6 +8,8 @@ interface Database {
 interface S3Client {
   costs?: CostsData;
   on(event: string, handler: EventHandler): void;
+  off?(event: string, handler: EventHandler): void;
+  removeListener?(event: string, handler: EventHandler): void;
 }
 
 type EventHandler = (name: string, response: S3Response, input: S3Input) => void;
@@ -126,6 +128,7 @@ export class CostsPlugin extends Plugin {
   map: Record<CommandName, MethodName>;
   costs: CostsData;
   client: S3Client | null = null;
+  private _responseListener: EventHandler | null = null;
 
   constructor(config: CostsPluginOptions = {}) {
     super(config as any);
@@ -232,10 +235,26 @@ export class CostsPlugin extends Plugin {
 
   override async onStart(): Promise<void> {
     if (this.client) {
-      this.client.on('cl:response', (name: string, response: S3Response, input: S3Input) => {
+      this._responseListener = (name: string, response: S3Response, input: S3Input) => {
         this.addRequest(name as CommandName, this.map[name as CommandName], response, input);
-      });
+      };
+
+      this.client.on('cl:response', this._responseListener);
     }
+  }
+
+  override async onStop(): Promise<void> {
+    if (!this.client || !this._responseListener) {
+      return;
+    }
+
+    if (typeof this.client.off === 'function') {
+      this.client.off('cl:response', this._responseListener);
+    } else if (typeof this.client.removeListener === 'function') {
+      this.client.removeListener('cl:response', this._responseListener);
+    }
+
+    this._responseListener = null;
   }
 
   addRequest(name: CommandName, method: MethodName | undefined, response: S3Response = {}, input: S3Input = {}): void {

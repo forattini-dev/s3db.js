@@ -145,6 +145,8 @@ interface GeoReader {
 }
 
 export class FailbanManager {
+  private static instanceCounter = 0;
+
   logger: S3DBLogger;
   namespace: string | null;
   resourceNames: ResourceNames;
@@ -157,8 +159,14 @@ export class FailbanManager {
   geoReader: GeoReader | null;
   cleanupJobName: CronTask | null;
   private _resourceDescriptors: Record<string, ResourceDescriptor>;
+  private _instanceId: number;
+  private _initialized: boolean;
+  private _cleanupJobName: string | null;
 
   constructor(options: FailbanManagerOptions = {}) {
+    FailbanManager.instanceCounter += 1;
+    this._instanceId = FailbanManager.instanceCounter;
+
     if (options.logger) {
       this.logger = options.logger;
     } else {
@@ -208,6 +216,14 @@ export class FailbanManager {
     this.geoCache = new Map();
     this.geoReader = null;
     this.cleanupJobName = null;
+    this._cleanupJobName = null;
+    this._initialized = false;
+  }
+
+  private _buildCleanupJobName(): string {
+    const namespace = this.namespace || 'default';
+
+    return `failban-cleanup:${namespace}:${this._instanceId}`;
   }
 
   private _resolveResourceNames(): ResourceNames {
@@ -223,6 +239,10 @@ export class FailbanManager {
   }
 
   async initialize(): Promise<void> {
+    if (this._initialized) {
+      return;
+    }
+
     if (!this.options.enabled) {
       if (this.options.logLevel) {
         this.logger.info('Disabled, skipping initialization');
@@ -247,6 +267,8 @@ export class FailbanManager {
     await this._loadBansIntoCache();
 
     await this._setupCleanupTimer();
+
+    this._initialized = true;
 
     if (this.options.logLevel) {
       this.logger.info('Initialized');
@@ -382,7 +404,18 @@ export class FailbanManager {
   }
 
   private async _setupCleanupTimer(): Promise<void> {
+    if (!this.options.enabled) {
+      return;
+    }
+
+    if (this._cleanupJobName) {
+      const cronManager = getCronManager();
+      cronManager.stop(this._cleanupJobName);
+      this._cleanupJobName = null;
+    }
+
     const cronManager = getCronManager();
+    const jobName = this._buildCleanupJobName();
     this.cleanupJobName = await cronManager.schedule(
       '0 * * * * *',
       () => {
@@ -406,8 +439,10 @@ export class FailbanManager {
           this.logger.info({ cleaned }, 'Cleaned expired bans from cache');
         }
       },
-      'failban-cleanup'
+      jobName,
+      { replace: true }
     );
+    this._cleanupJobName = jobName;
   }
 
   private async _initializeGeoIP(): Promise<void> {
@@ -759,9 +794,10 @@ export class FailbanManager {
   }
 
   async cleanup(): Promise<void> {
-    if (this.cleanupJobName) {
+    if (this._cleanupJobName) {
       const cronManager = getCronManager();
-      cronManager.stop('failban-cleanup');
+      cronManager.stop(this._cleanupJobName);
+      this._cleanupJobName = null;
       this.cleanupJobName = null;
     }
 
@@ -775,5 +811,7 @@ export class FailbanManager {
     if (this.options.logLevel) {
       this.logger.info('Cleaned up');
     }
+
+    this._initialized = false;
   }
 }
