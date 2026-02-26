@@ -15,6 +15,9 @@ export interface AuthRule {
     json?: { status?: number; error?: string; message?: string };
     loginPath?: string;
   };
+  roles?: string | string[];
+  scopes?: string | string[];
+  allowServiceAccounts?: boolean;
 }
 
 export interface AuthMiddlewareEntry {
@@ -29,6 +32,7 @@ export interface PathAuthOptions {
   events?: {
     emitAuthEvent: (event: string, data: Record<string, unknown>) => void;
   } | null;
+  authorizeRequest?: ((c: Context, rule: AuthRule) => Promise<boolean> | boolean) | null;
 }
 
 function calculateSpecificity(pattern: string): number {
@@ -100,7 +104,8 @@ export function createPathBasedAuthMiddleware(options: PathAuthOptions = {}): Mi
     rules = [],
     authMiddlewares = {},
     unauthorizedHandler = null,
-    events = null
+    events = null,
+    authorizeRequest = null
   } = options;
 
   const publicPaths = new Set<string>();
@@ -173,17 +178,26 @@ export function createPathBasedAuthMiddleware(options: PathAuthOptions = {}): Mi
 
       await middleware(c, tempNext);
 
-      if (authSuccess && c.get('user')) {
-        if (events) {
-          events.emitAuthEvent('success', {
-            method: name,
-            user: c.get('user'),
-            path: currentPath,
-            rule: rule.path
-          });
+      if (authSuccess && c.get('user') && authorizeRequest) {
+        const isAuthorized = await Promise.resolve(authorizeRequest(c, rule));
+        if (!isAuthorized) {
+          authSuccess = false;
         }
-        return await next();
       }
+
+      if (!authSuccess || !c.get('user')) {
+        continue;
+      }
+
+      if (events) {
+        events.emitAuthEvent('success', {
+          method: name,
+          user: c.get('user'),
+          path: currentPath,
+          rule: rule.path
+        });
+      }
+      return await next();
     }
 
     if (events) {

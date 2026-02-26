@@ -88,6 +88,20 @@ describe('normalizeAuthConfig', () => {
       expect(result.drivers[0].driver).toBe('jwt');
       expect(result.drivers[1].driver).toBe('api-key');
     });
+
+    test('supports object map drivers', () => {
+      const result = normalizeAuthConfig({
+        drivers: {
+          jwt: { secret: 'jwt-secret' },
+          apiKey: { keyField: 'apiKey' }
+        }
+      });
+      expect(result.drivers).toHaveLength(2);
+      expect(result.drivers[0].driver).toBe('jwt');
+      expect(result.drivers[0].config.secret).toBe('jwt-secret');
+      expect(result.drivers[1].driver).toBe('apiKey');
+      expect(result.drivers[1].config.keyField).toBe('apiKey');
+    });
   });
 
   describe('single driver', () => {
@@ -123,6 +137,25 @@ describe('normalizeAuthConfig', () => {
       const pathRules = [
         { path: '/api/*', required: true },
         { pattern: '/public/*', required: false }
+      ];
+      const result = normalizeAuthConfig({ pathRules });
+      expect(result.pathRules).toEqual(pathRules);
+    });
+
+    test('preserves pathRules authorization fields', () => {
+      const pathRules = [
+        {
+          path: '/admin/**',
+          required: true,
+          roles: ['admin'],
+          scopes: 'admin:read',
+          allowServiceAccounts: false
+        },
+        {
+          pattern: '/public/**',
+          required: false,
+          roles: undefined
+        }
       ];
       const result = normalizeAuthConfig({ pathRules });
       expect(result.pathRules).toEqual(pathRules);
