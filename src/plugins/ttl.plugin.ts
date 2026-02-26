@@ -78,9 +78,20 @@ interface IndexEntry {
   createdAt: number;
 }
 
+interface CohortScanState {
+  maxSize: number;
+  queue: string[];
+  lookup: Set<string>;
+}
+
 interface ResourceDescriptor {
   defaultName: string;
   override?: string;
+}
+
+interface TTLIndexMetadata {
+  expiresAtTimestamp: number;
+  expiresAtCohort: string;
 }
 
 const GRANULARITIES: Record<TTLGranularity, GranularityConfig> = {
@@ -170,6 +181,7 @@ export class TTLPlugin extends CoordinatorPlugin {
   isRunning: boolean;
   expirationIndex: Resource | null;
   indexResourceName: string;
+  private _cohortScanState: Record<TTLGranularity, CohortScanState>;
 
   private _indexResourceDescriptor: ResourceDescriptor;
 
@@ -230,6 +242,28 @@ export class TTLPlugin extends CoordinatorPlugin {
       override: resourceNamesOption.index || opts.indexResourceName
     };
     this.indexResourceName = this._resolveIndexResourceName();
+    this._cohortScanState = {
+      minute: {
+        maxSize: Math.max(4, GRANULARITIES.minute.cohortsToCheck * 4),
+        queue: [],
+        lookup: new Set()
+      },
+      hour: {
+        maxSize: Math.max(4, GRANULARITIES.hour.cohortsToCheck * 4),
+        queue: [],
+        lookup: new Set()
+      },
+      day: {
+        maxSize: Math.max(4, GRANULARITIES.day.cohortsToCheck * 4),
+        queue: [],
+        lookup: new Set()
+      },
+      week: {
+        maxSize: Math.max(4, GRANULARITIES.week.cohortsToCheck * 4),
+        queue: [],
+        lookup: new Set()
+      }
+    };
   }
 
   private _buildResourceFilter(config: {
@@ -371,6 +405,52 @@ export class TTLPlugin extends CoordinatorPlugin {
     config.granularity = detectGranularity(config.ttl);
   }
 
+  private _buildTTLMetadata(record: Record<string, unknown>, config: TTLResourceConfig): TTLIndexMetadata | null {
+    let baseTime = record[config.field!] as number | string | undefined;
+
+    if (!baseTime && config.field === '_createdAt') {
+      baseTime = Date.now();
+    }
+
+    if (!baseTime) {
+      return null;
+    }
+
+    const baseTimestamp = typeof baseTime === 'number'
+      ? baseTime
+      : new Date(baseTime).getTime();
+
+    if (!Number.isFinite(baseTimestamp)) {
+      return null;
+    }
+
+    const expiresAt = config.ttl
+      ? new Date(baseTimestamp + config.ttl * SECONDS_TO_MS)
+      : new Date(baseTimestamp);
+    const cohortConfig = GRANULARITIES[config.granularity!];
+    const cohort = cohortConfig.cohortFormat(expiresAt);
+
+    return {
+      expiresAtCohort: cohort,
+      expiresAtTimestamp: expiresAt.getTime()
+    };
+  }
+
+  private _shouldSkipIndexUpdate(
+    previousRecord: Record<string, unknown>,
+    updatedRecord: Record<string, unknown>,
+    config: TTLResourceConfig
+  ): boolean {
+    const previousMetadata = this._buildTTLMetadata(previousRecord, config);
+    const updatedMetadata = this._buildTTLMetadata(updatedRecord, config);
+
+    if (!previousMetadata || !updatedMetadata) {
+      return false;
+    }
+
+    return previousMetadata.expiresAtTimestamp === updatedMetadata.expiresAtTimestamp;
+  }
+
   private async _createExpirationIndex(): Promise<void> {
     this.expirationIndex = await this.database.createResource({
       name: this.indexResourceName,
@@ -425,9 +505,17 @@ export class TTLPlugin extends CoordinatorPlugin {
 
     if (typeof resource.update === 'function') {
       (this as any).addMiddleware(resource, 'update', async (next: Function, id: string, data: Record<string, unknown>, options?: unknown) => {
+        const [, , previousRecord] = await tryFn(() => resource.getOrNull(id));
         const updatedRecord = await next(id, data, options);
 
         if (!updatedRecord) {
+          return updatedRecord;
+        }
+
+        if (
+          previousRecord &&
+          this._shouldSkipIndexUpdate(previousRecord as Record<string, unknown>, updatedRecord as Record<string, unknown>, config)
+        ) {
           return updatedRecord;
         }
 
@@ -443,35 +531,22 @@ export class TTLPlugin extends CoordinatorPlugin {
 
   private async _addToIndex(resourceName: string, record: Record<string, unknown>, config: TTLResourceConfig): Promise<void> {
     try {
-      let baseTime = record[config.field!] as number | string | undefined;
+      const metadata = this._buildTTLMetadata(record, config);
 
-      if (!baseTime && config.field === '_createdAt') {
-        baseTime = Date.now();
-      }
-
-      if (!baseTime) {
+      if (!metadata) {
         this.logger.warn(
           { resourceName, recordId: record.id, field: config.field },
           `Record ${record.id} in ${resourceName} missing field "${config.field}", skipping index`
         );
         return;
       }
-
-      const baseTimestamp = typeof baseTime === 'number' ? baseTime : new Date(baseTime).getTime();
-      const expiresAt = config.ttl
-        ? new Date(baseTimestamp + config.ttl * SECONDS_TO_MS)
-        : new Date(baseTimestamp);
-
-      const cohortConfig = GRANULARITIES[config.granularity!];
-      const cohort = cohortConfig.cohortFormat(expiresAt);
-
       const indexId = `${resourceName}:${record.id}`;
       const payload = {
         id: indexId,
         resourceName,
         recordId: record.id as string,
-        expiresAtCohort: cohort,
-        expiresAtTimestamp: expiresAt.getTime(),
+        expiresAtCohort: metadata.expiresAtCohort,
+        expiresAtTimestamp: metadata.expiresAtTimestamp,
         granularity: config.granularity,
         createdAt: Date.now()
       };
@@ -479,8 +554,8 @@ export class TTLPlugin extends CoordinatorPlugin {
       await this.expirationIndex!.upsert(payload);
 
       this.logger.debug(
-        { resourceName, recordId: record.id, cohort, granularity: config.granularity },
-        `Added ${resourceName}:${record.id} to index (cohort: ${cohort}, granularity: ${config.granularity})`
+        { resourceName, recordId: record.id, cohort: metadata.expiresAtCohort, granularity: config.granularity },
+        `Added ${resourceName}:${record.id} to index (cohort: ${metadata.expiresAtCohort}, granularity: ${config.granularity})`
       );
     } catch (error) {
       this.logger.error({ error: (error as Error).message, stack: (error as Error).stack }, 'Error adding to index');
@@ -587,10 +662,35 @@ export class TTLPlugin extends CoordinatorPlugin {
       const granularityConfig = GRANULARITIES[granularity];
       const cohorts = getExpiredCohorts(granularity, granularityConfig.cohortsToCheck);
       const managedResourceNames = new Set(resources.map(item => item.name));
+      const state = this._cohortScanState[granularity];
+      const processedCohorts = cohorts.filter((cohort) => !state.lookup.has(cohort));
+      const usedFallback = processedCohorts.length === 0;
+      const cohortsToProcess = usedFallback ? [cohorts[0]] : processedCohorts;
+      const scannedEntryIds = new Set<string>();
 
-      this.logger.debug({ granularity, cohorts }, `Cleaning ${granularity} granularity, checking cohorts: ${cohorts.join(', ')}`);
+      if (usedFallback) {
+        this.logger.debug(
+          { granularity, cohort: cohorts[0] },
+          `Using cohort fallback for ${granularity} cleanup`
+        );
+      }
 
-      for (const cohort of cohorts) {
+      this.logger.debug({ granularity, cohorts: cohortsToProcess }, `Cleaning ${granularity} granularity, checking cohorts: ${cohortsToProcess.join(', ')}`);
+
+      for (const cohort of cohortsToProcess) {
+        const alreadyTracked = state.lookup.has(cohort);
+        if (!alreadyTracked) {
+          state.lookup.add(cohort);
+          state.queue.push(cohort);
+        }
+
+        if (state.queue.length > state.maxSize) {
+          const staleCohort = state.queue.shift();
+          if (staleCohort) {
+            state.lookup.delete(staleCohort);
+          }
+        }
+
         const expired = await this.expirationIndex!.listPartition({
           partition: 'byExpiresAtCohort',
           partitionValues: { expiresAtCohort: cohort }
@@ -598,6 +698,11 @@ export class TTLPlugin extends CoordinatorPlugin {
 
         const processableEntries: IndexEntry[] = [];
         for (const entry of expired) {
+          if (scannedEntryIds.has(entry.id)) {
+            continue;
+          }
+
+          scannedEntryIds.add(entry.id);
           const isManaged = managedResourceNames.has(entry.resourceName) && this.resourceFilter(entry.resourceName);
           if (!isManaged) {
             const [ok, err] = await tryFn(() => this.expirationIndex!.delete(entry.id));
