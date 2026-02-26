@@ -37,7 +37,7 @@ describe('TTLPlugin v2 - Update Hook', () => {
 
     await subscriptions.update('sub-1', {
       userId: 'user-1',
-      expiresAt: now - 1000
+      expiresAt: now - (121 * 1000)
     });
 
     await plugin.runCleanup();
@@ -49,4 +49,3 @@ describe('TTLPlugin v2 - Update Hook', () => {
     await db.disconnect();
   });
 });
-

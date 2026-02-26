@@ -120,7 +120,7 @@ describe('TTLPlugin v2 - Hard Delete Strategy', () => {
 
     await scopedResource.insert({ id: 'missing-resource', filename: 'lost.txt' });
 
-    await indexResource.insert({
+    await indexResource.upsert({
       id: entryId,
       resourceName: 'ephemeral_files',
       recordId: 'missing-resource',

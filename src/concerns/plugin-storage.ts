@@ -12,16 +12,44 @@ const S3_METADATA_LIMIT = 2047;
 const SEQUENCE_GATES = new Map<string, Promise<void>>();
 
 function isMissingObjectError(error: unknown): boolean {
-  const candidate = error as {
-    name?: string;
-    code?: string;
-    Code?: string;
-    statusCode?: number;
-    $metadata?: { httpStatusCode?: number };
+  const visited = new Set<unknown>();
+
+  const walk = (candidate: unknown, depth = 0): boolean => {
+    if (!candidate || depth > 4 || visited.has(candidate)) {
+      return false;
+    }
+    visited.add(candidate);
+
+    const err = candidate as {
+      name?: string;
+      code?: string;
+      Code?: string;
+      statusCode?: number;
+      $metadata?: { httpStatusCode?: number };
+      original?: unknown;
+      data?: {
+        code?: string;
+        statusCode?: number;
+        status?: number;
+      };
+      message?: string;
+    };
+
+    const errorCode = err?.name || err?.code || err?.Code;
+    const statusCode = err?.statusCode || err?.$metadata?.httpStatusCode || err?.data?.statusCode || err?.data?.status;
+
+    if (errorCode === 'NoSuchKey' || errorCode === 'NotFound' || statusCode === 404) {
+      return true;
+    }
+
+    if (typeof err?.message === 'string' && /not.?found|does not exist/i.test(err.message)) {
+      return true;
+    }
+
+    return walk(err?.original, depth + 1);
   };
-  const errorCode = candidate?.name || candidate?.code || candidate?.Code;
-  const statusCode = candidate?.statusCode || candidate?.$metadata?.httpStatusCode;
-  return errorCode === 'NoSuchKey' || errorCode === 'NotFound' || statusCode === 404;
+
+  return walk(error);
 }
 
 type ObjectParseMode = 'throw' | 'null';

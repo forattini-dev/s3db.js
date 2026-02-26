@@ -466,8 +466,7 @@ export class TTLPlugin extends CoordinatorPlugin {
       const cohort = cohortConfig.cohortFormat(expiresAt);
 
       const indexId = `${resourceName}:${record.id}`;
-
-      await this.expirationIndex!.insert({
+      const payload = {
         id: indexId,
         resourceName,
         recordId: record.id as string,
@@ -475,7 +474,9 @@ export class TTLPlugin extends CoordinatorPlugin {
         expiresAtTimestamp: expiresAt.getTime(),
         granularity: config.granularity,
         createdAt: Date.now()
-      });
+      };
+
+      await this.expirationIndex!.upsert(payload);
 
       this.logger.debug(
         { resourceName, recordId: record.id, cohort, granularity: config.granularity },
