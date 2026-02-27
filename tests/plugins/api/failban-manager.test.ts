@@ -133,7 +133,11 @@ describe('FailbanManager', () => {
     await manager.initialize();
 
     const badIp = '192.0.2.55';
-    await manager.recordViolation(badIp, 'test', { path: '/login', userAgent: 'jest' });
+    await manager.ban(badIp, 'manual-threshold', {
+      violationCount: 2,
+      userAgent: 'jest',
+      path: '/login'
+    });
     expect(manager.isBanned(badIp)).toBe(true);
 
     await manager.cleanup();
@@ -143,7 +147,11 @@ describe('FailbanManager', () => {
     await manager.initialize();
 
     const secondBadIp = '192.0.2.56';
-    await manager.recordViolation(secondBadIp, 'test', { path: '/login', userAgent: 'jest' });
+    await manager.ban(secondBadIp, 'manual-threshold', {
+      violationCount: 2,
+      userAgent: 'jest',
+      path: '/login'
+    });
     expect(manager.isBanned(secondBadIp)).toBe(true);
 
     await manager.cleanup();
