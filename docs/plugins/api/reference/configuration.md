@@ -180,8 +180,10 @@ Note: When disabled, the plugin still works (a local fallback ID is used interna
 - failban.whitelist?: string[]
 - failban.blacklist?: string[]
 - failban.persistViolations?: boolean = true
-- failban.geo?: { dbPath: string; block?: string[] }
+- failban.geo?: { enabled?: boolean; databasePath?: string; allowedCountries?: string[]; blockedCountries?: string[]; blockUnknown?: boolean; cacheResults?: boolean }
 - failban.resourceNames?: { bans?: string; violations?: string }
+
+Operational note: failban cron cleanup is created on plugin startup and cleaned on plugin stop/uninstall (`ApiPlugin.stop()`), so it doesn't leave scheduled tasks alive after shutdown.
 
 ## Static & Health
 

@@ -193,6 +193,7 @@ await db.usePlugin(new ApiPlugin({
   - [PAR - Pushed Authorization Requests](#par---pushed-authorization-requests-phase-4)
   - [Client Assertion with JWK](#client-assertion-with-jwk-phase-4)
   - [Backchannel Logout](#backchannel-logout-phase-4)
+- [Lifecycle & Cleanup](#-lifecycle--cleanup)
 - [Troubleshooting](#-troubleshooting)
 - [FAQ](#-faq)
 
@@ -2440,6 +2441,19 @@ config: {
 // [OIDC] Destroyed session: session-id-3
 // [OIDC] Backchannel logout complete: 3 sessions logged out
 ```
+
+---
+
+## ♻️ Lifecycle & Cleanup
+
+`ApiPlugin` calls OIDC cleanup hooks during shutdown (`onStop()`/`stop()`), including:
+
+- stopping OIDC state-cleanup timers;
+- clearing per-handler `state`/`nonce` maps used during authentication;
+- destroying auth rate-limiter middleware (`createAuthDriverRateLimiter`) so internal timers are released;
+- releasing any OIDC auth resources tied to the plugin lifecycle.
+
+This keeps plugin restarts leak-free in long-running environments.
 
 ---
 

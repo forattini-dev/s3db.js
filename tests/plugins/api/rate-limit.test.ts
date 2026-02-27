@@ -48,6 +48,25 @@ describe('RateLimitStore', () => {
 });
 
 describe('createDriverRateLimiter', () => {
+  it('cleans up resources when destroyed', async () => {
+    const limiter = createDriverRateLimiter({
+      windowMs: 50,
+      maxAttempts: 2,
+      keyPrefix: 'ratelimit-destroy',
+      enabled: true
+    });
+
+    const destroyableLimiter = limiter as { destroy?: () => void };
+    expect(typeof destroyableLimiter.destroy).toBe('function');
+
+    const first = createMockContext({ 'x-forwarded-for': '10.0.0.9' });
+    await limiter(first, async () => {});
+    expect(first.response).toBeNull();
+
+    expect(() => destroyableLimiter.destroy?.()).not.toThrow();
+    expect(() => destroyableLimiter.destroy?.()).not.toThrow();
+  });
+
   it('blocks requests after exceeding the configured limit', async () => {
     const limiter = createDriverRateLimiter({
       windowMs: 50,

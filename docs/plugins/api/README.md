@@ -222,6 +222,11 @@ GET     /metrics         # Prometheus metrics
 - **HTTP Keep-Alive:** 20-30% latency reduction
 - **Response Compression:** 70-85% bandwidth savings
 
+### Lifecycle & Cleanup
+
+- `ApiPlugin.stop()`/`uninstall()` shutdown path also disposes plugin internals (failban scheduler, rate-limiter stores, OIDC cleanup handlers).
+- Prevents hidden timers/listeners between restarts and supports safe plugin lifecycle in long-running servers.
+
 **[→ Performance guide](/plugins/api/guides/deployment.md#performance)**
 
 ---

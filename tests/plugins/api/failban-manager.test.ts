@@ -116,4 +116,36 @@ describe('FailbanManager', () => {
 
     await manager.cleanup();
   });
+
+  it('supports cleanup and reinitialization cycles', async () => {
+    const manager = new FailbanManager({
+      database: db,
+      enabled: true,
+      logLevel: false,
+      maxViolations: 1,
+      violationWindow: 1000,
+      banDuration: 10_000,
+      whitelist: [],
+      blacklist: []
+    });
+
+    await ensureFailbanResources(db, manager);
+    await manager.initialize();
+
+    const badIp = '192.0.2.55';
+    await manager.recordViolation(badIp, 'test', { path: '/login', userAgent: 'jest' });
+    expect(manager.isBanned(badIp)).toBe(true);
+
+    await manager.cleanup();
+    await manager.cleanup();
+
+    await manager.initialize();
+    await manager.initialize();
+
+    const secondBadIp = '192.0.2.56';
+    await manager.recordViolation(secondBadIp, 'test', { path: '/login', userAgent: 'jest' });
+    expect(manager.isBanned(secondBadIp)).toBe(true);
+
+    await manager.cleanup();
+  });
 });
