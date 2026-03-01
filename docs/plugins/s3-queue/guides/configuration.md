@@ -57,6 +57,43 @@ Key tuning knobs:
 
 > 🧭 Custom names are respected. If you pass `queueResource: 'tasks_queue'` or `deadLetterResource: 'dead_tasks'`, the plugin keeps those aliases available under `database.resources` while still provisioning the namespaced `plg_*` helpers it uses internally. To opt into namespacing for overrides, prefix them with `plg_...`.
 
+### Multi-instance startup without duplicate contention
+
+When two (or 200) workers start on the same queue, all instances should use the **exact same `resource` + config** and keep coordinator mode enabled. Only one process will become leader.
+
+Use this safer baseline for first production rollout:
+
+```javascript
+new S3QueuePlugin({
+  resource: 'tasks',
+  enableCoordinator: true,         // keep true
+  startupJitterMin: 0,
+  startupJitterMax: 5000,         // stagger startup to avoid simultaneous election attempts
+  coldStartDuration: 5000,        // keep startup/coordination warmup
+
+  // Critical for multi-instance stability
+  heartbeatInterval: 10000,       // coordinator/workers heartbeat cadence
+  pollInterval: 1000,            // normal empty-pool polling
+  maxPollInterval: 12000,        // exponential backoff ceiling on idle queue
+  dispatchInterval: 100,          // coordinator ticket emission interval
+  ticketBatchSize: 10,
+
+  onMessage: async (task) => {
+    // process task
+  }
+});
+```
+
+Why this helps:
+
+- `startupJitter*` reduces the chance of two instances fighting for coordinator state right after boot.
+- `maxPollInterval` plus adaptive backoff avoids a tight empty-queue loop on every instance.
+- `pollInterval` affects only worker scanning; `dispatchInterval` is used by coordinator only.
+
+Recommended for low contention:
+- Avoid `skipColdStart: true` unless explicitly testing startup paths.
+- Keep `heartbeatInterval` >= `dispatchInterval * 2` in most workloads.
+
 ### Configuration Patterns
 
 #### Dependency Graph
@@ -116,6 +153,38 @@ new S3QueuePlugin({
   }
 });
 ```
+
+---
+
+## 🔔 Performance log tuning (for startup + noisy environments)
+
+There are two independent switches for slow-operation logs:
+
+- `S3DB_S3_SLOW_*` controls `S3Client` thresholds/verbosity.
+- `S3DB_GCOORD_SLOW_*` controls coordinator heartbeat/register warnings.
+- `S3DB_SLOW_LOGS_ENABLED` is a global fallback for both components.
+
+If logs are too aggressive in your environment:
+
+```bash
+S3DB_S3_SLOW_PROFILE=2
+S3DB_S3_SLOW_LOGS_ENABLED=false
+S3DB_GCOORD_SLOW_LOGS_ENABLED=false
+S3DB_SLOW_LOGS_ENABLED=false
+```
+
+For a softer profile without disabling logs:
+
+```bash
+S3DB_S3_SLOW_PROFILE=2
+S3DB_GCOORD_SLOW_PROFILE=2
+S3DB_GCOORD_SLOW_HEARTBEAT_MS=5000
+S3DB_GCOORD_SLOW_REGISTER_MS=1000
+S3DB_S3_SLOW_GETOBJECT_MS=2000
+S3DB_S3_SLOW_EXECUTE_MS=2000
+```
+
+For all available keys and defaults, see `docs/clients/s3-client.md` and `docs/plugins/s3-queue/README.md` (coordinator tuning section).
 
 ---
 

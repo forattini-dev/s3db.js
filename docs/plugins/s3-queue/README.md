@@ -195,10 +195,12 @@ const queueB = new S3QueuePlugin({
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
 | `enableCoordinator` | boolean | `true` | Enable coordinator mode |
-| `heartbeatInterval` | number | `30000` | Heartbeat frequency (ms) |
-| `dispatchInterval` | number | `5000` | How often coordinator publishes tickets (ms) |
+| `heartbeatInterval` | number | `10000` | Heartbeat frequency (ms) |
+| `dispatchInterval` | number | `100` | How often coordinator publishes tickets (ms) |
 | `ticketBatchSize` | number | `10` | Messages per ticket batch |
-| `coldStartObservationWindow` | number | `15000` | Observation phase duration (ms) |
+| `coldStartDuration` | number | `0` | Cold-start observation duration (ms) |
+| `startupJitterMin` | number | `0` | Minimum startup jitter (ms) |
+| `startupJitterMax` | number | `5000` | Maximum startup jitter (ms) |
 | `skipColdStart` | boolean | `false` | Skip cold start (testing only!) |
 
 ### Coordinator Events
@@ -228,7 +230,29 @@ Comprehensive guide covering:
 - Troubleshooting multi-instance issues
 - Implementation details for plugin developers
 
----
+### Startup-safe defaults for multi-instance
+
+For multiple workers starting together on the same queue, keep these in sync:
+
+- same `resource` and same environment
+- `enableCoordinator: true` (default)
+- `startupJitterMin` + `startupJitterMax` to stagger election startup
+- `maxPollInterval` > `pollInterval` so idle workers back off
+
+Example:
+
+```javascript
+new S3QueuePlugin({
+  resource: 'tasks',
+  enableCoordinator: true,
+  startupJitterMin: 500,
+  startupJitterMax: 2500,
+  pollInterval: 1000,
+  maxPollInterval: 12000
+});
+```
+
+--- 
 
 ## ✨ Key Features
 

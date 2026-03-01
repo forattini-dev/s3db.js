@@ -95,6 +95,15 @@ export class S3Client extends EventEmitter {
   private _inflightCoalescing: Map<string, Promise<unknown>>;
   private taskExecutorConfig: NormalizedTaskExecutorConfig;
   private taskExecutor: TasksPoolType | null;
+  private readonly _slowOperationThresholds: {
+    executeOperationMs: number;
+    getObjectMs: number;
+    listObjectsMs: number;
+    getAllKeysIterationMs: number;
+    getAllKeysTotalMs: number;
+    getKeysPageMs: number;
+  };
+  private _warnSlowOperations: boolean;
 
   constructor({
     logLevel = 'info',
@@ -137,6 +146,37 @@ export class S3Client extends EventEmitter {
 
     this.taskExecutorConfig = this._normalizeTaskExecutorConfig(poolConfig as boolean | TaskExecutorConfig);
     this.taskExecutor = this.taskExecutorConfig.enabled ? this._createTasksPool() : null;
+    const slowProfile = this._getPerfThresholdMs('S3DB_S3_SLOW_PROFILE', 0);
+    const s3Defaults = slowProfile === 2
+      ? {
+          executeOperationMs: 2000,
+          getObjectMs: 2000,
+          listObjectsMs: 2000,
+          getAllKeysIterationMs: 1200,
+          getAllKeysTotalMs: 2000,
+          getKeysPageMs: 2000
+        }
+      : {
+          executeOperationMs: 750,
+          getObjectMs: 750,
+          listObjectsMs: 750,
+          getAllKeysIterationMs: 750,
+          getAllKeysTotalMs: 750,
+          getKeysPageMs: 750
+        };
+
+    this._slowOperationThresholds = {
+      executeOperationMs: this._getPerfThresholdMs('S3DB_S3_SLOW_EXECUTE_MS', s3Defaults.executeOperationMs),
+      getObjectMs: this._getPerfThresholdMs('S3DB_S3_SLOW_GETOBJECT_MS', s3Defaults.getObjectMs),
+      listObjectsMs: this._getPerfThresholdMs('S3DB_S3_SLOW_LISTOBJECTS_MS', s3Defaults.listObjectsMs),
+      getAllKeysIterationMs: this._getPerfThresholdMs('S3DB_S3_SLOW_LIST_ITERATION_MS', s3Defaults.getAllKeysIterationMs),
+      getAllKeysTotalMs: this._getPerfThresholdMs('S3DB_S3_SLOW_LIST_TOTAL_MS', s3Defaults.getAllKeysTotalMs),
+      getKeysPageMs: this._getPerfThresholdMs('S3DB_S3_SLOW_GETKEYSPAGE_MS', s3Defaults.getKeysPageMs)
+    };
+    this._warnSlowOperations = this._getPerfBoolean(
+      'S3DB_S3_SLOW_LOGS_ENABLED',
+      this._getPerfBoolean('S3DB_SLOW_LOGS_ENABLED', true)
+    );
   }
 
   private async _coalesce<T>(key: string, operationFn: () => Promise<T>): Promise<T> {
@@ -195,6 +235,37 @@ export class S3Client extends EventEmitter {
     };
 
     return normalized;
+  }
+
+  private _getPerfThresholdMs(envName: string, fallback: number): number {
+    const raw = process.env[envName];
+    if (!raw) {
+      return fallback;
+    }
+
+    const value = parseInt(raw, 10);
+    if (Number.isNaN(value) || value < 0) {
+      return fallback;
+    }
+
+    return value;
+  }
+
+  private _getPerfBoolean(envName: string, fallback: boolean): boolean {
+    const raw = process.env[envName];
+    if (!raw) {
+      return fallback;
+    }
+
+    if (raw === '1' || raw.toLowerCase() === 'true' || raw.toLowerCase() === 'yes' || raw.toLowerCase() === 'on') {
+      return true;
+    }
+
+    if (raw === '0' || raw.toLowerCase() === 'false' || raw.toLowerCase() === 'no' || raw.toLowerCase() === 'off') {
+      return false;
+    }
+
+    return fallback;
   }
 
   private _normalizedHttpClientOptions(): HttpClientOptions {
@@ -301,7 +372,7 @@ export class S3Client extends EventEmitter {
     });
     const totalMs = Date.now() - enqueueStart;
 
-    if (totalMs > 100) {
+    if (this._warnSlowOperations && totalMs > this._slowOperationThresholds.executeOperationMs) {
       const op = options.metadata?.operation || 'unknown';
       const key = String(options.metadata?.key || '?').substring(0, 50);
       const stats = this.taskExecutor?.stats || {};
@@ -626,7 +697,7 @@ export class S3Client extends EventEmitter {
       }
 
       const totalMs = Date.now() - getStart;
-      if (totalMs > 50) {
+      if (this._warnSlowOperations && totalMs > this._slowOperationThresholds.getObjectMs) {
         this.logger.warn({ totalMs, cmdMs, key: key?.substring(0, 60) }, `[PERF] S3Client.getObject SLOW`);
       } else {
         this.logger.debug({ totalMs, key: key?.substring(0, 60) }, `[S3Client.getObject] complete`);
@@ -871,7 +942,7 @@ export class S3Client extends EventEmitter {
       throw new UnknownError('Unknown error in listObjects', { prefix, bucket: this.config.bucket, original: err });
     }
 
-    if (totalMs > 100) {
+    if (this._warnSlowOperations && totalMs > this._slowOperationThresholds.listObjectsMs) {
       this.logger.warn({ totalMs, prefix: prefix?.substring(0, 60), keys: (response as { KeyCount?: number })?.KeyCount || 0 }, `[PERF] S3Client.listObjects SLOW`);
     } else {
       this.logger.debug({ totalMs, prefix: prefix?.substring(0, 60), keys: (response as { KeyCount?: number })?.KeyCount || 0 }, `[S3Client.listObjects] complete`);
@@ -916,7 +987,7 @@ export class S3Client extends EventEmitter {
       const response = await this.listObjects(options) as { Contents?: Array<{ Key: string }>; IsTruncated?: boolean; NextContinuationToken?: string };
       const listMs = Date.now() - startList;
 
-      if (listMs > 500) {
+      if (this._warnSlowOperations && listMs > this._slowOperationThresholds.getAllKeysIterationMs) {
         this.logger.warn({ iterations, listMs, prefix: prefix?.substring(0, 60) }, `[PERF] S3Client.getAllKeys: listObjects iteration SLOW`);
       }
 
@@ -928,7 +999,7 @@ export class S3Client extends EventEmitter {
     }
 
     const totalMs = Date.now() - startTotal;
-    if (totalMs > 100) {
+    if (this._warnSlowOperations && totalMs > this._slowOperationThresholds.getAllKeysTotalMs) {
       this.logger.warn({ totalMs, iterations, keysCount: keys.length, prefix: prefix?.substring(0, 60) }, `[PERF] S3Client.getAllKeys SLOW TOTAL`);
     }
 
@@ -1021,7 +1092,7 @@ export class S3Client extends EventEmitter {
     }
 
     const totalMs = Date.now() - pageStart;
-    if (totalMs > 100) {
+    if (this._warnSlowOperations && totalMs > this._slowOperationThresholds.getKeysPageMs) {
       this.logger.warn({ totalMs, iterations, keysCount: keys.length, prefix: prefix?.substring(0, 60) }, `[PERF] S3Client.getKeysPage SLOW`);
     } else {
       this.logger.debug({ totalMs, iterations, keysCount: keys.length }, `[S3Client.getKeysPage] complete`);

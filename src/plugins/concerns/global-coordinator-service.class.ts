@@ -188,10 +188,13 @@ export class GlobalCoordinatorService extends EventEmitter {
   protected _latencyBuffer: LatencyBuffer;
   protected _heartbeatStartedAt: number;
   protected _heartbeatMutexTimeoutMs: number;
+  protected _warnSlowCoordinatorLogs: boolean;
 
   protected _cachedState: LeaderState | null;
   protected _stateCacheTime: number;
   protected _stateCacheTtl: number;
+  protected _slowHeartbeatMs: number;
+  protected _slowRegisterMs: number;
 
   storage: CoordinatorPluginStorage | null;
   protected _pluginStorage: CoordinatorPluginStorage | null;
@@ -218,6 +221,23 @@ export class GlobalCoordinatorService extends EventEmitter {
     this.isLeader = false;
     this.currentLeaderId = null;
     this.currentEpoch = 0;
+    const gcoordProfile = this._getPerfThresholdMs('S3DB_GCOORD_SLOW_PROFILE', 0);
+    const gcoordDefaults = gcoordProfile === 2
+      ? {
+          heartbeatMs: 5000,
+          registerMs: 1000
+        }
+      : {
+          heartbeatMs: 1500,
+          registerMs: 300
+        };
+
+    this._slowHeartbeatMs = this._getPerfThresholdMs('S3DB_GCOORD_SLOW_HEARTBEAT_MS', gcoordDefaults.heartbeatMs);
+    this._slowRegisterMs = this._getPerfThresholdMs('S3DB_GCOORD_SLOW_REGISTER_MS', gcoordDefaults.registerMs);
+    this._warnSlowCoordinatorLogs = this._getPerfBoolean(
+      'S3DB_GCOORD_SLOW_LOGS_ENABLED',
+      this._getPerfBoolean('S3DB_SLOW_LOGS_ENABLED', true)
+    );
 
     this.config = this._normalizeConfig(config);
 
@@ -495,7 +515,7 @@ export class GlobalCoordinatorService extends EventEmitter {
 
       this._checkContention(durationMs);
 
-      if (durationMs > 100) {
+      if (this._warnSlowCoordinatorLogs && durationMs > this._slowHeartbeatMs) {
         this.logger.warn({ namespace: this.namespace, durationMs }, `[PERF] SLOW HEARTBEAT detected`);
       } else {
         this.logger.debug({ namespace: this.namespace, durationMs }, `[HEARTBEAT] complete`);
@@ -729,7 +749,7 @@ export class GlobalCoordinatorService extends EventEmitter {
     await Promise.all(registrations);
 
     const totalMs = Date.now() - regStart;
-    if (totalMs > 50) {
+    if (this._warnSlowCoordinatorLogs && totalMs > this._slowRegisterMs) {
       this.logger.warn({ namespace: this.namespace, totalMs, uniqueWorkers: registrations.length, deduped }, `[PERF] SLOW _registerWorker`);
     } else {
       this.logger.debug({ namespace: this.namespace, totalMs, uniqueWorkers: registrations.length, deduped }, `[REGISTER_WORKER] complete`);
@@ -1057,6 +1077,37 @@ export class GlobalCoordinatorService extends EventEmitter {
     }
 
     return `gcs-${this.namespace}-${Date.now()}-${Math.random().toString(36).slice(2, 9)}-${++serviceCounter}`;
+  }
+
+  private _getPerfThresholdMs(envName: string, fallback: number): number {
+    const value = process.env[envName];
+    if (!value) {
+      return fallback;
+    }
+
+    const parsed = parseInt(value, 10);
+    if (Number.isNaN(parsed) || parsed < 0) {
+      return fallback;
+    }
+
+    return parsed;
+  }
+
+  private _getPerfBoolean(envName: string, fallback: boolean): boolean {
+    const raw = process.env[envName];
+    if (!raw) {
+      return fallback;
+    }
+
+    if (raw === '1' || raw.toLowerCase() === 'true' || raw.toLowerCase() === 'yes' || raw.toLowerCase() === 'on') {
+      return true;
+    }
+
+    if (raw === '0' || raw.toLowerCase() === 'false' || raw.toLowerCase() === 'no' || raw.toLowerCase() === 'off') {
+      return false;
+    }
+
+    return fallback;
   }
 }
 

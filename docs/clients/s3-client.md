@@ -44,6 +44,7 @@ The `S3Client` class is the production S3 interface that powers s3db.js. It prov
 
 - [Overview](#overview)
 - [Constructor](#constructor)
+- [Performance & Slow Log Tuning](#performance--slow-log-tuning)
 - [HTTP Client Configuration](#http-client-configuration)
 - [Object Operations](#object-operations)
 - [Listing & Pagination](#listing--pagination)
@@ -100,6 +101,46 @@ const client = new S3Client({
 | `parallelism` | number | `100` | Concurrent operations for bulk methods (Separate OperationsPool per Database) |
 | `httpClientOptions` | object | see below | HTTP agent configuration |
 | `AwsS3Client` | S3Client | auto-created | Custom AWS S3Client instance |
+
+### Performance & Slow Log Tuning
+
+`S3Client` marks operations as slow when they exceed configurable thresholds.
+
+```bash
+# Global fallback (applies when subsystem-specific flags are not set)
+S3DB_SLOW_LOGS_ENABLED=true
+
+# S3 client specific controls
+S3DB_S3_SLOW_LOGS_ENABLED=true
+S3DB_S3_SLOW_PROFILE=2
+S3DB_S3_SLOW_EXECUTE_MS=2000
+S3DB_S3_SLOW_GETOBJECT_MS=2000
+S3DB_S3_SLOW_LISTOBJECTS_MS=2000
+S3DB_S3_SLOW_LIST_ITERATION_MS=1200
+S3DB_S3_SLOW_LIST_TOTAL_MS=2000
+S3DB_S3_SLOW_GETKEYSPAGE_MS=2000
+```
+
+`S3DB_S3_SLOW_PROFILE=2` applies a predefined forgiving profile:
+
+- `S3DB_S3_SLOW_EXECUTE_MS`: `2000ms`
+- `S3DB_S3_SLOW_GETOBJECT_MS`: `2000ms`
+- `S3DB_S3_SLOW_LISTOBJECTS_MS`: `2000ms`
+- `S3DB_S3_SLOW_LIST_ITERATION_MS`: `1200ms`
+- `S3DB_S3_SLOW_LIST_TOTAL_MS`: `2000ms`
+- `S3DB_S3_SLOW_GETKEYSPAGE_MS`: `2000ms`
+
+To stop slow-operation logs without muting other logs:
+
+```bash
+S3DB_S3_SLOW_LOGS_ENABLED=false
+```
+
+To keep them globally off:
+
+```bash
+S3DB_SLOW_LOGS_ENABLED=false
+```
 
 ### HTTP Client Options
 
