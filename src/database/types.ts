@@ -129,6 +129,7 @@ export interface GlobalCoordinatorConfig {
   leaseTimeout?: number;
   workerTimeout?: number;
   diagnosticsEnabled?: boolean;
+  warnSlowRegisterWorkerLogs?: boolean;
   circuitBreaker?: {
     failureThreshold?: number;
     resetTimeout?: number;

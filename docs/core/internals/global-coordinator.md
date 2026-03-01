@@ -93,6 +93,7 @@ console.log('Workers:', await coordinator.getActiveWorkers());
 | `heartbeatJitter` | `number` | `1000` | Random jitter per heartbeat in ms |
 | `leaseTimeout` | `number` | `15000` | Leader lease duration in ms |
 | `workerTimeout` | `number` | `20000` | Worker registration TTL in ms |
+| `warnSlowRegisterWorkerLogs` | `boolean` | `true` | Emit warning when `_registerWorker` exceeds slow threshold |
 | `startupJitterMin` | `number` | `0` | Min startup delay in ms |
 | `startupJitterMax` | `number` | `5000` | Max startup delay in ms |
 | `metricsBufferSize` | `number` | `100` | Rolling window size for latency metrics |

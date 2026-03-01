@@ -162,6 +162,7 @@ There are two independent switches for slow-operation logs:
 
 - `S3DB_S3_SLOW_*` controls `S3Client` thresholds/verbosity.
 - `S3DB_GCOORD_SLOW_*` controls coordinator heartbeat/register warnings.
+- `S3DB_GCOORD_SLOW_REGISTER_LOGS_ENABLED=false` disables only `SLOW _registerWorker` warning logs.
 - `S3DB_SLOW_LOGS_ENABLED` is a global fallback for both components.
 
 If logs are too aggressive in your environment:
@@ -170,6 +171,7 @@ If logs are too aggressive in your environment:
 S3DB_S3_SLOW_PROFILE=2
 S3DB_S3_SLOW_LOGS_ENABLED=false
 S3DB_GCOORD_SLOW_LOGS_ENABLED=false
+S3DB_GCOORD_SLOW_REGISTER_LOGS_ENABLED=false
 S3DB_SLOW_LOGS_ENABLED=false
 ```
 

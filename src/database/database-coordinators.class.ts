@@ -36,7 +36,8 @@ export class DatabaseCoordinators {
           heartbeatJitter: coordinatorConfig.heartbeatJitter ?? 1000,
           leaseTimeout: coordinatorConfig.leaseTimeout ?? 15000,
           workerTimeout: coordinatorConfig.workerTimeout ?? 20000,
-          diagnosticsEnabled: coordinatorConfig.diagnosticsEnabled ?? (this.database.logger.level === 'debug' || this.database.logger.level === 'trace')
+          diagnosticsEnabled: coordinatorConfig.diagnosticsEnabled ?? (this.database.logger.level === 'debug' || this.database.logger.level === 'trace'),
+          warnSlowRegisterWorkerLogs: coordinatorConfig.warnSlowRegisterWorkerLogs
         }
       });
 

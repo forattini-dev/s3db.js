@@ -26,6 +26,7 @@ export interface GlobalCoordinatorConfig {
   leaseTimeout?: number;
   workerTimeout?: number;
   diagnosticsEnabled?: boolean | string;
+  warnSlowRegisterWorkerLogs?: boolean;
   circuitBreaker?: CircuitBreakerConfig;
   contention?: ContentionConfig;
   metricsBufferSize?: number;
@@ -150,6 +151,7 @@ export interface NormalizedConfig {
   heartbeatJitter: number;
   leaseTimeout: number;
   workerTimeout: number;
+  warnSlowRegisterWorkerLogs: boolean;
   diagnosticsEnabled: boolean;
   contentionEnabled: boolean;
   contentionThreshold: number;
@@ -189,6 +191,7 @@ export class GlobalCoordinatorService extends EventEmitter {
   protected _heartbeatStartedAt: number;
   protected _heartbeatMutexTimeoutMs: number;
   protected _warnSlowCoordinatorLogs: boolean;
+  protected _warnSlowRegisterWorkerLogs: boolean;
 
   protected _cachedState: LeaderState | null;
   protected _stateCacheTime: number;
@@ -237,6 +240,10 @@ export class GlobalCoordinatorService extends EventEmitter {
     this._warnSlowCoordinatorLogs = this._getPerfBoolean(
       'S3DB_GCOORD_SLOW_LOGS_ENABLED',
       this._getPerfBoolean('S3DB_SLOW_LOGS_ENABLED', true)
+    );
+    this._warnSlowRegisterWorkerLogs = this._getPerfBoolean(
+      'S3DB_GCOORD_SLOW_REGISTER_LOGS_ENABLED',
+      this._warnSlowCoordinatorLogs
     );
 
     this.config = this._normalizeConfig(config);
@@ -749,7 +756,7 @@ export class GlobalCoordinatorService extends EventEmitter {
     await Promise.all(registrations);
 
     const totalMs = Date.now() - regStart;
-    if (this._warnSlowCoordinatorLogs && totalMs > this._slowRegisterMs) {
+    if (this._warnSlowCoordinatorLogs && this.config.warnSlowRegisterWorkerLogs && this._warnSlowRegisterWorkerLogs && totalMs > this._slowRegisterMs) {
       this.logger.warn({ namespace: this.namespace, totalMs, uniqueWorkers: registrations.length, deduped }, `[PERF] SLOW _registerWorker`);
     } else {
       this.logger.debug({ namespace: this.namespace, totalMs, uniqueWorkers: registrations.length, deduped }, `[REGISTER_WORKER] complete`);
@@ -1036,6 +1043,7 @@ export class GlobalCoordinatorService extends EventEmitter {
       heartbeatJitter: Math.max(0, config.heartbeatJitter || 1000),
       leaseTimeout: Math.max(5000, config.leaseTimeout || 15000),
       workerTimeout: Math.max(5000, config.workerTimeout || 20000),
+      warnSlowRegisterWorkerLogs: config.warnSlowRegisterWorkerLogs ?? true,
       diagnosticsEnabled: Boolean(config.diagnosticsEnabled ?? false),
       contentionEnabled: config.contention?.enabled ?? true,
       contentionThreshold: config.contention?.threshold ?? 2.0,
