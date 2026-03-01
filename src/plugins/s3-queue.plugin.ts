@@ -311,6 +311,8 @@ export class S3QueuePlugin extends CoordinatorPlugin<S3QueuePluginOptions> {
   _lastRecovery = 0;
   _recoveryInFlight = false;
   _bestEffortNotified = false;
+  _dispatchIdleStreak = 0;
+  _nextDispatchAllowedAt = 0;
 
   dispatchHandle: ReturnType<typeof setInterval> | null = null;
 
@@ -606,6 +608,9 @@ export class S3QueuePlugin extends CoordinatorPlugin<S3QueuePluginOptions> {
       };
 
       await plugin.queueResource!.insert(queueEntry);
+
+      plugin._dispatchIdleStreak = 0;
+      plugin._nextDispatchAllowedAt = 0;
 
       plugin.emit('plg:s3-queue:message-enqueued', { id: record.id, queueId: queueEntry.id });
 
@@ -955,6 +960,9 @@ export class S3QueuePlugin extends CoordinatorPlugin<S3QueuePluginOptions> {
       { workerId: this.workerId, resource: this.config.resource },
       'Global coordinator demoted this worker from leader'
     );
+
+    this._dispatchIdleStreak = 0;
+    this._nextDispatchAllowedAt = 0;
 
     this.emit('plg:s3-queue:coordinator-demoted', {
       workerId: this.workerId,
@@ -2318,9 +2326,43 @@ export class S3QueuePlugin extends CoordinatorPlugin<S3QueuePluginOptions> {
     if (!this.config.enableCoordinator) return;
     if (!this.isCoordinator) return;
 
+    const now = Date.now();
+
+    if (this._nextDispatchAllowedAt > now) return;
+
     await this.recoverStalledTickets();
 
-    const now = Date.now();
+    const existingTickets = await this.getAvailableTickets();
+    const availableCapacity = Math.max(this.config.ticketBatchSize - existingTickets.length, 0);
+
+    if (availableCapacity === 0) {
+      return;
+    }
+
+    const [ok, , allMessages] = await tryFn(() =>
+      this.queueResource!.query({ status: 'pending' }, { limit: availableCapacity * 2 })
+    );
+
+    if (!ok || !allMessages) {
+      return;
+    }
+
+    const messages = allMessages.filter(msg => msg.visibleAt <= now).slice(0, availableCapacity);
+
+    if (messages.length === 0) {
+      this._dispatchIdleStreak = Math.min(this._dispatchIdleStreak + 1, 10);
+      this._nextDispatchAllowedAt = now + this._computeIdleDelay(this._dispatchIdleStreak);
+      return;
+    }
+
+    this._dispatchIdleStreak = 0;
+    this._nextDispatchAllowedAt = 0;
+
+    const orderedMessages = this._prepareAvailableMessages(messages, now);
+
+    if (orderedMessages.length === 0) {
+      return;
+    }
 
     const releaseOrderingLock = await this._acquireOrderingLock();
     if (!releaseOrderingLock) {
@@ -2328,33 +2370,6 @@ export class S3QueuePlugin extends CoordinatorPlugin<S3QueuePluginOptions> {
     }
 
     try {
-      const existingTickets = await this.getAvailableTickets();
-      const availableCapacity = Math.max(this.config.ticketBatchSize - existingTickets.length, 0);
-
-      if (availableCapacity === 0) {
-        return;
-      }
-
-      const [ok, err, allMessages] = await tryFn(() =>
-        this.queueResource!.query({ status: 'pending' }, { limit: availableCapacity * 2 })
-      );
-
-      if (!ok || !allMessages) {
-        return;
-      }
-
-      const messages = allMessages.filter(msg => msg.visibleAt <= now).slice(0, availableCapacity);
-
-      if (messages.length === 0) {
-        return;
-      }
-
-      const orderedMessages = this._prepareAvailableMessages(messages, now);
-
-      if (orderedMessages.length === 0) {
-        return;
-      }
-
       const ticketCount = await this.publishDispatchTickets(orderedMessages);
 
       if (ticketCount > 0) {
@@ -2369,7 +2384,6 @@ export class S3QueuePlugin extends CoordinatorPlugin<S3QueuePluginOptions> {
           timestamp: now
         });
       }
-
     } finally {
       await releaseOrderingLock();
     }
