@@ -16,6 +16,7 @@ export interface CoordinatorConfig extends PluginConfig {
   heartbeatJitter?: number;
   leaseTimeout?: number;
   workerTimeout?: number;
+  warnSlowRegisterWorkerLogs?: boolean;
   logger?: S3DBLogger;
   epochFencingEnabled?: boolean;
   epochGracePeriodMs?: number;
@@ -32,6 +33,7 @@ export interface NormalizedCoordinatorConfig {
   heartbeatJitter: number;
   leaseTimeout: number;
   workerTimeout: number;
+  warnSlowRegisterWorkerLogs: boolean;
   epochFencingEnabled: boolean;
   epochGracePeriodMs: number;
 }
@@ -138,6 +140,7 @@ export class CoordinatorPlugin<TOptions extends CoordinatorConfig = CoordinatorC
       heartbeatJitter = 1000,
       leaseTimeout = 15000,
       workerTimeout = 20000,
+      warnSlowRegisterWorkerLogs = true,
       epochFencingEnabled = true,
       epochGracePeriodMs = 5000
     } = config;
@@ -156,6 +159,7 @@ export class CoordinatorPlugin<TOptions extends CoordinatorConfig = CoordinatorC
       heartbeatJitter: Math.max(0, heartbeatJitter),
       leaseTimeout: Math.max(5000, leaseTimeout),
       workerTimeout: Math.max(5000, workerTimeout),
+      warnSlowRegisterWorkerLogs: Boolean(warnSlowRegisterWorkerLogs),
       epochFencingEnabled: Boolean(epochFencingEnabled),
       epochGracePeriodMs: Math.max(0, epochGracePeriodMs)
     };
@@ -368,7 +372,8 @@ export class CoordinatorPlugin<TOptions extends CoordinatorConfig = CoordinatorC
         heartbeatJitter: this._coordinatorConfig.heartbeatJitter,
         leaseTimeout: this._coordinatorConfig.leaseTimeout,
         workerTimeout: this._coordinatorConfig.workerTimeout,
-        diagnosticsEnabled: !!this.options.logLevel
+        diagnosticsEnabled: !!this.options.logLevel,
+        warnSlowRegisterWorkerLogs: this._coordinatorConfig.warnSlowRegisterWorkerLogs
       }
     }) as unknown as GlobalCoordinatorService;
 
