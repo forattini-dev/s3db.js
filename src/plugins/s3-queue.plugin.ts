@@ -310,6 +310,8 @@ export class S3QueuePlugin extends CoordinatorPlugin<S3QueuePluginOptions> {
   messageLocks: Map<string, Lock> = new Map();
   _lastRecovery = 0;
   _recoveryInFlight = false;
+  _lastStalledTicketRecovery = 0;
+  _stalledTicketRecoveryInFlight = false;
   _bestEffortNotified = false;
   _dispatchIdleStreak = 0;
   _nextDispatchAllowedAt = 0;
@@ -1919,12 +1921,19 @@ export class S3QueuePlugin extends CoordinatorPlugin<S3QueuePluginOptions> {
     }
 
     if (queueEntry.maxAttempts !== undefined && queueEntry.attempts >= queueEntry.maxAttempts) {
-      let record: Record<string, unknown> | null = null;
-      const [okRecord, , original] = await tryFn(() => (this.targetResource as unknown as { get(id: string): Promise<Record<string, unknown>> }).get(queueEntry.originalId));
-      if (okRecord && original) {
-        record = original;
-      } else {
-        record = { id: queueEntry.originalId, _missing: true };
+      const needsOriginalRecord =
+        this.config.failureStrategy.mode === 'dead-letter' ||
+        (this.config.failureStrategy.mode === 'hybrid' && !!this.config.failureStrategy.deadLetterQueue);
+
+      let record: Record<string, unknown> = { id: queueEntry.originalId, _missing: true };
+
+      if (needsOriginalRecord) {
+        const [okRecord, , original] = await tryFn(() =>
+          (this.targetResource as unknown as { get(id: string): Promise<Record<string, unknown>> }).get(queueEntry.originalId)
+        );
+        if (okRecord && original) {
+          record = original;
+        }
       }
 
       const recoveredMessage: ClaimedMessage = {
@@ -2330,9 +2339,27 @@ export class S3QueuePlugin extends CoordinatorPlugin<S3QueuePluginOptions> {
 
     if (this._nextDispatchAllowedAt > now) return;
 
-    await this.recoverStalledTickets();
-
     const existingTickets = await this.getAvailableTickets();
+    if (
+      existingTickets.length === 0 &&
+      this.config.recoveryInterval > 0 &&
+      !this._stalledTicketRecoveryInFlight &&
+      now - this._lastStalledTicketRecovery >= this.config.recoveryInterval
+    ) {
+      this._stalledTicketRecoveryInFlight = true;
+      this._lastStalledTicketRecovery = now;
+      void this.recoverStalledTickets()
+        .catch((error) => {
+          this.logger.debug(
+            { error: (error as Error)?.message },
+            `Failed to recover stale tickets: ${(error as Error)?.message}`
+          );
+        })
+        .finally(() => {
+          this._stalledTicketRecoveryInFlight = false;
+        });
+    }
+
     const availableCapacity = Math.max(this.config.ticketBatchSize - existingTickets.length, 0);
 
     if (availableCapacity === 0) {
@@ -2351,7 +2378,10 @@ export class S3QueuePlugin extends CoordinatorPlugin<S3QueuePluginOptions> {
 
     if (messages.length === 0) {
       this._dispatchIdleStreak = Math.min(this._dispatchIdleStreak + 1, 10);
-      this._nextDispatchAllowedAt = now + this._computeIdleDelay(this._dispatchIdleStreak);
+      const base = this.config.pollInterval;
+      const maxIdle = this.config.maxPollInterval || Math.max(base * 32, 30000);
+      const idleDelay = Math.min(base * Math.pow(2, Math.max(0, this._dispatchIdleStreak - 1)), maxIdle);
+      this._nextDispatchAllowedAt = now + idleDelay;
       return;
     }
 
@@ -2641,50 +2671,60 @@ export class S3QueuePlugin extends CoordinatorPlugin<S3QueuePluginOptions> {
   async recoverStalledTickets(): Promise<void> {
     if (!this.config.enableCoordinator) return;
     if (!this.isCoordinator) return;
-
-    const storage = this.getStorage() as unknown as PluginStorage;
-    const prefix = 'tickets/';
-
-    const [okTickets, , tickets] = await tryFn(() => storage.listWithPrefix(prefix));
-
-    if (!okTickets || !tickets || tickets.length === 0) {
-      return;
-    }
-
-    const activeWorkers = (await this.getActiveWorkers()) as Worker[];
-    const activeWorkerIds = new Set(activeWorkers.map((w) => w.workerId));
+    if (this._stalledTicketRecoveryInFlight) return;
 
     const now = Date.now();
-    const stalledTimeout = this.config.heartbeatTTL * 1000;
-    let recovered = 0;
+    if (this._lastStalledTicketRecovery && now - this._lastStalledTicketRecovery < this.config.recoveryInterval) return;
 
-    for (const ticket of tickets) {
-      if (!ticket || !ticket.ticketId || ticket.status !== 'claimed' || !ticket.claimedBy) {
-        continue;
+    this._stalledTicketRecoveryInFlight = true;
+    this._lastStalledTicketRecovery = now;
+
+    try {
+      const storage = this.getStorage() as unknown as PluginStorage;
+      const prefix = 'tickets/';
+
+      const [okTickets, , tickets] = await tryFn(() => storage.listWithPrefix(prefix));
+
+      if (!okTickets || !tickets || tickets.length === 0) {
+        return;
       }
 
-      if (activeWorkerIds.has(ticket.claimedBy)) {
-        const claimAge = now - (ticket.claimedAt || 0);
-        if (claimAge < stalledTimeout) {
+      const activeWorkers = (await this.getActiveWorkers()) as Worker[];
+      const activeWorkerIds = new Set(activeWorkers.map((w) => w.workerId));
+
+      const stalledTimeout = this.config.heartbeatTTL * 1000;
+      let recovered = 0;
+
+      for (const ticket of tickets) {
+        if (!ticket || !ticket.ticketId || ticket.status !== 'claimed' || !ticket.claimedBy) {
           continue;
         }
+
+        if (activeWorkerIds.has(ticket.claimedBy)) {
+          const claimAge = now - (ticket.claimedAt || 0);
+          if (claimAge < stalledTimeout) {
+            continue;
+          }
+        }
+
+        await this.releaseTicket(ticket.ticketId, { forceOwner: true });
+        recovered++;
+
+        this.logger.debug(
+          { ticketId: ticket.ticketId, claimedBy: ticket.claimedBy },
+          `Recovered stalled ticket ${ticket.ticketId} from worker ${ticket.claimedBy}`
+        );
       }
 
-      await this.releaseTicket(ticket.ticketId, { forceOwner: true });
-      recovered++;
-
-      this.logger.debug(
-        { ticketId: ticket.ticketId, claimedBy: ticket.claimedBy },
-        `Recovered stalled ticket ${ticket.ticketId} from worker ${ticket.claimedBy}`
-      );
-    }
-
-    if (recovered > 0) {
-      this.emit('plg:s3-queue:tickets-recovered', {
-        coordinatorId: this.workerId,
-        count: recovered,
-        timestamp: now
-      });
+      if (recovered > 0) {
+        this.emit('plg:s3-queue:tickets-recovered', {
+          coordinatorId: this.workerId,
+          count: recovered,
+          timestamp: now
+        });
+      }
+    } finally {
+      this._stalledTicketRecoveryInFlight = false;
     }
   }
 }
