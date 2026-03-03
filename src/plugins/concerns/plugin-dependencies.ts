@@ -93,6 +93,66 @@ export const PLUGIN_DEPENDENCIES: Record<string, PluginDefinition> = {
       }
     }
   },
+  'ioredis': {
+    name: 'ioredis',
+    docsUrl: 'https://github.com/redis/ioredis',
+    dependencies: {
+      'ioredis': {
+        version: '^5.4.1',
+        description: 'Redis client for Node.js',
+        installCommand: 'pnpm add ioredis',
+        npmUrl: 'https://www.npmjs.com/package/ioredis'
+      }
+    }
+  },
+  'redis-list-consumer': {
+    name: 'Redis List Queue Consumer',
+    docsUrl: 'https://github.com/forattini-dev/s3db.js/blob/main/docs/plugins/queue-consumer.md',
+    dependencies: {
+      'ioredis': {
+        version: '^5.4.1',
+        description: 'Redis client for Node.js',
+        installCommand: 'pnpm add ioredis',
+        npmUrl: 'https://www.npmjs.com/package/ioredis'
+      }
+    }
+  },
+  'redis-stream-consumer': {
+    name: 'Redis Stream Queue Consumer',
+    docsUrl: 'https://github.com/forattini-dev/s3db.js/blob/main/docs/plugins/queue-consumer.md',
+    dependencies: {
+      'ioredis': {
+        version: '^5.4.1',
+        description: 'Redis client for Node.js',
+        installCommand: 'pnpm add ioredis',
+        npmUrl: 'https://www.npmjs.com/package/ioredis'
+      }
+    }
+  },
+  'redis-pubsub-consumer': {
+    name: 'Redis Pub/Sub Consumer',
+    docsUrl: 'https://github.com/forattini-dev/s3db.js/blob/main/docs/plugins/queue-consumer.md',
+    dependencies: {
+      'ioredis': {
+        version: '^5.4.1',
+        description: 'Redis client for Node.js',
+        installCommand: 'pnpm add ioredis',
+        npmUrl: 'https://www.npmjs.com/package/ioredis'
+      }
+    }
+  },
+  'bullmq-consumer': {
+    name: 'BullMQ Queue Consumer',
+    docsUrl: 'https://github.com/forattini-dev/s3db.js/blob/main/docs/plugins/queue-consumer.md',
+    dependencies: {
+      'bullmq': {
+        version: '>=5.0.0',
+        description: 'BullMQ job queue for Node.js',
+        installCommand: 'pnpm add bullmq',
+        npmUrl: 'https://www.npmjs.com/package/bullmq'
+      }
+    }
+  },
   'tfstate-plugin': {
     name: 'Tfstate Plugin',
     docsUrl: 'https://github.com/forattini-dev/s3db.js/blob/main/docs/plugins/tfstate.md',
