@@ -28,11 +28,12 @@ export interface LoginThrottleConfig {
 
 export interface DocsConfig {
   enabled: boolean;
-  ui: 'swagger' | 'redoc';
   title: string;
   version: string;
   description: string;
-  csp: string | null;
+  uiTheme: 'light' | 'dark' | 'auto';
+  tryItOut: boolean;
+  codeGeneration: boolean;
 }
 
 export interface ApiCorsConfig {

@@ -92,10 +92,6 @@ export interface ApiPluginOptions {
   startupBanner?: boolean;
   versionPrefix?: boolean | string;
   docs?: Partial<DocsConfig>;
-  docsEnabled?: boolean;
-  apiTitle?: string;
-  apiVersion?: string;
-  apiDescription?: string;
   auth?: Partial<AuthConfig> & {
     resource?: string;
     registration?: Partial<RegistrationConfig>;
@@ -141,28 +137,6 @@ const BASE_USER_ATTRIBUTES: Record<string, string> = {
   metadata: 'json|optional'
 };
 
-const REDOC_CSP_DIRECTIVES: CspDirectives = {
-  'script-src': ['https://cdn.redoc.ly'],
-  'style-src': ['https://cdn.redoc.ly', 'https://fonts.googleapis.com'],
-  'font-src': ['https://fonts.gstatic.com']
-};
-
-const SWAGGER_CSP_DIRECTIVES: CspDirectives = {
-  'script-src': ['https://cdn.jsdelivr.net'],
-  'style-src': ['https://cdn.jsdelivr.net']
-};
-
-function mergeCspDirectives(base: CspDirectives, additions: CspDirectives): CspDirectives {
-  const result = { ...base };
-  for (const [key, values] of Object.entries(additions)) {
-    if (values && Array.isArray(values)) {
-      const existing = result[key] || [];
-      const merged = [...new Set([...existing, ...values])];
-      result[key] = merged;
-    }
-  }
-  return result;
-}
 
 export class ApiPlugin extends Plugin {
   declare config: ApiPluginConfig;
@@ -212,12 +186,13 @@ export class ApiPlugin extends Plugin {
       versionPrefix: options.versionPrefix !== undefined ? options.versionPrefix : false,
 
       docs: {
-        enabled: options.docs?.enabled !== false && options.docsEnabled !== false,
-        ui: options.docs?.ui || 'redoc',
-        title: options.docs?.title || options.apiTitle || 's3db.js API',
-        version: options.docs?.version || options.apiVersion || '1.0.0',
-        description: options.docs?.description || options.apiDescription || 'Auto-generated REST API for s3db.js resources',
-        csp: options.docs?.csp || null
+        enabled: options.docs?.enabled !== false,
+        title: options.docs?.title || 's3db.js API',
+        version: options.docs?.version || '1.0.0',
+        description: options.docs?.description || 'Auto-generated REST API for s3db.js resources',
+        uiTheme: options.docs?.uiTheme || 'auto',
+        tryItOut: options.docs?.tryItOut !== false,
+        codeGeneration: options.docs?.codeGeneration !== false,
       },
 
       auth: normalizedAuth,
@@ -272,10 +247,7 @@ export class ApiPlugin extends Plugin {
         enabled: options.security?.enabled !== false,
 
         contentSecurityPolicy: options.security?.contentSecurityPolicy !== false ? (() => {
-          const docsEnabled = options.docs?.enabled !== false && options.docsEnabled !== false;
-          const docsUi = options.docs?.ui || 'redoc';
-
-          const baseDirectives: CspDirectives = (options.security?.contentSecurityPolicy as Partial<ContentSecurityPolicyConfig> | undefined)?.directives || options.csp?.directives || {
+          const directives: CspDirectives = (options.security?.contentSecurityPolicy as Partial<ContentSecurityPolicyConfig> | undefined)?.directives || options.csp?.directives || {
             'default-src': ["'self'"],
             'script-src': ["'self'", "'unsafe-inline'"],
             'style-src': ["'self'", "'unsafe-inline'"],
@@ -284,15 +256,9 @@ export class ApiPlugin extends Plugin {
             'connect-src': ["'self'"]
           };
 
-          let finalDirectives = baseDirectives;
-          if (docsEnabled) {
-            const docsCspAdditions = docsUi === 'swagger' ? SWAGGER_CSP_DIRECTIVES : REDOC_CSP_DIRECTIVES;
-            finalDirectives = mergeCspDirectives(baseDirectives, docsCspAdditions);
-          }
-
           return {
             enabled: (options.security?.contentSecurityPolicy as Partial<ContentSecurityPolicyConfig> | undefined)?.enabled !== false,
-            directives: finalDirectives,
+            directives,
             reportOnly: (options.security?.contentSecurityPolicy as Partial<ContentSecurityPolicyConfig> | undefined)?.reportOnly || options.csp?.reportOnly || false,
             reportUri: (options.security?.contentSecurityPolicy as Partial<ContentSecurityPolicyConfig> | undefined)?.reportUri || options.csp?.reportUri || null
           };
@@ -556,11 +522,10 @@ export class ApiPlugin extends Plugin {
       auth: this.config.auth as Record<string, unknown>,
       compression: this.config.compression,
       docsEnabled: this.config.docs.enabled,
-      docsUI: this.config.docs.ui,
-      docsCsp: this.config.docs.csp,
       apiTitle: this.config.docs.title,
       apiVersion: this.config.docs.version,
       apiDescription: this.config.docs.description,
+      docs: this.config.docs,
       startupBanner: this.config.startupBanner,
       logger: this.logger
     });

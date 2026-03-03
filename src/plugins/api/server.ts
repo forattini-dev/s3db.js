@@ -70,8 +70,6 @@ export interface ApiServerOptions {
   logLevel?: string;
   auth?: AuthConfig;
   docsEnabled?: boolean;
-  docsUI?: string;
-  docsCsp?: string | null;
   apiTitle?: string;
   apiVersion?: string;
   apiDescription?: string;
@@ -82,11 +80,12 @@ export interface ApiServerOptions {
   logger?: Logger;
   docs?: {
     enabled?: boolean;
-    ui?: string;
     title?: string;
     version?: string;
     description?: string;
-    csp?: string | null;
+    uiTheme?: 'light' | 'dark' | 'auto';
+    tryItOut?: boolean;
+    codeGeneration?: boolean;
   };
 }
 
@@ -211,11 +210,15 @@ export class ApiServer {
       logLevel: options.logLevel || 'info',
       auth: options.auth || {},
       docsEnabled: (options.docs?.enabled !== false) && (options.docsEnabled !== false),
-      docsUI: options.docs?.ui || options.docsUI || 'redoc',
-      docsCsp: options.docsCsp || options.docs?.csp || null,
       apiTitle: options.docs?.title || options.apiTitle || 's3db.js API',
       apiVersion: options.docs?.version || options.apiVersion || '1.0.0',
       apiDescription: options.docs?.description || options.apiDescription || 'Auto-generated REST API for s3db.js resources',
+      docs: {
+        ...options.docs,
+        uiTheme: options.docs?.uiTheme || 'auto',
+        tryItOut: options.docs?.tryItOut !== false,
+        codeGeneration: options.docs?.codeGeneration !== false,
+      },
       maxBodySize: options.maxBodySize || 10 * 1024 * 1024,
       startupBanner: options.startupBanner !== false,
       rootRoute: options.rootRoute,
@@ -772,37 +775,57 @@ export class ApiServer {
   }
 
   private async _setupDocumentationRoutes(): Promise<void> {
-    const { mountOpenApiDocs } = await import('raffel/http');
+    const { createUSDHandlers, createRegistry, createSchemaRegistry } = await import('raffel');
 
     if (this.options.logLevel) {
-      this.logger.debug({ docsEnabled: this.options.docsEnabled, docsUI: this.options.docsUI }, 'Setting up documentation routes');
+      this.logger.debug({ docsEnabled: this.options.docsEnabled }, 'Setting up documentation routes');
     }
 
     const basePath = this.options.basePath || '';
     const openApiPath = applyBasePath(basePath, '/openapi.json');
+    const usdPath = applyBasePath(basePath, '/api.usd.json');
     const docsPath = applyBasePath(basePath, '/docs');
-    const docsCsp = this.options.docsCsp || undefined;
-    const docsUI = this.options.docsUI || 'redoc';
 
     if (this.options.logLevel) {
-      this.logger.debug({ docsPath, openApiPath }, 'Documentation paths configured');
+      this.logger.debug({ docsPath, openApiPath, usdPath }, 'Documentation paths configured');
     }
 
     if (this.options.docsEnabled) {
-      mountOpenApiDocs(this.app!, {
-        spec: () => this._generateOpenAPISpec(),
-        specPath: openApiPath,
-        docsPath,
-        ui: docsUI as 'redoc' | 'swagger',
-        title: this.options.apiTitle || 's3db.js API',
-        csp: docsCsp
-      });
+      const registry = createRegistry();
+      const schemaRegistry = createSchemaRegistry();
+
+      const getHandlers = () => {
+        const spec = this.openApiGenerator.generate();
+        return createUSDHandlers(
+          { registry, schemaRegistry },
+          {
+            info: {
+              title: this.options.apiTitle || 's3db.js API',
+              version: this.options.apiVersion || '1.0.0',
+              description: this.options.apiDescription,
+            },
+            externalPaths: spec.paths as Record<string, never>,
+            externalComponents: {
+              schemas: spec.components.schemas as Record<string, never>,
+              securitySchemes: spec.components.securitySchemes as Record<string, never>,
+            },
+            ui: {
+              theme: this.options.docs?.uiTheme || 'auto',
+              tryItOut: this.options.docs?.tryItOut !== false,
+              codeGeneration: this.options.docs?.codeGeneration !== false
+                ? { enabled: true, languages: ['typescript', 'curl', 'python', 'go'] as ('typescript' | 'python' | 'go' | 'curl')[] }
+                : { enabled: false }
+            }
+          }
+        );
+      };
+
+      this.app!.get(openApiPath, () => getHandlers().serveOpenAPI());
+      this.app!.get(usdPath, () => getHandlers().serveUSD());
+      this.app!.get(docsPath, () => getHandlers().serveUI());
 
       if (this.options.logLevel) {
-        this.logger.debug({ docsPath, openApiPath, docsCsp }, 'Docs routes registered with Raffel OpenAPI helpers');
-      }
-      if (this.options.logLevel) {
-        this.logger.debug('Documentation routes setup complete');
+        this.logger.debug({ docsPath, openApiPath, usdPath }, 'Docs routes registered with Raffel USD');
       }
     }
   }
