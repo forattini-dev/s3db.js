@@ -1,6 +1,7 @@
 import zlib from "node:zlib";
 import { PluginStorage, type PluginStorageSetOptions, type PluginClient } from "../../concerns/plugin-storage.js";
 import { Cache, type CacheConfig } from "./cache.class.js";
+import { CacheError } from "../cache.errors.js";
 
 export interface S3CacheConfig extends CacheConfig {
   client: unknown;
@@ -34,9 +35,21 @@ export class S3Cache extends Cache {
     ttl = 0,
     prefix = undefined,
     enableCompression = true,
-    compressionThreshold = 1024
+    compressionThreshold = 1024,
+    ...rest
   }: S3CacheConfig) {
     super();
+
+    if ((rest as Record<string, unknown>).maxBytes !== undefined) {
+      throw new CacheError('maxBytes is not supported for S3 driver. Use S3 lifecycle rules for storage management.', {
+        driver: 's3',
+        operation: 'constructor',
+        statusCode: 400,
+        retriable: false,
+        suggestion: 'Configure S3 lifecycle rules for storage management instead of using maxBytes.'
+      });
+    }
+
     this.client = client as PluginClient;
     this.keyPrefix = keyPrefix;
     this.ttlMs = typeof ttl === 'number' && ttl > 0 ? ttl : 0;

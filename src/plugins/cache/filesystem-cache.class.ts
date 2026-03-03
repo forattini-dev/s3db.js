@@ -7,6 +7,8 @@ import tryFn from '../../concerns/try-fn.js';
 import { CacheError } from '../cache.errors.js';
 import { getCronManager, type CronManager } from '../../concerns/cron-manager.js';
 
+export type FilesystemEvictionPolicy = 'lru' | 'fifo';
+
 export interface FilesystemCacheConfig extends CacheConfig {
   directory: string;
   prefix?: string;
@@ -17,6 +19,8 @@ export interface FilesystemCacheConfig extends CacheConfig {
   fileExtension?: string;
   enableMetadata?: boolean;
   maxFileSize?: number;
+  maxBytes?: number;
+  evictionPolicy?: FilesystemEvictionPolicy;
   enableStats?: boolean;
   enableCleanup?: boolean;
   cleanupInterval?: number;
@@ -37,6 +41,9 @@ export interface FilesystemCacheStats {
   deletes: number;
   clears: number;
   errors: number;
+  currentBytes: number;
+  maxBytes: number;
+  evictedDueToSize: number;
 }
 
 interface FileMetadata {
@@ -47,6 +54,14 @@ interface FileMetadata {
   originalSize: number;
   compressedSize: number;
   compressionRatio: string | number;
+  lastAccess?: number;
+  insertOrder?: number;
+}
+
+interface SizeIndexEntry {
+  bytes: number;
+  lastAccess: number;
+  insertOrder: number;
 }
 
 interface Logger {
@@ -64,6 +79,10 @@ export class FilesystemCache extends Cache {
   fileExtension: string;
   enableMetadata: boolean;
   maxFileSize: number;
+  maxBytes: number;
+  evictionPolicy: FilesystemEvictionPolicy;
+  currentBytes: number;
+  evictedDueToSize: number;
   enableStats: boolean;
   enableCleanup: boolean;
   cleanupInterval: number;
@@ -82,6 +101,8 @@ export class FilesystemCache extends Cache {
   logger: Logger;
   protected _initPromise: Promise<void>;
   protected _initError?: Error;
+  private _accessCounter: number;
+  protected _sizeIndex: Map<string, SizeIndexEntry>;
 
   constructor({
     directory,
@@ -93,6 +114,8 @@ export class FilesystemCache extends Cache {
     fileExtension = '.cache',
     enableMetadata = true,
     maxFileSize = 10485760,
+    maxBytes = 0,
+    evictionPolicy = 'lru',
     enableStats = false,
     enableCleanup = true,
     cleanupInterval = 300000,
@@ -127,6 +150,12 @@ export class FilesystemCache extends Cache {
     this.fileExtension = fileExtension;
     this.enableMetadata = enableMetadata;
     this.maxFileSize = maxFileSize;
+    this.maxBytes = maxBytes;
+    this.evictionPolicy = evictionPolicy;
+    this.currentBytes = 0;
+    this.evictedDueToSize = 0;
+    this._accessCounter = 0;
+    this._sizeIndex = new Map();
     this.enableStats = enableStats;
     this.enableCleanup = enableCleanup;
     this.cleanupInterval = cleanupInterval;
@@ -145,7 +174,10 @@ export class FilesystemCache extends Cache {
       sets: 0,
       deletes: 0,
       clears: 0,
-      errors: 0
+      errors: 0,
+      currentBytes: 0,
+      maxBytes: this.maxBytes,
+      evictedDueToSize: 0
     };
 
     this.locks = new Map();
@@ -177,6 +209,10 @@ export class FilesystemCache extends Cache {
           directory: this.directory
         });
       }
+    }
+
+    if (this.maxBytes > 0) {
+      await this._rebuildSizeIndex();
     }
 
     if (this.enableCleanup && this.cleanupInterval > 0) {
@@ -269,6 +305,23 @@ export class FilesystemCache extends Cache {
         compressed = true;
       }
 
+      const estimatedFileBytes = Buffer.byteLength(finalData, compressed ? 'utf8' : this.encoding);
+      const metadataEstimate = this.enableMetadata ? 200 : 0;
+      const totalIncomingBytes = estimatedFileBytes + metadataEstimate;
+
+      if (this.maxBytes > 0) {
+        const existingEntry = this._sizeIndex.get(key);
+        if (existingEntry) {
+          this.currentBytes = Math.max(0, this.currentBytes - existingEntry.bytes);
+          this._sizeIndex.delete(key);
+        }
+
+        const fits = await this._enforceSizeLimit(totalIncomingBytes);
+        if (!fits) {
+          return;
+        }
+      }
+
       const dir = path.dirname(filePath);
       await this._ensureDirectory(dir);
 
@@ -287,21 +340,41 @@ export class FilesystemCache extends Cache {
           mode: this.fileMode
         });
 
+        const now = Date.now();
+        const insertOrder = ++this._accessCounter;
+
         if (this.enableMetadata) {
           const metadata: FileMetadata = {
             key,
-            timestamp: Date.now(),
+            timestamp: now,
             ttl: this.ttl,
             compressed,
             originalSize,
             compressedSize: compressed ? Buffer.byteLength(finalData, 'utf8') : originalSize,
-            compressionRatio: compressed ? (Buffer.byteLength(finalData, 'utf8') / originalSize).toFixed(2) : 1.0
+            compressionRatio: compressed ? (Buffer.byteLength(finalData, 'utf8') / originalSize).toFixed(2) : 1.0,
+            lastAccess: now,
+            insertOrder
           };
 
           await writeFile(this._getMetadataPath(filePath), JSON.stringify(metadata), {
             encoding: this.encoding,
             mode: this.fileMode
           });
+        }
+
+        if (this.maxBytes > 0) {
+          let actualBytes = 0;
+          const [fOk, , fStat] = await tryFn(() => stat(filePath));
+          if (fOk && fStat) actualBytes += fStat.size;
+
+          if (this.enableMetadata) {
+            const metaPath = this._getMetadataPath(filePath);
+            const [mOk, , mStat] = await tryFn(() => stat(metaPath));
+            if (mOk && mStat) actualBytes += mStat.size;
+          }
+
+          this._sizeIndex.set(key, { bytes: actualBytes, lastAccess: now, insertOrder });
+          this.currentBytes += actualBytes;
         }
 
         if (this.enableStats) {
@@ -411,6 +484,24 @@ export class FilesystemCache extends Cache {
           this.stats.hits++;
         }
 
+        if (this.maxBytes > 0 && this.evictionPolicy === 'lru') {
+          const now = Date.now();
+          const entry = this._sizeIndex.get(key);
+          if (entry) {
+            entry.lastAccess = now;
+          }
+
+          if (this.enableMetadata) {
+            const metaPath = this._getMetadataPath(filePath);
+            tryFn(async () => {
+              const metaContent = await readFile(metaPath, this.encoding);
+              const meta = JSON.parse(metaContent) as FileMetadata;
+              meta.lastAccess = now;
+              await writeFile(metaPath, JSON.stringify(meta), { encoding: this.encoding, mode: this.fileMode });
+            });
+          }
+        }
+
         return data;
 
       } finally {
@@ -447,6 +538,14 @@ export class FilesystemCache extends Cache {
         const backupPath = filePath + this.backupSuffix;
         if (await this._fileExists(backupPath)) {
           await unlink(backupPath);
+        }
+      }
+
+      if (this.maxBytes > 0) {
+        const entry = this._sizeIndex.get(key);
+        if (entry) {
+          this.currentBytes = Math.max(0, this.currentBytes - entry.bytes);
+          this._sizeIndex.delete(key);
         }
       }
 
@@ -533,6 +632,23 @@ export class FilesystemCache extends Cache {
           } catch (error) {
             if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
               throw error;
+            }
+          }
+        }
+      }
+
+      if (this.maxBytes > 0) {
+        if (!prefix) {
+          this._sizeIndex.clear();
+          this.currentBytes = 0;
+        } else {
+          for (const [key] of this._sizeIndex) {
+            if (key.startsWith(prefix)) {
+              const entry = this._sizeIndex.get(key);
+              if (entry) {
+                this.currentBytes = Math.max(0, this.currentBytes - entry.bytes);
+              }
+              this._sizeIndex.delete(key);
             }
           }
         }
@@ -659,6 +775,10 @@ export class FilesystemCache extends Cache {
         }
       }
 
+      if (this.maxBytes > 0) {
+        await this._enforceSizeLimit(0);
+      }
+
     } catch (error) {
       this.logger.warn('FilesystemCache cleanup error:', (error as Error).message);
     }
@@ -712,6 +832,89 @@ export class FilesystemCache extends Cache {
     }
   }
 
+  protected async _rebuildSizeIndex(): Promise<void> {
+    this._sizeIndex.clear();
+    this.currentBytes = 0;
+
+    const allKeys = await this.keys();
+    let order = 0;
+
+    for (const key of allKeys) {
+      const filePath = this._getFilePath(key);
+      const [ok, , fileStat] = await tryFn(() => stat(filePath));
+      if (!ok || !fileStat) continue;
+
+      let totalBytes = fileStat.size;
+
+      if (this.enableMetadata) {
+        const metaPath = this._getMetadataPath(filePath);
+        const [metaOk, , metaStat] = await tryFn(() => stat(metaPath));
+        if (metaOk && metaStat) {
+          totalBytes += metaStat.size;
+        }
+      }
+
+      let lastAccess = fileStat.mtime.getTime();
+      let insertOrder = ++order;
+
+      if (this.enableMetadata) {
+        const metaPath = this._getMetadataPath(filePath);
+        const [metaOk, , metadata] = await tryFn(async () => {
+          const content = await readFile(metaPath, this.encoding);
+          return JSON.parse(content) as FileMetadata;
+        });
+        if (metaOk && metadata) {
+          if (metadata.lastAccess) lastAccess = metadata.lastAccess;
+          if (metadata.insertOrder) insertOrder = metadata.insertOrder;
+        }
+      }
+
+      this._sizeIndex.set(key, { bytes: totalBytes, lastAccess, insertOrder });
+      this.currentBytes += totalBytes;
+    }
+
+    this._accessCounter = order;
+  }
+
+  protected _selectEvictionCandidate(): string | null {
+    let candidate: string | null = null;
+    let bestValue = Infinity;
+
+    for (const [key, entry] of this._sizeIndex) {
+      const value = this.evictionPolicy === 'lru' ? entry.lastAccess : entry.insertOrder;
+      if (value < bestValue) {
+        bestValue = value;
+        candidate = key;
+      }
+    }
+
+    return candidate;
+  }
+
+  protected async _evictKey(key: string): Promise<void> {
+    const entry = this._sizeIndex.get(key);
+    await this._del(key);
+    if (entry) {
+      this._sizeIndex.delete(key);
+      this.currentBytes = Math.max(0, this.currentBytes - entry.bytes);
+    }
+    this.evictedDueToSize++;
+  }
+
+  protected async _enforceSizeLimit(incomingBytes: number): Promise<boolean> {
+    if (this.maxBytes <= 0) return true;
+
+    if (incomingBytes > this.maxBytes) return false;
+
+    while (this.currentBytes + incomingBytes > this.maxBytes && this._sizeIndex.size > 0) {
+      const candidate = this._selectEvictionCandidate();
+      if (!candidate) break;
+      await this._evictKey(candidate);
+    }
+
+    return this.currentBytes + incomingBytes <= this.maxBytes;
+  }
+
   destroy(): void {
     if (this.cleanupJobName) {
       this.cronManager.stop(this.cleanupJobName);
@@ -722,6 +925,9 @@ export class FilesystemCache extends Cache {
   getStats(): FilesystemCacheStats & Record<string, unknown> {
     return {
       ...this.stats,
+      currentBytes: this.currentBytes,
+      maxBytes: this.maxBytes,
+      evictedDueToSize: this.evictedDueToSize,
       directory: this.directory,
       ttl: this.ttl,
       compression: this.enableCompression,

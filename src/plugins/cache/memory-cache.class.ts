@@ -9,6 +9,7 @@ export type EvictionPolicy = 'lru' | 'fifo';
 
 export interface MemoryCacheConfig extends CacheConfig {
   maxSize?: number;
+  maxBytes?: number;
   maxMemoryBytes?: number;
   maxMemoryPercent?: number;
   ttl?: number;
@@ -160,6 +161,10 @@ export class MemoryCache extends Cache {
     this.cache = {};
     this.meta = {};
     this.maxSize = config.maxSize !== undefined ? config.maxSize : 1000;
+
+    if (config.maxBytes !== undefined && config.maxMemoryBytes === undefined) {
+      config.maxMemoryBytes = config.maxBytes;
+    }
 
     if (config.maxMemoryBytes && config.maxMemoryBytes > 0 &&
         config.maxMemoryPercent && config.maxMemoryPercent > 0) {
@@ -593,6 +598,9 @@ export class MemoryCache extends Cache {
       memoryUsageBytes: this.currentMemoryBytes,
       maxMemoryBytes: this.maxMemoryBytes,
       evictedDueToMemory: this.evictedDueToMemory,
+      currentBytes: this.currentMemoryBytes,
+      maxBytes: this.maxMemoryBytes,
+      evictedDueToSize: this.evictedDueToMemory,
       hitRate,
       monitorInterval: this.monitorInterval,
       heapUsageThreshold: this.heapUsageThreshold

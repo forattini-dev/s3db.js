@@ -17,8 +17,8 @@ await db.usePlugin(new CachePlugin({ driver: 'memory' }));  // 90x faster!
 ```javascript
 await db.usePlugin(new CachePlugin({
   drivers: [
-    { driver: 'memory', ttl: 300000, config: { maxMemoryPercent: 0.1 } },  // L1: ~1ms
-    { driver: 'redis', ttl: 3600000, config: { host: 'localhost' } },      // L2: ~15ms
+    { driver: 'memory', config: { maxBytes: 100 * 1024 * 1024 } },         // L1: 100MB RAM, ~1ms
+    { driver: 'filesystem', config: { directory: './cache', maxBytes: 500 * 1024 * 1024 } }, // L2: 500MB disk
     { driver: 's3', ttl: 86400000, config: { keyPrefix: 'cache/' } }       // L3: ~120ms
   ]
 }));
@@ -28,6 +28,7 @@ await db.usePlugin(new CachePlugin({
 - Drivers: memory (LRU/FIFO), redis, S3
 - Multi-tier caching with auto-promotion (hot data moves to faster layers)
 - Configurable TTL per layer + automatic invalidation
+- Per-method cache policies (TTL, payload limits, min-hits-before-store)
 - Optional compression (gzip)
 - Hit/miss/eviction statistics
 - Partition-aware caching with usage insights
@@ -155,7 +156,9 @@ new CachePlugin({
 | `drivers` | array | - | Multi-tier: `[{ driver, ttl, config }, ...]` |
 | `ttl` | number | `300000` | Time-to-live in milliseconds (5 min default) |
 | `maxSize` | number | `1000` | Maximum cached items |
+| `maxBytes` | number | `0` | Maximum cache size in bytes (0 = unlimited). Supported by memory and filesystem drivers |
 | `config` | object | `{}` | Driver-specific options |
+| `methodPolicies` | object | `{}` | Per-method cache policies (see [Configuration Guide](/plugins/cache/guides/configuration.md#method-policies)) |
 
 ### Cache Management
 

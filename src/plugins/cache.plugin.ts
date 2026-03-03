@@ -62,6 +62,8 @@ interface PartitionDefinition {
 interface PageResult {
   items: unknown[];
   total?: number;
+  nextCursor?: string | null;
+  hasMore?: boolean;
 }
 
 interface HookContext {
@@ -183,10 +185,11 @@ export interface CachePluginOptions {
   driver?: string | CacheDriver;
   drivers?: DriverConfig[];
   promoteOnHit?: boolean;
-  strategy?: 'write-through' | 'lazy-promotion' | 'write-behind' | 'cache-aside';
+  strategy?: 'write-through' | 'lazy-promotion';
   fallbackOnError?: boolean;
   ttl?: number;
   maxSize?: number;
+  maxBytes?: number;
   maxMemoryBytes?: number;
   maxMemoryPercent?: number;
   config?: DriverSpecificConfig;
@@ -217,6 +220,7 @@ interface DriverConfig {
 interface DriverSpecificConfig {
   ttl?: number;
   maxSize?: number;
+  maxBytes?: number;
   maxMemoryBytes?: number;
   maxMemoryPercent?: number;
   enableCompression?: boolean;
@@ -316,6 +320,7 @@ export class CachePlugin extends Plugin {
       fallbackOnError = true,
       ttl,
       maxSize,
+      maxBytes,
       maxMemoryBytes,
       maxMemoryPercent,
       config = {},
@@ -346,6 +351,7 @@ export class CachePlugin extends Plugin {
       config: {
         ttl,
         maxSize,
+        maxBytes,
         maxMemoryBytes,
         maxMemoryPercent,
         ...config
@@ -686,15 +692,38 @@ export class CachePlugin extends Plugin {
       async warmPage(pageOptions: Record<string, unknown> = {}, control: WarmControl = {}): Promise<unknown> {
         const { forceRefresh = false, returnData = false } = control;
         const {
-          offset = 0,
           page,
           cursor = null,
           size = 100,
+          offset,
           partition,
           partitionValues,
           ...rest
         } = pageOptions || {};
-        const options = { offset, page, cursor, size, partition, partitionValues, ...rest } as Record<string, unknown>;
+        const normalizedSize = (typeof size === 'number' && Number.isFinite(size) && size > 0)
+          ? size
+          : 100;
+
+        const options = { size: normalizedSize, partition, partitionValues, ...rest } as Record<string, unknown>;
+        if (typeof page === 'number' && Number.isFinite(page) && page > 0) {
+          options.page = Math.floor(page);
+        }
+        if (typeof cursor === 'string' && cursor.trim().length > 0) {
+          options.cursor = cursor.trim();
+        } else if (cursor !== null && cursor !== undefined && cursor !== '') {
+          options.cursor = cursor;
+        }
+
+        if (
+          options.page === undefined &&
+          options.cursor === undefined &&
+          typeof offset === 'number' &&
+          Number.isFinite(offset) &&
+          offset >= 0
+        ) {
+          options.page = Math.floor(offset / normalizedSize) + 1;
+        }
+
         if (forceRefresh) {
           options.skipCache = true;
         }
@@ -702,8 +731,9 @@ export class CachePlugin extends Plugin {
         const result = await resource.page(options);
 
         if (forceRefresh && shouldStore(result)) {
+          const keyParams = { ...(pageOptions || {}) };
           const key = await keyFor('page', {
-            params: { offset, page, cursor, size },
+            params: keyParams,
             partition: partition as string | null,
             partitionValues: partitionValues as Record<string, unknown> | null
           });
@@ -831,10 +861,6 @@ export class CachePlugin extends Plugin {
         return descriptor;
       }
     }) as CacheNamespace;
-  }
-
-  override async onStart(): Promise<void> {
-    // Plugin is ready
   }
 
   private async _createSingleDriver(driverName: string, config: DriverSpecificConfig): Promise<CacheDriver> {
@@ -1059,10 +1085,10 @@ export class CachePlugin extends Plugin {
           key = await resolveCacheKey({ action: method, params: { ids: ctx.args[0] } });
         } else if (method === 'page') {
           const options = (ctx.args[0] || {}) as Record<string, unknown>;
-          const { offset, page, cursor = null, size, partition, partitionValues } = options;
+          const { page, cursor = null, size, partition, partitionValues } = options;
           key = await resolveCacheKey({
             action: method,
-            params: { offset, page, cursor, size },
+            params: { page, cursor, size },
             partition: partition as string | null,
             partitionValues: partitionValues as Record<string, unknown> | null
           });
@@ -1268,7 +1294,6 @@ export class CachePlugin extends Plugin {
       const aggregateMethods = ['count', 'list', 'listIds', 'getAll', 'page', 'query'];
       for (const method of aggregateMethods) {
         await this.clearCacheWithRetry(driver, `${keyPrefix}/action=${method}`);
-        await this.clearCacheWithRetry(driver, `resource=${resource.name}/action=${method}`);
       }
     }
   }
@@ -1301,7 +1326,7 @@ export class CachePlugin extends Plugin {
 
   private _getDriverForResource(resource: Resource): CacheDriver | null {
     const instanceKey = this.instanceName || this.slug || 'default';
-    if (resource?.cacheInstances && instanceKey && resource.cacheInstances[instanceKey]) {
+    if (resource?.cacheInstances && resource.cacheInstances[instanceKey]) {
       return resource.cacheInstances[instanceKey];
     }
     return this.driver;
@@ -1375,10 +1400,10 @@ export class CachePlugin extends Plugin {
   }
 
   private normalizeCacheDriver(driverName: string): 'memory' | 'redis' | 'filesystem' | 's3' {
-    if (typeof driverName !== 'string') {
+    if (typeof driverName !== 'string' || driverName.trim() === '') {
       throw new CacheError('Invalid cache driver', {
         operation: 'driver',
-        driver: 'CachePlugin',
+        driver: String(driverName),
         suggestion: 'Use one of: memory, redis, filesystem, s3',
         statusCode: 400,
         retriable: false
@@ -1405,14 +1430,6 @@ export class CachePlugin extends Plugin {
 
     if (normalized === 'write-through' || normalized === 'lazy-promotion') {
       return normalized;
-    }
-
-    if (normalized === 'write-behind' || normalized === 'cache-aside') {
-      this.logger.warn(
-        { strategy },
-        `Cache strategy '${strategy}' is deprecated. Falling back to 'write-through'.`
-      );
-      return 'write-through';
     }
 
     throw new CacheError('Invalid cache strategy', {
@@ -1453,7 +1470,7 @@ export class CachePlugin extends Plugin {
   }
 
   async warmCache(resourceName: string, options: Record<string, unknown> = {}): Promise<WarmResult> {
-    const resource = this.database.resources[resourceName]!;
+    const resource = this.database.resources[resourceName];
     if (!resource) {
       throw new CacheError('Resource not found for cache warming', {
         operation: 'warmCache',
@@ -1471,12 +1488,12 @@ export class CachePlugin extends Plugin {
       return await (resource as any).warmPartitionCache(partitionNames, options);
     }
 
-    let offset = 0;
+    let cursor: string | null = null;
     const pageSize = 100;
     const sampledRecords: Record<string, unknown>[] = [];
 
     while (sampledRecords.length < (sampleSize as number)) {
-      const [ok, , pageResult] = await tryFn(() => resource.page({ offset, size: pageSize }));
+      const [ok, , pageResult] = await tryFn(() => resource.page({ cursor, size: pageSize }));
 
       if (!ok || !pageResult) {
         break;
@@ -1491,7 +1508,13 @@ export class CachePlugin extends Plugin {
       }
 
       sampledRecords.push(...(pageItems as Record<string, unknown>[]));
-      offset += pageSize;
+      const nextCursor = Array.isArray(pageResult)
+        ? null
+        : ((pageResult as PageResult).nextCursor ?? null);
+      if (!nextCursor) {
+        break;
+      }
+      cursor = nextCursor;
     }
 
     if (includePartitions && resource.$schema.partitions && sampledRecords.length > 0) {

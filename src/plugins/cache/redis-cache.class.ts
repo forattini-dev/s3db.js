@@ -107,6 +107,16 @@ export class RedisCache extends Cache {
   }: RedisCacheConfig) {
     super();
 
+    if ((redisOptions as Record<string, unknown>).maxBytes !== undefined) {
+      throw new CacheError('maxBytes is not supported for Redis driver. Use Redis server maxmemory and maxmemory-policy instead.', {
+        driver: 'redis',
+        operation: 'constructor',
+        statusCode: 400,
+        retriable: false,
+        suggestion: 'Configure maxmemory and maxmemory-policy on the Redis server instead of using maxBytes.'
+      });
+    }
+
     requirePluginDependency('ioredis', 'RedisCache');
 
     this.config = {
