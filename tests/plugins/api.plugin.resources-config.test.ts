@@ -88,6 +88,82 @@ describe('API Plugin - resource configuration', () => {
     expect(body.data[0]).toMatchObject({ id: 'rec-1', name: 'Visible Record' });
   });
 
+  it('supports cursor and page-number pagination on list endpoint', async () => {
+    for (let i = 2; i <= 8; i++) {
+      await db.resources.plg_internal_records.insert({
+        id: `rec-${i}`,
+        name: `Visible Record ${i}`
+      });
+    }
+
+    apiPlugin = new ApiPlugin({
+      logLevel: 'silent',
+      port,
+      host: '127.0.0.1',
+      docs: { enabled: false },
+      logging: { enabled: false },
+      resources: ['plg_internal_records']
+    });
+
+    await db.usePlugin(apiPlugin);
+    await waitForServer(port);
+
+    const firstCursorPage = await fetch(`http://127.0.0.1:${port}/plg_internal_records?limit=3&cursor=`);
+    expect(firstCursorPage.status).toBe(200);
+    expect(firstCursorPage.headers.get('x-pagination-mode')).toBe('cursor');
+
+    const firstBody = await firstCursorPage.json();
+    expect(firstBody.success).toBe(true);
+    expect(firstBody.data.length).toBe(3);
+    expect(firstBody.pagination.total).toBeNull();
+    expect(firstBody.pagination.page).toBeNull();
+    expect(firstBody.pagination.pageCount).toBeNull();
+    expect(firstBody.pagination.hasMore).toBe(true);
+    expect(typeof firstBody.pagination.nextCursor).toBe('string');
+    expect(firstCursorPage.headers.get('x-next-cursor')).toBe(firstBody.pagination.nextCursor);
+
+    const secondCursorPage = await fetch(
+      `http://127.0.0.1:${port}/plg_internal_records?limit=3&cursor=${encodeURIComponent(firstBody.pagination.nextCursor)}`
+    );
+    expect(secondCursorPage.status).toBe(200);
+    expect(secondCursorPage.headers.get('x-pagination-mode')).toBe('cursor');
+
+    const secondBody = await secondCursorPage.json();
+    expect(secondBody.success).toBe(true);
+    expect(secondBody.data.length).toBeGreaterThan(0);
+    expect(secondBody.pagination.total).toBeNull();
+    expect(secondBody.pagination.page).toBeNull();
+    expect(secondBody.pagination.pageCount).toBeNull();
+    expect(typeof secondBody.pagination.hasMore).toBe('boolean');
+
+    const firstIds = new Set(firstBody.data.map((item: { id: string }) => item.id));
+    const secondIds = secondBody.data.map((item: { id: string }) => item.id);
+    expect(secondIds.some((id: string) => !firstIds.has(id))).toBe(true);
+
+    const pageModeResponse = await fetch(`http://127.0.0.1:${port}/plg_internal_records?limit=3&page=2`);
+    expect(pageModeResponse.status).toBe(200);
+    expect(pageModeResponse.headers.get('x-pagination-mode')).toBe('cursor');
+
+    const pageModeBody = await pageModeResponse.json();
+    expect(pageModeBody.success).toBe(true);
+    expect(pageModeBody.pagination.page).toBe(2);
+    expect(pageModeBody.pagination.pageCount).toBeNull();
+    expect(typeof pageModeBody.pagination.hasMore).toBe('boolean');
+
+    const invalidMixedMode = await fetch(`http://127.0.0.1:${port}/plg_internal_records?limit=3&page=2&cursor=`);
+    expect(invalidMixedMode.status).toBe(400);
+    const invalidMixedModeBody = await invalidMixedMode.json();
+    expect(invalidMixedModeBody.success).toBe(false);
+    expect(invalidMixedModeBody.error.code).toBe('INVALID_PAGINATION');
+
+    const offsetResponse = await fetch(`http://127.0.0.1:${port}/plg_internal_records?limit=2&offset=2`);
+    expect(offsetResponse.status).toBe(400);
+
+    const offsetBody = await offsetResponse.json();
+    expect(offsetBody.success).toBe(false);
+    expect(offsetBody.error.code).toBe('INVALID_PAGINATION');
+  });
+
   it('skips plugin resources when explicitly disabled in config', async () => {
     apiPlugin = new ApiPlugin({
       logLevel: 'silent',

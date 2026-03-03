@@ -1,6 +1,7 @@
 import { tryFn } from '../concerns/try-fn.js';
 import { PartitionError } from '../errors.js';
 import type { StringRecord } from '../types/common.types.js';
+import { createHash } from 'node:crypto';
 
 export interface PartitionFields {
   [fieldName: string]: string;
@@ -21,6 +22,11 @@ export interface ResourceConfig {
 export interface S3Client {
   count(params: { prefix: string }): Promise<number>;
   getKeysPage(params: { prefix: string; offset: number; amount: number }): Promise<string[]>;
+  listObjects(params: { prefix: string; maxKeys: number; continuationToken?: string | null }): Promise<{
+    Contents?: Array<{ Key: string }>;
+    IsTruncated?: boolean;
+    NextContinuationToken?: string | null;
+  }>;
 }
 
 export interface Observer {
@@ -61,11 +67,19 @@ export interface Resource {
     operations: Array<() => Promise<T>>,
     options?: BatchOptions
   ): Promise<BatchResult<T>>;
+  cache?: ResourceQueryCacheNamespace;
+  getCacheNamespace?(name?: string | null): ResourceQueryCacheNamespace | null;
+}
+
+export interface ResourceQueryCacheNamespace {
+  get(key: string): Promise<unknown>;
+  set(key: string, value: unknown): Promise<unknown>;
 }
 
 export interface CountParams {
   partition?: string | null;
   partitionValues?: StringRecord;
+  skipCache?: boolean;
 }
 
 export interface ListIdsParams {
@@ -84,10 +98,12 @@ export interface ListParams {
 
 export interface PageParams {
   offset?: number;
+  page?: number;
   size?: number;
   partition?: string | null;
   partitionValues?: StringRecord;
   skipCount?: boolean;
+  cursor?: string | null;
 }
 
 export interface PageResult {
@@ -97,12 +113,15 @@ export interface PageResult {
   pageSize: number;
   totalPages: number | null;
   hasMore: boolean;
+  nextCursor?: string | null;
   _debug: {
     requestedSize: number;
     requestedOffset: number;
     actualItemsReturned: number;
     skipCount: boolean;
     hasTotalItems: boolean;
+    usedCursor?: boolean;
+    hasNextCursor?: boolean;
     error?: string;
   };
 }
@@ -119,6 +138,40 @@ interface PartitionPlannerCandidate {
   partitionValues: StringRecord;
   matchCount: number;
   totalFields: number;
+}
+
+interface CursorPayload {
+  v: number;
+  prefix: string;
+  token: string | null;
+  pageSize: number;
+}
+
+function encodeCursorPayload(payload: CursorPayload): string {
+  return Buffer.from(JSON.stringify(payload), 'utf8')
+    .toString('base64')
+    .replace(/\+/g, '-')
+    .replace(/\//g, '_')
+    .replace(/=+$/g, '');
+}
+
+function decodeCursorPayload(cursor: string): CursorPayload | null {
+  try {
+    const normalized = cursor.replace(/-/g, '+').replace(/_/g, '/');
+    const padded = normalized + '='.repeat((4 - (normalized.length % 4)) % 4);
+    const decoded = Buffer.from(padded, 'base64').toString('utf8');
+    const parsed = JSON.parse(decoded) as CursorPayload;
+
+    if (!parsed || typeof parsed !== 'object') return null;
+    if (parsed.v !== 1) return null;
+    if (typeof parsed.prefix !== 'string') return null;
+    if (parsed.token !== null && typeof parsed.token !== 'string') return null;
+    if (typeof parsed.pageSize !== 'number' || !Number.isFinite(parsed.pageSize) || parsed.pageSize <= 0) return null;
+
+    return parsed;
+  } catch {
+    return null;
+  }
 }
 
 export class ResourceQuery {
@@ -222,7 +275,121 @@ export class ResourceQuery {
     return this.resource.config?.partitions || {};
   }
 
-  async count({ partition = null, partitionValues = {} }: CountParams = {}): Promise<number> {
+  private _getCacheNamespace(): ResourceQueryCacheNamespace | null {
+    const namespaceFromAccessor = typeof this.resource.getCacheNamespace === 'function'
+      ? this.resource.getCacheNamespace()
+      : null;
+    const namespace = namespaceFromAccessor || this.resource.cache || null;
+
+    if (!namespace || typeof namespace.get !== 'function' || typeof namespace.set !== 'function') {
+      return null;
+    }
+
+    return namespace;
+  }
+
+  private _hashValue(value: unknown): string {
+    const replacer = (_key: string, val: unknown): unknown => {
+      if (!val || typeof val !== 'object' || Array.isArray(val)) {
+        return val;
+      }
+
+      const sorted = Object.entries(val as Record<string, unknown>).sort(([a], [b]) => a.localeCompare(b));
+      return Object.fromEntries(sorted);
+    };
+
+    const serialized = JSON.stringify(value ?? {}, replacer);
+    return createHash('sha1').update(serialized).digest('hex').slice(0, 16);
+  }
+
+  private _buildCountMetaCacheKey(partition: string | null, partitionValues: StringRecord): string {
+    const partitionName = partition || 'main';
+    const valuesHash = this._hashValue(partitionValues || {});
+    return `resource=${this.resource.name}/meta/count/partition=${partitionName}/values=${valuesHash}.json`;
+  }
+
+  private _buildCursorCheckpointCacheKey({
+    page,
+    size,
+    partition,
+    partitionValues
+  }: {
+    page: number;
+    size: number;
+    partition: string | null;
+    partitionValues: StringRecord;
+  }): string {
+    const partitionName = partition || 'main';
+    const valuesHash = this._hashValue(partitionValues || {});
+    return `resource=${this.resource.name}/meta/cursor-checkpoint/partition=${partitionName}/size=${size}/values=${valuesHash}/page=${page}.json`;
+  }
+
+  private _normalizeCachedCount(value: unknown): number | null {
+    if (typeof value === 'number' && Number.isFinite(value)) {
+      return value;
+    }
+
+    if (value && typeof value === 'object' && typeof (value as Record<string, unknown>).count === 'number') {
+      const cachedCount = (value as Record<string, unknown>).count as number;
+      return Number.isFinite(cachedCount) ? cachedCount : null;
+    }
+
+    return null;
+  }
+
+  private _normalizeCachedCursor(value: unknown): string | null | undefined {
+    if (value === null) return null;
+    if (typeof value === 'string') return value;
+    if (!value || typeof value !== 'object') return undefined;
+
+    const cursor = (value as Record<string, unknown>).cursor;
+    if (cursor === null) return null;
+    if (typeof cursor === 'string') return cursor;
+    return undefined;
+  }
+
+  private async _getCheckpointCursorForPage({
+    page,
+    size,
+    partition,
+    partitionValues
+  }: {
+    page: number;
+    size: number;
+    partition: string | null;
+    partitionValues: StringRecord;
+  }): Promise<string | null | undefined> {
+    const cache = this._getCacheNamespace();
+    if (!cache) return undefined;
+
+    const key = this._buildCursorCheckpointCacheKey({ page, size, partition, partitionValues });
+    return this._normalizeCachedCursor(await cache.get(key));
+  }
+
+  private async _setCheckpointCursorForPage({
+    page,
+    size,
+    partition,
+    partitionValues,
+    cursor
+  }: {
+    page: number;
+    size: number;
+    partition: string | null;
+    partitionValues: StringRecord;
+    cursor: string | null;
+  }): Promise<void> {
+    const cache = this._getCacheNamespace();
+    if (!cache) return;
+
+    const key = this._buildCursorCheckpointCacheKey({ page, size, partition, partitionValues });
+    await cache.set(key, {
+      cursor,
+      cachedAt: Date.now()
+    });
+  }
+
+  async count({ partition = null, partitionValues = {}, skipCache = false }: CountParams = {}): Promise<number> {
     await this.resource.executeHooks('beforeCount', { partition, partitionValues });
 
     let prefix: string;
@@ -256,7 +423,23 @@ export class ResourceQuery {
       prefix = `resource=${this.resource.name}/data`;
     }
 
+    const cache = this._getCacheNamespace();
+    const countCacheKey = this._buildCountMetaCacheKey(partition, partitionValues);
+
+    if (!skipCache && cache) {
+      const cachedCount = this._normalizeCachedCount(await cache.get(countCacheKey));
+      if (cachedCount !== null) {
+        await this.resource.executeHooks('afterCount', { count: cachedCount, partition, partitionValues });
+        this.resource._emitStandardized('count', cachedCount);
+        return cachedCount;
+      }
+    }
+
     const count = await this.client.count({ prefix });
+
+    if (!skipCache && cache) {
+      await cache.set(countCacheKey, { count, cachedAt: Date.now() });
+    }
 
     await this.resource.executeHooks('afterCount', { count, partition, partitionValues });
 
@@ -525,32 +708,306 @@ export class ResourceQuery {
     return results;
   }
 
-  async page({ offset = 0, size = 100, partition = null, partitionValues = {}, skipCount = false }: PageParams = {}): Promise<PageResult> {
+  private _buildPagePrefix(partition: string | null, partitionValues: StringRecord): { prefix: string; partitionDef: PartitionDefinition | null } {
+    if (!partition) {
+      return {
+        prefix: `resource=${this.resource.name}/data`,
+        partitionDef: null
+      };
+    }
+
+    const partitionDef = this.partitions[partition];
+    if (!partitionDef) {
+      throw new PartitionError(`Partition '${partition}' not found`, {
+        resourceName: this.resource.name,
+        partitionName: partition,
+        operation: 'page'
+      });
+    }
+
+    return {
+      prefix: this.resource.buildPartitionPrefix(partition, partitionDef, partitionValues),
+      partitionDef
+    };
+  }
+
+  private async _listPageByCursor({
+    cursor,
+    size,
+    partition,
+    partitionValues
+  }: {
+    cursor: string | null;
+    size: number;
+    partition: string | null;
+    partitionValues: StringRecord;
+  }): Promise<{ items: ResourceData[]; nextCursor: string | null }> {
+    const { prefix, partitionDef } = this._buildPagePrefix(partition, partitionValues);
+    let continuationToken: string | null = null;
+
+    if (cursor) {
+      const decoded = decodeCursorPayload(cursor);
+      if (!decoded || decoded.prefix !== prefix || decoded.pageSize !== size) {
+        throw new PartitionError('Invalid pagination cursor', {
+          resourceName: this.resource.name,
+          partitionName: partition || undefined,
+          operation: 'page',
+          cursor
+        });
+      }
+
+      continuationToken = decoded.token;
+    }
+
+    const response = await this.client.listObjects({
+      prefix,
+      maxKeys: size,
+      continuationToken
+    });
+
+    const keys = (response.Contents ?? [])
+      .map(item => item.Key)
+      .filter((key): key is string => typeof key === 'string' && key.length > 0);
+    const ids = this.extractIdsFromKeys(keys);
+
+    let items: ResourceData[];
+    if (partition && partitionDef) {
+      items = await this.processPartitionResults(ids, partition, partitionDef, keys);
+    } else {
+      items = await this.processListResults(ids, 'cursor');
+    }
+
+    const nextToken = response.IsTruncated ? (response.NextContinuationToken ?? null) : null;
+    const nextCursor = nextToken
+      ? encodeCursorPayload({
+          v: 1,
+          prefix,
+          token: nextToken,
+          pageSize: size
+        })
+      : null;
+
+    return {
+      items,
+      nextCursor
+    };
+  }
+
+  private async _listPageByPageNumber({
+    page,
+    size,
+    partition,
+    partitionValues
+  }: {
+    page: number;
+    size: number;
+    partition: string | null;
+    partitionValues: StringRecord;
+  }): Promise<{ items: ResourceData[]; nextCursor: string | null }> {
+    const targetPage = Number.isFinite(page) && page > 0 ? Math.floor(page) : 1;
+
+    await this._setCheckpointCursorForPage({
+      page: 1,
+      size,
+      partition,
+      partitionValues,
+      cursor: null
+    });
+
+    if (targetPage === 1) {
+      const firstResult = await this._listPageByCursor({
+        cursor: null,
+        size,
+        partition,
+        partitionValues
+      });
+
+      await this._setCheckpointCursorForPage({
+        page: 2,
+        size,
+        partition,
+        partitionValues,
+        cursor: firstResult.nextCursor
+      });
+
+      return firstResult;
+    }
+
+    let startCursor = await this._getCheckpointCursorForPage({
+      page: targetPage,
+      size,
+      partition,
+      partitionValues
+    });
+
+    if (startCursor === undefined) {
+      let cursor: string | null = null;
+      let exhausted = false;
+
+      for (let currentPage = 1; currentPage < targetPage; currentPage++) {
+        const nextPage = currentPage + 1;
+
+        const cachedCursor = await this._getCheckpointCursorForPage({
+          page: nextPage,
+          size,
+          partition,
+          partitionValues
+        });
+
+        if (cachedCursor !== undefined) {
+          cursor = cachedCursor;
+          if (cachedCursor === null) {
+            exhausted = true;
+            break;
+          }
+          continue;
+        }
+
+        const currentPageResult = await this._listPageByCursor({
+          cursor,
+          size,
+          partition,
+          partitionValues
+        });
+
+        await this._setCheckpointCursorForPage({
+          page: nextPage,
+          size,
+          partition,
+          partitionValues,
+          cursor: currentPageResult.nextCursor
+        });
+
+        cursor = currentPageResult.nextCursor;
+        if (!cursor) {
+          exhausted = true;
+          break;
+        }
+      }
+
+      if (exhausted && cursor === null) {
+        return { items: [], nextCursor: null };
+      }
+
+      startCursor = cursor;
+    }
+
+    if (startCursor === null) {
+      return { items: [], nextCursor: null };
+    }
+
+    const targetResult = await this._listPageByCursor({
+      cursor: startCursor,
+      size,
+      partition,
+      partitionValues
+    });
+
+    await this._setCheckpointCursorForPage({
+      page: targetPage + 1,
+      size,
+      partition,
+      partitionValues,
+      cursor: targetResult.nextCursor
+    });
+
+    return targetResult;
+  }
+
+  async page(params: PageParams = {}): Promise<PageResult> {
+    const {
+      offset = 0,
+      page,
+      size = 100,
+      partition = null,
+      partitionValues = {},
+      skipCount = false,
+      cursor = null
+    } = params;
     const effectiveSize = size > 0 ? size : 100;
+    const cursorOptionProvided = Object.prototype.hasOwnProperty.call(params, 'cursor');
+    const pageOptionProvided = Object.prototype.hasOwnProperty.call(params, 'page');
+    const normalizedPage = typeof page === 'number' && Number.isFinite(page)
+      ? Math.floor(page)
+      : null;
+    const normalizedCursor = typeof cursor === 'string' && cursor.trim().length > 0
+      ? cursor.trim()
+      : null;
+    const usingPageNumber = pageOptionProvided;
+    const usingCursor = cursorOptionProvided || usingPageNumber;
+
+    if (usingPageNumber && (normalizedPage === null || normalizedPage < 1)) {
+      throw new PartitionError('Invalid pagination page number', {
+        resourceName: this.resource.name,
+        partitionName: partition || undefined,
+        operation: 'page',
+        page
+      });
+    }
+
+    if (usingPageNumber && cursorOptionProvided) {
+      throw new PartitionError('Cannot combine page number and cursor in the same request', {
+        resourceName: this.resource.name,
+        partitionName: partition || undefined,
+        operation: 'page',
+        page,
+        cursor
+      });
+    }
 
     let totalItems: number | null = null;
     let totalPages: number | null = null;
-    if (!skipCount) {
+    if (!skipCount && !usingCursor) {
       totalItems = await this.count({ partition, partitionValues });
       totalPages = Math.ceil(totalItems / effectiveSize);
     }
 
-    const page = Math.floor(offset / effectiveSize);
-    const items = await this.list({ partition, partitionValues, limit: effectiveSize, offset });
+    const currentPage = usingPageNumber
+      ? normalizedPage!
+      : (usingCursor ? 0 : Math.floor(offset / effectiveSize));
+    let items: ResourceData[] = [];
+    let nextCursor: string | null = null;
+
+    if (usingPageNumber) {
+      const pageResult = await this._listPageByPageNumber({
+        page: normalizedPage!,
+        size: effectiveSize,
+        partition,
+        partitionValues
+      });
+      items = pageResult.items;
+      nextCursor = pageResult.nextCursor;
+    } else if (usingCursor) {
+      const cursorResult = await this._listPageByCursor({
+        cursor: normalizedCursor,
+        size: effectiveSize,
+        partition,
+        partitionValues
+      });
+      items = cursorResult.items;
+      nextCursor = cursorResult.nextCursor;
+    } else {
+      items = await this.list({ partition, partitionValues, limit: effectiveSize, offset });
+    }
 
     const pageResult: PageResult = {
       items,
       totalItems,
-      page,
+      page: currentPage,
       pageSize: effectiveSize,
       totalPages,
-      hasMore: items.length === effectiveSize && (offset + effectiveSize) < (totalItems || Infinity),
+      hasMore: usingCursor
+        ? Boolean(nextCursor)
+        : items.length === effectiveSize && (offset + effectiveSize) < (totalItems || Infinity),
+      nextCursor,
       _debug: {
         requestedSize: size,
         requestedOffset: offset,
         actualItemsReturned: items.length,
         skipCount,
-        hasTotalItems: totalItems !== null
+        hasTotalItems: totalItems !== null,
+        usedCursor: usingCursor,
+        hasNextCursor: Boolean(nextCursor)
       }
     };
     this.resource._emitStandardized('paginated', pageResult);

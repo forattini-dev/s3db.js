@@ -939,12 +939,11 @@ export function generateResourcePaths(
         summary: `List ${resourceLabel}`,
         description: `Retrieve a paginated list of ${resourceLabel}. Supports filtering by passing any resource field as a query parameter (e.g., ?status=active&year=2024). Values are parsed as JSON if possible, otherwise treated as strings.
 
-**Pagination**: Use \`limit\` and \`offset\` to paginate results. For example:
-- First page (10 items): \`?limit=10&offset=0\`
-- Second page: \`?limit=10&offset=10\`
-- Third page: \`?limit=10&offset=20\`
+**Pagination**:
+- Cursor mode: \`?limit=10\` for first page (or \`?limit=10&cursor=\` explicitly), then reuse \`nextCursor\` from response.
+- Page mode: \`?limit=10&page=3\` for page-number navigation backed by cached cursor checkpoints.
 
-The response includes pagination metadata in the \`pagination\` object with total count and page information.${hasPartitions ? '\n\n**Partitioning**: This resource supports partitioned queries for optimized filtering. Use the `partition` and `partitionValues` parameters together.' : ''}`,
+The response includes pagination metadata in the \`pagination\` object, including \`nextCursor\` when cursor pagination is used.${hasPartitions ? '\n\n**Partitioning**: This resource supports partitioned queries for optimized filtering. Use the `partition` and `partitionValues` parameters together.' : ''}`,
         parameters: [
           {
             name: 'limit',
@@ -954,11 +953,18 @@ The response includes pagination metadata in the \`pagination\` object with tota
             example: 10
           },
           {
-            name: 'offset',
+            name: 'cursor',
             in: 'query',
-            description: 'Number of items to skip before starting to return results. Use for pagination: offset = (page - 1) * limit',
-            schema: { type: 'integer', default: 0, minimum: 0 },
-            example: 0
+            description: 'Opaque cursor token for cursor-based pagination (base64url). Use empty value (`cursor=`) for the first cursor page.',
+            schema: { type: 'string' },
+            example: ''
+          },
+          {
+            name: 'page',
+            in: 'query',
+            description: 'Page number (1-indexed). Uses cached cursor checkpoints internally; cannot be combined with `cursor`.',
+            schema: { type: 'integer', minimum: 1 },
+            example: 1
           },
           ...(hasPartitions ? [
             {
@@ -1009,12 +1015,14 @@ The response includes pagination metadata in the \`pagination\` object with tota
                       properties: {
                         total: {
                           type: 'integer',
-                          description: 'Total number of items available',
+                          nullable: true,
+                          description: 'Total number of items available. Null in cursor mode.',
                           example: 150
                         },
                         page: {
                           type: 'integer',
-                          description: 'Current page number (1-indexed)',
+                          nullable: true,
+                          description: 'Current page number (1-indexed). Null when using token-only cursor mode.',
                           example: 1
                         },
                         pageSize: {
@@ -1024,8 +1032,20 @@ The response includes pagination metadata in the \`pagination\` object with tota
                         },
                         pageCount: {
                           type: 'integer',
-                          description: 'Total number of pages available',
+                          nullable: true,
+                          description: 'Total number of pages available. Null in cursor mode.',
                           example: 15
+                        },
+                        hasMore: {
+                          type: 'boolean',
+                          description: 'Whether more results are available for the current pagination mode',
+                          example: true
+                        },
+                        nextCursor: {
+                          type: 'string',
+                          nullable: true,
+                          description: 'Opaque cursor token for the next page when cursor pagination is used',
+                          example: 'eyJ2IjoxLCJwcmVmaXgiOiJyZXNvdXJjZT11c2Vycy9kYXRhIiwidG9rZW4iOiJhYmMxMjMiLCJwYWdlU2l6ZSI6MTB9'
                         }
                       }
                     }
@@ -1034,13 +1054,13 @@ The response includes pagination metadata in the \`pagination\` object with tota
               }
             },
             headers: {
-              'X-Total-Count': {
-                description: 'Total number of records',
-                schema: { type: 'integer' }
+              'X-Next-Cursor': {
+                description: 'Cursor token for the next page in cursor pagination mode',
+                schema: { type: 'string' }
               },
-              'X-Page-Count': {
-                description: 'Total number of pages',
-                schema: { type: 'integer' }
+              'X-Pagination-Mode': {
+                description: 'Pagination mode used to serve this response',
+                schema: { type: 'string', enum: ['cursor'] }
               }
             }
           }

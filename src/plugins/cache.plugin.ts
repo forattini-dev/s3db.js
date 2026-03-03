@@ -147,6 +147,38 @@ interface WarmControl {
   returnData?: boolean;
 }
 
+type CacheableMethod =
+  | 'count'
+  | 'listIds'
+  | 'getMany'
+  | 'getAll'
+  | 'page'
+  | 'list'
+  | 'get'
+  | 'exists'
+  | 'content'
+  | 'hasContent'
+  | 'query'
+  | 'getFromPartition';
+
+type CacheMethodPolicyInput = boolean | CacheMethodPolicy;
+
+interface CacheMethodPolicy {
+  enabled?: boolean;
+  ttlMs?: number | null;
+  maxPayloadBytes?: number | null;
+  minHitsBeforeStore?: number;
+}
+
+type CacheMethodPolicyMap = Partial<Record<CacheableMethod, CacheMethodPolicyInput>>;
+
+interface NormalizedCacheMethodPolicy {
+  enabled: boolean;
+  ttlMs: number | null;
+  maxPayloadBytes: number | null;
+  minHitsBeforeStore: number;
+}
+
 export interface CachePluginOptions {
   driver?: string | CacheDriver;
   drivers?: DriverConfig[];
@@ -167,6 +199,7 @@ export interface CachePluginOptions {
   preloadRelated?: boolean;
   retryAttempts?: number;
   retryDelay?: number;
+  methodPolicies?: CacheMethodPolicyMap;
   verbose?: boolean;
   logger?: S3DBLogger;
   logLevel?: string;
@@ -209,6 +242,7 @@ interface CacheConfig {
   preloadRelated: boolean;
   retryAttempts: number;
   retryDelay: number;
+  methodPolicies: Record<CacheableMethod, NormalizedCacheMethodPolicy>;
   logLevel?: string;
 }
 
@@ -261,6 +295,7 @@ export class CachePlugin extends Plugin {
   config: CacheConfig;
   driver: CacheDriver | null = null;
   stats: CacheStats;
+  private _storeMissCounters: Map<string, number>;
 
   constructor(options: CachePluginOptions = {}) {
     super(options);
@@ -292,12 +327,14 @@ export class CachePlugin extends Plugin {
       trackUsage = true,
       preloadRelated = true,
       retryAttempts = 3,
-      retryDelay = 100
+      retryDelay = 100,
+      methodPolicies = {}
     } = cacheOptions;
 
     const normalizedStrategy = this.resolveMultiTierStrategy(strategy);
 
     const isMultiTier = Array.isArray(drivers) && drivers.length > 0;
+    const normalizedMethodPolicies = this.normalizeMethodPolicies(methodPolicies);
 
     this.config = {
       driver,
@@ -322,6 +359,7 @@ export class CachePlugin extends Plugin {
       preloadRelated,
       retryAttempts,
       retryDelay,
+      methodPolicies: normalizedMethodPolicies,
       logLevel: this.logLevel
     };
 
@@ -333,6 +371,145 @@ export class CachePlugin extends Plugin {
       errors: 0,
       startTime: Date.now()
     };
+
+    this._storeMissCounters = new Map();
+  }
+
+  private normalizeMethodPolicies(input: CacheMethodPolicyMap = {}): Record<CacheableMethod, NormalizedCacheMethodPolicy> {
+    const defaults: Record<CacheableMethod, NormalizedCacheMethodPolicy> = {
+      count: { enabled: true, ttlMs: null, maxPayloadBytes: null, minHitsBeforeStore: 1 },
+      listIds: { enabled: true, ttlMs: null, maxPayloadBytes: null, minHitsBeforeStore: 1 },
+      getMany: { enabled: true, ttlMs: null, maxPayloadBytes: null, minHitsBeforeStore: 1 },
+      getAll: { enabled: false, ttlMs: null, maxPayloadBytes: null, minHitsBeforeStore: 1 },
+      page: { enabled: true, ttlMs: null, maxPayloadBytes: null, minHitsBeforeStore: 1 },
+      list: { enabled: true, ttlMs: null, maxPayloadBytes: null, minHitsBeforeStore: 1 },
+      get: { enabled: true, ttlMs: null, maxPayloadBytes: null, minHitsBeforeStore: 2 },
+      exists: { enabled: false, ttlMs: null, maxPayloadBytes: null, minHitsBeforeStore: 1 },
+      content: { enabled: false, ttlMs: null, maxPayloadBytes: null, minHitsBeforeStore: 1 },
+      hasContent: { enabled: false, ttlMs: null, maxPayloadBytes: null, minHitsBeforeStore: 1 },
+      query: { enabled: true, ttlMs: null, maxPayloadBytes: null, minHitsBeforeStore: 1 },
+      getFromPartition: { enabled: true, ttlMs: null, maxPayloadBytes: null, minHitsBeforeStore: 1 }
+    };
+
+    const normalized = { ...defaults };
+
+    for (const [method, rawPolicy] of Object.entries(input) as Array<[CacheableMethod, CacheMethodPolicyInput]>) {
+      if (!(method in defaults)) {
+        continue;
+      }
+
+      if (typeof rawPolicy === 'boolean') {
+        normalized[method] = {
+          ...defaults[method],
+          enabled: rawPolicy
+        };
+        continue;
+      }
+
+      const policy = rawPolicy || {};
+      const ttlMs = typeof policy.ttlMs === 'number' && policy.ttlMs > 0
+        ? Math.floor(policy.ttlMs)
+        : (policy.ttlMs === null ? null : defaults[method].ttlMs);
+      const maxPayloadBytes = typeof policy.maxPayloadBytes === 'number' && policy.maxPayloadBytes > 0
+        ? Math.floor(policy.maxPayloadBytes)
+        : (policy.maxPayloadBytes === null ? null : defaults[method].maxPayloadBytes);
+      const minHitsBeforeStore = typeof policy.minHitsBeforeStore === 'number' && policy.minHitsBeforeStore > 1
+        ? Math.floor(policy.minHitsBeforeStore)
+        : defaults[method].minHitsBeforeStore;
+
+      normalized[method] = {
+        enabled: policy.enabled ?? defaults[method].enabled,
+        ttlMs,
+        maxPayloadBytes,
+        minHitsBeforeStore
+      };
+    }
+
+    return normalized;
+  }
+
+  private getMethodPolicy(method: string): NormalizedCacheMethodPolicy | null {
+    if (!method) return null;
+    return (this.config.methodPolicies as Record<string, NormalizedCacheMethodPolicy>)[method] || null;
+  }
+
+  private estimatePayloadBytes(value: unknown): number | null {
+    try {
+      const serialized = JSON.stringify(value);
+      return typeof serialized === 'string' ? Buffer.byteLength(serialized, 'utf8') : null;
+    } catch {
+      return null;
+    }
+  }
+
+  private wrapCachedValue(method: string, value: unknown): unknown {
+    const policy = this.getMethodPolicy(method);
+    if (!policy || !policy.ttlMs || policy.ttlMs <= 0) {
+      return value;
+    }
+
+    return {
+      __s3dbCacheV: 1,
+      method,
+      storedAt: Date.now(),
+      ttlMs: policy.ttlMs,
+      payload: value
+    };
+  }
+
+  private unwrapCachedValue(cachedValue: unknown): { present: boolean; expired: boolean; value: unknown } {
+    if (cachedValue === null || cachedValue === undefined) {
+      return { present: false, expired: false, value: null };
+    }
+
+    if (!cachedValue || typeof cachedValue !== 'object') {
+      return { present: true, expired: false, value: cachedValue };
+    }
+
+    const envelope = cachedValue as Record<string, unknown>;
+    if (envelope.__s3dbCacheV !== 1 || !Object.prototype.hasOwnProperty.call(envelope, 'payload')) {
+      return { present: true, expired: false, value: cachedValue };
+    }
+
+    const ttlMs = typeof envelope.ttlMs === 'number' ? envelope.ttlMs : 0;
+    const storedAt = typeof envelope.storedAt === 'number' ? envelope.storedAt : 0;
+    const expired = ttlMs > 0 && storedAt > 0 && (Date.now() - storedAt) > ttlMs;
+
+    return {
+      present: true,
+      expired,
+      value: envelope.payload
+    };
+  }
+
+  private shouldStoreInCache(method: string, key: string, value: unknown): boolean {
+    const policy = this.getMethodPolicy(method);
+    if (!policy || !policy.enabled) {
+      return false;
+    }
+
+    if (value === undefined) {
+      return false;
+    }
+
+    if (policy.maxPayloadBytes !== null) {
+      const payloadBytes = this.estimatePayloadBytes(value);
+      if (payloadBytes !== null && payloadBytes > policy.maxPayloadBytes) {
+        return false;
+      }
+    }
+
+    if (policy.minHitsBeforeStore > 1) {
+      const counterKey = `${method}:${key}`;
+      const nextHits = (this._storeMissCounters.get(counterKey) || 0) + 1;
+      if (nextHits < policy.minHitsBeforeStore) {
+        this._storeMissCounters.set(counterKey, nextHits);
+        return false;
+      }
+      this._storeMissCounters.delete(counterKey);
+    }
+
+    return true;
   }
 
   override async onInstall(): Promise<void> {
@@ -508,8 +685,16 @@ export class CachePlugin extends Plugin {
 
       async warmPage(pageOptions: Record<string, unknown> = {}, control: WarmControl = {}): Promise<unknown> {
         const { forceRefresh = false, returnData = false } = control;
-        const { offset = 0, size = 100, partition, partitionValues, ...rest } = pageOptions || {};
-        const options = { offset, size, partition, partitionValues, ...rest } as Record<string, unknown>;
+        const {
+          offset = 0,
+          page,
+          cursor = null,
+          size = 100,
+          partition,
+          partitionValues,
+          ...rest
+        } = pageOptions || {};
+        const options = { offset, page, cursor, size, partition, partitionValues, ...rest } as Record<string, unknown>;
         if (forceRefresh) {
           options.skipCache = true;
         }
@@ -518,7 +703,7 @@ export class CachePlugin extends Plugin {
 
         if (forceRefresh && shouldStore(result)) {
           const key = await keyFor('page', {
-            params: { offset, size },
+            params: { offset, page, cursor, size },
             partition: partition as string | null,
             partitionValues: partitionValues as Record<string, unknown> | null
           });
@@ -846,13 +1031,18 @@ export class CachePlugin extends Plugin {
       };
     }
 
-    const cacheMethods = [
+    const cacheMethods: CacheableMethod[] = [
       'count', 'listIds', 'getMany', 'getAll', 'page', 'list', 'get',
       'exists', 'content', 'hasContent', 'query', 'getFromPartition'
     ];
 
     for (const method of cacheMethods) {
       resource.useMiddleware(method, async (ctx: MiddlewareContext, next: () => Promise<unknown>): Promise<unknown> => {
+        const methodPolicy = this.getMethodPolicy(method);
+        if (!methodPolicy?.enabled) {
+          return await next();
+        }
+
         const resolveCacheKey = resource.cacheKeyResolvers?.[instanceKey] || computeCacheKey;
         let skipCache = false;
         const lastArg = ctx.args[ctx.args.length - 1];
@@ -869,8 +1059,13 @@ export class CachePlugin extends Plugin {
           key = await resolveCacheKey({ action: method, params: { ids: ctx.args[0] } });
         } else if (method === 'page') {
           const options = (ctx.args[0] || {}) as Record<string, unknown>;
-          const { offset, size, partition, partitionValues } = options;
-          key = await resolveCacheKey({ action: method, params: { offset, size }, partition: partition as string | null, partitionValues: partitionValues as Record<string, unknown> | null });
+          const { offset, page, cursor = null, size, partition, partitionValues } = options;
+          key = await resolveCacheKey({
+            action: method,
+            params: { offset, page, cursor, size },
+            partition: partition as string | null,
+            partitionValues: partitionValues as Record<string, unknown> | null
+          });
         } else if (method === 'list' || method === 'listIds' || method === 'count') {
           const options = (ctx.args[0] || {}) as Record<string, unknown>;
           const { partition, partitionValues } = options;
@@ -930,9 +1125,12 @@ export class CachePlugin extends Plugin {
             partitionValues
           }));
 
-          if (ok && result !== null && result !== undefined) {
-            this.stats.hits++;
-            return result;
+          if (ok) {
+            const normalizedCached = this.unwrapCachedValue(result);
+            if (normalizedCached.present && !normalizedCached.expired) {
+              this.stats.hits++;
+              return normalizedCached.value;
+            }
           }
           if (!ok && (err as Error & { name?: string }).name !== 'NoSuchKey') {
             this.stats.errors++;
@@ -942,20 +1140,26 @@ export class CachePlugin extends Plugin {
           this.stats.misses++;
           const freshResult = await next();
 
-          this.stats.writes++;
-          await driver._set!(key, freshResult, {
-            resource: resource.name,
-            action: method,
-            partition,
-            partitionValues
-          });
+          if (this.shouldStoreInCache(method, key, freshResult)) {
+            const wrappedFreshResult = this.wrapCachedValue(method, freshResult);
+            this.stats.writes++;
+            await driver._set!(key, wrappedFreshResult, {
+              resource: resource.name,
+              action: method,
+              partition,
+              partitionValues
+            });
+          }
 
           return freshResult;
         } else {
           const [ok, err, result] = await tryFn(() => driver.get(key));
-          if (ok && result !== null && result !== undefined) {
-            this.stats.hits++;
-            return result;
+          if (ok) {
+            const normalizedCached = this.unwrapCachedValue(result);
+            if (normalizedCached.present && !normalizedCached.expired) {
+              this.stats.hits++;
+              return normalizedCached.value;
+            }
           }
           if (!ok && (err as Error & { name?: string }).name !== 'NoSuchKey') {
             this.stats.errors++;
@@ -964,8 +1168,13 @@ export class CachePlugin extends Plugin {
 
           this.stats.misses++;
           const freshResult = await next();
-          this.stats.writes++;
-          await driver.set(key, freshResult);
+
+          if (this.shouldStoreInCache(method, key, freshResult)) {
+            const wrappedFreshResult = this.wrapCachedValue(method, freshResult);
+            this.stats.writes++;
+            await driver.set(key, wrappedFreshResult);
+          }
+
           return freshResult;
         }
       });

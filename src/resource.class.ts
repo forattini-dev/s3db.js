@@ -188,6 +188,7 @@ export interface PageResult {
   offset: number;
   size: number;
   hasMore: boolean;
+  nextCursor?: string | null;
 }
 
 export interface QueryFilter {
@@ -211,6 +212,7 @@ export interface ListOptions {
 export interface CountOptions {
   partition?: string | null;
   partitionValues?: StringRecord;
+  skipCache?: boolean;
 }
 
 export interface UpdateConditionalResult {
@@ -228,10 +230,12 @@ export interface DeleteManyResult {
 
 export interface PageOptions {
   offset?: number;
+  page?: number;
   size?: number;
   partition?: string | null;
   partitionValues?: StringRecord;
   skipCount?: boolean;
+  cursor?: string | null;
 }
 
 export interface UpdateConditionalResult {
@@ -1108,9 +1112,9 @@ export class Resource extends AsyncEventEmitter implements Disposable {
     return this._query.getAll() as Promise<ResourceData[]>;
   }
 
-  async page({ offset = 0, size = 100, partition = null, partitionValues = {}, skipCount = false }: PageOptions = {}): Promise<PageResult> {
+  async page(options: PageOptions = {}): Promise<PageResult> {
     this._ensureSchemaCompiled();
-    const result = await this._query.page({ offset, size, partition, partitionValues, skipCount });
+    const result = await this._query.page(options);
     return result as unknown as PageResult;
   }
 

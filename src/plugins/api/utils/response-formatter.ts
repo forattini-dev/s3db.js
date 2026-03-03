@@ -38,20 +38,24 @@ export interface ErrorResponse {
 }
 
 export interface PaginationInfo {
-  total?: number;
-  page?: number;
+  total?: number | null;
+  page?: number | null;
   pageSize?: number;
-  pageCount?: number;
+  pageCount?: number | null;
+  hasMore?: boolean;
+  nextCursor?: string | null;
 }
 
 export interface ListResponse<T = unknown> {
   success: true;
   data: T[];
   pagination: {
-    total: number;
-    page: number;
-    pageSize: number;
-    pageCount: number;
+    total?: number | null;
+    page?: number | null;
+    pageSize?: number;
+    pageCount?: number | null;
+    hasMore?: boolean;
+    nextCursor?: string | null;
   };
   meta: ResponseMeta;
   _status: number;
@@ -152,17 +156,27 @@ export function error(errorInput: string | Error, options: ErrorOptions = {}): E
 }
 
 export function list<T = unknown>(items: T[], pagination: PaginationInfo = {}): ListResponse<T> {
-  const { total, page, pageSize, pageCount } = pagination;
+  const { total, page, pageSize, pageCount, hasMore, nextCursor } = pagination;
+  const paginationPayload: ListResponse<T>['pagination'] = {};
+
+  if (total !== undefined) paginationPayload.total = total;
+  if (page !== undefined) paginationPayload.page = page;
+  if (pageSize !== undefined) paginationPayload.pageSize = pageSize;
+  if (pageCount !== undefined) paginationPayload.pageCount = pageCount;
+  if (hasMore !== undefined) paginationPayload.hasMore = hasMore;
+  if (nextCursor !== undefined) paginationPayload.nextCursor = nextCursor;
+
+  if (Object.keys(paginationPayload).length === 0) {
+    paginationPayload.total = items.length;
+    paginationPayload.page = 1;
+    paginationPayload.pageSize = items.length;
+    paginationPayload.pageCount = 1;
+  }
 
   return {
     success: true,
     data: items,
-    pagination: {
-      total: total ?? items.length,
-      page: page ?? 1,
-      pageSize: pageSize ?? items.length,
-      pageCount: pageCount ?? 1
-    },
+    pagination: paginationPayload,
     meta: {
       timestamp: new Date().toISOString()
     },

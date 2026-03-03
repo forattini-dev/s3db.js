@@ -425,7 +425,7 @@ export class S3QueuePlugin extends CoordinatorPlugin<S3QueuePluginOptions> {
       recoveryInterval,
       recoveryBatchSize: recoveryBatchSize ?? Math.max(concurrency * 2, 10),
       processedCacheTTL,
-      maxPollInterval: maxPollInterval ?? pollInterval,
+      maxPollInterval: maxPollInterval ?? Math.max(pollInterval * 32, 30000),
       queueResourceName: this.queueResourceName,
       enableCoordinator,
       heartbeatTTL,

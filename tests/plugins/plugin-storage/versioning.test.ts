@@ -45,6 +45,42 @@ describe('PluginStorage - Versioned Operations', () => {
     expect(latest.data?.count).toBe(2);
   });
 
+  test('getWithVersion should avoid headObject when getObject already returns ETag', async () => {
+    const client = createMockClient({ bucket: 'mock-version-no-head' });
+    const noHeadStorage = new PluginStorage(client, 'test-plugin');
+    const key = noHeadStorage.getPluginKey(null, 'direct-etag');
+
+    await noHeadStorage.set(key, { value: 'ok' });
+    client.resetCalls();
+
+    const snapshot = await noHeadStorage.getWithVersion(key);
+    expect(snapshot.version).toBeTruthy();
+    expect(client.getCalls('getObject')).toHaveLength(1);
+    expect(client.getCalls('headObject')).toHaveLength(0);
+  });
+
+  test('getWithVersion should fallback to headObject when getObject has no ETag', async () => {
+    const client = createMockClient({ bucket: 'mock-version-with-head-fallback' });
+    const fallbackStorage = new PluginStorage(client, 'test-plugin');
+    const key = fallbackStorage.getPluginKey(null, 'etag-missing');
+
+    await fallbackStorage.set(key, { value: 'ok' });
+
+    const originalGetObject = client.getObject.bind(client);
+    client.getObject = async (requestedKey) => {
+      const response = await originalGetObject(requestedKey);
+      const { ETag, ...withoutETag } = response;
+      return withoutETag;
+    };
+
+    client.resetCalls();
+
+    const snapshot = await fallbackStorage.getWithVersion(key);
+    expect(snapshot.version).toBeTruthy();
+    expect(client.getCalls('getObject')).toHaveLength(1);
+    expect(client.getCalls('headObject')).toHaveLength(1);
+  });
+
   test('deleteIfVersion should delete only when version matches', async () => {
     const key = storage.getPluginKey(null, 'delete-versioned-item');
     await storage.set(key, { value: 'abc' });
@@ -56,7 +92,8 @@ describe('PluginStorage - Versioned Operations', () => {
     expect(staleDelete).toBe(false);
     expect(await storage.has(key)).toBe(true);
 
-    const deleted = await storage.deleteIfVersion(key, snapshot.version as string);
+    const unquotedVersion = (snapshot.version as string).replace(/"/g, '');
+    const deleted = await storage.deleteIfVersion(key, unquotedVersion);
     expect(deleted).toBe(true);
     expect(await storage.has(key)).toBe(false);
   });

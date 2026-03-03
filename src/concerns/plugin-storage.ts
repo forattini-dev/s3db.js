@@ -54,6 +54,25 @@ function isMissingObjectError(error: unknown): boolean {
 
 type ObjectParseMode = 'throw' | 'null';
 
+function normalizeETagToken(value: unknown): string | null {
+  if (typeof value !== 'string') {
+    return null;
+  }
+
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return null;
+  }
+
+  const weakNormalized = trimmed.startsWith('W/"') ? trimmed.slice(2) : trimmed;
+
+  if (weakNormalized.length >= 2 && weakNormalized.startsWith('"') && weakNormalized.endsWith('"')) {
+    return weakNormalized.slice(1, -1);
+  }
+
+  return weakNormalized;
+}
+
 async function withSequenceGate<T>(lockKey: string, task: () => Promise<T>): Promise<T> {
   const previous = SEQUENCE_GATES.get(lockKey) ?? Promise.resolve();
   const waitForPrevious = previous.catch(() => undefined);
@@ -158,6 +177,7 @@ interface GetObjectResponse {
   Body?: GetObjectBody;
   Metadata?: Record<string, string>;
   ContentType?: string;
+  ETag?: string;
 }
 
 type GetObjectBody =
@@ -751,7 +771,7 @@ export class PluginStorage {
   }
 
   /**
-   * Get data along with its version (ETag) for conditional updates.
+   * Get data along with an opaque version token (ETag-based) for conditional updates.
    * @returns Object with data and version, or { data: null, version: null } if not found.
    */
   async getWithVersion(key: string): Promise<{ data: Record<string, unknown> | null; version: string | null }> {
@@ -786,7 +806,11 @@ export class PluginStorage {
     delete data._expiresat;
     delete data._expiresAt;
 
-    // Extract ETag from response - need to get it from headObject since getObject may not return it
+    const getVersion = response.ETag ?? null;
+    if (getVersion) {
+      return { data, version: getVersion };
+    }
+
     const [headOk, headErr, headResponse] = await tryFn<HeadObjectResponse & { ETag?: string }>(() =>
       this.client.headObject(key)
     );
@@ -804,9 +828,7 @@ export class PluginStorage {
       });
     }
 
-    const version = headOk && headResponse ? (headResponse as any).ETag ?? null : null;
-
-    return { data, version };
+    return { data, version: (headResponse as any).ETag ?? null };
   }
 
   /**
@@ -851,11 +873,14 @@ export class PluginStorage {
     }
 
     const currentVersion = (headResponse as any).ETag;
-    if (!currentVersion) {
+    const normalizedCurrentVersion = normalizeETagToken(currentVersion);
+    const normalizedExpectedVersion = normalizeETagToken(version);
+
+    if (!normalizedCurrentVersion || !normalizedExpectedVersion) {
       return false;
     }
 
-    if (currentVersion !== version) {
+    if (normalizedCurrentVersion !== normalizedExpectedVersion) {
       return false;
     }
 

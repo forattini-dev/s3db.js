@@ -443,6 +443,17 @@ describe('API Plugin - resource.$schema.api configuration', () => {
       const productsTag = spec.tags.find(t => t.name === 'products');
       expect(productsTag).toBeDefined();
       expect(productsTag.description).toBe('Product catalog management');
+
+      const listOperation = spec.paths['/products']?.get;
+      expect(listOperation).toBeDefined();
+      const parameterNames = (listOperation.parameters || []).map((param: { name: string }) => param.name);
+      expect(parameterNames).toContain('cursor');
+      expect(parameterNames).toContain('page');
+      expect(parameterNames).not.toContain('offset');
+
+      const responseHeaders = listOperation.responses?.['200']?.headers || {};
+      expect(responseHeaders['X-Next-Cursor']).toBeDefined();
+      expect(responseHeaders['X-Pagination-Mode']).toBeDefined();
     });
 
     it('supports object description format with field descriptions', async () => {

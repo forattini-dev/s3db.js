@@ -41,6 +41,23 @@ export interface ResourceLike {
   list(options?: { limit?: number; offset?: number }): Promise<Record<string, unknown>[]>;
   listPartition(options: unknown): Promise<Record<string, unknown>[]>;
   query(filters: Record<string, unknown>, options?: { limit?: number; offset?: number }): Promise<Record<string, unknown>[]>;
+  page?(options?: {
+    size?: number;
+    offset?: number;
+    page?: number;
+    cursor?: string | null;
+    partition?: string | null;
+    partitionValues?: Record<string, unknown>;
+    skipCount?: boolean;
+  }): Promise<{
+    items: Record<string, unknown>[];
+    totalItems?: number | null;
+    page?: number;
+    pageSize?: number;
+    totalPages?: number | null;
+    hasMore?: boolean;
+    nextCursor?: string | null;
+  }>;
   get(id: string, options?: { include?: string[] }): Promise<Record<string, unknown> | null>;
   getFromPartition(options: { id: string; partitionName: string; partitionValues: unknown }): Promise<Record<string, unknown> | null>;
   insert(data: Record<string, unknown>, options?: { user?: unknown; request?: unknown }): Promise<Record<string, unknown>>;
@@ -333,8 +350,22 @@ export function createResourceRoutes(resource: ResourceLike, version: string, co
   if (methods.includes('GET')) {
     const listHandler = asyncHandler(async (c: Context) => {
       const query = c.req.query();
-      const limit = parseInt(query.limit || '100') || 100;
-      const offset = parseInt(query.offset || '0') || 0;
+      const parsedLimit = parseInt(query.limit || '100', 10);
+      const limit = Number.isFinite(parsedLimit) && parsedLimit > 0
+        ? Math.min(parsedLimit, 1000)
+        : 100;
+      const hasOffsetParam = Object.prototype.hasOwnProperty.call(query, 'offset');
+      const hasCursorParam = Object.prototype.hasOwnProperty.call(query, 'cursor');
+      const hasPageParam = Object.prototype.hasOwnProperty.call(query, 'page');
+      const hasSortParam = Object.prototype.hasOwnProperty.call(query, 'sort');
+      const rawCursor = query.cursor;
+      const cursor = typeof rawCursor === 'string' && rawCursor.trim().length > 0
+        ? rawCursor.trim()
+        : null;
+      const parsedPage = parseInt(query.page || '1', 10);
+      const page = Number.isFinite(parsedPage) && parsedPage > 0
+        ? parsedPage
+        : 1;
       const partition = query.partition;
       const partitionValues = parsePartitionValues(query.partitionValues);
 
@@ -354,7 +385,41 @@ export function createResourceRoutes(resource: ResourceLike, version: string, co
         populateIncludes = populateResult.includes || null;
       }
 
-      const reservedKeys = ['limit', 'offset', 'partition', 'partitionValues', 'sort', 'populate'];
+      if (hasOffsetParam) {
+        const response = formatter.error('Offset pagination is not supported in this endpoint', {
+          status: 400,
+          code: 'INVALID_PAGINATION',
+          details: {
+            suggestion: 'Use cursor pagination only: ?limit=10 for first page, then reuse pagination.nextCursor'
+          }
+        });
+        return c.json(response, response._status as ContentfulStatusCode);
+      }
+
+      if (hasCursorParam && hasPageParam) {
+        const response = formatter.error('Use either cursor token or page number, not both', {
+          status: 400,
+          code: 'INVALID_PAGINATION',
+          details: {
+            suggestion: 'Use ?page=N for page-based navigation or ?cursor=TOKEN for token-based continuation'
+          }
+        });
+        return c.json(response, response._status as ContentfulStatusCode);
+      }
+
+      if (hasPageParam && (!Number.isFinite(parsedPage) || parsedPage < 1)) {
+        const response = formatter.error('Invalid page parameter', {
+          status: 400,
+          code: 'INVALID_PAGINATION',
+          details: {
+            page: query.page,
+            suggestion: 'Use a page number greater than or equal to 1'
+          }
+        });
+        return c.json(response, response._status as ContentfulStatusCode);
+      }
+
+      const reservedKeys = ['limit', 'cursor', 'page', 'partition', 'partitionValues', 'sort', 'populate'];
       const filters: Record<string, unknown> = {};
       for (const [key, value] of Object.entries(query)) {
         if (!reservedKeys.includes(key)) {
@@ -369,38 +434,76 @@ export function createResourceRoutes(resource: ResourceLike, version: string, co
       const guardPartitionFilters = c.get('partitionFilters') as Array<{ partitionName: string; partitionFields: unknown }> | undefined || [];
 
       let items: Record<string, unknown>[];
-      let total: number;
+      let nextCursor: string | null = null;
+      let hasMore = false;
+
+      if (Object.keys(filters).length > 0) {
+        const response = formatter.error('Cursor pagination does not support ad-hoc filters yet', {
+          status: 400,
+          code: 'UNSUPPORTED_CURSOR_FILTERS',
+          details: {
+            suggestion: 'Use partition + partitionValues with cursor'
+          }
+        });
+        return c.json(response, response._status as ContentfulStatusCode);
+      }
+
+      if (hasSortParam) {
+        const response = formatter.error('Cursor pagination does not support sort parameter', {
+          status: 400,
+          code: 'UNSUPPORTED_CURSOR_SORT',
+          details: {
+            suggestion: 'Remove sort when using cursor pagination'
+          }
+        });
+        return c.json(response, response._status as ContentfulStatusCode);
+      }
+
+      if (typeof resource.page !== 'function') {
+        const response = formatter.error('Cursor pagination is not available for this resource', {
+          status: 400,
+          code: 'CURSOR_NOT_SUPPORTED'
+        });
+        return c.json(response, response._status as ContentfulStatusCode);
+      }
 
       if (guardPartitionFilters.length > 0 && guardPartitionFilters[0]) {
         const { partitionName, partitionFields } = guardPartitionFilters[0];
         const partitionValuesFromGuard = parsePartitionValues(partitionFields);
-        items = await resource.listPartition({
+
+        const pageResult = await resource.page!({
+          size: limit,
+          ...(hasPageParam ? { page } : {}),
+          ...(!hasPageParam ? { cursor: hasCursorParam ? cursor : null } : {}),
           partition: partitionName,
           partitionValues: partitionValuesFromGuard,
-          limit,
-          offset
+          skipCount: true
         });
-        total = await resource.count({
-          partition: partitionName,
-          partitionValues: partitionValuesFromGuard
-        });
-      } else if (Object.keys(filters).length > 0) {
-        items = await resource.query(filters, { limit, offset });
-        total = items.length;
+        items = pageResult.items || [];
+        nextCursor = pageResult.nextCursor ?? null;
+        hasMore = pageResult.hasMore ?? Boolean(nextCursor);
       } else if (partition && partitionValues) {
-        items = await resource.listPartition({
+        const pageResult = await resource.page!({
+          size: limit,
+          ...(hasPageParam ? { page } : {}),
+          ...(!hasPageParam ? { cursor: hasCursorParam ? cursor : null } : {}),
           partition,
           partitionValues,
-          limit,
-          offset
+          skipCount: true
         });
-        total = await resource.count({
-          partition,
-          partitionValues
-        });
+        items = pageResult.items || [];
+        nextCursor = pageResult.nextCursor ?? null;
+        hasMore = pageResult.hasMore ?? Boolean(nextCursor);
       } else {
-        items = await resource.list({ limit, offset });
-        total = await resource.count();
+        const pageResult = await resource.page!({
+          size: limit,
+          ...(hasPageParam ? { page } : {}),
+          ...(!hasPageParam ? { cursor: hasCursorParam ? cursor : null } : {}),
+          skipCount: true
+        });
+        items = pageResult.items || [];
+        nextCursor = pageResult.nextCursor ?? null;
+        hasMore = pageResult.hasMore ?? Boolean(nextCursor);
       }
 
       if (populateIncludes && relationsPlugin && items && items.length > 0) {
@@ -410,14 +513,18 @@ export function createResourceRoutes(resource: ResourceLike, version: string, co
       const filteredItems = filterProtectedFields(items, protectedFields);
 
       const response = formatter.list(filteredItems, {
-        total,
-        page: Math.floor(offset / limit) + 1,
+        total: null,
+        page: hasPageParam ? page : null,
         pageSize: limit,
-        pageCount: Math.ceil(total / limit)
+        pageCount: null,
+        hasMore,
+        nextCursor
       });
 
-      c.header('X-Total-Count', total.toString());
-      c.header('X-Page-Count', Math.ceil(total / limit).toString());
+      c.header('X-Pagination-Mode', 'cursor');
+      if (nextCursor) {
+        c.header('X-Next-Cursor', nextCursor);
+      }
 
       return c.json(response, response._status as ContentfulStatusCode);
     });
@@ -434,12 +541,12 @@ export function createResourceRoutes(resource: ResourceLike, version: string, co
           pagination: {
             type: 'object',
             properties: {
-              total: { type: 'integer' },
-              limit: { type: 'integer' },
-              offset: { type: 'integer' },
-              page: { type: 'integer' },
+              total: { type: 'integer', nullable: true },
+              page: { type: 'integer', nullable: true },
               pageSize: { type: 'integer' },
-              pageCount: { type: 'integer' }
+              pageCount: { type: 'integer', nullable: true },
+              hasMore: { type: 'boolean' },
+              nextCursor: { type: 'string', nullable: true }
             }
           }
         }
@@ -865,7 +972,9 @@ export function createResourceRoutes(resource: ResourceLike, version: string, co
 
         queryParameters: {
           limit: 'number (1-1000, default: 100)',
-          offset: 'number (min: 0, default: 0)',
+          cursor: 'string (opaque cursor token for cursor pagination; omit or use cursor= for first cursor page)',
+          page: 'number (>= 1, page-based navigation backed by cached cursor checkpoints)',
+          sort: 'string (sorting is not supported with cursor mode)',
           partition: 'string (partition name)',
           partitionValues: 'JSON string',
           '[any field]': 'any (filter by field value)'

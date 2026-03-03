@@ -1165,7 +1165,7 @@ export class ReplicatorPlugin extends Plugin {
         const pageSize = this.config.batchSize || 100;
 
         while (true) {
-          const [ok, err, page] = await tryFn(() => resource.page({ offset, size: pageSize }));
+          const [ok, err, page] = await tryFn(() => resource.page({ offset, size: pageSize, skipCount: true }));
 
           if (!ok || !page) break;
 

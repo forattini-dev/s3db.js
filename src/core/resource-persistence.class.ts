@@ -78,6 +78,7 @@ export interface PutObjectParams {
   contentType?: string;
   metadata: StringRecord<string>;
   ifMatch?: string;
+  ifNoneMatch?: string;
 }
 
 export interface CopyObjectParams {
@@ -237,7 +238,6 @@ export class ResourcePersistence {
   async insert({ id, ...attributes }: InsertParams): Promise<ResourceData> {
     this.logger.trace({ id, attributeKeys: Object.keys(attributes) }, 'insert called');
 
-    const providedId = id !== undefined && id !== null && String(id).trim() !== '';
     if (this.config.timestamps) {
       attributes.createdAt = new Date().toISOString();
       attributes.updatedAt = new Date().toISOString();
@@ -307,20 +307,6 @@ export class ResourcePersistence {
       });
     }
 
-    const shouldCheckExists = providedId || shouldValidateId || validatedId !== undefined;
-    if (shouldCheckExists) {
-      const alreadyExists = await this.exists(finalId);
-      if (alreadyExists) {
-        throw new InvalidResourceItem({
-          bucket: this.client.config.bucket,
-          resourceName: this.name,
-          attributes: preProcessedData,
-          validation: [{ message: `Resource with id '${finalId}' already exists`, field: 'id' }],
-          message: `Resource with id '${finalId}' already exists`
-        });
-      }
-    }
-
     const key = this.resource.getResourceKey(finalId);
     let contentType: string | undefined = undefined;
     if (body && body !== '') {
@@ -339,14 +325,26 @@ export class ResourcePersistence {
       });
     }
 
-    const [okPut, errPut] = await tryFn(() => this.client.putObject({
+    const [okPut, errPut, putResponse] = await tryFn<{ ETag?: string }>(() => this.client.putObject({
       key,
       body,
       contentType,
       metadata: finalMetadata,
+      ifNoneMatch: '*'
     }));
 
     if (!okPut) {
+      if ((errPut as Error & { name?: string }).name === 'PreconditionFailed' ||
+          (errPut as Error & { $metadata?: { httpStatusCode?: number } }).$metadata?.httpStatusCode === 412) {
+        throw new InvalidResourceItem({
+          bucket: this.client.config.bucket,
+          resourceName: this.name,
+          attributes: preProcessedData,
+          validation: [{ message: `Resource with id '${finalId}' already exists`, field: 'id' }],
+          message: `Resource with id '${finalId}' already exists`
+        });
+      }
+
       const msg = errPut && errPut.message ? errPut.message : '';
       if (msg.includes('metadata headers exceed') || msg.includes('Insert failed')) {
         const totalSize = calculateTotalSize(finalMetadata);
@@ -372,7 +370,24 @@ export class ResourcePersistence {
       throw errPut;
     }
 
-    const insertedObject = await this.get(finalId);
+    const insertedObject = await this.resource.composeFullObjectFromWrite({
+      id: finalId,
+      metadata: finalMetadata,
+      body,
+      behavior: this.behavior
+    });
+
+    const bodyAsBuffer = typeof body === 'string'
+      ? Buffer.from(body, 'utf8')
+      : (body || Buffer.alloc(0));
+
+    insertedObject._contentLength = bodyAsBuffer.length;
+    insertedObject._hasContent = bodyAsBuffer.length > 0;
+    insertedObject._mimeType = contentType || null;
+    insertedObject._etag = putResponse?.ETag;
+    insertedObject._v = this.version;
+    insertedObject._lastModified = new Date();
+    insertedObject._definitionHash = this.resource.getDefinitionHash();
 
     if (this.config.partitions && Object.keys(this.config.partitions).length > 0) {
       if (this.config.strictPartitions) {
@@ -462,10 +477,15 @@ export class ResourcePersistence {
     let body = '';
 
     if (request.ContentLength && request.ContentLength > 0) {
-      const [okBody, , fullObject] = await tryFn<S3Response>(() => this.client.getObject(key));
-      if (okBody && fullObject?.Body) {
-        const bodyBytes = await fullObject.Body.transformToByteArray();
+      if (request.Body) {
+        const bodyBytes = await request.Body.transformToByteArray();
         body = Buffer.from(bodyBytes).toString('utf-8');
+      } else {
+        const [okBody, , fullObject] = await tryFn<S3Response>(() => this.client.getObject(key));
+        if (okBody && fullObject?.Body) {
+          const bodyBytes = await fullObject.Body.transformToByteArray();
+          body = Buffer.from(bodyBytes).toString('utf-8');
+        }
       }
     }
 
@@ -644,13 +664,22 @@ export class ResourcePersistence {
         suggestion: 'Provide an id when calling upsert().'
       });
     }
-    const exists = await this.exists(id);
 
-    if (exists) {
+    const [okInsert, errInsert, inserted] = await tryFn<ResourceData>(() => this.insert({ id, ...attributes }));
+    if (okInsert && inserted) {
+      return inserted;
+    }
+
+    const duplicateConflict =
+      errInsert instanceof InvalidResourceItem &&
+      typeof errInsert.message === 'string' &&
+      errInsert.message.includes(`Resource with id '${id}' already exists`);
+
+    if (duplicateConflict) {
       return this.update(id, attributes);
     }
 
-    return this.insert({ id, ...attributes });
+    throw errInsert;
   }
 
   async insertMany(objects: InsertParams[]): Promise<ResourceData[]> {
@@ -695,8 +724,21 @@ export class ResourcePersistence {
       });
     }
 
-    const exists = await this.exists(id);
-    if (!exists) {
+    const [okOriginalData, errOriginalData, originalData] = await tryFn<ResourceData>(() => this.get(id));
+    if (!okOriginalData || !originalData) {
+      if (errOriginalData && isNotFoundError(errOriginalData)) {
+        throw new ResourceError(`Resource with id '${id}' does not exist`, {
+          resourceName: this.name,
+          id,
+          statusCode: 404,
+          retriable: false,
+          suggestion: 'Ensure the record exists or create it before attempting an update.'
+        });
+      }
+      throw errOriginalData;
+    }
+
+    if (!originalData) {
       throw new ResourceError(`Resource with id '${id}' does not exist`, {
         resourceName: this.name,
         id,
@@ -705,8 +747,6 @@ export class ResourcePersistence {
         suggestion: 'Ensure the record exists or create it before attempting an update.'
       });
     }
-
-    const originalData = await this.get(id);
     let mergedData: ResourceData = { ...originalData };
 
     for (const [key, value] of Object.entries(attributes)) {
@@ -1209,15 +1249,13 @@ export class ResourcePersistence {
       });
     }
 
-    const exists = await this.exists(id);
-    if (!exists) {
+    const originalData = await this.getOrNull(id);
+    if (!originalData) {
       return {
         success: false,
         error: `Resource with id '${id}' does not exist`
       };
     }
-
-    const originalData = await this.get(id);
     let mergedData: ResourceData = { ...originalData };
 
     for (const [key, value] of Object.entries(attributes)) {

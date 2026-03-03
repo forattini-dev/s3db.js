@@ -364,6 +364,37 @@ describe('Resource Pagination - Real Integration Tests', () => {
     expect(endTime - startTime).toBeLessThan(10000); // Should complete in under 10 seconds
   });
 
+  test('Pagination Offset Consistency', async () => {
+    const resource = await database.createResource({
+      name: 'offset_consistency',
+      attributes: {
+        id: 'string|optional',
+        name: 'string|required',
+        timestamp: 'string|required'
+      }
+    });
+
+    const items = Array.from({ length: 20 }, (_, i) => ({
+      id: `item-${i + 1}`,
+      name: `Item ${i + 1}`,
+      timestamp: new Date(Date.now() + i * 1000).toISOString()
+    }));
+
+    await resource.insertMany(items);
+
+    const page2a = await resource.page({ size: 5, offset: 5 });
+    const page2b = await resource.page({ size: 5, offset: 5 });
+
+    expect(page2a.items).toHaveLength(page2b.items.length);
+    const page2aIds = page2a.items.map(item => item.id).sort();
+    const page2bIds = page2b.items.map(item => item.id).sort();
+    expect(page2aIds).toEqual(page2bIds);
+
+    const page3 = await resource.page({ size: 5, offset: 10 });
+    const page3Ids = page3.items.map(item => item.id).sort();
+    expect(page3Ids).not.toEqual(page2aIds);
+  });
+
   test('Pagination Cursor Consistency', async () => {
     const resource = await database.createResource({
       name: 'consistency',
@@ -383,24 +414,79 @@ describe('Resource Pagination - Real Integration Tests', () => {
 
     await resource.insertMany(items);
 
-    // Test that pagination returns consistent results
-    const page1 = await resource.page({ size: 5, offset: 0 });
-    const offset1 = 5;
+    // Start cursor-based pagination (cursor: null means first cursor page)
+    const page1 = await resource.page({ size: 5, cursor: null, skipCount: true });
+    expect(page1.items).toHaveLength(5);
+    expect(typeof page1.nextCursor).toBe('string');
 
-    // Use the same offset multiple times
-    const page2a = await resource.page({ size: 5, offset: offset1 });
-    const page2b = await resource.page({ size: 5, offset: offset1 });
+    // Reuse the same cursor and ensure deterministic page contents
+    const page2a = await resource.page({ size: 5, cursor: page1.nextCursor as string, skipCount: true });
+    const page2b = await resource.page({ size: 5, cursor: page1.nextCursor as string, skipCount: true });
 
-    // Both pages should have the same number of items
     expect(page2a.items).toHaveLength(page2b.items.length);
-    // Both pages should contain the same item IDs (order may vary)
     const page2aIds = page2a.items.map(item => item.id).sort();
     const page2bIds = page2b.items.map(item => item.id).sort();
     expect(page2aIds).toEqual(page2bIds);
 
-    // Test that different offsets return different results
-    const page3 = await resource.page({ size: 5, offset: 10 });
-    expect(page3.items).not.toEqual(page2a.items);
+    // Advancing cursor should move to a different page
+    const page3 = await resource.page({ size: 5, cursor: page2a.nextCursor as string, skipCount: true });
+    const page3Ids = page3.items.map(item => item.id).sort();
+    expect(page3Ids).not.toEqual(page2aIds);
+  });
+
+  test('Pagination Cursor Rejects Page Size Mismatch', async () => {
+    const resource = await database.createResource({
+      name: 'cursor_size_mismatch',
+      attributes: {
+        id: 'string|optional',
+        name: 'string|required'
+      }
+    });
+
+    const items = Array.from({ length: 12 }, (_, i) => ({
+      id: `item-${i + 1}`,
+      name: `Item ${i + 1}`
+    }));
+
+    await resource.insertMany(items);
+
+    const firstPage = await resource.page({ size: 4, cursor: null, skipCount: true });
+    expect(typeof firstPage.nextCursor).toBe('string');
+
+    await expect(
+      resource.page({ size: 2, cursor: firstPage.nextCursor as string, skipCount: true })
+    ).rejects.toThrow('Invalid pagination cursor');
+  });
+
+  test('Pagination Page Number Navigation via Cursor Checkpoints', async () => {
+    const resource = await database.createResource({
+      name: 'page_mode_cursor',
+      attributes: {
+        id: 'string|optional',
+        name: 'string|required'
+      }
+    });
+
+    const items = Array.from({ length: 12 }, (_, i) => ({
+      id: `item-${i + 1}`,
+      name: `Item ${i + 1}`
+    }));
+
+    await resource.insertMany(items);
+
+    const page2 = await resource.page({ size: 5, page: 2, skipCount: true });
+    expect(page2.page).toBe(2);
+    expect(page2.items).toHaveLength(5);
+
+    const page3 = await resource.page({ size: 5, page: 3, skipCount: true });
+    expect(page3.page).toBe(3);
+    expect(page3.items).toHaveLength(2);
+    expect(page3.hasMore).toBe(false);
+
+    const page4 = await resource.page({ size: 5, page: 4, skipCount: true });
+    expect(page4.page).toBe(4);
+    expect(page4.items).toHaveLength(0);
+    expect(page4.hasMore).toBe(false);
   });
 
   test('Pagination with Deleted Items', async () => {
