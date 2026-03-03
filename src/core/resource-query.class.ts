@@ -627,7 +627,7 @@ export class ResourceQuery {
     this.resource._emitStandardized('list', { partition, partitionValues, count: 0, errors: 1 });
 
     if (error && typeof error === 'object') {
-      const errObj = error as Record<string, unknown>;
+      const errObj = error as unknown as Record<string, unknown>;
       if ('statusCode' in errObj || 'retriable' in errObj) {
         throw error;
       }
