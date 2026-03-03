@@ -1,4 +1,4 @@
-import type { Context as HonoContext } from 'hono';
+import type { Context as AppContext } from '#src/plugins/shared/http-runtime.js';
 
 export interface UserInfo {
   sub?: string;
@@ -23,7 +23,7 @@ export interface GuardContext {
   tenantId: string | null;
   userId: string | null;
   setPartition(name: string, values: Record<string, unknown>): void;
-  raw: { req?: unknown; c?: HonoContext; request?: unknown };
+  raw: { req?: unknown; c?: AppContext; request?: unknown };
 }
 
 export interface ResourceLike {
@@ -69,11 +69,11 @@ export function createExpressContext(req: ExpressRequest): GuardContext {
   return context;
 }
 
-export async function createHonoContext(c: HonoContext): Promise<GuardContext> {
+export async function createAppContext(c: AppContext): Promise<GuardContext> {
   const context: GuardContext = {
-    user: c.get('user') || {},
+    user: (c.get('user') as Record<string, unknown>) || {},
     params: c.req.param(),
-    body: await c.req.json().catch(() => ({})),
+    body: await c.req.json().catch(() => ({})) as Record<string, unknown>,
     query: c.req.query(),
     headers: Object.fromEntries((c.req.raw.headers as unknown as { entries(): IterableIterator<[string, string]> }).entries()),
     partitionName: null,

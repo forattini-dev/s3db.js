@@ -1,4 +1,4 @@
-import type { MiddlewareHandler } from 'hono';
+import type { MiddlewareHandler } from '#src/plugins/shared/http-runtime.js';
 import type { Logger } from '../../../../concerns/logger.js';
 import type { ResourceLike, DatabaseLike } from '../resource-manager.js';
 import type { DriverDefinition, BaseAuthStrategy } from './base-strategy.class.js';

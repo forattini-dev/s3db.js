@@ -1,5 +1,6 @@
-import type { Context, Hono as HonoType, MiddlewareHandler } from 'hono';
-import type { ContentfulStatusCode } from 'hono/utils/http-status';
+import type { Context, HttpApp as HttpAppType, MiddlewareHandler } from '#src/plugins/shared/http-runtime.js';
+import type { ContentfulStatusCode } from '#src/plugins/shared/http-runtime.js';
+import type { HttpMethod } from 'raffel/http';
 import { asyncHandler } from '../utils/error-handler.js';
 import { createLogger } from '../../../concerns/logger.js';
 import type { Logger } from '../../../concerns/logger.js';
@@ -257,12 +258,12 @@ function parseCustomRoute(routeDef: string): ParsedRoute {
   return { method, path, isAsync };
 }
 
-interface HonoAppWithDescribe extends HonoType {
-  describe?(meta: Record<string, unknown>): HonoAppWithDescribe;
+interface HttpAppWithDescribe extends HttpAppType {
+  describe?(meta: Record<string, unknown>): HttpAppWithDescribe;
 }
 
-export function createResourceRoutes(resource: ResourceLike, version: string, config: ResourceRoutesConfig = {}, Hono: new () => HonoType): HonoType {
-  const app = new Hono() as HonoAppWithDescribe;
+export function createResourceRoutes(resource: ResourceLike, version: string, config: ResourceRoutesConfig = {}, HttpApp: new () => HttpAppType): HttpAppType {
+  const app = new HttpApp() as HttpAppWithDescribe;
 
   if (!app.describe) {
     app.describe = function(meta: Record<string, unknown>) {
@@ -305,7 +306,7 @@ export function createResourceRoutes(resource: ResourceLike, version: string, co
       try {
         const { method, path } = parseCustomRoute(routeDef);
 
-        app.on(method, path, asyncHandler(async (c: Context) => {
+        app.on(method as HttpMethod | '*', path, asyncHandler(async (c: Context) => {
           const result = await (handler as (c: Context, ctx: { resource: ResourceLike; database: unknown }) => Promise<unknown>)(c, { resource, database: resource.database });
 
           if (result && (result as Response).constructor && (result as Response).constructor.name === 'Response') {
@@ -448,7 +449,7 @@ export function createResourceRoutes(resource: ResourceLike, version: string, co
 
   if (methods.includes('GET')) {
     const getHandler = asyncHandler(async (c: Context) => {
-      const id = c.req.param('id');
+      const id = c.req.param('id')!;
       const query = c.req.query();
       const partition = query.partition;
       const partitionValues = parsePartitionValues(query.partitionValues);
@@ -521,7 +522,7 @@ export function createResourceRoutes(resource: ResourceLike, version: string, co
 
   if (methods.includes('POST')) {
     const createHandler = asyncHandler(async (c: Context) => {
-      const data = await c.req.json();
+      const data = await c.req.json() as Record<string, unknown>;
 
       const item = await resource.insert(data, {
         user: c.get('user'),
@@ -571,8 +572,8 @@ export function createResourceRoutes(resource: ResourceLike, version: string, co
 
   if (methods.includes('PUT')) {
     const updateHandler = asyncHandler(async (c: Context) => {
-      const id = c.req.param('id');
-      const data = await c.req.json();
+      const id = c.req.param('id')!;
+      const data = await c.req.json() as Record<string, unknown>;
 
       const existing = await resource.get(id);
       if (!existing) {
@@ -642,8 +643,8 @@ export function createResourceRoutes(resource: ResourceLike, version: string, co
 
   if (methods.includes('PATCH')) {
     const patchHandler = asyncHandler(async (c: Context) => {
-      const id = c.req.param('id');
-      const data = await c.req.json();
+      const id = c.req.param('id')!;
+      const data = await c.req.json() as Record<string, unknown>;
 
       const existing = await resource.get(id);
       if (!existing) {
@@ -715,7 +716,7 @@ export function createResourceRoutes(resource: ResourceLike, version: string, co
 
   if (methods.includes('DELETE')) {
     const deleteHandler = asyncHandler(async (c: Context) => {
-      const id = c.req.param('id');
+      const id = c.req.param('id')!;
 
       const existing = await resource.get(id);
       if (!existing) {
@@ -775,7 +776,7 @@ export function createResourceRoutes(resource: ResourceLike, version: string, co
     });
 
     const headItemHandler = asyncHandler(async (c: Context) => {
-      const id = c.req.param('id');
+      const id = c.req.param('id')!;
       const item = await resource.get(id);
 
       if (!item) {
@@ -909,8 +910,8 @@ export interface RelationConfig {
   [key: string]: unknown;
 }
 
-export function createRelationalRoutes(sourceResource: ResourceLike, relationName: string, relationConfig: RelationConfig, version: string, Hono: new () => HonoType): HonoType {
-  const app = new Hono();
+export function createRelationalRoutes(sourceResource: ResourceLike, relationName: string, relationConfig: RelationConfig, version: string, HttpApp: new () => HttpAppType): HttpAppType {
+  const app = new HttpApp();
   const resourceName = sourceResource.name;
   const relatedResourceName = relationConfig.resource;
 

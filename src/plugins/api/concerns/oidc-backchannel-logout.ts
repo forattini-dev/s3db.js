@@ -1,6 +1,6 @@
 import { jwtVerify } from 'jose';
 import type { JWTPayload, CryptoKey, KeyObject } from 'jose';
-import type { Context } from 'hono';
+import type { Context } from '#src/plugins/shared/http-runtime.js';
 import { createLogger } from '../../../concerns/logger.js';
 import type { Logger, LogLevel } from '../../../concerns/logger.js';
 
@@ -202,12 +202,12 @@ export async function handleBackchannelLogout(
   }
 }
 
-interface HonoApp {
+interface HttpApp {
   post(path: string, handler: (c: Context) => Promise<Response>): void;
 }
 
 export function registerBackchannelLogoutRoute(
-  app: HonoApp,
+  app: HttpApp,
   path: string,
   config: OidcConfig,
   signingKey: KeyLike,

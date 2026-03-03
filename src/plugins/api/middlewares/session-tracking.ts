@@ -1,9 +1,9 @@
-import type { Context, MiddlewareHandler, Next } from 'hono';
+import type { Context, MiddlewareHandler, Next } from '#src/plugins/shared/http-runtime.js';
 import { encrypt, decrypt } from '../../../concerns/crypto.js';
 import { createLogger } from '../../../concerns/logger.js';
 import type { Logger } from '../../../concerns/logger.js';
 import { idGenerator } from '../../../concerns/id.js';
-import { getCookie, setCookie } from 'hono/cookie';
+import { getCookie, setCookie } from '#src/plugins/shared/http-runtime.js';
 
 const logger: Logger = createLogger({ name: 'SessionTracking', level: 'info' });
 

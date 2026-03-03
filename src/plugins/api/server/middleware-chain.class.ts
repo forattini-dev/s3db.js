@@ -1,4 +1,4 @@
-import type { Context, Next, MiddlewareHandler } from 'hono';
+import type { Context, Next, MiddlewareHandler } from '#src/plugins/shared/http-runtime.js';
 import type { Logger } from '../../../concerns/logger.js';
 import { idGenerator } from '../../../concerns/id.js';
 import { createRequestIdMiddleware } from '../middlewares/request-id.js';
@@ -10,7 +10,7 @@ import { errorHelper } from '../middlewares/error-helper.js';
 import { setupTemplateEngine, type TemplateEngineOptions } from '../utils/template-engine.js';
 import * as formatter from '../../shared/response-formatter.js';
 
-type HonoType = {
+type HttpAppType = {
   use: (path: string, handler: MiddlewareHandler) => void;
 };
 
@@ -149,7 +149,7 @@ export class MiddlewareChain {
     this.corsMiddleware = corsMiddleware;
   }
 
-  async apply(app: HonoType): Promise<void> {
+  async apply(app: HttpAppType): Promise<void> {
     this.applyRequestTracking(app);
     this.applyFailban(app);
     this.applyRequestId(app);
@@ -163,7 +163,7 @@ export class MiddlewareChain {
     this.applyBodySizeLimits(app);
   }
 
-  private applyRequestTracking(app: HonoType): void {
+  private applyRequestTracking(app: HttpAppType): void {
     app.use('*', async (c: Context, next: Next): Promise<Response | void> => {
       if (!this.acceptingRequests()) {
         return c.json({ error: 'Server is shutting down' }, 503);
@@ -189,7 +189,7 @@ export class MiddlewareChain {
         this.events.emitRequestEvent('end', {
           ...requestInfo,
           duration: Date.now() - startTime,
-          status: c.res.status
+          status: c.res!.status
         });
       } catch (err) {
         this.events.emitRequestEvent('error', {
@@ -205,7 +205,7 @@ export class MiddlewareChain {
     });
   }
 
-  private applyFailban(app: HonoType): void {
+  private applyFailban(app: HttpAppType): void {
     if (!this.failban) {
       return;
     }
@@ -229,7 +229,7 @@ export class MiddlewareChain {
     this.logger.debug('Failban protection enabled');
   }
 
-  private applyRequestId(app: HonoType): void {
+  private applyRequestId(app: HttpAppType): void {
     if (!this.requestId?.enabled) {
       app.use('*', async (c: Context, next: Next) => {
         c.set('logLevel', this.logLevel);
@@ -245,7 +245,7 @@ export class MiddlewareChain {
     this.logger.debug({ headerName }, `Request ID tracking enabled (header: ${headerName})`);
   }
 
-  private async applyHttpLogger(app: HonoType): Promise<void> {
+  private async applyHttpLogger(app: HttpAppType): Promise<void> {
     if (!this.httpLogger?.enabled || !this.logger) {
       return;
     }
@@ -266,7 +266,7 @@ export class MiddlewareChain {
     }, 'Pino HTTP logger enabled');
   }
 
-  private applyErrorHelper(app: HonoType): void {
+  private applyErrorHelper(app: HttpAppType): void {
     const errorMiddleware = errorHelper({
       includeStack: process.env.NODE_ENV !== 'production',
       logLevel: this.logLevel
@@ -277,7 +277,7 @@ export class MiddlewareChain {
     this.logger.debug('Error helper enabled (c.error() method available)');
   }
 
-  private applyCors(app: HonoType): void {
+  private applyCors(app: HttpAppType): void {
     if (!this.cors?.enabled || !this.corsMiddleware) {
       return;
     }
@@ -297,7 +297,7 @@ export class MiddlewareChain {
     this.logger.debug({ maxAge, origin }, `CORS enabled (maxAge: ${maxAge}s, origin: ${origin})`);
   }
 
-  private applySecurity(app: HonoType): void {
+  private applySecurity(app: HttpAppType): void {
     if (!this.security?.enabled) {
       return;
     }
@@ -308,7 +308,7 @@ export class MiddlewareChain {
     this.logger.debug('Security headers enabled');
   }
 
-  private applySessionTracking(app: HonoType): void {
+  private applySessionTracking(app: HttpAppType): void {
     if (!this.sessionTracking?.enabled) {
       return;
     }
@@ -323,7 +323,7 @@ export class MiddlewareChain {
     this.logger.debug({ storageType }, `Session tracking enabled (${storageType})`);
   }
 
-  private applyCustomMiddlewares(app: HonoType): void {
+  private applyCustomMiddlewares(app: HttpAppType): void {
     this.middlewares.forEach(middleware => {
       app.use('*', middleware);
     });
@@ -333,7 +333,7 @@ export class MiddlewareChain {
     }
   }
 
-  private applyTemplates(app: HonoType): void {
+  private applyTemplates(app: HttpAppType): void {
     if (!this.templates?.enabled) {
       return;
     }
@@ -344,7 +344,7 @@ export class MiddlewareChain {
     this.logger.debug({ engine: this.templates.engine }, `Template engine enabled: ${this.templates.engine}`);
   }
 
-  private applyBodySizeLimits(app: HonoType): void {
+  private applyBodySizeLimits(app: HttpAppType): void {
     app.use('*', async (c: Context, next: Next): Promise<Response | void> => {
       const method = c.req.method;
 

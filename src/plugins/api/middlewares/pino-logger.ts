@@ -1,4 +1,4 @@
-import type { Context, MiddlewareHandler, Next } from 'hono';
+import type { Context, MiddlewareHandler, Next } from '#src/plugins/shared/http-runtime.js';
 
 export interface LoggerLike {
   info(obj: unknown, msg?: string): void;
@@ -202,7 +202,7 @@ function createSimpleHttpLoggerMiddleware(options: PinoLoggerOptions): Middlewar
       await next();
 
       const duration = Date.now() - startTime;
-      const statusCode = c.res.status || 200;
+      const statusCode = c.res!.status || 200;
 
       const level = customLogLevel(
         { method, url: c.req.url },
@@ -220,7 +220,7 @@ function createSimpleHttpLoggerMiddleware(options: PinoLoggerOptions): Middlewar
           res: {
             statusCode,
             headers: {
-              'content-type': c.res.headers.get('content-type')
+              'content-type': c.res!.headers.get('content-type')
             }
           },
           responseTime: duration
@@ -308,12 +308,12 @@ export async function createPinoLoggerMiddleware(options: PinoLoggerOptions): Pr
       await next();
 
       if (autoLogging && req.log) {
-        const statusCode = c.res.status || 200;
+        const statusCode = c.res!.status || 200;
         const level = customLogLevel(req, { statusCode } as ResponseLike, null);
 
         const logFn = req.log[level];
         if (typeof logFn === 'function') {
-          const headers = c.res.headers as unknown as { entries(): IterableIterator<[string, string]> };
+          const headers = c.res!.headers as unknown as { entries(): IterableIterator<[string, string]> };
           (logFn as (obj: unknown, msg: string) => void).call(req.log, {
             res: {
               statusCode,
@@ -332,7 +332,7 @@ export async function createPinoLoggerMiddleware(options: PinoLoggerOptions): Pr
 }
 
 export function getRequestLogger(c: Context): LoggerLike {
-  return c.get('reqLogger') || c.get('logger');
+  return (c.get('reqLogger') || c.get('logger')) as LoggerLike;
 }
 
 export function customLogLevelExample(req: RequestLike | { method: string; url: string }, res: ResponseLike | { statusCode: number }): string {

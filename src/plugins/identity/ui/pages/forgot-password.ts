@@ -2,8 +2,7 @@
  * Forgot Password Page
  */
 
-import { html } from 'hono/html';
-import type { HtmlEscapedString } from 'hono/utils/html';
+import { html, type HtmlEscapedString } from '#src/plugins/shared/html.js';
 import { BaseLayout, type ThemeConfig } from '../layouts/base.js';
 
 export interface ForgotPasswordPageProps {

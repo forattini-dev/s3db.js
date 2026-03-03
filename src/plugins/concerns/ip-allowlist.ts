@@ -1,4 +1,4 @@
-export interface HonoContext {
+export interface AppContext {
   req: {
     header(name: string): string | undefined;
     raw: {
@@ -94,7 +94,7 @@ export function isIpAllowed(ip: string | null | undefined, allowlist: string[] =
   return false;
 }
 
-export function getClientIp(c: HonoContext): string | null {
+export function getClientIp(c: AppContext): string | null {
   const forwarded = c.req.header('x-forwarded-for');
   if (forwarded) {
     return forwarded.split(',')[0]!.trim();

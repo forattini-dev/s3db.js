@@ -1,4 +1,4 @@
-import type { Context, Next, MiddlewareHandler } from 'hono';
+import type { Context, Next, MiddlewareHandler } from '#src/plugins/shared/http-runtime.js';
 
 export interface CSPDirectives {
   'default-src'?: string[];

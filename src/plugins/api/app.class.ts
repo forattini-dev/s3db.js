@@ -10,8 +10,8 @@
  * - app.group() for route composition
  */
 
-import { Hono } from 'hono';
-import type { Context, Next, MiddlewareHandler as HonoMiddleware, TypedResponse } from 'hono';
+import { HttpApp } from '#src/plugins/shared/http-runtime.js';
+import type { Context, Next, MiddlewareHandler as HttpMiddleware, TypedResponse } from '#src/plugins/shared/http-runtime.js';
 import Validator from 'fastest-validator';
 import { RouteContext } from './route-context.class.js';
 
@@ -43,7 +43,7 @@ export interface RouteMetadata {
   protected: string[];
   priority: number;
   compiledValidator: ((data: unknown) => true | ValidationError[]) | null;
-  handlers?: HonoMiddleware[];
+  handlers?: HttpMiddleware[];
 }
 
 export interface ValidationError {
@@ -59,7 +59,7 @@ export interface GuardEntry {
 }
 
 export interface MiddlewareEntry {
-  fn: HonoMiddleware;
+  fn: HttpMiddleware;
   priority: number;
   name: string;
 }
@@ -169,7 +169,7 @@ interface ValidatorInstance {
 }
 
 export class ApiApp {
-  hono: Hono;
+  app: HttpApp;
   routes: RouteMetadata[];
   guards: Map<string, GuardEntry>;
   middlewares: MiddlewareEntry[];
@@ -179,7 +179,7 @@ export class ApiApp {
   schemaCache: Map<string, SchemaCache>;
 
   constructor({ db = null, resources = null }: ApiAppOptions = {}) {
-    this.hono = new Hono();
+    this.app = new HttpApp();
     this.routes = [];
     this.guards = new Map();
     this.middlewares = [];
@@ -189,9 +189,9 @@ export class ApiApp {
     this.schemaCache = new Map();
   }
 
-  route(methodOrPath: string, pathOrApp: string | Hono, options: RouteOptions = {}, handler?: RouteHandler): ApiApp {
+  route(methodOrPath: string, pathOrApp: string | HttpApp, options: RouteOptions = {}, handler?: RouteHandler): ApiApp {
     if (typeof methodOrPath === 'string' && methodOrPath.startsWith('/')) {
-      this.hono.route(methodOrPath, pathOrApp as Hono);
+      this.app.route(methodOrPath, pathOrApp as HttpApp);
       return this;
     }
 
@@ -235,7 +235,7 @@ export class ApiApp {
     this.routes.push(route);
 
     const methodLower = method.toLowerCase() as 'get' | 'post' | 'put' | 'patch' | 'delete';
-    (this.hono[methodLower] as (path: string, ...handlers: HonoMiddleware[]) => Hono)(path, ...chain);
+    (this.app[methodLower] as (path: string, ...handlers: HttpMiddleware[]) => HttpApp)(path, ...chain);
 
     return this;
   }
@@ -281,12 +281,12 @@ export class ApiApp {
   }
 
   use(
-    pathOrMiddleware: string | HonoMiddleware,
-    middlewareOrOptions?: HonoMiddleware | { priority?: number; name?: string },
+    pathOrMiddleware: string | HttpMiddleware,
+    middlewareOrOptions?: HttpMiddleware | { priority?: number; name?: string },
     maybeOptions: { priority?: number; name?: string } = {}
   ): ApiApp {
     const isPathSignature = typeof pathOrMiddleware === 'string';
-    const middleware = isPathSignature ? middlewareOrOptions as HonoMiddleware : pathOrMiddleware;
+    const middleware = isPathSignature ? middlewareOrOptions as HttpMiddleware : pathOrMiddleware;
     const options = isPathSignature ? maybeOptions : (middlewareOrOptions as { priority?: number; name?: string }) || {};
 
     if (typeof middleware !== 'function') {
@@ -447,16 +447,16 @@ export class ApiApp {
   }
 
   get fetch(): (request: Request, env?: unknown, executionContext?: unknown) => Response | Promise<Response> {
-    return this.hono.fetch.bind(this.hono) as (request: Request, env?: unknown, executionContext?: unknown) => Response | Promise<Response>;
+    return this.app.fetch.bind(this.app) as (request: Request, env?: unknown, executionContext?: unknown) => Response | Promise<Response>;
   }
 
   onError(handler: (err: Error, c: Context) => Response | Promise<Response>): ApiApp {
-    this.hono.onError(handler);
+    this.app.onError(handler);
     return this;
   }
 
   notFound(handler: (c: Context) => Response | Promise<Response>): ApiApp {
-    this.hono.notFound(handler);
+    this.app.notFound(handler);
     return this;
   }
 
@@ -643,8 +643,8 @@ export class ApiApp {
     return { compiledValidator, openApiRequestSchema, openApiResponseSchema };
   }
 
-  private _buildMiddlewareChain(route: RouteMetadata, handler: RouteHandler): HonoMiddleware[] {
-    const chain: HonoMiddleware[] = [];
+  private _buildMiddlewareChain(route: RouteMetadata, handler: RouteHandler): HttpMiddleware[] {
+    const chain: HttpMiddleware[] = [];
 
     chain.push(async (c: Context, next: Next) => {
       const ctx = new RouteContext(c, { db: this.db, resources: this.resources });
@@ -698,7 +698,7 @@ export class ApiApp {
     return chain;
   }
 
-  private _createValidationMiddleware(route: RouteMetadata): HonoMiddleware {
+  private _createValidationMiddleware(route: RouteMetadata): HttpMiddleware {
     const validator = route.compiledValidator!;
     const method = route.method;
 
@@ -723,7 +723,7 @@ export class ApiApp {
     };
   }
 
-  private _createGuardsMiddleware(guards: Array<{ name: string; fn: GuardFunction; priority: number }>): HonoMiddleware {
+  private _createGuardsMiddleware(guards: Array<{ name: string; fn: GuardFunction; priority: number }>): HttpMiddleware {
     return async (c: Context, next: Next): Promise<Response | void> => {
       const ctx = c.get('ctx' as never) as RouteContext;
 

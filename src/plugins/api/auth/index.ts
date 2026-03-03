@@ -1,4 +1,4 @@
-import type { Context, Next, MiddlewareHandler } from 'hono';
+import type { Context, Next, MiddlewareHandler } from '#src/plugins/shared/http-runtime.js';
 import type { DatabaseLike } from './resource-manager.js';
 import { createJWTHandler, createToken, verifyToken, type JWTConfig } from './jwt-auth.js';
 import { createApiKeyHandler, generateApiKey, type ApiKeyConfig } from './api-key-auth.js';
@@ -6,7 +6,7 @@ import { createBasicAuthHandler, type BasicAuthConfig } from './basic-auth.js';
 import { createOAuth2Handler, type OAuth2Config } from './oauth2-auth.js';
 import { OIDCClient } from './oidc-client.js';
 import { unauthorized } from '../utils/response-formatter.js';
-import { getCookie } from 'hono/cookie';
+import { getCookie } from '#src/plugins/shared/http-runtime.js';
 
 function normalizeMethodName(method: string): string {
   if (!method || typeof method !== 'string') {

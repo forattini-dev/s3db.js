@@ -35,7 +35,7 @@
  * }
  */
 
-import type { Context } from 'hono';
+import type { Context } from '#src/plugins/shared/http-runtime.js';
 import { createRemoteJWKSet, jwtVerify, type JWTPayload } from 'jose';
 import { createLogger, type Logger } from '../../../concerns/logger.js';
 import { createHttpClient, type HttpClient } from '../../../concerns/http-client.js';
@@ -118,7 +118,7 @@ export type OAuth2Handler = (c: Context) => Promise<OAuth2User | null>;
  * Create OAuth2 authentication handler (NEW API)
  * @param inputConfig - OAuth2 configuration
  * @param database - s3db.js database instance
- * @returns Hono middleware
+ * @returns HTTP middleware
  */
 export async function createOAuth2Handler(
   inputConfig: OAuth2Config,

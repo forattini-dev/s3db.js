@@ -1,5 +1,5 @@
 import { error as formatError, ErrorResponse } from './response-formatter.js';
-import type { Context } from 'hono';
+import type { Context } from '#src/plugins/shared/http-runtime.js';
 import type { S3DBLogger } from '../../concerns/logger.js';
 
 export interface S3DBError extends Error {

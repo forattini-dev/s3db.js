@@ -1,9 +1,9 @@
-import type { Context } from 'hono';
+import type { Context } from '#src/plugins/shared/http-runtime.js';
 import type { Logger, LogLevel } from '../../../concerns/logger.js';
 import * as formatter from '../../shared/response-formatter.js';
 import { createLogger } from '../../../concerns/logger.js';
 
-type HonoType = {
+type HttpAppType = {
   get: (path: string, handler: (c: Context) => Response | Promise<Response>) => void;
 };
 
@@ -69,7 +69,7 @@ export class HealthManager {
     }
   }
 
-  register(app: HonoType): void {
+  register(app: HttpAppType): void {
     app.get('/health/live', (c: Context) => this.livenessProbe(c));
     app.get('/health/ready', (c: Context) => this.readinessProbe(c));
     app.get('/health', (c: Context) => this.genericHealth(c));

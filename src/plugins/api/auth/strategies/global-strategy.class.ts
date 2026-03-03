@@ -1,4 +1,4 @@
-import type { MiddlewareHandler } from 'hono';
+import type { MiddlewareHandler } from '#src/plugins/shared/http-runtime.js';
 import { BaseAuthStrategy, type BaseAuthStrategyOptions } from './base-strategy.class.js';
 import { createAuthMiddleware } from '../index.js';
 

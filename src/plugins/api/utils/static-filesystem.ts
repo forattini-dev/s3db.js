@@ -5,7 +5,7 @@ import path from 'path';
 import { createReadStream } from 'fs';
 import crypto from 'crypto';
 import { getContentType } from './mime-types.js';
-import type { Context, MiddlewareHandler } from 'hono';
+import type { Context, MiddlewareHandler } from '#src/plugins/shared/http-runtime.js';
 
 const logger: Logger = createLogger({ name: 'StaticFilesystem', level: 'info' });
 

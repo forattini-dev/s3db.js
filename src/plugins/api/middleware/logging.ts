@@ -1,4 +1,4 @@
-import type { Context, Next } from 'hono';
+import type { Context, Next } from '#src/plugins/shared/http-runtime.js';
 import type { Logger } from '../../../concerns/logger.js';
 import { matchPath } from '../utils/path-matcher.js';
 import { formatPrettyHttpLog, colorizeStatus } from '../utils/http-logger.js';

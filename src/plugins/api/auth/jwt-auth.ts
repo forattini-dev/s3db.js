@@ -1,10 +1,10 @@
 import { createHmac, timingSafeEqual } from 'crypto';
-import type { Context, Next } from 'hono';
-import type { ContentfulStatusCode } from 'hono/utils/http-status';
+import type { Context, Next } from '#src/plugins/shared/http-runtime.js';
+import type { ContentfulStatusCode } from '#src/plugins/shared/http-runtime.js';
 import type { ResourceLike, DatabaseLike } from './resource-manager.js';
 import { createLogger } from '../../../concerns/logger.js';
 import { unauthorized } from '../utils/response-formatter.js';
-import { getCookie } from 'hono/cookie';
+import { getCookie } from '#src/plugins/shared/http-runtime.js';
 import { LRUCache } from '../concerns/lru-cache.js';
 import { JWTResourceManager } from './resource-manager.js';
 import { verifyPassword as comparePassword } from '../../../concerns/password-hashing.js';

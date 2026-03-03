@@ -1,4 +1,4 @@
-import type { Context, MiddlewareHandler, Next } from 'hono';
+import type { Context, MiddlewareHandler, Next } from '#src/plugins/shared/http-runtime.js';
 import { readFile } from 'fs/promises';
 import { join, resolve } from 'path';
 import { existsSync } from 'fs';

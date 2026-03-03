@@ -3,7 +3,7 @@
  * Session validation and authentication middleware
  */
 
-import type { Context, Next, MiddlewareHandler } from 'hono';
+import type { Context, Next, MiddlewareHandler } from '#src/plugins/shared/http-runtime.js';
 import type { SessionManager, ValidateSessionResult, SessionRecord } from '../session-manager.js';
 
 export interface SessionAuthOptions {

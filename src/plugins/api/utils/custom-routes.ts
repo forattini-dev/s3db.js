@@ -1,4 +1,4 @@
-import type { Context } from 'hono';
+import type { Context } from '#src/plugins/shared/http-runtime.js';
 import { asyncHandler } from './error-handler.js';
 import { createLogger } from '../../../concerns/logger.js';
 import type { Logger } from '../../../concerns/logger.js';
@@ -37,7 +37,7 @@ export interface ValidationError {
   error: string;
 }
 
-export interface HonoAppLike {
+export interface HttpAppLike {
   on(method: string, path: string, handler: RouteHandler): void;
 }
 
@@ -55,7 +55,7 @@ export function parseRouteKey(key: string): ParsedRoute {
 }
 
 export function mountCustomRoutes(
-  app: HonoAppLike,
+  app: HttpAppLike,
   routes: Routes | null | undefined,
   context: RouteContext = {},
   logLevel: string = 'info',

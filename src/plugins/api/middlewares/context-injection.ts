@@ -1,4 +1,4 @@
-import type { Context, MiddlewareHandler, Next } from 'hono';
+import type { Context, MiddlewareHandler, Next } from '#src/plugins/shared/http-runtime.js';
 
 export interface ResourceLike {
   [key: string]: unknown;

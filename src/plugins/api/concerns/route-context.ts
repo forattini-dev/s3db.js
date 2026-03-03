@@ -1,4 +1,4 @@
-import type { Context } from 'hono';
+import type { Context } from '#src/plugins/shared/http-runtime.js';
 import type { Database } from '../../../database.class.js';
 
 export interface UserInfo {
@@ -100,12 +100,12 @@ export class RouteContext {
   private _partitionFilters: PartitionFilter[];
 
   constructor(
-    honoContext: Context,
+    context: Context,
     database: Database,
     resource: ResourceLike | null = null,
     plugins: PluginRegistry = {}
   ) {
-    this.c = honoContext;
+    this.c = context;
     this.db = database;
     this.database = database;
     this._currentResource = resource;
@@ -195,7 +195,7 @@ export class RouteContext {
       },
 
       async validateBody(resourceName: string | null = null): Promise<ValidateBodyResult> {
-        const body = await ctx.c.req.json();
+        const body = await ctx.c.req.json() as Record<string, unknown>;
 
         if (resourceName) {
           const result = this.validate(resourceName, body);
@@ -326,19 +326,19 @@ export class RouteContext {
   }
 
   get user(): UserInfo | null {
-    return this.c.get('user') || null;
+    return (this.c.get('user') as UserInfo | null) || null;
   }
 
   get session(): Record<string, unknown> | null {
-    return this.c.get('session') || null;
+    return (this.c.get('session') as Record<string, unknown> | null) || null;
   }
 
   get sessionId(): string | null {
-    return this.c.get('sessionId') || null;
+    return (this.c.get('sessionId') as string | null) || null;
   }
 
   get requestId(): string | null {
-    return this.c.get('requestId') || null;
+    return (this.c.get('requestId') as string | null) || null;
   }
 
   get isAuthenticated(): boolean {

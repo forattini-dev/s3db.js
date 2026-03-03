@@ -1,4 +1,4 @@
-import type { Context, MiddlewareHandler, Next } from 'hono';
+import type { Context, MiddlewareHandler, Next } from '#src/plugins/shared/http-runtime.js';
 import { createLogger } from '../../../concerns/logger.js';
 import type { Logger } from '../../../concerns/logger.js';
 
@@ -84,11 +84,11 @@ export interface ViolationListenerConfig {
   events?: ApiEventEmitterLike;
 }
 
-export interface HonoLike {
-  new(): HonoAppLike;
+export interface HttpAppConstructor {
+  new(): HttpAppLike;
 }
 
-export interface HonoAppLike {
+export interface HttpAppLike {
   get(path: string, handler: (c: Context) => Promise<Response>): void;
   post(path: string, handler: (c: Context) => Promise<Response>): void;
   delete(path: string, handler: (c: Context) => Promise<Response>): void;
@@ -216,8 +216,8 @@ export function setupFailbanViolationListener(config: ViolationListenerConfig = 
   }
 }
 
-export function createFailbanAdminRoutes(Hono: HonoLike, plugin: FailbanManagerLike): HonoAppLike {
-  const app = new Hono();
+export function createFailbanAdminRoutes(HttpApp: HttpAppConstructor, plugin: FailbanManagerLike): HttpAppLike {
+  const app = new HttpApp();
 
   app.get('/bans', async (c: Context): Promise<Response> => {
     try {
@@ -236,7 +236,7 @@ export function createFailbanAdminRoutes(Hono: HonoLike, plugin: FailbanManagerL
   });
 
   app.get('/bans/:ip', async (c: Context): Promise<Response> => {
-    const ip = c.req.param('ip');
+    const ip = c.req.param('ip')!;
 
     try {
       const ban = await plugin.getBan(ip);
@@ -296,7 +296,7 @@ export function createFailbanAdminRoutes(Hono: HonoLike, plugin: FailbanManagerL
   });
 
   app.delete('/bans/:ip', async (c: Context): Promise<Response> => {
-    const ip = c.req.param('ip');
+    const ip = c.req.param('ip')!;
 
     try {
       const result = await plugin.unban(ip);

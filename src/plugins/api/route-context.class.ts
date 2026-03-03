@@ -1,12 +1,12 @@
 /**
  * RouteContext - Single, clean context for route handlers
  *
- * Wraps Hono context (c) and injects db/resources plus helper methods
- * Keeps Hono context "clean" while providing rich functionality
+ * Wraps HTTP context (c) and injects db/resources plus helper methods
+ * Keeps HTTP context "clean" while providing rich functionality
  */
 
-import type { Context } from 'hono';
-import type { ContentfulStatusCode } from 'hono/utils/http-status';
+import type { Context } from '#src/plugins/shared/http-runtime.js';
+import type { ContentfulStatusCode } from '#src/plugins/shared/http-runtime.js';
 
 export interface RouteContextOptions {
   db?: unknown | null;

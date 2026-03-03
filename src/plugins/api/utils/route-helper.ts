@@ -1,4 +1,4 @@
-import type { Context } from 'hono';
+import type { Context } from '#src/plugins/shared/http-runtime.js';
 
 export interface ResourceLike {
   [key: string]: unknown;

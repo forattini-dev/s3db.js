@@ -1,4 +1,4 @@
-import type { Context } from 'hono';
+import type { Context } from '#src/plugins/shared/http-runtime.js';
 
 const DEFAULT_LOG_FORMAT = ':verb :url => :status (:elapsed ms, :res[content-length])';
 

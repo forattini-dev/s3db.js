@@ -1,7 +1,7 @@
 import { timingSafeEqual } from 'crypto';
-import { Hono } from 'hono';
-import type { Context, MiddlewareHandler } from 'hono';
-import type { ContentfulStatusCode } from 'hono/utils/http-status';
+import { HttpApp } from '#src/plugins/shared/http-runtime.js';
+import type { Context, MiddlewareHandler } from '#src/plugins/shared/http-runtime.js';
+import type { ContentfulStatusCode } from '#src/plugins/shared/http-runtime.js';
 import { asyncHandler } from '../utils/error-handler.js';
 import * as formatter from '../utils/response-formatter.js';
 import { createToken } from '../auth/jwt-auth.js';
@@ -80,7 +80,7 @@ interface ThrottleResult {
   retryAfter?: number;
 }
 
-interface HonoRequest {
+interface HttpRawRequest {
   raw?: {
     socket?: {
       remoteAddress?: string;
@@ -88,8 +88,8 @@ interface HonoRequest {
   };
 }
 
-export function createAuthRoutes(authResource: AuthResource, config: AuthRoutesConfig = {}, authMiddleware?: MiddlewareHandler): Hono {
-  const app = new Hono();
+export function createAuthRoutes(authResource: AuthResource, config: AuthRoutesConfig = {}, authMiddleware?: MiddlewareHandler): HttpApp {
+  const app = new HttpApp();
   const {
     driver,
     drivers = [],
@@ -161,7 +161,7 @@ export function createAuthRoutes(authResource: AuthResource, config: AuthRoutesC
     if (cfConnecting) {
       return cfConnecting;
     }
-    return (c.req as unknown as HonoRequest).raw?.socket?.remoteAddress || 'unknown';
+    return (c.req as unknown as HttpRawRequest).raw?.socket?.remoteAddress || 'unknown';
   };
 
   const cleanupLoginAttempts = (): void => {
@@ -230,7 +230,7 @@ export function createAuthRoutes(authResource: AuthResource, config: AuthRoutesC
 
   if (registrationConfig.enabled) {
     app.post('/register', asyncHandler(async (c: Context) => {
-      const data = await c.req.json();
+      const data = await c.req.json() as Record<string, string>;
       const username = data[usernameField];
       const password = data[passwordField];
 
@@ -331,7 +331,7 @@ export function createAuthRoutes(authResource: AuthResource, config: AuthRoutesC
 
   if (driver === 'jwt') {
     app.post('/login', asyncHandler(async (c: Context) => {
-      const data = await c.req.json();
+      const data = await c.req.json() as Record<string, string>;
       const username = data[usernameField];
       const password = data[passwordField];
 

@@ -11,10 +11,10 @@
  */
 
 import crypto from 'crypto';
-import type { Context, Next, Hono, MiddlewareHandler } from 'hono';
-import type { ContentfulStatusCode } from 'hono/utils/http-status';
+import type { Context, Next, HttpApp, MiddlewareHandler } from '#src/plugins/shared/http-runtime.js';
+import type { ContentfulStatusCode } from '#src/plugins/shared/http-runtime.js';
 import { SignJWT, jwtVerify, type JWTPayload } from 'jose';
-import { getCookie, setCookie, deleteCookie } from 'hono/cookie';
+import { getCookie, getCookies, setCookie, deleteCookie } from '#src/plugins/shared/http-runtime.js';
 import { createLogger, type Logger, type LogLevel } from '../../../concerns/logger.js';
 import { createHttpClient, type HttpClient } from '../../../concerns/http-client.js';
 import { unauthorized } from '../utils/response-formatter.js';
@@ -798,7 +798,7 @@ async function refreshAccessToken(
  */
 export async function createOIDCHandler(
   inputConfig: OIDCConfig,
-  app: Hono,
+  app: HttpApp,
   database: DatabaseLike,
   events: OIDCEventsEmitter | null = null
 ): Promise<OIDCHandlerResult> {
@@ -1146,7 +1146,7 @@ export async function createOIDCHandler(
   ): Promise<void> {
     const path = options.path || '/';
     const domain = options.domain || config.cookieDomain;
-    const cookieJar = contextOptions.cookieJar || getCookie(c) || {};
+    const cookieJar = contextOptions.cookieJar || getCookies(c);
     const skipSessionDestroy = contextOptions.skipSessionDestroy || false;
     const sessionId = contextOptions.sessionId !== undefined
       ? contextOptions.sessionId
@@ -1176,7 +1176,7 @@ export async function createOIDCHandler(
 
   async function regenerateSession(c: Context, sessionData: SessionData): Promise<string> {
     const sessionCookieName = config.cookieName || 'oidc_session';
-    const cookieJar = getCookie(c) || {};
+    const cookieJar = getCookies(c);
     const previousSessionToken = getChunkedCookie(c, sessionCookieName, cookieJar);
 
     if (sessionStore) {
@@ -1938,8 +1938,8 @@ export async function createOIDCHandler(
 
     await next();
 
-    if (!c.res.headers.has('Cache-Control')) {
-      c.res.headers.set('Cache-Control', 'private, no-cache, no-store, must-revalidate');
+    if (!c.res!.headers.has('Cache-Control')) {
+      c.res!.headers.set('Cache-Control', 'private, no-cache, no-store, must-revalidate');
     }
 
     const updatedSessionJWT = c.get('oidc_session_jwt_updated');
@@ -1988,14 +1988,14 @@ export default createOIDCHandler;
 export function createOidcUtils(
   config: OIDCConfig,
   dependencies: {
-    app?: Hono;
+    app?: HttpApp;
     usersResource?: ResourceLike | null;
     events?: OIDCEventsEmitter | null;
   } = {}
 ): OIDCUtils {
   const noopApp = dependencies.app || {
     get: () => {}
-  } as unknown as Hono;
+  } as unknown as HttpApp;
 
   const handler = createOIDCHandler(
     config,

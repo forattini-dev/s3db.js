@@ -1,4 +1,4 @@
-import type { Context, MiddlewareHandler } from 'hono';
+import type { Context, MiddlewareHandler } from '#src/plugins/shared/http-runtime.js';
 import type { Logger, LogLevel } from '../../../concerns/logger.js';
 import { createResourceRoutes, createRelationalRoutes } from '../routes/resource-routes.js';
 import { createAuthRoutes } from '../routes/auth-routes.js';
@@ -11,12 +11,12 @@ import { createContextInjectionMiddleware } from '../middlewares/context-injecti
 import { applyBasePath } from '../utils/base-path.js';
 import { createLogger } from '../../../concerns/logger.js';
 
-type HonoConstructor = new () => HonoType;
+type HttpAppConstructor = new () => HttpAppType;
 
-type HonoType = {
+type HttpAppType = {
   get: (path: string, handler: ((c: Context) => Response | Promise<Response>) | MiddlewareHandler) => void;
   use: (path: string, handler: MiddlewareHandler) => void;
-  route: (path: string, app: HonoType) => void;
+  route: (path: string, app: HttpAppType) => void;
   on: (method: string, path: string, handler: ((c: Context) => Response | Promise<Response>) | MiddlewareHandler) => void;
 };
 
@@ -147,7 +147,7 @@ export interface RouterOptions {
   authMiddleware?: MiddlewareHandler;
   logLevel?: string;
   logger?: Logger;
-  Hono: HonoConstructor;
+  HttpApp: HttpAppConstructor;
   apiTitle?: string;
   apiDescription?: string;
   docsEnabled?: boolean;
@@ -168,7 +168,7 @@ export class Router {
   private authMiddleware: MiddlewareHandler | undefined;
   private logLevel: string | undefined;
   private logger: Logger;
-  private Hono: HonoConstructor;
+  private HttpApp: HttpAppConstructor;
   private apiTitle: string;
   private apiDescription: string;
   private docsEnabled: boolean;
@@ -189,7 +189,7 @@ export class Router {
     authMiddleware,
     logLevel,
     logger,
-    Hono,
+    HttpApp,
     apiTitle,
     apiDescription,
     docsEnabled,
@@ -217,7 +217,7 @@ export class Router {
       });
     }
 
-    this.Hono = Hono;
+    this.HttpApp = HttpApp;
     this.apiTitle = apiTitle || 's3db.js API';
     this.apiDescription = apiDescription || 'Auto-generated REST API for s3db.js resources';
     this.docsEnabled = docsEnabled !== false;
@@ -225,7 +225,7 @@ export class Router {
     this.routeSummaries = [];
   }
 
-  mount(app: HonoType, events: EventEmitter): void {
+  mount(app: HttpAppType, events: EventEmitter): void {
     const contextInjection = createContextInjectionMiddleware(this.database as unknown as Parameters<typeof createContextInjectionMiddleware>[0]);
     app.use('*', contextInjection);
 
@@ -240,7 +240,7 @@ export class Router {
     this.mountAdminRoutes(app);
   }
 
-  private mountRootRoute(app: HonoType): void {
+  private mountRootRoute(app: HttpAppType): void {
     if (this.rootRoute === false) {
       this.logger?.debug('Root route disabled via config.rootRoute = false');
       return;
@@ -424,7 +424,7 @@ export class Router {
 </html>`;
   }
 
-  private mountResourceRoutes(app: HonoType, events: EventEmitter): void {
+  private mountResourceRoutes(app: HttpAppType, events: EventEmitter): void {
     const databaseResources = this.database.resources;
     this.routeSummaries = [];
 
@@ -508,12 +508,12 @@ export class Router {
           events,
           relationsPlugin: this.relationsPlugin as unknown
         } as Parameters<typeof createResourceRoutes>[2],
-        this.Hono as unknown as Parameters<typeof createResourceRoutes>[3]
+        this.HttpApp as unknown as Parameters<typeof createResourceRoutes>[3]
       );
 
       const mountPath = prefix ? `/${prefix}/${name}` : `/${name}`;
       const fullMountPath = this._withBasePath(mountPath);
-      app.route(fullMountPath, resourceApp as unknown as HonoType);
+      app.route(fullMountPath, resourceApp as unknown as HttpAppType);
 
       this.logger?.debug({ resourceName: name, path: fullMountPath, methods }, `Mounted routes for resource '${name}' at ${fullMountPath}`);
 
@@ -533,12 +533,12 @@ export class Router {
           version
         };
 
-        mountCustomRoutes(resourceApp as unknown as HonoType, resource.config.routes as unknown as Parameters<typeof mountCustomRoutes>[1], routeContext, this.logLevel);
+        mountCustomRoutes(resourceApp as unknown as HttpAppType, resource.config.routes as unknown as Parameters<typeof mountCustomRoutes>[1], routeContext, this.logLevel);
       }
     }
   }
 
-  private mountAuthRoutes(app: HonoType): void {
+  private mountAuthRoutes(app: HttpAppType): void {
     const { drivers, resource: resourceName, usernameField, passwordField, registration, loginThrottle } = (this.auth || {});
 
     if (!drivers || (Array.isArray(drivers) && drivers.length === 0)) {
@@ -615,12 +615,12 @@ export class Router {
 
         const authPath = this._withBasePath('/auth');
 
-        app.route(authPath, authApp as unknown as HonoType);
+        app.route(authPath, authApp as unknown as HttpAppType);
 
     this.logger?.debug({ path: authPath, driver: 'jwt' }, `Mounted auth routes (driver: jwt) at ${authPath}`);
   }
 
-  private mountStaticRoutes(app: HonoType): void {
+  private mountStaticRoutes(app: HttpAppType): void {
     if (!this.staticConfigs || this.staticConfigs.length === 0) {
       return;
     }
@@ -707,7 +707,7 @@ export class Router {
     }
   }
 
-  private mountRelationalRoutes(app: HonoType): void {
+  private mountRelationalRoutes(app: HttpAppType): void {
     if (!this.relationsPlugin || !this.relationsPlugin.relations) {
       return;
     }
@@ -746,18 +746,18 @@ export class Router {
           relationName,
           relationConfig as unknown as Parameters<typeof createRelationalRoutes>[2],
           version,
-          this.Hono as unknown as Parameters<typeof createRelationalRoutes>[4]
+          this.HttpApp as unknown as Parameters<typeof createRelationalRoutes>[4]
         );
 
         const relationPath = this._withBasePath(`/${version}/${resourceName}/:id/${relationName}`);
-        app.route(relationPath, relationalApp as unknown as HonoType);
+        app.route(relationPath, relationalApp as unknown as HttpAppType);
 
         this.logger?.debug({ path: relationPath, type: relationConfig.type, targetResource: relationConfig.resource }, `Mounted relational route: ${relationPath} (${relationConfig.type} -> ${relationConfig.resource})`);
       }
     }
   }
 
-  private mountCustomRoutes(app: HonoType): void {
+  private mountCustomRoutes(app: HttpAppType): void {
     if (!this.routes || Object.keys(this.routes).length === 0) {
       return;
     }
@@ -775,7 +775,7 @@ export class Router {
     this.logger?.debug({ routeCount }, `Mounted ${routeCount} plugin-level custom routes`);
   }
 
-  private mountAdminRoutes(app: HonoType): void {
+  private mountAdminRoutes(app: HttpAppType): void {
     const metricsEnabled = this.metrics?.options?.enabled ?? false;
     if (metricsEnabled) {
       const metricsPath = this._withBasePath('/metrics');
@@ -795,9 +795,9 @@ export class Router {
     }
 
     if (this.failban) {
-      const failbanAdminRoutes = createFailbanAdminRoutes(this.Hono as unknown as Parameters<typeof createFailbanAdminRoutes>[0], this.failban as unknown as Parameters<typeof createFailbanAdminRoutes>[1]);
+      const failbanAdminRoutes = createFailbanAdminRoutes(this.HttpApp as unknown as Parameters<typeof createFailbanAdminRoutes>[0], this.failban as unknown as Parameters<typeof createFailbanAdminRoutes>[1]);
       const failbanPath = this._withBasePath('/admin/security');
-      app.route(failbanPath, failbanAdminRoutes as unknown as HonoType);
+      app.route(failbanPath, failbanAdminRoutes as unknown as HttpAppType);
 
       this.logger?.debug({ path: failbanPath }, `Failban admin endpoints enabled at ${failbanPath}`);
     }

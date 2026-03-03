@@ -32,7 +32,7 @@
  * await database.usePlugin(apiPlugin);
  */
 
-import type { Context, MiddlewareHandler } from 'hono';
+import type { Context, MiddlewareHandler } from '#src/plugins/shared/http-runtime.js';
 import { Plugin } from '../plugin.class.js';
 import { requirePluginDependency } from '../concerns/plugin-dependencies.js';
 import tryFn from '../../concerns/try-fn.js';
@@ -52,7 +52,7 @@ import { createRateLimitMiddleware } from './middleware/rate-limit.js';
 import { createSecurityMiddleware } from './middleware/security.js';
 import { initCookieChunking } from './concerns/cookie-chunking.js';
 
-import type { Hono } from 'hono';
+import type { HttpApp } from '#src/plugins/shared/http-runtime.js';
 import type {
   ResourceDescriptor,
   RegistrationConfig,
@@ -646,7 +646,7 @@ export class ApiPlugin extends Plugin {
     return this.server ? this.server.getInfo() : { isRunning: false };
   }
 
-  getApp(): Hono | null {
+  getApp(): HttpApp | null {
     return this.server ? this.server.getApp() : null;
   }
 }

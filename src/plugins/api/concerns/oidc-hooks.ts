@@ -1,6 +1,6 @@
-import { setCookie as honoSetCookie, getCookie as honoGetCookie, deleteCookie as honoDeleteCookie } from 'hono/cookie';
-import type { Context } from 'hono';
-import type { CookieOptions as HonoCookieOptions } from 'hono/utils/cookie';
+import { setCookie, getCookie, deleteCookie } from '#src/plugins/shared/http-runtime.js';
+import type { Context } from '#src/plugins/shared/http-runtime.js';
+import type { CookieOptions as HttpCookieOptions } from '#src/plugins/shared/http-runtime.js';
 import { createLogger } from '../../../concerns/logger.js';
 import type { Logger, LogLevel } from '../../../concerns/logger.js';
 
@@ -250,7 +250,7 @@ export class CookieHelpers {
   setCookie(name: string, value: string, options: CookieOptions = {}): void {
     const prefixedName = this._prefixName(name);
     const mergedOptions = { ...this.defaults, ...options };
-    honoSetCookie(this.context, prefixedName, value, mergedOptions as HonoCookieOptions);
+    setCookie(this.context, prefixedName, value, mergedOptions as HttpCookieOptions);
     logger.debug({
       httpOnly: mergedOptions.httpOnly,
       maxAge: mergedOptions.maxAge
@@ -259,13 +259,13 @@ export class CookieHelpers {
 
   getCookie(name: string): string | undefined {
     const prefixedName = this._prefixName(name);
-    return honoGetCookie(this.context, prefixedName);
+    return getCookie(this.context, prefixedName);
   }
 
   deleteCookie(name: string, options: CookieOptions = {}): void {
     const prefixedName = this._prefixName(name);
     const mergedOptions = { ...this.defaults, ...options, maxAge: -1 };
-    honoDeleteCookie(this.context, prefixedName, mergedOptions as HonoCookieOptions);
+    deleteCookie(this.context, prefixedName, mergedOptions as HttpCookieOptions);
     logger.debug({ prefixedName }, `Cookie deleted: ${prefixedName}`);
   }
 
@@ -294,11 +294,11 @@ export class CookieHelpers {
   }
 
   getSessionId(): string | undefined {
-    return this.context.get('sessionId');
+    return this.context.get('sessionId') as string | undefined;
   }
 
   getSessionData(): Record<string, unknown> | undefined {
-    return this.context.get('sessionData');
+    return this.context.get('sessionData') as Record<string, unknown> | undefined;
   }
 }
 

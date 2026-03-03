@@ -1,13 +1,12 @@
 /**
  * Base HTML Layout for Identity Provider UI
- * Uses Hono's html helper for server-side rendering
+ * Uses shared html helper for server-side rendering
  */
 
-import { html } from 'hono/html';
+import { html, type HtmlEscapedString } from '#src/plugins/shared/html.js';
 import { readFileSync } from 'fs';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
-import type { HtmlEscapedString } from 'hono/utils/html';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);

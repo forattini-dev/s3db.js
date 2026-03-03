@@ -1,5 +1,5 @@
 /**
- * Identity Server - Hono-based HTTP server for Identity Provider Plugin
+ * Identity Server - Raffel-based HTTP server for Identity Provider Plugin
  *
  * Manages OAuth2/OIDC endpoints only (no CRUD routes)
  */
@@ -13,7 +13,8 @@ import {
 } from '../shared/middlewares/index.js';
 import { idGenerator } from '../../concerns/id.js';
 import { createJsonRateLimitMiddleware, RateLimiter } from './concerns/rate-limit.js';
-import type { Context as HonoContext, Hono as HonoApp } from 'hono';
+import { HttpApp, type Context as AppContext } from '#src/plugins/shared/http-runtime.js';
+import { serve } from '#src/plugins/shared/http-runtime.js';
 
 export interface IdentityServerOptions {
   port?: number;
@@ -140,7 +141,7 @@ interface ServerInfo {
   port: number;
 }
 
-function createExpressStyleResponse(c: HonoContext): ExpressStyleResponse {
+function createExpressStyleResponse(c: AppContext): ExpressStyleResponse {
   let statusCode = 200;
 
   const response: ExpressStyleResponse = {
@@ -194,8 +195,8 @@ function parseCookies(cookieHeader: string | undefined): Record<string, string> 
     }, {});
 }
 
-async function createExpressStyleRequest(c: HonoContext): Promise<ExpressStyleRequest> {
-  const cached = c.get('expressStyleRequest');
+async function createExpressStyleRequest(c: AppContext): Promise<ExpressStyleRequest> {
+  const cached = c.get('expressStyleRequest') as ExpressStyleRequest | undefined;
   if (cached) {
     return cached;
   }
@@ -225,8 +226,8 @@ async function createExpressStyleRequest(c: HonoContext): Promise<ExpressStyleRe
 
   const query = Object.fromEntries(url.searchParams.entries());
   const cookies = parseCookies(headers.cookie);
-  const clientIp =
-    c.get('clientIp') ||
+  const clientIp: string =
+    (c.get('clientIp') as string | undefined) ||
     c.req.header('x-forwarded-for')?.split(',')[0]?.trim() ||
     c.req.header('x-real-ip') ||
     'unknown';
@@ -253,13 +254,13 @@ async function createExpressStyleRequest(c: HonoContext): Promise<ExpressStyleRe
 
 export class IdentityServer {
   private options: Required<Pick<IdentityServerOptions, 'port' | 'host' | 'logLevel' | 'issuer'>> & IdentityServerOptions;
-  private app: HonoApp | null;
+  private app: HttpApp | null;
   private server: any;
   private isRunning: boolean;
   private initialized: boolean;
   private logger: Logger;
-  private Hono: typeof HonoApp | null;
-  private serve: ((options: any, callback?: (info: ServerInfo) => void) => any) | null;
+  private HttpApp: typeof HttpApp | null;
+  private serve: ((options: Parameters<typeof serve>[0]) => ReturnType<typeof serve>) | null;
   private identityPlugin: IdentityPluginInstance | null;
 
   constructor(options: IdentityServerOptions = {}) {
@@ -285,7 +286,7 @@ export class IdentityServer {
     this.isRunning = false;
     this.initialized = false;
     this.logger = this.options.logger!;
-    this.Hono = null;
+    this.HttpApp = null;
     this.serve = null;
     this.identityPlugin = options.identityPlugin || null;
     this.logger.debug({ configuredPort: options.port, configuredHost: options.host }, '[Identity Server] Initializing');
@@ -296,7 +297,7 @@ export class IdentityServer {
 
     if (!failbanManager || !this.app) return;
 
-    this.app.use('*', async (c: HonoContext, next: () => Promise<void>): Promise<any> => {
+    this.app.use('*', async (c: AppContext, next: () => Promise<void>): Promise<any> => {
       const ip = this._extractClientIp(c);
       c.set('clientIp', ip);
 
@@ -369,22 +370,22 @@ export class IdentityServer {
     }
   }
 
-  private _extractClientIp(c: HonoContext): string {
+  private _extractClientIp(c: AppContext): string {
     return c.get('clientIp') ||
       c.req.header('x-forwarded-for')?.split(',')[0]?.trim() ||
       c.req.header('x-real-ip') ||
-      (c.env as any)?.ip ||
+      (c as any).env?.ip ||
       'unknown';
   }
 
-  private _createRateLimitMiddleware(limiter: RateLimiter): (c: HonoContext, next: () => Promise<void>) => Promise<any> {
-    return createJsonRateLimitMiddleware(limiter, (c: HonoContext) => this._extractClientIp(c));
+  private _createRateLimitMiddleware(limiter: RateLimiter): (c: AppContext, next: () => Promise<void>) => Promise<any> {
+    return createJsonRateLimitMiddleware(limiter, (c: AppContext) => this._extractClientIp(c));
   }
 
   private _setupRoutes(): void {
     if (!this.app) return;
 
-    this.app.use('*', async (c: HonoContext, next: () => Promise<void>) => {
+    this.app.use('*', async (c: AppContext, next: () => Promise<void>) => {
       c.set('requestId', idGenerator());
       c.set('logLevel', this.options.logLevel);
       await next();
@@ -409,7 +410,7 @@ export class IdentityServer {
       this.app.use('*', loggingMiddleware);
     }
 
-    this.app.get('/health', (c: HonoContext) => {
+    this.app.get('/health', (c: AppContext) => {
       const response = formatter.success({
         status: 'ok',
         service: 'identity-provider',
@@ -419,7 +420,7 @@ export class IdentityServer {
       return c.json(response);
     });
 
-    this.app.get('/health/live', (c: HonoContext) => {
+    this.app.get('/health/live', (c: AppContext) => {
       const response = formatter.success({
         status: 'alive',
         timestamp: new Date().toISOString()
@@ -427,7 +428,7 @@ export class IdentityServer {
       return c.json(response);
     });
 
-    this.app.get('/health/ready', async (c: HonoContext) => {
+    this.app.get('/health/ready', async (c: AppContext) => {
       const isReady = this.options.oauth2Server !== null;
 
       let onboardingStatus: OnboardingStatus | null = null;
@@ -476,7 +477,7 @@ export class IdentityServer {
       return c.json(response);
     });
 
-    this.app.get('/onboarding/status', async (c: HonoContext) => {
+    this.app.get('/onboarding/status', async (c: AppContext) => {
       if (!this.options.identityPlugin || typeof this.options.identityPlugin.getOnboardingStatus !== 'function') {
         const response = formatter.error('Onboarding not available', {
           status: 501,
@@ -499,7 +500,7 @@ export class IdentityServer {
       }
     });
 
-    this.app.get('/', (c: HonoContext) => {
+    this.app.get('/', (c: AppContext) => {
       return c.redirect('/.well-known/openid-configuration', 302);
     });
 
@@ -508,7 +509,7 @@ export class IdentityServer {
 
     (this.app.onError as any)(errorHandler);
 
-    this.app.notFound((c: HonoContext) => {
+    this.app.notFound((c: AppContext) => {
       const response = formatter.error('Route not found', {
         status: 404,
         code: 'NOT_FOUND',
@@ -530,7 +531,7 @@ export class IdentityServer {
     }
 
     const rateLimiters = this.options.identityPlugin?.rateLimiters || {};
-    const wrap = (handler: (req: ExpressStyleRequest, res: ExpressStyleResponse) => Promise<any>) => async (c: HonoContext) => {
+    const wrap = (handler: (req: ExpressStyleRequest, res: ExpressStyleResponse) => Promise<any>) => async (c: AppContext) => {
       const req = await createExpressStyleRequest(c);
       const res = createExpressStyleResponse(c);
       return await handler.call(oauth2Server, req, res);
@@ -539,7 +540,7 @@ export class IdentityServer {
     this.app.get('/.well-known/openid-configuration', wrap(oauth2Server.discoveryHandler));
     this.app.get('/.well-known/jwks.json', wrap(oauth2Server.jwksHandler));
 
-    this.app.get('/.well-known/s3db-identity.json', (c: HonoContext) => {
+    this.app.get('/.well-known/s3db-identity.json', (c: AppContext) => {
       const metadata = this.identityPlugin!.getIntegrationMetadata();
       const etag = `"${Buffer.from(JSON.stringify(metadata)).toString('base64').slice(0, 16)}"`;
 
@@ -660,13 +661,10 @@ export class IdentityServer {
     }
 
     if (!this.initialized) {
-      const { Hono } = await import('hono');
-      const { serve } = await import('@hono/node-server');
-
-      this.Hono = Hono;
+      this.HttpApp = HttpApp;
       this.serve = serve;
 
-      this.app = new Hono();
+      this.app = new HttpApp();
       this._setupRoutes();
 
       this.initialized = true;
@@ -680,14 +678,15 @@ export class IdentityServer {
         this.server = this.serve!({
           fetch: this.app!.fetch,
           port,
-          hostname: host
-        }, (info: ServerInfo) => {
-          this.isRunning = true;
-          this.options.port = info.port;
-          this.logger.info(`[Identity Server] Server listening on http://${info.address}:${info.port}`);
-          this.logger.info(`[Identity Server] Issuer: ${this.options.issuer}`);
-          this.logger.info(`[Identity Server] Discovery: ${this.options.issuer}/.well-known/openid-configuration`);
-          resolve();
+          hostname: host,
+          onListen: (info) => {
+            this.isRunning = true;
+            this.options.port = info.port;
+            this.logger.info(`[Identity Server] Server listening on http://${info.hostname}:${info.port}`);
+            this.logger.info(`[Identity Server] Issuer: ${this.options.issuer}`);
+            this.logger.info(`[Identity Server] Discovery: ${this.options.issuer}/.well-known/openid-configuration`);
+            resolve();
+          }
         });
       } catch (err) {
         reject(err);
@@ -729,7 +728,7 @@ export class IdentityServer {
     };
   }
 
-  getApp(): HonoApp | null {
+  getApp(): HttpApp | null {
     return this.app;
   }
 }

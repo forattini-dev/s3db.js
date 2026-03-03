@@ -3,8 +3,8 @@
  * Handles login, registration, logout, and other UI endpoints
  */
 
-import type { Context, Hono } from 'hono';
-import type { HtmlEscapedString } from 'hono/utils/html';
+import type { Context, HttpApp } from '#src/plugins/shared/http-runtime.js';
+import type { HtmlEscapedString } from '#src/plugins/shared/html.js';
 import { LoginPage } from './pages/login.js';
 import { RegisterPage } from './pages/register.js';
 import { ForgotPasswordPage } from './pages/forgot-password.js';
@@ -269,7 +269,7 @@ function getPageComponent(
   return customPages[pageName] || defaultPage;
 }
 
-export function registerUIRoutes(app: Hono, plugin: IdentityPlugin): void {
+export function registerUIRoutes(app: HttpApp, plugin: IdentityPlugin): void {
   const { sessionManager, usersResource, config, failbanManager } = plugin;
   const sessionManagerCasted = sessionManager as unknown as SessionManagerClass;
   const customPages = config.ui.customPages || {};
@@ -322,7 +322,7 @@ export function registerUIRoutes(app: Hono, plugin: IdentityPlugin): void {
   // ============================================================================
   // GET / - Root route - Redirect to /login or /profile based on session
   // ============================================================================
-  app.get('/', async (c) => {
+  app.get('/', async (c: Context) => {
     const sessionId = sessionManager.getSessionIdFromRequest(c.req);
     if (sessionId) {
       const { valid } = await sessionManager.validateSession(sessionId);
@@ -336,7 +336,7 @@ export function registerUIRoutes(app: Hono, plugin: IdentityPlugin): void {
   // ============================================================================
   // GET /login - Show login form
   // ============================================================================
-  app.get('/login', async (c) => {
+  app.get('/login', async (c: Context) => {
     const sessionId = sessionManager.getSessionIdFromRequest(c.req);
     if (sessionId) {
       const { valid } = await sessionManager.validateSession(sessionId);
@@ -359,7 +359,7 @@ export function registerUIRoutes(app: Hono, plugin: IdentityPlugin): void {
   });
 
   const getClientIp = (c: Context): string =>
-    c.get('clientIp') ||
+    (c.get('clientIp') as string | undefined) ||
     c.req.header('x-forwarded-for')?.split(',')[0]?.trim() ||
     c.req.header('x-real-ip') ||
     'unknown';
@@ -730,7 +730,7 @@ export function registerUIRoutes(app: Hono, plugin: IdentityPlugin): void {
   // ============================================================================
   // GET /login/mfa - Show MFA verification page (two-factor authentication)
   // ============================================================================
-  app.get('/login/mfa', async (c) => {
+  app.get('/login/mfa', async (c: Context) => {
     if (!config.mfa.enabled) {
       return c.redirect(`/login?error=${encodeURIComponent('MFA is not enabled on this server')}`);
     }
@@ -778,7 +778,7 @@ export function registerUIRoutes(app: Hono, plugin: IdentityPlugin): void {
   // ============================================================================
   // GET /register - Show registration form
   // ============================================================================
-  app.get('/register', async (c) => {
+  app.get('/register', async (c: Context) => {
     if (!config.registration.enabled) {
       const message = config.registration.customMessage ||
         'Registration is currently disabled. Please contact an administrator for access.';
@@ -810,7 +810,7 @@ export function registerUIRoutes(app: Hono, plugin: IdentityPlugin): void {
   // ============================================================================
   // POST /register - Handle registration form submission
   // ============================================================================
-  app.post('/register', async (c) => {
+  app.post('/register', async (c: Context) => {
     if (!config.registration.enabled) {
       const message = config.registration.customMessage ||
         'Registration is currently disabled. Please contact an administrator for access.';
@@ -933,7 +933,7 @@ export function registerUIRoutes(app: Hono, plugin: IdentityPlugin): void {
   // ============================================================================
   // POST /logout - Handle logout
   // ============================================================================
-  app.post('/logout', async (c) => {
+  app.post('/logout', async (c: Context) => {
     try {
       const sessionId = sessionManager.getSessionIdFromRequest(c.req);
 
@@ -957,7 +957,7 @@ export function registerUIRoutes(app: Hono, plugin: IdentityPlugin): void {
   // ============================================================================
   // GET /logout - Logout via GET (convenience)
   // ============================================================================
-  app.get('/logout', async (c) => {
+  app.get('/logout', async (c: Context) => {
     const sessionId = sessionManager.getSessionIdFromRequest(c.req);
 
     if (sessionId) {
@@ -971,7 +971,7 @@ export function registerUIRoutes(app: Hono, plugin: IdentityPlugin): void {
   // ============================================================================
   // GET /forgot-password - Show forgot password form
   // ============================================================================
-  app.get('/forgot-password', async (c) => {
+  app.get('/forgot-password', async (c: Context) => {
     const error = c.req.query('error');
     const success = c.req.query('success');
     const email = c.req.query('email') || '';
@@ -988,7 +988,7 @@ export function registerUIRoutes(app: Hono, plugin: IdentityPlugin): void {
   // ============================================================================
   // POST /forgot-password - Handle forgot password request
   // ============================================================================
-  app.post('/forgot-password', async (c) => {
+  app.post('/forgot-password', async (c: Context) => {
     try {
       const body = await c.req.parseBody();
       const { email } = body as Record<string, string>;
@@ -1055,7 +1055,7 @@ export function registerUIRoutes(app: Hono, plugin: IdentityPlugin): void {
   // ============================================================================
   // GET /reset-password - Show reset password form
   // ============================================================================
-  app.get('/reset-password', async (c) => {
+  app.get('/reset-password', async (c: Context) => {
     const token = c.req.query('token');
     const error = c.req.query('error');
 
@@ -1093,7 +1093,7 @@ export function registerUIRoutes(app: Hono, plugin: IdentityPlugin): void {
   // ============================================================================
   // POST /reset-password - Handle password reset
   // ============================================================================
-  app.post('/reset-password', async (c) => {
+  app.post('/reset-password', async (c: Context) => {
     try {
       const body = await c.req.parseBody();
       const { token, password, confirm_password } = body as Record<string, string>;
@@ -1162,7 +1162,7 @@ export function registerUIRoutes(app: Hono, plugin: IdentityPlugin): void {
   // ============================================================================
   // GET /profile - Show user profile (protected route)
   // ============================================================================
-  app.get('/profile', sessionAuth(sessionManagerCasted, { required: true }), async (c) => {
+  app.get('/profile', sessionAuth(sessionManagerCasted, { required: true }), async (c: Context) => {
     try {
       const user = (c as any).get('user') as { userId?: string; id?: string };
       const currentSessionId = sessionManager.getSessionIdFromRequest(c.req);
@@ -1211,7 +1211,7 @@ export function registerUIRoutes(app: Hono, plugin: IdentityPlugin): void {
   // ============================================================================
   // POST /profile/update - Update user profile
   // ============================================================================
-  app.post('/profile/update', sessionAuth(sessionManagerCasted, { required: true }), async (c) => {
+  app.post('/profile/update', sessionAuth(sessionManagerCasted, { required: true }), async (c: Context) => {
     try {
       const body = await c.req.parseBody();
       const { name, email } = body as Record<string, string>;
@@ -1284,7 +1284,7 @@ export function registerUIRoutes(app: Hono, plugin: IdentityPlugin): void {
   // ============================================================================
   // POST /profile/change-password - Change user password
   // ============================================================================
-  app.post('/profile/change-password', sessionAuth(sessionManagerCasted, { required: true }), async (c) => {
+  app.post('/profile/change-password', sessionAuth(sessionManagerCasted, { required: true }), async (c: Context) => {
     try {
       const body = await c.req.parseBody();
       const { current_password, new_password, confirm_new_password } = body as Record<string, string>;
@@ -1359,7 +1359,7 @@ export function registerUIRoutes(app: Hono, plugin: IdentityPlugin): void {
   // ============================================================================
   // POST /profile/logout-session - Logout a specific session
   // ============================================================================
-  app.post('/profile/logout-session', sessionAuth(sessionManagerCasted, { required: true }), async (c) => {
+  app.post('/profile/logout-session', sessionAuth(sessionManagerCasted, { required: true }), async (c: Context) => {
     try {
       const body = await c.req.parseBody();
       const { session_id } = body as Record<string, string>;
@@ -1402,7 +1402,7 @@ export function registerUIRoutes(app: Hono, plugin: IdentityPlugin): void {
   // ============================================================================
   // POST /profile/logout-all-sessions - Logout all other sessions
   // ============================================================================
-  app.post('/profile/logout-all-sessions', sessionAuth(sessionManagerCasted, { required: true }), async (c) => {
+  app.post('/profile/logout-all-sessions', sessionAuth(sessionManagerCasted, { required: true }), async (c: Context) => {
     try {
       const user = (c as any).get('user') as { userId?: string; id?: string };
       const currentSessionId = sessionManager.getSessionIdFromRequest(c.req);
@@ -1441,7 +1441,7 @@ export function registerUIRoutes(app: Hono, plugin: IdentityPlugin): void {
   // ============================================================================
 
   // GET /profile/mfa/enroll - Show MFA enrollment page with QR code
-  app.get('/profile/mfa/enroll', sessionAuth(sessionManagerCasted, { required: true }), async (c) => {
+  app.get('/profile/mfa/enroll', sessionAuth(sessionManagerCasted, { required: true }), async (c: Context) => {
     if (!config.mfa.enabled) {
       return c.redirect(`/profile?error=${encodeURIComponent('MFA is not enabled on this server')}`);
     }
@@ -1487,7 +1487,7 @@ export function registerUIRoutes(app: Hono, plugin: IdentityPlugin): void {
   });
 
   // POST /profile/mfa/enroll - Verify token and complete MFA enrollment
-  app.post('/profile/mfa/enroll', sessionAuth(sessionManagerCasted, { required: true }), async (c) => {
+  app.post('/profile/mfa/enroll', sessionAuth(sessionManagerCasted, { required: true }), async (c: Context) => {
     if (!config.mfa.enabled) {
       return c.redirect(`/profile?error=${encodeURIComponent('MFA is not enabled on this server')}`);
     }
@@ -1550,7 +1550,7 @@ export function registerUIRoutes(app: Hono, plugin: IdentityPlugin): void {
   });
 
   // POST /profile/mfa/disable - Disable MFA for user
-  app.post('/profile/mfa/disable', sessionAuth(sessionManagerCasted, { required: true }), async (c) => {
+  app.post('/profile/mfa/disable', sessionAuth(sessionManagerCasted, { required: true }), async (c: Context) => {
     if (!config.mfa.enabled) {
       return c.redirect(`/profile?error=${encodeURIComponent('MFA is not enabled on this server')}`);
     }
@@ -1606,7 +1606,7 @@ export function registerUIRoutes(app: Hono, plugin: IdentityPlugin): void {
   });
 
   // GET /profile/mfa/backup-codes - Regenerate backup codes
-  app.get('/profile/mfa/backup-codes', sessionAuth(sessionManagerCasted, { required: true }), async (c) => {
+  app.get('/profile/mfa/backup-codes', sessionAuth(sessionManagerCasted, { required: true }), async (c: Context) => {
     if (!config.mfa.enabled) {
       return c.redirect(`/profile?error=${encodeURIComponent('MFA is not enabled on this server')}`);
     }
@@ -1664,7 +1664,7 @@ export function registerUIRoutes(app: Hono, plugin: IdentityPlugin): void {
   // ============================================================================
 
   // GET /admin - Admin dashboard
-  app.get('/admin', adminOnly(sessionManagerCasted), async (c) => {
+  app.get('/admin', adminOnly(sessionManagerCasted), async (c: Context) => {
     try {
       const user = (c as any).get('user') as BaseLayoutUser | undefined;
 
@@ -1708,7 +1708,7 @@ export function registerUIRoutes(app: Hono, plugin: IdentityPlugin): void {
   });
 
   // GET /admin/clients - List OAuth2 clients
-  app.get('/admin/clients', adminOnly(sessionManagerCasted), async (c) => {
+  app.get('/admin/clients', adminOnly(sessionManagerCasted), async (c: Context) => {
     try {
       const user = (c as any).get('user') as BaseLayoutUser | undefined;
       const error = c.req.query('error');
@@ -1742,7 +1742,7 @@ export function registerUIRoutes(app: Hono, plugin: IdentityPlugin): void {
   });
 
   // GET /admin/clients/new - New client form
-  app.get('/admin/clients/new', adminOnly(sessionManagerCasted), async (c) => {
+  app.get('/admin/clients/new', adminOnly(sessionManagerCasted), async (c: Context) => {
     const user = (c as any).get('user') as BaseLayoutUser | undefined;
     const error = c.req.query('error');
 
@@ -1756,7 +1756,7 @@ export function registerUIRoutes(app: Hono, plugin: IdentityPlugin): void {
   });
 
   // POST /admin/clients/create - Create new client
-  app.post('/admin/clients/create', adminOnly(sessionManagerCasted), async (c) => {
+  app.post('/admin/clients/create', adminOnly(sessionManagerCasted), async (c: Context) => {
     try {
       const body = await c.req.parseBody();
       const { name, active } = body as Record<string, string>;
@@ -1827,10 +1827,10 @@ export function registerUIRoutes(app: Hono, plugin: IdentityPlugin): void {
   });
 
   // GET /admin/clients/:id/edit - Edit client form
-  app.get('/admin/clients/:id/edit', adminOnly(sessionManagerCasted), async (c) => {
+  app.get('/admin/clients/:id/edit', adminOnly(sessionManagerCasted), async (c: Context) => {
     try {
       const user = (c as any).get('user') as BaseLayoutUser | undefined;
-      const clientId = c.req.param('id');
+      const clientId = c.req.param('id')!;
       const error = c.req.query('error');
 
       const [okClient, , client] = await tryFn(() =>
@@ -1859,9 +1859,9 @@ export function registerUIRoutes(app: Hono, plugin: IdentityPlugin): void {
   });
 
   // POST /admin/clients/:id/update - Update client
-  app.post('/admin/clients/:id/update', adminOnly(sessionManagerCasted), async (c) => {
+  app.post('/admin/clients/:id/update', adminOnly(sessionManagerCasted), async (c: Context) => {
     try {
-      const clientId = c.req.param('id');
+      const clientId = c.req.param('id')!;
       const body = await c.req.parseBody();
       const { name, active } = body as Record<string, string>;
       const redirectUris = body['redirectUris[]'] || body.redirectUris;
@@ -1908,9 +1908,9 @@ export function registerUIRoutes(app: Hono, plugin: IdentityPlugin): void {
   });
 
   // POST /admin/clients/:id/delete - Delete client
-  app.post('/admin/clients/:id/delete', adminOnly(sessionManagerCasted), async (c) => {
+  app.post('/admin/clients/:id/delete', adminOnly(sessionManagerCasted), async (c: Context) => {
     try {
-      const clientId = c.req.param('id');
+      const clientId = c.req.param('id')!;
       const user = (c as any).get('user') as { id?: string; email?: string };
 
       const [okClient, , client] = await tryFn(() => plugin.oauth2ClientsResource.get(clientId));
@@ -1952,9 +1952,9 @@ export function registerUIRoutes(app: Hono, plugin: IdentityPlugin): void {
   });
 
   // POST /admin/clients/:id/rotate-secret - Rotate client secret
-  app.post('/admin/clients/:id/rotate-secret', adminOnly(sessionManagerCasted), async (c) => {
+  app.post('/admin/clients/:id/rotate-secret', adminOnly(sessionManagerCasted), async (c: Context) => {
     try {
-      const clientId = c.req.param('id');
+      const clientId = c.req.param('id')!;
       const user = (c as any).get('user') as { id?: string; email?: string };
 
       const [okClient, , client] = await tryFn(() => plugin.oauth2ClientsResource.get(clientId));
@@ -2003,9 +2003,9 @@ export function registerUIRoutes(app: Hono, plugin: IdentityPlugin): void {
   });
 
   // POST /admin/clients/:id/toggle-active - Toggle client active status
-  app.post('/admin/clients/:id/toggle-active', adminOnly(sessionManagerCasted), async (c) => {
+  app.post('/admin/clients/:id/toggle-active', adminOnly(sessionManagerCasted), async (c: Context) => {
     try {
-      const clientId = c.req.param('id');
+      const clientId = c.req.param('id')!;
 
       const [okClient, , client] = await tryFn(() =>
         plugin.oauth2ClientsResource.get(clientId)
@@ -2043,7 +2043,7 @@ export function registerUIRoutes(app: Hono, plugin: IdentityPlugin): void {
   // ============================================================================
 
   // GET /admin/users - List all users
-  app.get('/admin/users', adminOnly(sessionManagerCasted), async (c) => {
+  app.get('/admin/users', adminOnly(sessionManagerCasted), async (c: Context) => {
     const error = c.req.query('error');
     const success = c.req.query('success');
 
@@ -2088,8 +2088,8 @@ export function registerUIRoutes(app: Hono, plugin: IdentityPlugin): void {
   });
 
   // GET /admin/users/:id/edit - Edit user form
-  app.get('/admin/users/:id/edit', adminOnly(sessionManagerCasted), async (c) => {
-    const userId = c.req.param('id');
+  app.get('/admin/users/:id/edit', adminOnly(sessionManagerCasted), async (c: Context) => {
+    const userId = c.req.param('id')!;
     const error = c.req.query('error');
 
     try {
@@ -2116,8 +2116,8 @@ export function registerUIRoutes(app: Hono, plugin: IdentityPlugin): void {
   });
 
   // POST /admin/users/:id/update - Update user
-  app.post('/admin/users/:id/update', adminOnly(sessionManagerCasted), async (c) => {
-    const userId = c.req.param('id');
+  app.post('/admin/users/:id/update', adminOnly(sessionManagerCasted), async (c: Context) => {
+    const userId = c.req.param('id')!;
     const body = await c.req.parseBody();
     const { name, email, status, role, emailVerified } = body as Record<string, string>;
     const currentUser = (c as any).get('user') as BaseLayoutUser | undefined;
@@ -2194,8 +2194,8 @@ export function registerUIRoutes(app: Hono, plugin: IdentityPlugin): void {
   });
 
   // POST /admin/users/:id/delete - Delete user
-  app.post('/admin/users/:id/delete', adminOnly(sessionManagerCasted), async (c) => {
-    const userId = c.req.param('id');
+  app.post('/admin/users/:id/delete', adminOnly(sessionManagerCasted), async (c: Context) => {
+    const userId = c.req.param('id')!;
     const currentUser = (c as any).get('user') as { id?: string };
 
     if (userId === currentUser.id) {
@@ -2234,8 +2234,8 @@ export function registerUIRoutes(app: Hono, plugin: IdentityPlugin): void {
   });
 
   // POST /admin/users/:id/change-status - Change user status
-  app.post('/admin/users/:id/change-status', adminOnly(sessionManagerCasted), async (c) => {
-    const userId = c.req.param('id');
+  app.post('/admin/users/:id/change-status', adminOnly(sessionManagerCasted), async (c: Context) => {
+    const userId = c.req.param('id')!;
     const body = await c.req.parseBody();
     const { status } = body as Record<string, string>;
     const currentUser = (c as any).get('user') as { id?: string };
@@ -2270,8 +2270,8 @@ export function registerUIRoutes(app: Hono, plugin: IdentityPlugin): void {
   });
 
   // POST /admin/users/:id/verify-email - Mark email as verified
-  app.post('/admin/users/:id/verify-email', adminOnly(sessionManagerCasted), async (c) => {
-    const userId = c.req.param('id');
+  app.post('/admin/users/:id/verify-email', adminOnly(sessionManagerCasted), async (c: Context) => {
+    const userId = c.req.param('id')!;
 
     try {
       const [okUpdate, errUpdate] = await tryFn(() =>
@@ -2295,8 +2295,8 @@ export function registerUIRoutes(app: Hono, plugin: IdentityPlugin): void {
   });
 
   // POST /admin/users/:id/reset-password - Send password reset email
-  app.post('/admin/users/:id/reset-password', adminOnly(sessionManagerCasted), async (c) => {
-    const userId = c.req.param('id');
+  app.post('/admin/users/:id/reset-password', adminOnly(sessionManagerCasted), async (c: Context) => {
+    const userId = c.req.param('id')!;
     const currentUser = (c as any).get('user') as { id?: string };
 
     if (userId === currentUser.id) {
@@ -2347,8 +2347,8 @@ export function registerUIRoutes(app: Hono, plugin: IdentityPlugin): void {
   });
 
   // POST /admin/users/:id/unlock-account - Unlock user account (clear lockout)
-  app.post('/admin/users/:id/unlock-account', adminOnly(sessionManagerCasted), async (c) => {
-    const userId = c.req.param('id');
+  app.post('/admin/users/:id/unlock-account', adminOnly(sessionManagerCasted), async (c: Context) => {
+    const userId = c.req.param('id')!;
     const currentUser = (c as any).get('user') as { email?: string };
 
     try {
@@ -2394,12 +2394,12 @@ export function registerUIRoutes(app: Hono, plugin: IdentityPlugin): void {
   });
 
   // POST /admin/users/:id/disable-mfa - Disable MFA for user (admin override)
-  app.post('/admin/users/:id/disable-mfa', adminOnly(sessionManagerCasted), async (c) => {
+  app.post('/admin/users/:id/disable-mfa', adminOnly(sessionManagerCasted), async (c: Context) => {
     if (!config.mfa.enabled) {
       return c.redirect(`/admin/users?error=${encodeURIComponent('MFA is not enabled on this server')}`);
     }
 
-    const userId = c.req.param('id');
+    const userId = c.req.param('id')!;
     const currentUser = (c as any).get('user') as { email?: string };
 
     try {
@@ -2448,8 +2448,8 @@ export function registerUIRoutes(app: Hono, plugin: IdentityPlugin): void {
   });
 
   // POST /admin/users/:id/toggle-admin - Toggle admin role
-  app.post('/admin/users/:id/toggle-admin', adminOnly(sessionManagerCasted), async (c) => {
-    const userId = c.req.param('id');
+  app.post('/admin/users/:id/toggle-admin', adminOnly(sessionManagerCasted), async (c: Context) => {
+    const userId = c.req.param('id')!;
     const currentUser = (c as any).get('user') as { id?: string };
 
     if (userId === currentUser.id) {
@@ -2489,8 +2489,8 @@ export function registerUIRoutes(app: Hono, plugin: IdentityPlugin): void {
   });
 
   // POST /admin/users/:id/toggle-status - Toggle user status
-  app.post('/admin/users/:id/toggle-status', adminOnly(sessionManagerCasted), async (c) => {
-    const userId = c.req.param('id');
+  app.post('/admin/users/:id/toggle-status', adminOnly(sessionManagerCasted), async (c: Context) => {
+    const userId = c.req.param('id')!;
     const currentUser = (c as any).get('user') as { id?: string };
 
     if (userId === currentUser.id) {
@@ -2534,7 +2534,7 @@ export function registerUIRoutes(app: Hono, plugin: IdentityPlugin): void {
   // ============================================================================
 
   // GET /oauth/authorize - Show consent screen (session-based)
-  app.get('/oauth/authorize', sessionAuth(sessionManagerCasted, { required: false }), async (c) => {
+  app.get('/oauth/authorize', sessionAuth(sessionManagerCasted, { required: false }), async (c: Context) => {
     const query = c.req.query();
     const {
       response_type,
@@ -2631,7 +2631,7 @@ export function registerUIRoutes(app: Hono, plugin: IdentityPlugin): void {
   });
 
   // POST /oauth/consent - Process user consent decision
-  app.post('/oauth/consent', sessionAuth(sessionManagerCasted, { required: true }), async (c) => {
+  app.post('/oauth/consent', sessionAuth(sessionManagerCasted, { required: true }), async (c: Context) => {
     const body = await c.req.parseBody();
     const {
       decision,
@@ -2717,7 +2717,7 @@ export function registerUIRoutes(app: Hono, plugin: IdentityPlugin): void {
   // ============================================================================
 
   // GET /verify-email - Verify email with token
-  app.get('/verify-email', async (c) => {
+  app.get('/verify-email', async (c: Context) => {
     const token = c.req.query('token');
     const PageComponent = getPageComponent(customPages, 'verifyEmail', VerifyEmailPage as PageComponentType);
 
@@ -2805,7 +2805,7 @@ export function registerUIRoutes(app: Hono, plugin: IdentityPlugin): void {
   });
 
   // POST /verify-email/resend - Resend verification email
-  app.post('/verify-email/resend', async (c) => {
+  app.post('/verify-email/resend', async (c: Context) => {
     const body = await c.req.parseBody();
     const { email } = body as Record<string, string>;
     const PageComponent = getPageComponent(customPages, 'verifyEmail', VerifyEmailPage as PageComponentType);

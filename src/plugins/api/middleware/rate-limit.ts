@@ -1,4 +1,4 @@
-import type { Context, Next } from 'hono';
+import type { Context, Next } from '#src/plugins/shared/http-runtime.js';
 import { findBestMatch } from '../utils/path-matcher.js';
 
 export interface RateLimitRule {

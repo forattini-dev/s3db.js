@@ -1,4 +1,4 @@
-import type { Context, Next, MiddlewareHandler } from 'hono';
+import type { Context, Next, MiddlewareHandler } from '#src/plugins/shared/http-runtime.js';
 import type { S3DBLogger } from '../../../concerns/logger.js';
 
 export interface LoggingConfig {
@@ -33,7 +33,7 @@ export function createLoggingMiddleware(
     await next();
 
     const duration = Date.now() - start;
-    const status = c.res.status;
+    const status = c.res!.status;
     const user = c.get('user') as UserInfo | undefined;
     const username = user?.username || user?.email || 'anonymous';
 

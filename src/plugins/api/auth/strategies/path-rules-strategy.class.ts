@@ -1,4 +1,4 @@
-import type { Context, Next, MiddlewareHandler } from 'hono';
+import type { Context, Next, MiddlewareHandler } from '#src/plugins/shared/http-runtime.js';
 import { BaseAuthStrategy, type BaseAuthStrategyOptions } from './base-strategy.class.js';
 import { createPathBasedAuthMiddleware, type AuthRule } from '../path-auth-matcher.js';
 import { createJWTHandler } from '../jwt-auth.js';

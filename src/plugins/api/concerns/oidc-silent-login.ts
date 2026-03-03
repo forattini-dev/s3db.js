@@ -1,6 +1,6 @@
-import { getCookie, setCookie } from 'hono/cookie';
-import type { Context } from 'hono';
-import type { CookieOptions as HonoCookieOptions } from 'hono/utils/cookie';
+import { getCookie, setCookie } from '#src/plugins/shared/http-runtime.js';
+import type { Context } from '#src/plugins/shared/http-runtime.js';
+import type { CookieOptions as HttpCookieOptions } from '#src/plugins/shared/http-runtime.js';
 
 const safeGetCookie = (context: Context, name: string): string | null => {
   const req = context?.req as { cookie?: (name: string) => string | undefined };
@@ -8,7 +8,7 @@ const safeGetCookie = (context: Context, name: string): string | null => {
     try {
       return req.cookie(name) || null;
     } catch {
-      // Fall through to hono helper
+      // Fall through to raffel helper
     }
   }
   try {
@@ -22,7 +22,7 @@ const safeSetCookie = (
   context: Context,
   name: string,
   value: string,
-  options: HonoCookieOptions
+  options: HttpCookieOptions
 ): void => {
   try {
     setCookie(context, name, value, options);
@@ -103,7 +103,7 @@ export function shouldAttemptSilentLogin(context: Context, options: SilentLoginO
   return true;
 }
 
-export function markSilentLoginAttempted(context: Context, options: CookieOptions = {}): void {
+export function markSilentLoginAttempted(context: Context, options: HttpCookieOptions = {}): void {
   const {
     secure = true,
     sameSite = 'Lax',
@@ -121,7 +121,7 @@ export function markSilentLoginAttempted(context: Context, options: CookieOption
   });
 }
 
-export function clearSilentLoginAttempt(context: Context, options: CookieOptions = {}): void {
+export function clearSilentLoginAttempt(context: Context, options: HttpCookieOptions = {}): void {
   const {
     secure = true,
     sameSite = 'Lax',

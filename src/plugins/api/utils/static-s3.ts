@@ -4,7 +4,7 @@ import { createLogger } from '../../../concerns/logger.js';
 import type { Logger } from '../../../concerns/logger.js';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { getContentType } from './mime-types.js';
-import type { Context, MiddlewareHandler } from 'hono';
+import type { Context, MiddlewareHandler } from '#src/plugins/shared/http-runtime.js';
 
 const logger: Logger = createLogger({ name: 'StaticS3', level: 'info' });
 

@@ -109,23 +109,11 @@ export const PLUGIN_DEPENDENCIES: Record<string, PluginDefinition> = {
     name: 'API Plugin',
     docsUrl: 'https://github.com/forattini-dev/s3db.js/blob/main/docs/plugins/api.md',
     dependencies: {
-      'hono': {
-        version: '^4.0.0',
-        description: 'Ultra-light HTTP server framework',
-        installCommand: 'pnpm add hono',
-        npmUrl: 'https://www.npmjs.com/package/hono'
-      },
-      '@hono/node-server': {
-        version: '^1.0.0',
-        description: 'Node.js adapter for Hono',
-        installCommand: 'pnpm add @hono/node-server',
-        npmUrl: 'https://www.npmjs.com/package/@hono/node-server'
-      },
-      '@hono/swagger-ui': {
-        version: '^0.4.0',
-        description: 'Swagger UI integration for Hono',
-        installCommand: 'pnpm add @hono/swagger-ui',
-        npmUrl: 'https://www.npmjs.com/package/@hono/swagger-ui'
+      'raffel': {
+        version: '^1.0.1',
+        description: 'Native HTTP runtime, serving and OpenAPI docs helpers',
+        installCommand: 'pnpm add raffel',
+        npmUrl: 'https://www.npmjs.com/package/raffel'
       },
       'jose': {
         version: '^5.0.0 || ^6.0.0',
@@ -139,17 +127,11 @@ export const PLUGIN_DEPENDENCIES: Record<string, PluginDefinition> = {
     name: 'Identity Provider Plugin',
     docsUrl: 'https://github.com/forattini-dev/s3db.js/blob/main/docs/plugins/identity.md',
     dependencies: {
-      'hono': {
-        version: '^4.0.0',
-        description: 'Ultra-light HTTP server framework',
-        installCommand: 'pnpm add hono',
-        npmUrl: 'https://www.npmjs.com/package/hono'
-      },
-      '@hono/node-server': {
-        version: '^1.0.0',
-        description: 'Node.js adapter for Hono',
-        installCommand: 'pnpm add @hono/node-server',
-        npmUrl: 'https://www.npmjs.com/package/@hono/node-server'
+      'raffel': {
+        version: '^1.0.1',
+        description: 'Native HTTP runtime, serving and OpenAPI docs helpers',
+        installCommand: 'pnpm add raffel',
+        npmUrl: 'https://www.npmjs.com/package/raffel'
       },
       'jose': {
         version: '^5.0.0 || ^6.0.0',

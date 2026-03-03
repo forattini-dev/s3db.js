@@ -1,11 +1,12 @@
 /**
- * API Server - Hono-based HTTP server for s3db.js API Plugin
+ * API Server - Raffel-based HTTP server for s3db.js API Plugin
  *
  * Manages HTTP server lifecycle and delegates routing/middleware concerns
  * to dedicated components (MiddlewareChain, Router, HealthManager).
  */
 
-import type { Context, MiddlewareHandler, Hono } from 'hono';
+import type { Context, MiddlewareHandler, HttpApp } from '#src/plugins/shared/http-runtime.js';
+import { serve } from '#src/plugins/shared/http-runtime.js';
 import type { Server } from 'node:http';
 import type { NetworkInterfaceInfo } from 'node:os';
 import type { Logger } from '../../concerns/logger.js';
@@ -135,8 +136,8 @@ export interface ResourceLike {
 }
 
 export interface ServerInfo {
-  address: string;
   port: number;
+  hostname: string;
 }
 
 export interface RouteSummary {
@@ -165,7 +166,7 @@ export interface SessionStore {
 export class ApiServer {
   private options: Required<Pick<ApiServerOptions, 'port' | 'host'>> & ApiServerOptions;
   private logger: Logger;
-  private app: Hono | null = null;
+  private app: HttpApp | null = null;
   private server: Server | null = null;
   private isRunning = false;
   private initialized = false;
@@ -180,11 +181,6 @@ export class ApiServer {
   failban: FailbanManager | null = null;
   private relationsPlugin: unknown;
   private openApiGenerator: OpenAPIGeneratorCached;
-  private Hono: typeof Hono | null = null;
-  private serve: ((options: unknown, callback?: (info: ServerInfo) => void) => Server) | null = null;
-  private swaggerUI: ((options: { url: string }) => MiddlewareHandler) | null = null;
-  private cors: ((options: unknown) => MiddlewareHandler) | null = null;
-  private ApiApp: unknown = null;
   private _signalHandlersSetup = false;
   private _boundSigtermHandler: (() => void) | null = null;
   private _boundSigintHandler: (() => void) | null = null;
@@ -300,19 +296,13 @@ export class ApiServer {
     }
 
     if (!this.initialized) {
-      const { Hono } = await import('hono');
-      const { serve } = await import('@hono/node-server');
-      const { swaggerUI } = await import('@hono/swagger-ui');
-      const { cors } = await import('hono/cors');
+      const { HttpApp } = await import('#src/plugins/shared/http-runtime.js');
+      const { cors } = await import('raffel/http');
       const { ApiApp } = await import('./app.class.js');
 
-      this.Hono = Hono;
-      this.serve = serve as unknown as typeof this.serve;
-      this.swaggerUI = swaggerUI;
-      this.cors = cors as unknown as typeof this.cors;
-      this.ApiApp = ApiApp;
+      const corsMiddleware = cors as unknown as ConstructorParameters<typeof MiddlewareChain>[0]['corsMiddleware'];
 
-      this.app = new (ApiApp as unknown as new (options: unknown) => Hono)({
+      this.app = new (ApiApp as unknown as new (options: unknown) => HttpApp)({
         db: this.options.database,
         resources: this.options.database?.resources
       });
@@ -339,7 +329,7 @@ export class ApiServer {
         database: this.options.database as ConstructorParameters<typeof MiddlewareChain>[0]['database'],
         inFlightRequests: this.inFlightRequests,
         acceptingRequests: () => this.acceptingRequests,
-        corsMiddleware: this.cors as ConstructorParameters<typeof MiddlewareChain>[0]['corsMiddleware']
+        corsMiddleware
       });
       this.middlewareChain.apply(this.app!);
 
@@ -350,7 +340,7 @@ export class ApiServer {
 
       const authMiddleware = await this._createAuthMiddleware();
 
-      this._setupDocumentationRoutes();
+      await this._setupDocumentationRoutes();
 
       if (this.options.health?.enabled !== false) {
         this.healthManager = new HealthManager({
@@ -376,7 +366,7 @@ export class ApiServer {
         authMiddleware: authMiddleware as unknown as ConstructorParameters<typeof Router>[0]['authMiddleware'],
         logLevel: this.options.logLevel,
         logger: this.logger,
-        Hono: this.Hono as unknown as ConstructorParameters<typeof Router>[0]['Hono'],
+        HttpApp: HttpApp as unknown as ConstructorParameters<typeof Router>[0]['HttpApp'],
         apiTitle: this.options.apiTitle,
         apiDescription: this.options.apiDescription,
         docsEnabled: this.options.docsEnabled,
@@ -454,18 +444,17 @@ export class ApiServer {
 
     return new Promise((resolve, reject) => {
       try {
-        this.server = this.serve!(
-          {
-            fetch: fetchHandler,
-            port,
-            hostname: host,
-            keepAliveTimeout: 65000,
-            headersTimeout: 66000
-          },
-          (info: ServerInfo) => {
+        this.server = serve({
+          fetch: fetchHandler,
+          port,
+          hostname: host,
+          keepAliveTimeout: 65000,
+          headersTimeout: 66000,
+          onListen: ({ port, hostname }) => {
+            const info: ServerInfo = { port, hostname };
             this.isRunning = true;
             if (this.options.logLevel) {
-              this.logger.info({ address: info.address, port: info.port }, 'Server listening');
+              this.logger.info({ address: info.hostname, port: info.port }, 'Server listening');
             }
             this._printStartupBanner(info);
 
@@ -495,7 +484,7 @@ export class ApiServer {
 
             resolve();
           }
-        );
+        });
       } catch (err) {
         reject(err);
       }
@@ -566,7 +555,7 @@ export class ApiServer {
     };
   }
 
-  getApp(): Hono | null {
+  getApp(): HttpApp | null {
     return this.app;
   }
 
@@ -782,7 +771,9 @@ export class ApiServer {
     this._metricsListeners.clear();
   }
 
-  private _setupDocumentationRoutes(): void {
+  private async _setupDocumentationRoutes(): Promise<void> {
+    const { mountOpenApiDocs } = await import('raffel/http');
+
     if (this.options.logLevel) {
       this.logger.debug({ docsEnabled: this.options.docsEnabled, docsUI: this.options.docsUI }, 'Setting up documentation routes');
     }
@@ -790,100 +781,25 @@ export class ApiServer {
     const basePath = this.options.basePath || '';
     const openApiPath = applyBasePath(basePath, '/openapi.json');
     const docsPath = applyBasePath(basePath, '/docs');
+    const docsCsp = this.options.docsCsp || undefined;
+    const docsUI = this.options.docsUI || 'redoc';
 
     if (this.options.logLevel) {
       this.logger.debug({ docsPath, openApiPath }, 'Documentation paths configured');
     }
 
     if (this.options.docsEnabled) {
-      if (this.options.logLevel) {
-        this.logger.debug({ openApiPath }, 'Registering OpenAPI route');
-      }
-      this.app!.get(openApiPath, (c: Context) => {
-        if (this.options.logLevel) {
-          this.logger.debug('OpenAPI route hit');
-        }
-        const spec = this.openApiGenerator.generate();
-        return c.json(spec);
+      mountOpenApiDocs(this.app!, {
+        spec: () => this._generateOpenAPISpec(),
+        specPath: openApiPath,
+        docsPath,
+        ui: docsUI as 'redoc' | 'swagger',
+        title: this.options.apiTitle || 's3db.js API',
+        csp: docsCsp
       });
-      if (this.options.logLevel) {
-        this.logger.debug('OpenAPI route registered');
-      }
 
-      if (this.options.docsUI === 'swagger') {
-        if (this.options.logLevel) {
-          this.logger.debug({ docsPath }, 'Registering Swagger UI');
-        }
-        const swaggerHandler = this.swaggerUI!({ url: openApiPath });
-        this.app!.get(docsPath, (c: Context) => {
-          let cspHeader = this.options.docsCsp;
-          if (!cspHeader) {
-            cspHeader = [
-              "default-src 'self'",
-              "script-src 'self' 'unsafe-inline'",
-              "style-src 'self' 'unsafe-inline'",
-              "img-src 'self' data: https:",
-              "font-src 'self'",
-              "connect-src 'self'"
-            ].join('; ');
-          }
-          const res = swaggerHandler(c, async () => {}) as unknown as Response;
-          if (res?.headers) {
-            res.headers.set('Content-Security-Policy', cspHeader);
-            res.headers.delete('Content-Security-Policy-Report-Only');
-          }
-          return res;
-        });
-      } else {
-        if (this.options.logLevel) {
-          this.logger.debug({ docsPath }, 'Registering Redoc UI');
-        }
-        this.app!.get(docsPath, (c: Context) => {
-          if (this.options.logLevel) {
-            this.logger.debug('Redoc docs route hit');
-          }
-          const redocCdn = 'https://cdn.redoc.ly';
-          const fontsCss = 'https://fonts.googleapis.com';
-          const fontsGstatic = 'https://fonts.gstatic.com';
-          let cspHeader = this.options.docsCsp;
-          if (!cspHeader) {
-            cspHeader = [
-              "default-src 'self'",
-              `script-src 'self' 'unsafe-inline' ${redocCdn}`,
-              `script-src-elem 'self' 'unsafe-inline' ${redocCdn}`,
-              `style-src 'self' 'unsafe-inline' ${redocCdn} ${fontsCss}`,
-              "img-src 'self' data: https:",
-              `font-src 'self' ${fontsGstatic}`,
-              "connect-src 'self'"
-            ].join('; ');
-          }
-          const html = [
-            '<!DOCTYPE html>',
-            '<html lang="en">',
-            '<head>',
-            '  <meta charset="UTF-8">',
-            '  <meta name="viewport" content="width=device-width, initial-scale=1.0">',
-            '  <title>' + String(this.options.apiTitle || 's3db.js API') + ' - API Documentation</title>',
-            '  <style>',
-            '    body { margin: 0; padding: 0; }',
-            '  </style>',
-            '</head>',
-            '<body>',
-            '  <redoc spec-url="' + String(openApiPath) + '"></redoc>',
-            '  <script src="https://cdn.redoc.ly/redoc/v2.5.1/bundles/redoc.standalone.js"></script>',
-            '</body>',
-            '</html>'
-          ].join('\n');
-          const res = c.html(html);
-          if (res?.headers) {
-            res.headers.set('Content-Security-Policy', cspHeader);
-            res.headers.delete('Content-Security-Policy-Report-Only');
-          }
-          return res;
-        });
-        if (this.options.logLevel) {
-          this.logger.debug('Redoc UI route registered');
-        }
+      if (this.options.logLevel) {
+        this.logger.debug({ docsPath, openApiPath, docsCsp }, 'Docs routes registered with Raffel OpenAPI helpers');
       }
       if (this.options.logLevel) {
         this.logger.debug('Documentation routes setup complete');

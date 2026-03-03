@@ -235,7 +235,7 @@ GET     /metrics         # Prometheus metrics
 
 **Required:**
 ```bash
-pnpm add s3db.js hono @hono/node-server @hono/swagger-ui jose
+pnpm add s3db.js hono raffel jose
 ```
 
 **Optional (by feature):**

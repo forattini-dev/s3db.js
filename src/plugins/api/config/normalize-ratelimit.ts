@@ -1,5 +1,5 @@
 import type { Logger } from '../../../concerns/logger.js';
-import type { Context } from 'hono';
+import type { Context } from '#src/plugins/shared/http-runtime.js';
 
 export interface RawRateLimitRule {
   path?: string;

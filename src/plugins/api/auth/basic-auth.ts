@@ -1,11 +1,11 @@
 import { timingSafeEqual } from 'crypto';
-import type { Context, Next } from 'hono';
-import type { ContentfulStatusCode } from 'hono/utils/http-status';
+import type { Context, Next } from '#src/plugins/shared/http-runtime.js';
+import type { ContentfulStatusCode } from '#src/plugins/shared/http-runtime.js';
 import type { DatabaseLike } from './resource-manager.js';
 import { unauthorized } from '../utils/response-formatter.js';
 import { createLogger } from '../../../concerns/logger.js';
 import { isBcryptHash, verifyPassword } from '../../../concerns/password-hashing.js';
-import { getCookie } from 'hono/cookie';
+import { getCookie } from '#src/plugins/shared/http-runtime.js';
 import { BasicAuthResourceManager } from './resource-manager.js';
 
 const logger = createLogger({ name: 'BasicAuth', level: 'info' });

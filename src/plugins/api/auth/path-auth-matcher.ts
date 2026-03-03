@@ -1,4 +1,4 @@
-import type { Context, Next, MiddlewareHandler } from 'hono';
+import type { Context, Next, MiddlewareHandler } from '#src/plugins/shared/http-runtime.js';
 import type { Logger } from '../../../concerns/logger.js';
 import { createLogger } from '../../../concerns/logger.js';
 

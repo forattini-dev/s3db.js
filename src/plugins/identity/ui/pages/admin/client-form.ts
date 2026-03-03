@@ -2,8 +2,7 @@
  * Admin OAuth2 Client Form Page (Create/Edit)
  */
 
-import { html } from 'hono/html';
-import type { HtmlEscapedString } from 'hono/utils/html';
+import { html, type HtmlEscapedString } from '#src/plugins/shared/html.js';
 import { BaseLayout, type ThemeConfig, type BaseLayoutUser } from '../../layouts/base.js';
 
 export interface ClientData {

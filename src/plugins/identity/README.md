@@ -194,7 +194,7 @@ ui: {
 ### Custom Pages
 
 ```javascript
-import { html } from 'hono/html';
+import { html } from '#src/plugins/shared/html.js';
 
 function MyCustomLoginPage(props) {
   const { error, email, config } = props;

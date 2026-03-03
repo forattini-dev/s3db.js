@@ -1,42 +1,11 @@
-import type { Context } from 'hono';
+import type { Context } from '#src/plugins/shared/http-runtime.js';
+import { getCookie, getCookies, setCookie, generateCookie, type CookieOptions as RaffelCookieOptions } from '#src/plugins/shared/http-runtime.js';
 import { createLogger } from '../../../concerns/logger.js';
 
 const logger = createLogger({ name: 'CookieChunking', level: 'info' });
 
-type GenerateCookieFn = (name: string, value: string, options?: Record<string, unknown>) => string;
-type GetCookieFn = {
-  (c: Context, name: string): string | undefined;
-  (c: Context): Record<string, string>;
-};
-type SetCookieFn = (c: Context, name: string, value: string, options?: Record<string, unknown>) => void;
-
-interface HonoCookieModule {
-  generateCookie: GenerateCookieFn;
-  getCookie: GetCookieFn;
-  setCookie: SetCookieFn;
-}
-
-let honoCookieModule: HonoCookieModule | null = null;
-
-async function getHonoCookie(): Promise<HonoCookieModule> {
-  if (!honoCookieModule) {
-    honoCookieModule = await import('hono/cookie') as HonoCookieModule;
-  }
-  return honoCookieModule;
-}
-
-function getHonoCookieSync(): HonoCookieModule {
-  if (!honoCookieModule) {
-    throw new Error(
-      '[Cookie Chunking] Hono cookie module not initialized. ' +
-      'Call initCookieChunking() before using cookie functions.'
-    );
-  }
-  return honoCookieModule;
-}
-
 export async function initCookieChunking(): Promise<void> {
-  await getHonoCookie();
+  return;
 }
 
 const MAX_COOKIE_SIZE = 4000;
@@ -92,8 +61,7 @@ function getEncodedLength(value: string): number {
 
 function getCookieJar(context: Context): CookieJar {
   try {
-    const { getCookie } = getHonoCookieSync();
-    const cookies = getCookie(context);
+    const cookies = getCookies(context);
     if (cookies && typeof cookies === 'object' && !Array.isArray(cookies)) {
       return cookies as CookieJar;
     }
@@ -125,7 +93,6 @@ function getChunkEntriesFromJar(cookieJar: CookieJar, baseName: string): ChunkEn
 }
 
 function calculateChunkSize(name: string, options: CookieOptions): number {
-  const { generateCookie } = getHonoCookieSync();
   const sampleCookie = generateCookie(`${name}.0`, '', options as Record<string, unknown>);
   const overhead = Buffer.byteLength(sampleCookie);
   const chunkSize = MAX_COOKIE_SIZE - overhead;
@@ -212,14 +179,13 @@ export function setChunkedCookie(
     return;
   }
 
-  const { setCookie } = getHonoCookieSync();
   const chunkSize = calculateChunkSize(name, options);
   const encodedLength = getEncodedLength(value);
   const requestCookies = getCookieJar(context);
 
   if (encodedLength <= chunkSize) {
     deleteChunkedCookie(context, name, options, requestCookies);
-    setCookie(context, name, value, options as Record<string, unknown>);
+    setCookie(context, name, value, options as RaffelCookieOptions);
     return;
   }
 
@@ -248,16 +214,16 @@ export function setChunkedCookie(
   }
 
   chunks.forEach((chunk, index) => {
-    setCookie(context, `${name}.${index}`, chunk, options as Record<string, unknown>);
+    setCookie(context, `${name}.${index}`, chunk, options as RaffelCookieOptions);
   });
 
-  setCookie(context, `${name}.__chunks`, String(chunks.length), options as Record<string, unknown>);
+  setCookie(context, `${name}.__chunks`, String(chunks.length), options as RaffelCookieOptions);
 
   if (Object.prototype.hasOwnProperty.call(requestCookies, name)) {
-    setCookie(context, name, '', {
-      ...options,
-      maxAge: 0,
-    } as Record<string, unknown>);
+      setCookie(context, name, '', {
+        ...options,
+        maxAge: 0,
+      } as RaffelCookieOptions);
   }
 
   const existingChunks = getChunkEntriesFromJar(requestCookies, name);
@@ -266,7 +232,7 @@ export function setChunkedCookie(
       setCookie(context, chunkName, '', {
         ...options,
         maxAge: 0,
-      } as Record<string, unknown>);
+      } as RaffelCookieOptions);
     }
   });
 }
@@ -312,7 +278,6 @@ export function deleteChunkedCookie(
   options: CookieOptions = {},
   cookieJar: CookieJar | null = null
 ): void {
-  const { setCookie } = getHonoCookieSync();
   const jar = cookieJar || getCookieJar(context);
   const namesToDelete = new Set<string>();
 
@@ -336,11 +301,10 @@ export function deleteChunkedCookie(
     setCookie(context, cookieName, '', {
       ...options,
       maxAge: 0,
-    } as Record<string, unknown>);
+    } as RaffelCookieOptions);
   });
 }
 
 export function isChunkedCookie(context: Context, name: string): boolean {
-  const { getCookie } = getHonoCookieSync();
   return !!getCookie(context, `${name}.__chunks`);
 }
