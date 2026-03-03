@@ -29,32 +29,32 @@ describe('Resource Pagination - Real Integration Tests', () => {
 
     await resource.insertMany(users);
 
-    // Test first page
-    const page1 = await resource.page({ size: 10, offset: 0 });
+    // Test first page (page-number navigation)
+    const page1 = await resource.page({ size: 10, page: 1 });
     expect(page1.items).toHaveLength(10);
-    expect(page1.totalItems).toBe(25);
-    expect(page1.totalPages).toBe(3);
-    
+    expect(page1.page).toBe(1);
+    expect(page1.hasMore).toBe(true);
+
     // Verify all items in page1 are from the expected range
     const page1Ids = page1.items.map(item => parseInt(item.id.split('-')[1]));
     expect(page1Ids.every(id => id >= 1 && id <= 25)).toBe(true);
 
     // Test second page
-    const page2 = await resource.page({ size: 10, offset: 10 });
+    const page2 = await resource.page({ size: 10, page: 2 });
     expect(page2.items).toHaveLength(10);
-    expect(page2.totalItems).toBe(25);
-    expect(page2.totalPages).toBe(3);
-    
+    expect(page2.page).toBe(2);
+    expect(page2.hasMore).toBe(true);
+
     // Verify all items in page2 are from the expected range
     const page2Ids = page2.items.map(item => parseInt(item.id.split('-')[1]));
     expect(page2Ids.every(id => id >= 1 && id <= 25)).toBe(true);
 
     // Test third page
-    const page3 = await resource.page({ size: 10, offset: 20 });
+    const page3 = await resource.page({ size: 10, page: 3 });
     expect(page3.items).toHaveLength(5);
-    expect(page3.totalItems).toBe(25);
-    expect(page3.totalPages).toBe(3);
-    
+    expect(page3.page).toBe(3);
+    expect(page3.hasMore).toBe(false);
+
     // Verify all items in page3 are from the expected range
     const page3Ids = page3.items.map(item => parseInt(item.id.split('-')[1]));
     expect(page3Ids.every(id => id >= 1 && id <= 25)).toBe(true);
@@ -80,19 +80,19 @@ describe('Resource Pagination - Real Integration Tests', () => {
     await resource.insertMany(products);
 
     // Test with page size 5
-    const page1 = await resource.page({ size: 5, offset: 0 });
+    const page1 = await resource.page({ size: 5, page: 1 });
     expect(page1.items).toHaveLength(5);
-    expect(page1.totalItems).toBe(20);
+    expect(page1.hasMore).toBe(true);
 
     // Test with page size 20
-    const page2 = await resource.page({ size: 20, offset: 0 });
+    const page2 = await resource.page({ size: 20, page: 1 });
     expect(page2.items).toHaveLength(20);
-    expect(page2.totalItems).toBe(20);
+    expect(page2.hasMore).toBe(false);
 
     // Test with page size 100 (larger than total)
-    const page3 = await resource.page({ size: 100, offset: 0 });
+    const page3 = await resource.page({ size: 100, page: 1 });
     expect(page3.items).toHaveLength(20);
-    expect(page3.totalItems).toBe(20);
+    expect(page3.hasMore).toBe(false);
   });
 
   test('Pagination with Filters', async () => {
@@ -205,21 +205,22 @@ describe('Resource Pagination - Real Integration Tests', () => {
     // Small delay to ensure partition indexes are ready
     await new Promise(resolve => setTimeout(resolve, 100));
 
-    // Test pagination within electronics partition
-    const electronicsPage1 = await resource.page({ 
-      size: 2, 
-      offset: 0,
+    // Test pagination within electronics partition (cursor-based)
+    const electronicsPage1 = await resource.page({
+      size: 2,
+      cursor: null,
       partition: 'byCategory',
       partitionValues: { category: 'electronics' }
     });
 
     expect(electronicsPage1.items).toHaveLength(2);
     expect(electronicsPage1.items.every(product => product.category === 'electronics')).toBe(true);
+    expect(electronicsPage1.hasMore).toBe(true);
 
-    // Test second page of electronics
-    const electronicsPage2 = await resource.page({ 
-      size: 2, 
-      offset: 2,
+    // Test second page of electronics (follow cursor)
+    const electronicsPage2 = await resource.page({
+      size: 2,
+      cursor: electronicsPage1.nextCursor as string,
       partition: 'byCategory',
       partitionValues: { category: 'electronics' }
     });
@@ -229,9 +230,9 @@ describe('Resource Pagination - Real Integration Tests', () => {
     expect(electronicsPage2.hasMore).toBe(false);
 
     // Test pagination within books partition
-    const booksPage = await resource.page({ 
-      size: 10, 
-      offset: 0,
+    const booksPage = await resource.page({
+      size: 10,
+      cursor: null,
       partition: 'byCategory',
       partitionValues: { category: 'books' }
     });
@@ -251,27 +252,26 @@ describe('Resource Pagination - Real Integration Tests', () => {
     });
 
     // Test pagination with empty resource
-    const emptyPage = await resource.page({ size: 10, offset: 0 });
+    const emptyPage = await resource.page({ size: 10, page: 1 });
     expect(emptyPage.items).toHaveLength(0);
-    expect(emptyPage.totalItems).toBe(0);
-    expect(emptyPage.totalPages).toBe(0);
+    expect(emptyPage.hasMore).toBe(false);
 
     // Insert single item
     await resource.insert({ id: 'single', name: 'Single Item' });
 
     // Test pagination with single item
-    const singlePage = await resource.page({ size: 10, offset: 0 });
+    const singlePage = await resource.page({ size: 10, page: 1 });
     expect(singlePage.items).toHaveLength(1);
     expect(singlePage.hasMore).toBe(false);
 
     // Test with size 0 - should default to 100 (defensive behavior)
-    const zeroSizePage = await resource.page({ size: 0, offset: 0 });
+    const zeroSizePage = await resource.page({ size: 0, page: 1 });
     expect(zeroSizePage.items).toHaveLength(1); // Only 1 item exists
     expect(zeroSizePage.pageSize).toBe(100); // Defaulted to 100
     expect(zeroSizePage.hasMore).toBe(false);
 
     // Test with negative size - should also default to 100
-    const negativeSizePage = await resource.page({ size: -5, offset: 0 });
+    const negativeSizePage = await resource.page({ size: -5, page: 1 });
     expect(negativeSizePage.items).toHaveLength(1); // Only 1 item exists
     expect(negativeSizePage.pageSize).toBe(100); // Defaulted to 100
   });
@@ -340,22 +340,23 @@ describe('Resource Pagination - Real Integration Tests', () => {
 
     await resource.insertMany(items);
 
-    // Test pagination performance
+    // Test pagination performance (cursor-based loop)
     const startTime = Date.now();
-    
-    let offset = 0;
+
+    let currentCursor: string | null = null;
     let pageCount = 0;
     let totalItems = 0;
-    let currentPage;
+    let isFirst = true;
 
     do {
-      currentPage = await resource.page({ size: 10, offset });
-      offset += 10;
+      const currentPage = await resource.page({ size: 10, cursor: isFirst ? null : currentCursor });
+      isFirst = false;
       if (currentPage.items.length > 0) {
         pageCount++;
         totalItems += currentPage.items.length;
       }
-    } while (currentPage.items.length > 0);
+      currentCursor = currentPage.nextCursor as string | null;
+    } while (currentCursor);
 
     const endTime = Date.now();
 
@@ -364,9 +365,9 @@ describe('Resource Pagination - Real Integration Tests', () => {
     expect(endTime - startTime).toBeLessThan(10000); // Should complete in under 10 seconds
   });
 
-  test('Pagination Offset Consistency', async () => {
+  test('Pagination Page Number Consistency', async () => {
     const resource = await database.createResource({
-      name: 'offset_consistency',
+      name: 'page_consistency',
       attributes: {
         id: 'string|optional',
         name: 'string|required',
@@ -382,15 +383,15 @@ describe('Resource Pagination - Real Integration Tests', () => {
 
     await resource.insertMany(items);
 
-    const page2a = await resource.page({ size: 5, offset: 5 });
-    const page2b = await resource.page({ size: 5, offset: 5 });
+    const page2a = await resource.page({ size: 5, page: 2 });
+    const page2b = await resource.page({ size: 5, page: 2 });
 
     expect(page2a.items).toHaveLength(page2b.items.length);
     const page2aIds = page2a.items.map(item => item.id).sort();
     const page2bIds = page2b.items.map(item => item.id).sort();
     expect(page2aIds).toEqual(page2bIds);
 
-    const page3 = await resource.page({ size: 5, offset: 10 });
+    const page3 = await resource.page({ size: 5, page: 3 });
     const page3Ids = page3.items.map(item => item.id).sort();
     expect(page3Ids).not.toEqual(page2aIds);
   });
@@ -508,19 +509,19 @@ describe('Resource Pagination - Real Integration Tests', () => {
 
     await resource.insertMany(items);
 
-    // Get first page
-    const page1 = await resource.page({ size: 5, offset: 0 });
+    // Get first page (cursor-based)
+    const page1 = await resource.page({ size: 5, cursor: null });
 
     // Delete some items
     await resource.delete('item-3');
     await resource.delete('item-7');
 
-    // Get second page
-    const page2 = await resource.page({ size: 5, offset: 5 });
+    // Get all remaining items via page-number navigation
+    const allItems = await resource.page({ size: 10, page: 1 });
 
-    // Should still work and return remaining items
-    expect(page2.items.length).toBeLessThanOrEqual(5);
-    expect(page2.items.every(item => item.id !== 'item-3' && item.id !== 'item-7')).toBe(true);
+    // Should return 8 items (10 - 2 deleted)
+    expect(allItems.items).toHaveLength(8);
+    expect(allItems.items.every(item => item.id !== 'item-3' && item.id !== 'item-7')).toBe(true);
   });
 
   test('Pagination with Updated Items', async () => {
@@ -542,25 +543,21 @@ describe('Resource Pagination - Real Integration Tests', () => {
 
     await resource.insertMany(items);
 
-    // Get first page
-    const page1 = await resource.page({ size: 5, offset: 0 });
-
     // Update some items
     await resource.update('item-2', { name: 'Item 2', version: 2 });
     await resource.update('item-8', { name: 'Item 8', version: 2 });
 
-    // Get second page
-    const page2 = await resource.page({ size: 5, offset: 5 });
+    // Get all items via page-number navigation
+    const allItems = await resource.page({ size: 10, page: 1 });
+    expect(allItems.items).toHaveLength(10);
 
-    // Should include updated items
-    const updatedItem2 = page2.items.find(item => item.id === 'item-2');
-    const updatedItem8 = page2.items.find(item => item.id === 'item-8');
-    
-    if (updatedItem2) {
-      expect(updatedItem2.version).toBe(2);
-    }
-    if (updatedItem8) {
-      expect(updatedItem8.version).toBe(2);
-    }
+    // Should include updated items with new version
+    const updatedItem2 = allItems.items.find(item => item.id === 'item-2');
+    const updatedItem8 = allItems.items.find(item => item.id === 'item-8');
+
+    expect(updatedItem2).toBeDefined();
+    expect(updatedItem2!.version).toBe(2);
+    expect(updatedItem8).toBeDefined();
+    expect(updatedItem8!.version).toBe(2);
   });
 }); 
