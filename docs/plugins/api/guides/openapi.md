@@ -1,12 +1,13 @@
-# 📝 OpenAPI & Swagger UI Customization
+# 📝 OpenAPI & USD Documentation
 
 > **Navigation:** [← Back to API Plugin](./README.md) | [Authentication →](./authentication.md) | [Guards →](./guards.md)
 
-The API Plugin automatically generates **OpenAPI 3.1 schemas** and serves an interactive **Swagger UI** at `/docs`. This guide shows you how to add descriptions and customize the generated documentation for the best developer experience.
+The API Plugin automatically generates **OpenAPI 3.1** and **USD 1.0.0** schemas and serves an interactive docs UI at `/docs`. This guide shows how to add descriptions and tune docs behavior for better developer experience.
 
-Note on CSP and Docs UI:
-- The `/docs` route applies a route‑level CSP that allows Swagger/Redoc assets to load by default (including Redoc CDN).
-- To self‑host docs assets or tighten CSP, see [Security](./security.md#api-docs-csp-swaggerredoc).
+Docs endpoints:
+- `/docs` (interactive UI)
+- `/openapi.json` and `/docs/openapi.json` (OpenAPI 3.1)
+- `/api.usd.json`, `/docs/usd.json`, `/docs/usd.yaml` (USD)
 
 ---
 
@@ -36,11 +37,13 @@ await db.createResource({
   }
 });
 
-// Start API with Swagger UI
+// Start API with docs UI
 await db.usePlugin(new ApiPlugin({
   port: 3000,
   docs: {
-    ui: 'swagger',  // or 'redoc'
+    uiTheme: 'auto',
+    tryItOut: true,
+    codeGeneration: true,
     title: 'Product API',
     version: '1.0.0',
     description: 'E-commerce product catalog API'
@@ -70,7 +73,7 @@ await db.createResource({
 ```
 
 **What you get:**
-- Resource description appears in Swagger UI endpoint list
+- Resource description appears in docs endpoint list
 - Generic auto-generated attribute descriptions
 
 **Best for:** Simple resources where attribute names are self-explanatory
@@ -104,7 +107,7 @@ await db.createResource({
 ```
 
 **What you get:**
-- Each attribute shows its custom description in Swagger UI
+- Each attribute shows its custom description in docs
 - Helps API consumers understand field purposes
 - Great for public APIs and SDKs
 
@@ -149,7 +152,7 @@ await db.createResource({
 ```
 
 **What you get:**
-- Descriptions appear next to validation rules in Swagger UI
+- Descriptions appear next to validation rules in docs
 - Most detailed and self-documenting approach
 - Validation context is clear
 
@@ -208,7 +211,9 @@ await db.createResource({
 await db.usePlugin(new ApiPlugin({
   port: 3000,
   docs: {
-    ui: 'swagger',  // or 'redoc' for alternative UI
+    uiTheme: 'dark',
+    tryItOut: true,
+    codeGeneration: true,
     title: 'Acme E-Commerce API',
     version: '2.1.0',
     description: 'Product catalog and inventory management API. Supports filtering, pagination, and real-time stock updates.'
@@ -216,11 +221,12 @@ await db.usePlugin(new ApiPlugin({
 }));
 
 console.log('🚀 API running at http://localhost:3000');
-console.log('📚 Swagger UI at http://localhost:3000/docs');
+console.log('📚 Docs UI at http://localhost:3000/docs');
 console.log('📄 OpenAPI spec at http://localhost:3000/openapi.json');
+console.log('📄 USD spec at http://localhost:3000/api.usd.json');
 ```
 
-**Result:** Beautiful, self-documenting Swagger UI with:
+**Result:** Self-documenting API docs with:
 - Clear field descriptions
 - Enum value documentation
 - Validation constraints
@@ -233,7 +239,7 @@ console.log('📄 OpenAPI spec at http://localhost:3000/openapi.json');
 
 The OpenAPI generator automatically includes:
 
-| Feature | Appears in Swagger UI | Source |
+| Feature | Appears in Docs UI | Source |
 |---------|----------------------|--------|
 | **Field types** | ✅ String, number, boolean, array, object | `attributes` definition |
 | **Validation rules** | ✅ Min/max, length, pattern, format | String notation (`\|min:0\|max:100`) |
@@ -244,14 +250,14 @@ The OpenAPI generator automatically includes:
 | **Partitions** | ✅ Query parameters (`?partition=`, `?partitionValues=`) | `partitions` config |
 | **Relations** | ✅ `?populate=` parameter | RelationPlugin integration |
 | **Timestamps** | ✅ `createdAt`, `updatedAt` fields | `timestamps: true` |
-| **Pagination** | ✅ `?limit=`, `?offset=` parameters | Always included |
+| **Pagination** | ✅ `?limit=`, `?cursor=`, `?page=` parameters | Always included (cursor-based) |
 | **Plugin attributes** | ❌ Hidden (internal use only) | Auto-filtered (see below) |
 
 ---
 
 ## 🏷️ Automatic Tags for Custom Routes
 
-Swagger UI groups operations by **tags**. The API plugin now infers tags for custom routes so your `/docs` sidebar stays organized without any manual tagging code.
+The docs UI groups operations by **tags**. The API plugin infers tags for custom routes so your `/docs` sidebar stays organized without manual tagging.
 
 ### Plugin-level custom routes
 
@@ -269,7 +275,7 @@ await db.usePlugin(new ApiPlugin({
 }));
 ```
 
-**Result in Swagger UI**
+**Result in docs UI**
 
 - `/billing/*` routes are tagged as **Billing**
 - `/ops/*` routes are tagged as **Ops**
@@ -313,7 +319,7 @@ Use nested segments to group related actions (`payments`, `audit`, `webhooks`, e
 - These are internal implementation details
 - They're managed automatically by plugins
 - API consumers shouldn't interact with them directly
-- Keeps Swagger UI clean and predictable
+- Keeps docs clean and predictable
 
 **Still accessible in code:**
 ```javascript
@@ -322,7 +328,7 @@ const doc = await resource.get('doc123');
 console.log(doc._hasEmbedding);  // ✅ Works!
 
 // But they won't appear in:
-// - Swagger UI
+// - Docs UI
 // - OpenAPI schema
 // - TypeScript definitions
 // - API documentation
@@ -459,47 +465,50 @@ metadata: {
 
 ---
 
-## 🎭 Swagger UI vs Redoc
+## 🎛️ Docs UI Settings
 
-The API Plugin supports two documentation UIs:
-
-### Swagger UI (Default)
+The API Plugin uses Raffel's USD docs UI. You can control theme and interaction behavior:
 
 ```javascript
 docs: {
-  ui: 'swagger',
-  title: 'My API'
+  enabled: true,         // Set to false to disable docs entirely
+  title: 'My API',
+  version: '1.0.0',
+  description: 'API description',
+  uiTheme: 'auto',      // 'light' | 'dark' | 'auto'
+  tryItOut: true,       // Enable interactive request execution
+  codeGeneration: true  // Show client code snippets
 }
 ```
 
-**Features:**
-- Interactive "Try it out" testing
-- Execute requests directly from docs
-- OAuth2/OIDC authentication support
-- Request/response examples
-- Schema visualization
+Set `docs.enabled: false` to disable the `/docs` UI and all spec endpoints. Useful for production environments where you don't want to expose API documentation publicly.
 
-**Best for:** Internal APIs, testing, development
+Main endpoints:
+- `/docs` interactive UI
+- `/openapi.json` and `/docs/openapi.json`
+- `/api.usd.json`, `/docs/usd.json`, `/docs/usd.yaml`
 
----
+### Effect of `basePath`
 
-### Redoc
+When `basePath` is configured, all docs endpoints are served under it:
 
 ```javascript
-docs: {
-  ui: 'redoc',
-  title: 'My API'
-}
+await db.usePlugin(new ApiPlugin({
+  basePath: '/api/v1',
+  // docs at /api/v1/docs, spec at /api/v1/openapi.json, etc.
+}));
 ```
 
-**Features:**
-- Clean, responsive design
-- Better for complex schemas
-- Three-panel layout
-- Markdown support in descriptions
-- No "Try it out" (read-only)
+### USD vs OpenAPI Format
 
-**Best for:** Public APIs, external documentation, marketing
+The API Plugin generates two spec formats:
+
+| Format | Endpoints | Purpose |
+|--------|-----------|---------|
+| **OpenAPI 3.1** | `/openapi.json`, `/docs/openapi.json` | Industry standard, tooling compatible |
+| **USD 1.0.0** | `/api.usd.json`, `/docs/usd.json`, `/docs/usd.yaml` | Raffel's native format, used by the docs UI |
+
+The interactive docs UI at `/docs` uses the USD format internally. Both formats are generated from the same source and kept in sync automatically.
 
 ---
 
@@ -513,56 +522,17 @@ docs: {
 
 ---
 
-## 📦 Additional Configuration
+## 📦 Additional Notes
 
-### Custom OpenAPI Schema Overrides
+### API Metadata
 
-```javascript
-await db.usePlugin(new ApiPlugin({
-  port: 3000,
-  docs: {
-    ui: 'swagger',
-    title: 'My API',
-    version: '1.0.0',
-    description: 'API description',
+`docs.title`, `docs.version`, and `docs.description` populate both OpenAPI and USD outputs.
 
-    // Custom OpenAPI schema extensions
-    servers: [
-      { url: 'https://api.example.com', description: 'Production' },
-      { url: 'https://staging.api.example.com', description: 'Staging' }
-    ],
+### Caching Behavior
 
-    contact: {
-      name: 'API Support',
-      email: 'api@example.com',
-      url: 'https://example.com/support'
-    },
-
-    license: {
-      name: 'MIT',
-      url: 'https://opensource.org/licenses/MIT'
-    }
-  }
-}));
-```
-
-### Cache Configuration
-
-OpenAPI schema generation is cached for performance (80-90% speedup):
-
-```javascript
-docs: {
-  cache: {
-    enabled: true,        // Default: true
-    ttl: 3600000         // 1 hour (default)
-  }
-}
-```
-
-Cache automatically invalidates when:
-- Resources are created/updated/deleted
-- Plugin configuration changes
-- `apiPlugin.invalidateOpenAPICache()` is called
+OpenAPI generation is cached internally by the plugin and reused across requests.
+The cache key changes when resources, schema/config, routes, auth config, or registered app routes change.
+There is currently no public `docs.cache` setting or `invalidateOpenAPICache()` API.
 
 ---
 

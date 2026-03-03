@@ -354,6 +354,61 @@ apikey: {
 
 ---
 
+## Registration
+
+The API plugin can expose a `POST /auth/register` endpoint for user self-registration. Disabled by default.
+
+### Configuration
+
+```javascript
+await db.usePlugin(new ApiPlugin({
+  auth: {
+    resource: 'users',
+    drivers: { jwt: { secret: process.env.JWT_SECRET } },
+    registration: {
+      enabled: true,                             // Enable registration endpoint
+      allowedFields: ['name', 'company'],        // Extra fields users can submit
+      defaultRole: 'user'                        // Role assigned to new users
+    }
+  }
+}));
+```
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `enabled` | boolean | `false` | Enable `POST /auth/register` |
+| `allowedFields` | string[] | `[]` | Extra fields allowed beyond username/password |
+| `defaultRole` | string | `'user'` | Role assigned to new users |
+
+### Blocked Fields
+
+These fields are always rejected in registration requests to prevent privilege escalation:
+
+`role`, `active`, `apiKey`, `jwtSecret`, `scopes`, `createdAt`, `updatedAt`, `metadata`, `id`
+
+### Example
+
+```bash
+curl -X POST http://localhost:3000/auth/register \
+  -H 'Content-Type: application/json' \
+  -d '{ "email": "new@example.com", "password": "securepass123", "name": "Jane" }'
+```
+
+**Response (201):**
+```json
+{
+  "success": true,
+  "data": {
+    "user": { "id": "new@example.com", "email": "new@example.com", "name": "Jane", "role": "user" },
+    "token": "eyJhbGc..."
+  }
+}
+```
+
+When the JWT driver is active, a token is returned immediately so the user is logged in after registration. Password must be at least 8 characters. If the username already exists, a `409 CONFLICT` is returned.
+
+---
+
 ## OIDC / OAuth2
 
 **Best for:** SSO, Azure AD, Google, Keycloak, Auth0
@@ -459,6 +514,89 @@ jwt: {
   audience: 'my-api'
 }
 ```
+
+### OAuth2 Resource Server Driver
+
+Use the `oauth2` driver when your API validates tokens issued by an external Authorization Server (SSO). It verifies JWT signatures via JWKS and optionally falls back to token introspection for opaque tokens.
+
+```javascript
+await db.usePlugin(new ApiPlugin({
+  auth: {
+    drivers: {
+      oauth2: {
+        issuer: 'https://auth.example.com',       // Required: token issuer
+        audience: 'my-api',                        // Expected audience claim
+        algorithms: ['RS256', 'ES256'],            // Allowed algorithms (default)
+        cacheTTL: 3_600_000,                       // JWKS cache: 1 hour (default)
+        clockTolerance: 60,                        // Clock skew tolerance in seconds
+        fetchUserInfo: true,                       // Look up user in local DB (default)
+        userMapping: {                             // Map token claims to user fields
+          id: 'sub',
+          email: 'email',
+          username: 'preferred_username',
+          role: 'role'
+        },
+        introspection: {                           // Opaque token fallback (optional)
+          enabled: true,
+          endpoint: 'https://auth.example.com/oauth/introspect',
+          clientId: process.env.INTROSPECT_CLIENT_ID,
+          clientSecret: process.env.INTROSPECT_CLIENT_SECRET
+        }
+      }
+    },
+    pathRules: [
+      { path: '/api/**', methods: ['oauth2'], required: true }
+    ]
+  }
+}));
+```
+
+**Provider presets** simplify configuration for common providers:
+
+```javascript
+// Azure AD
+oauth2: { provider: 'azure', tenantId: 'your-tenant-id', audience: 'api://my-api' }
+
+// Auth0
+oauth2: { provider: 'auth0', domain: 'your-tenant.auth0.com', audience: 'https://api.example.com' }
+
+// Keycloak (with introspection)
+oauth2: {
+  provider: 'keycloak',
+  baseUrl: 'https://keycloak.example.com',
+  realm: 'myrealm',
+  introspection: { enabled: true }
+}
+
+// AWS Cognito
+oauth2: { provider: 'cognito', region: 'us-east-1', userPoolId: 'us-east-1_abc123' }
+```
+
+The driver auto-discovers JWKS endpoints via `.well-known/oauth-authorization-server` or `.well-known/openid-configuration`. If discovery fails, it falls back to `{issuer}/.well-known/jwks.json`.
+
+---
+
+## Multi-Driver Strategy
+
+When multiple auth drivers are configured, the `strategy` option controls how they're evaluated:
+
+```javascript
+auth: {
+  drivers: { jwt: { /* ... */ }, oauth2: { /* ... */ }, apikey: { /* ... */ } },
+  strategy: 'any',       // Try all drivers, first success wins (default)
+  priorities: {           // Optional: driver evaluation order
+    jwt: 1,               // Highest priority
+    oauth2: 2,
+    apikey: 3              // Lowest priority
+  }
+}
+```
+
+| Strategy | Behavior |
+|----------|----------|
+| `'any'` | Try all drivers in order; first successful authentication wins |
+
+When `priorities` is set, drivers are sorted by priority (lowest number = highest priority) before evaluation. This is useful when multiple drivers could match the same request — e.g., a `Bearer` token could be either JWT or OAuth2.
 
 ---
 
@@ -648,7 +786,7 @@ oidc: {
 }
 ```
 
-### Rate Limiting
+### Rate Limiting & Login Throttle
 
 ```javascript
 failban: {
@@ -657,6 +795,8 @@ failban: {
   banDuration: 3600000   // 1 hour ban
 }
 ```
+
+Login throttle is enabled by default for the JWT driver, blocking IPs after 5 failed login attempts for 5 minutes. See [Security Guide — Login Throttle](/plugins/api/guides/security.md#login-throttle) for full configuration.
 
 ### Security Headers
 

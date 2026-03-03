@@ -669,8 +669,8 @@ guard: {
 
 ## ⚠️ Important Notes
 
-1. **Guards are NOT automatic with API Plugin** - You must manually apply guards in custom routes (or use global guards at plugin level)
-2. **Future feature**: `addResource()` method will auto-apply guards to generated routes
+1. **Guards ARE automatic for resource routes** — Guards defined in `resource.guard` (single resource) or plugin-level `guards` (global) are automatically applied to all auto-generated CRUD endpoints (list, get, create, update, delete). No manual wiring needed.
+2. **Custom routes need manual guards** — If you define custom routes via `routes: {}`, you must apply guard logic yourself in the handler or use global guards at plugin level.
 3. **Never trust request body** - Always force `tenantId`/`userId` from token in guards
 4. **Use 404 instead of 403** - Prevents information leakage (don't reveal resource exists)
 5. **Guards run BEFORE or AFTER database operations** - List/insert run before, get/update/delete run after (to access resource)

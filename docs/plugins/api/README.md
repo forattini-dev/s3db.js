@@ -7,7 +7,7 @@ await db.usePlugin(new ApiPlugin({ port: 3000 }));
 // ✅ REST API + Auth + Docs + Metrics running
 ```
 
-**Instant features:** Auto-generated endpoints • JWT/OAuth2/OIDC auth • Row-level security • Rate limiting • Swagger UI • Production metrics
+**Instant features:** Auto-generated endpoints • JWT/OAuth2/OIDC auth • Row-level security • Rate limiting • Interactive docs (OpenAPI + USD) • Production metrics
 
 **Works with:** Any OIDC provider (IdentityPlugin, Keycloak, Azure AD, AWS Cognito, etc.)
 
@@ -30,7 +30,7 @@ await db.createResource({
 });
 
 await db.usePlugin(new ApiPlugin({ port: 3000 }));
-// ✨ API at http://localhost:3000 with Swagger UI at /docs
+// ✨ API at http://localhost:3000 with docs UI at /docs
 ```
 
 ### 2. Add JWT Authentication
@@ -84,8 +84,11 @@ auth: {
 | Guide | Description | Read Time |
 |-------|-------------|-----------|
 | **[OIDC Guide](/plugins/api/guides/oidc.md)** | ✨ Complete OAuth2/OIDC setup (Google, Azure, etc) | 20 min |
-| **[OpenAPI Docs](/plugins/api/guides/openapi.md)** | Customize Swagger UI, add descriptions | 10 min |
+| **[OpenAPI Docs](/plugins/api/guides/openapi.md)** | Customize docs UI, add descriptions | 10 min |
 | **[Routing](/plugins/api/reference/routing.md)** | Custom routes, precedence, path rules | 5 min |
+| **[Authorization Patterns](/plugins/api/guides/authorization-patterns.md)** | RBAC, ABAC, multi-tenancy patterns | 10 min |
+| **[Static Files](/plugins/api/guides/static-files.md)** | Serve SPAs, assets, filesystem/S3 drivers | 5 min |
+| **[Plugin Integrations](/plugins/api/guides/integrations.md)** | Expose AuditPlugin, Metrics, Cloud Inventory data | 5 min |
 
 ### Reference
 
@@ -185,7 +188,7 @@ apiPlugin.events.on('resource:created', async ({ resource, item }) => {
 ### Auto-Generated Endpoints
 
 ```bash
-GET     /users           # List/query with filters
+GET     /users           # List with cursor pagination (?limit=10&cursor=TOKEN or ?page=2)
 POST    /users           # Create
 GET     /users/:id       # Get by ID
 PUT     /users/:id       # Update (full replace)
@@ -194,8 +197,12 @@ DELETE  /users/:id       # Delete
 HEAD    /users           # Count
 OPTIONS /users           # Metadata
 
-GET     /docs            # Interactive Swagger UI
-GET     /openapi.json    # OpenAPI 3.0 spec
+GET     /docs            # Interactive docs UI (Raffel USD)
+GET     /openapi.json    # OpenAPI 3.1 spec
+GET     /api.usd.json    # USD 1.0.0 spec (legacy path)
+GET     /docs/openapi.json # OpenAPI 3.1 spec (docs alias)
+GET     /docs/usd.json   # USD 1.0.0 spec (canonical path)
+GET     /docs/usd.yaml   # USD 1.0.0 spec in YAML
 GET     /health          # Health check
 GET     /metrics         # Prometheus metrics
 ```
@@ -227,7 +234,7 @@ GET     /metrics         # Prometheus metrics
 - `ApiPlugin.stop()`/`uninstall()` shutdown path also disposes plugin internals (failban scheduler, rate-limiter stores, OIDC cleanup handlers).
 - Prevents hidden timers/listeners between restarts and supports safe plugin lifecycle in long-running servers.
 
-**[→ Performance guide](/plugins/api/guides/deployment.md#performance)**
+**[→ Performance guide](/plugins/api/guides/deployment.md#performance-tuning)**
 
 ---
 
@@ -391,7 +398,7 @@ static: [{
 
 **Built on Hono:** 12x faster than Express, 3x faster than Fastify
 
-**[→ Performance benchmarks](/plugins/api/guides/deployment.md#performance)**
+**[→ Performance benchmarks](/plugins/api/guides/deployment.md#performance-tuning)**
 </details>
 
 <details>
@@ -433,7 +440,7 @@ failban: {
 }
 ```
 
-**[→ Observability guide](/plugins/api/guides/observability.md)**
+**[→ Deployment guide](/plugins/api/guides/deployment.md#prometheus-monitoring)**
 </details>
 
 <details>
