@@ -8,7 +8,7 @@ This section is the single source of truth for all ApiPlugin options. Other guid
 
 - port: number = 3000
 - host: string = '0.0.0.0'
-- basePath: string = '' (normalized; affects all routes, including /docs and /openapi.json)
+- basePath: string = '' (normalized; affects all routes, including /docs, /openapi.json, and /api.usd.json)
 - logLevel: string = false (controls log level output across the plugin)
 - startupBanner: boolean = true
 - versionPrefix: boolean | string = false
@@ -17,15 +17,17 @@ This section is the single source of truth for all ApiPlugin options. Other guid
 ## Docs
 
 - docs.enabled: boolean = true
-- docs.ui: 'redoc' | 'swagger' = 'redoc'
 - docs.title: string = 's3db.js API'
 - docs.version: string = '1.0.0'
 - docs.description: string
-- docs.csp: string | null (route‑level CSP override for /docs; defaults allow Redoc CDN and fonts)
+- docs.uiTheme: 'light' | 'dark' | 'auto' = 'auto'
+- docs.tryItOut: boolean = true
+- docs.codeGeneration: boolean = true
 
 Notes:
-- When ui='redoc' and no docs.csp provided, /docs sets CSP including https://cdn.redoc.ly, https://fonts.googleapis.com, https://fonts.gstatic.com.
-- When ui='swagger', a minimal CSP (self + unsafe‑inline) is set unless docs.csp overrides it.
+- `/openapi.json` serves OpenAPI 3.1.
+- `/api.usd.json` serves USD 1.0.0 (compatibility path).
+- `/docs/openapi.json`, `/docs/usd.json`, and `/docs/usd.yaml` are canonical docs aliases.
 
 ## Auth
 
@@ -573,7 +575,7 @@ await db.usePlugin(new ApiPlugin({
 }));
 ```
 
-The OpenAPI generator and Swagger/Redoc docs automatically include the base path so the documentation matches the actual routes.
+OpenAPI/USD docs endpoints automatically include the base path so the documentation matches the actual routes.
 
 ---
 

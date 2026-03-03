@@ -137,7 +137,6 @@ export class EventualConsistencyPlugin extends CoordinatorPlugin<EventualConsist
     });
 
     this.config = config;
-    this.workerId = `worker-${process.pid}-${Date.now()}`;
 
     if (config.resources && config.resources.length > 0) {
       validateResourcesConfig(config.resources);

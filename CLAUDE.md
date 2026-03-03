@@ -35,12 +35,13 @@ AI guidance for s3db.js - S3-based document database.
 
 | Method | Module | Usage |
 |--------|--------|-------|
-| `insert()` | `_persistence` | `await resource.insert({ name: 'John' })` |
+| `insert()` | `_persistence` | `await resource.insert({ name: 'John' })` — atomic via `ifNoneMatch` |
 | `get()` | `_persistence` | `await resource.get(id)` |
 | `update()` | `_persistence` | GET+PUT merge (baseline) |
 | `patch()` | `_persistence` | HEAD+COPY merge (40-60% faster) |
 | `replace()` | `_persistence` | PUT only (30-40% faster) |
 | `list()` | `_query` | `await resource.list({ limit: 100 })` |
+| `page()` | `_query` | `await resource.page({ size: 10, cursor })` — cursor or page-based |
 | `query()` | `_query` | `await resource.query({ status: 'active' })` |
 
 ### Resource Architecture (Facade Pattern)
@@ -80,7 +81,7 @@ Modules in `src/core/`: ResourcePersistence, ResourceQuery, ResourcePartitions, 
 |--------|---------|
 | `ApiPlugin` | REST API with guards, OpenAPI docs |
 | `TTLPlugin` | Auto-cleanup (O(1) partition-based) |
-| `CachePlugin` | Memory/S3/filesystem cache |
+| `CachePlugin` | Memory/S3/filesystem cache + per-method policies |
 | `AuditPlugin` | Track all changes |
 | `ReplicatorPlugin` | Sync to PostgreSQL/BigQuery/SQS |
 
@@ -465,6 +466,8 @@ await sitemap.parse('https://example.com/sitemap.xml');
 - **S3**: 2KB metadata limit (use behaviors), no transactions, no indexes (use partitions)
 - **Security**: `secret` fields auto-encrypted, credentials need URL encoding
 - **patch()**: Falls back to update() for body behaviors
+- **insert()**: Atomic via `ifNoneMatch: '*'` — no separate exists check needed, prevents duplicate ID race conditions
+- **API pagination**: REST endpoints use cursor-based pagination only (`?cursor=TOKEN` or `?page=N`). Offset (`?offset=`) is rejected with 400
 
 ## Performance Tuning
 

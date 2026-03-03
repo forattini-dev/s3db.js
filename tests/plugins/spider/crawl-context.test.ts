@@ -235,6 +235,58 @@ describe('CrawlContext', () => {
       expect(config.headers['User-Agent']).toBe('MyBot/1.0')
       expect(config.headers['Cookie']).toBe('auth=token')
       expect(config.proxy).toBe('http://proxy.example.com:8080')
+      expect(config.useCurl).toBeUndefined()
+    })
+
+    test('should support proxy rotation list', () => {
+      context = new CrawlContext({
+        proxy: [
+          'http://proxy1.example.com:8080',
+          'socks5://proxy2.example.com:1080'
+        ]
+      })
+
+      const config = context.getHttpClientConfig('https://example.com/')
+      const launchConfig = context.getLaunchConfig()
+
+      expect(config.proxy).toEqual([
+        'http://proxy1.example.com:8080',
+        'socks5://proxy2.example.com:1080'
+      ])
+      expect(launchConfig.args).toContain('--proxy-server=http://proxy1.example.com:8080')
+    })
+
+    test('should allow disabling curl impersonation', () => {
+      context = new CrawlContext({
+        useCurl: false
+      })
+
+      const config = context.getHttpClientConfig('https://example.com/')
+      expect(config.useCurl).toBe(false)
+    })
+
+    test('should allow forcing curl impersonation', () => {
+      context = new CrawlContext({
+        useCurl: true
+      })
+
+      const config = context.getHttpClientConfig('https://example.com/')
+      expect(config.useCurl).toBe(true)
+    })
+
+    test('should pass recker options through http client config', () => {
+      context = new CrawlContext({
+        recker: {
+          http2: { enabled: true },
+          dns: { servers: ['1.1.1.1', '8.8.8.8'] }
+        }
+      })
+
+      const config = context.getHttpClientConfig('https://example.com/')
+      expect(config.recker).toMatchObject({
+        http2: { enabled: true },
+        dns: { servers: ['1.1.1.1', '8.8.8.8'] }
+      })
     })
 
     test('should include consistent anti-detection headers', () => {
@@ -309,6 +361,9 @@ describe('CrawlContext', () => {
         userAgent: 'RestoredBot/1.0',
         timezone: 'Asia/Tokyo',
         viewport: { width: 1280, height: 720 },
+        recker: {
+          http2: { enabled: true }
+        },
         cookies: [
           { name: 'restored', value: 'yes', domain: 'example.com', path: '/' }
         ],
@@ -323,6 +378,9 @@ describe('CrawlContext', () => {
       expect(restored.userAgent).toBe('RestoredBot/1.0')
       expect(restored.timezone).toBe('Asia/Tokyo')
       expect(restored.viewport).toEqual({ width: 1280, height: 720 })
+      expect(restored.getHttpClientConfig('https://example.com/').recker).toMatchObject({
+        http2: { enabled: true }
+      })
 
       const cookies = restored.getCookiesForDomain('example.com')
       expect(cookies).toHaveLength(1)

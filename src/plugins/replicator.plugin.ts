@@ -1,20 +1,13 @@
 import { TasksPool } from "../tasks/tasks-pool.class.js";
 import { Plugin, type PluginConfig } from "./plugin.class.js";
 import tryFn from "../concerns/try-fn.js";
-import { createReplicator, validateReplicatorConfig } from "./replicators/index.js";
+import { createReplicator } from "./replicators/index.js";
 import { ReplicationError } from "./replicator.errors.js";
 import { resolveResourceName } from "./concerns/resource-names.js";
 import { createLogger, type LogLevel, type S3DBLogger } from '../concerns/logger.js';
 
 function normalizeResourceName(name: unknown): string {
   return typeof name === 'string' ? name.trim().toLowerCase() : String(name);
-}
-
-interface Logger {
-  info(obj: unknown, msg?: string): void;
-  warn(obj: unknown, msg?: string): void;
-  error(obj: unknown, msg?: string): void;
-  debug(obj: unknown, msg?: string): void;
 }
 
 interface Database {
@@ -31,7 +24,7 @@ interface Resource {
   insert(data: Record<string, unknown>): Promise<Record<string, unknown>>;
   patch(id: string, data: Record<string, unknown>): Promise<Record<string, unknown>>;
   query(filter: Record<string, unknown>, options?: QueryOptions): Promise<Array<Record<string, unknown>>>;
-  page(options: PageOptions): Promise<Array<Record<string, unknown>> | { items: Array<Record<string, unknown>> }>;
+  page(options: PageOptions): Promise<{ items: Array<Record<string, unknown>>; nextCursor?: string | null }>;
   count(filter?: Record<string, unknown>): Promise<number>;
   on(event: string, handler: EventHandler): void;
   off(event: string, handler: EventHandler): void;
@@ -56,8 +49,10 @@ interface QueryOptions {
 }
 
 interface PageOptions {
-  offset: number;
   size: number;
+  page?: number;
+  cursor?: string | null;
+  skipCount?: boolean;
 }
 
 type EventHandler = (...args: unknown[]) => void | Promise<void>;
@@ -189,7 +184,7 @@ export interface ReplicatorPluginOptions {
   resourceAllowlist?: string[];
   resourceBlocklist?: string[];
   logLevel?: string;
-  logger?: Logger;
+  logger?: S3DBLogger;
   [key: string]: unknown;
 }
 
@@ -475,10 +470,6 @@ export class ReplicatorPlugin extends Plugin {
     }
   }
 
-  override async start(): Promise<void> {
-    // Plugin is ready
-  }
-
   installDatabaseHooks(): void {
     if (!this.database) return;
 
@@ -575,7 +566,7 @@ export class ReplicatorPlugin extends Plugin {
     }
   }
 
-  async uploadMetadataFile(database: Database): Promise<void> {
+  async uploadMetadataFile(_database?: Database): Promise<void> {
     if (typeof this.database?.uploadMetadataFile === 'function') {
       await this.database.uploadMetadataFile();
     }
@@ -1161,11 +1152,11 @@ export class ReplicatorPlugin extends Plugin {
 
         const resource = this.database.resources[resourceName]!;
 
-        let offset = 0;
+        let cursor: string | null = null;
         const pageSize = this.config.batchSize || 100;
 
         while (true) {
-          const [ok, err, page] = await tryFn(() => resource.page({ offset, size: pageSize, skipCount: true }));
+          const [ok, err, page] = await tryFn(() => resource.page({ cursor, size: pageSize, skipCount: true }));
 
           if (!ok || !page) break;
 
@@ -1222,7 +1213,13 @@ export class ReplicatorPlugin extends Plugin {
             throw poolError.error;
           }
 
-          offset += pageSize;
+          const nextCursor = Array.isArray(page)
+            ? null
+            : ((page as { nextCursor?: string | null }).nextCursor ?? null);
+          if (!nextCursor) {
+            break;
+          }
+          cursor = nextCursor;
         }
       }
     }

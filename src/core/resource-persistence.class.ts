@@ -5,8 +5,7 @@ import { isNotFoundError } from '../concerns/s3-errors.js';
 import { sanitizeDeep } from '../concerns/safe-merge.js';
 import { calculateTotalSize, calculateEffectiveLimit } from '../concerns/calculator.js';
 import { mapAwsError, InvalidResourceItem, ResourceError, ValidationError } from '../errors.js';
-import { streamToString } from '../stream/index.js';
-import type { StringRecord, JSONValue } from '../types/common.types.js';
+import type { StringRecord } from '../types/common.types.js';
 import type { IdGeneratorConfig } from './resource-id-generator.class.js';
 
 export interface ResourceData extends StringRecord {
@@ -235,6 +234,37 @@ export class ResourcePersistence {
   get versioningEnabled(): boolean { return this.resource.versioningEnabled; }
   get observers(): Observer[] { return this.resource.observers; }
 
+  private _isKnownCoreError(error: unknown): error is Error {
+    return (
+      error instanceof InvalidResourceItem ||
+      error instanceof ResourceError ||
+      error instanceof ValidationError
+    );
+  }
+
+  private _normalizeCoreError(
+    error: unknown,
+    context: { key?: string; id?: string; operation?: string } = {}
+  ): Error {
+    if (this._isKnownCoreError(error)) {
+      return error;
+    }
+
+    if (error && typeof error === 'object') {
+      const errObj = error as Record<string, unknown>;
+      if ('statusCode' in errObj || 'retriable' in errObj) {
+        return error as Error;
+      }
+    }
+
+    const safeError = error instanceof Error ? error : new Error(String(error ?? 'Unknown error'));
+    return mapAwsError(safeError, {
+      bucket: this.client.config.bucket,
+      resourceName: this.name,
+      ...context
+    });
+  }
+
   async insert({ id, ...attributes }: InsertParams): Promise<ResourceData> {
     this.logger.trace({ id, attributeKeys: Object.keys(attributes) }, 'insert called');
 
@@ -287,15 +317,13 @@ export class ResourcePersistence {
     const mappedData = await this.schema.mapper(validatedAttributes);
     mappedData._v = String(this.version);
 
-    const behaviorImpl = getBehavior(this.behavior) as Behavior as Behavior;
-    const { mappedData: processedMetadata, body } = await behaviorImpl.handleInsert({
+    const behaviorImpl = getBehavior(this.behavior) as Behavior;
+    const { mappedData: finalMetadata, body } = await behaviorImpl.handleInsert({
       resource: this.resource,
       data: validatedAttributes,
       mappedData,
       originalData: completeData
     });
-
-    const finalMetadata = processedMetadata;
 
     if (!finalId || String(finalId).trim() === '') {
       throw new InvalidResourceItem({
@@ -367,7 +395,11 @@ export class ResourcePersistence {
           suggestion: 'Reduce metadata size or number of fields.'
         });
       }
-      throw errPut;
+      throw this._normalizeCoreError(errPut, {
+        key,
+        id: finalId,
+        operation: 'insert'
+      });
     }
 
     const insertedObject = await this.resource.composeFullObjectFromWrite({
@@ -531,7 +563,12 @@ export class ResourcePersistence {
       return null;
     }
 
-    if (!ok || !data) throw err;
+    if (!ok || !data) {
+      throw this._normalizeCoreError(err, {
+        id,
+        operation: 'getOrNull'
+      });
+    }
     return data;
   }
 
@@ -547,7 +584,12 @@ export class ResourcePersistence {
       });
     }
 
-    if (!ok || !data) throw err;
+    if (!ok || !data) {
+      throw this._normalizeCoreError(err, {
+        id,
+        operation: 'getOrThrow'
+      });
+    }
     return data;
   }
 
@@ -559,7 +601,11 @@ export class ResourcePersistence {
 
     if (!ok && err) {
       if (!isNotFoundError(err)) {
-        throw err;
+        throw this._normalizeCoreError(err, {
+          key,
+          id,
+          operation: 'exists'
+        });
       }
     }
 
@@ -670,16 +716,33 @@ export class ResourcePersistence {
       return inserted;
     }
 
+    const errInsertMsg = (errInsert as Error | null | undefined)?.message || '';
+    const preconditionName = (errInsert as Error & { name?: string; code?: string; statusCode?: number } | null | undefined);
     const duplicateConflict =
-      errInsert instanceof InvalidResourceItem &&
-      typeof errInsert.message === 'string' &&
-      errInsert.message.includes(`Resource with id '${id}' already exists`);
+      (
+        errInsert instanceof InvalidResourceItem &&
+        errInsertMsg.includes(`Resource with id '${id}' already exists`)
+      ) ||
+      preconditionName?.name === 'PreconditionFailed' ||
+      preconditionName?.code === 'PreconditionFailed' ||
+      preconditionName?.statusCode === 412 ||
+      (
+        typeof errInsertMsg === 'string' &&
+        (
+          /precondition failed/i.test(errInsertMsg) ||
+          /already exists for key/i.test(errInsertMsg)
+        )
+      );
 
     if (duplicateConflict) {
       return this.update(id, attributes);
     }
 
-    throw errInsert;
+    throw this._normalizeCoreError(errInsert, {
+      key: this.resource.getResourceKey(id),
+      id,
+      operation: 'upsert'
+    });
   }
 
   async insertMany(objects: InsertParams[]): Promise<ResourceData[]> {
@@ -735,18 +798,13 @@ export class ResourcePersistence {
           suggestion: 'Ensure the record exists or create it before attempting an update.'
         });
       }
-      throw errOriginalData;
-    }
-
-    if (!originalData) {
-      throw new ResourceError(`Resource with id '${id}' does not exist`, {
-        resourceName: this.name,
+      throw this._normalizeCoreError(errOriginalData, {
+        key: this.resource.getResourceKey(id),
         id,
-        statusCode: 404,
-        retriable: false,
-        suggestion: 'Ensure the record exists or create it before attempting an update.'
+        operation: 'update'
       });
     }
+
     let mergedData: ResourceData = { ...originalData };
 
     for (const [key, value] of Object.entries(attributes)) {
@@ -807,15 +865,14 @@ export class ResourcePersistence {
       originalData: { ...attributes, id }
     });
 
-    const { id: validatedId, ...validatedAttributes } = data;
-    const oldData = { ...originalData, id };
-    const newData = { ...validatedAttributes, id };
+    const validatedAttributes = { ...data };
+    delete validatedAttributes.id;
 
     const mappedData = await this.schema.mapper(validatedAttributes);
     mappedData._v = String(this.version);
 
     const behaviorImpl = getBehavior(this.behavior) as Behavior;
-    const { mappedData: processedMetadata, body } = await behaviorImpl.handleUpdate({
+    const { mappedData: finalMetadata, body } = await behaviorImpl.handleUpdate({
       resource: this.resource,
       id,
       data: validatedAttributes,
@@ -823,7 +880,6 @@ export class ResourcePersistence {
       originalData: { ...attributes, id }
     });
 
-    const finalMetadata = processedMetadata;
     const key = this.resource.getResourceKey(id);
 
     let existingContentType: string | undefined = undefined;
@@ -1010,7 +1066,7 @@ export class ResourcePersistence {
     let result: ResourceData;
 
     if ((behavior === 'enforce-limits' || behavior === 'truncate-data') && !hasNestedFields) {
-      result = await this._patchViaCopyObject(id, fields, options);
+      result = await this._patchViaCopyObject(id, fields);
     } else {
       result = await this.update(id, fields);
     }
@@ -1020,7 +1076,7 @@ export class ResourcePersistence {
     return finalResult;
   }
 
-  async _patchViaCopyObject(id: string, fields: StringRecord, options: PatchOptions = {}): Promise<ResourceData> {
+  async _patchViaCopyObject(id: string, fields: StringRecord): Promise<ResourceData> {
     const key = this.resource.getResourceKey(id);
 
     const headResponse = await this.client.headObject(key);
@@ -1139,7 +1195,8 @@ export class ResourcePersistence {
       });
     }
 
-    const { id: validatedId, ...validatedAttributes } = validated;
+    const validatedAttributes = { ...validated };
+    delete validatedAttributes.id;
 
     const mappedMetadata = await this.schema.mapper(validatedAttributes);
     mappedMetadata._v = String(this.version);
@@ -1191,13 +1248,13 @@ export class ResourcePersistence {
           }
         });
         const excess = totalSize - effectiveLimit;
-        (errPut as Error & { totalSize?: number; limit?: number; effectiveLimit?: number; excess?: number }).totalSize = totalSize;
-        (errPut as Error & { totalSize?: number; limit?: number; effectiveLimit?: number; excess?: number }).limit = 2047;
-        (errPut as Error & { totalSize?: number; limit?: number; effectiveLimit?: number; excess?: number }).effectiveLimit = effectiveLimit;
-        (errPut as Error & { totalSize?: number; limit?: number; effectiveLimit?: number; excess?: number }).excess = excess;
         throw new ResourceError('metadata headers exceed', { resourceName: this.name, operation: 'replace', id, totalSize, effectiveLimit, excess, suggestion: 'Reduce metadata size or number of fields.' });
       }
-      throw errPut;
+      throw this._normalizeCoreError(errPut, {
+        key,
+        id,
+        operation: 'replace'
+      });
     }
 
     const replacedObject: ResourceData = { id, ...validatedAttributes };
@@ -1305,7 +1362,8 @@ export class ResourcePersistence {
       };
     }
 
-    const { id: validatedId, ...validatedAttributes } = data;
+    const validatedAttributes = { ...data };
+    delete validatedAttributes.id;
     const mappedData = await this.schema.mapper(validatedAttributes);
     mappedData._v = String(this.version);
 
@@ -1432,7 +1490,6 @@ export class ResourcePersistence {
         etag: (response as { ETag?: string })?.ETag
       };
     } else {
-      await this.resource.handlePartitionReferenceUpdates(oldData, newData);
       const finalResult = await this.resource.executeHooks('afterUpdate', updatedData) as ResourceData;
 
       this.resource._emitStandardized('updated', {

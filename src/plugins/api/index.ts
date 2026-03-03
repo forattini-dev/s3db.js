@@ -212,7 +212,7 @@ export class ApiPlugin extends Plugin {
         origin: options.cors?.origin || '*',
         methods: options.cors?.methods || ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
         allowedHeaders: options.cors?.allowedHeaders || ['Content-Type', 'Authorization', 'X-API-Key'],
-        exposedHeaders: options.cors?.exposedHeaders || ['X-Total-Count', 'X-Page-Count'],
+        exposedHeaders: options.cors?.exposedHeaders || ['X-Total-Count', 'X-Page-Count', 'X-Next-Cursor', 'X-Pagination-Mode'],
         credentials: options.cors?.credentials !== false,
         maxAge: options.cors?.maxAge || 86400
       },

@@ -1,162 +1,115 @@
-# Costs Plugin
+# 💸 Costs Plugin
 
-> **Real-time S3 request, storage, and transfer cost tracking for every workload.**
+> Real-time usage and cost visibility for requests, storage, and transfer.
+>
+> **Navigation:** [← Plugin Index](/plugins/README.md) | [Guides ↓](#-documentation-index)
 
 ---
 
-## TLDR
+## ⚡ TLDR
 
-**Real-time** AWS S3 cost tracking with comprehensive request, storage, and data transfer monitoring.
+Use `CostsPlugin` to answer three questions in production:
+1. How many S3 operations are we doing?
+2. What is the estimated USD impact?
+3. Which resources/plugins are driving cost?
 
-**1 line to get started:**
 ```javascript
-plugins: [CostsPlugin]  // Done! Optional configuration available
-```
+import { Database, CostsPlugin } from 's3db.js';
 
-**Main features:**
-- Zero configuration (static plugin)
-- Real-time cost tracking (requests + storage + data transfer)
-- Tiered pricing support (AWS pricing tiers)
-- Free tier support (100GB/month data transfer OUT)
-- Monthly/yearly projections
+const db = new Database({ connectionString: 's3://KEY:SECRET@bucket/app' });
+await db.usePlugin(new CostsPlugin({ considerFreeTier: true }));
+await db.connect();
 
-**When to use:**
-- Budget monitoring
-- Cost optimization
-- Identify expensive operations
-- Future cost projection
-
-**Access:**
-```javascript
-console.log('Total cost:', s3db.client.costs.total);  // $0.123456
-console.log('Requests:', s3db.client.costs.requests.counts);
-console.log('Storage:', s3db.client.costs.storage.totalGB);
+const costsPlugin = db.plugins.CostsPlugin;
+const last24h = costsPlugin.snapshot({ windowMs: 24 * 60 * 60 * 1000 });
+const monthProjection = costsPlugin.estimate({ days: 30, includePluginEstimates: true });
 ```
 
 ---
 
-## Quick Start
+## 🚀 Quick Start
 
 ```javascript
-import { S3db } from 's3db.js';
-import { CostsPlugin } from 's3db.js';
+import { Database, CostsPlugin } from 's3db.js';
 
-// 1. Setup database with CostsPlugin
-const db = new S3db({
-  connectionString: "s3://KEY:SECRET@bucket/path",
-  plugins: [CostsPlugin]
+const db = new Database({
+  connectionString: 's3://ACCESS:SECRET@my-bucket/prod'
 });
+
+await db.usePlugin(new CostsPlugin({
+  considerFreeTier: true,
+  historyRetentionMs: 30 * 24 * 60 * 60 * 1000
+}));
 
 await db.connect();
 
-// 2. Use your database normally
+// ... normal operations
 const users = db.resources.users;
-await users.insert({ name: 'John', email: 'john@example.com' });
-await users.list();
+await users.insert({ id: 'u1', name: 'Ana' });
+await users.get('u1');
 
-// 3. Check costs anytime
-console.log('Total cost:', db.client.costs.total);
-console.log('Breakdown:');
-console.log('  Requests:', db.client.costs.requests.subtotal);
-console.log('  Storage:', db.client.costs.storage.subtotal);
-console.log('  Transfer:', db.client.costs.dataTransfer.subtotal);
+const costs = db.client.costs;
+console.log('Total USD:', costs.total);
+console.log('Requests by method:', costs.requests.counts);
+console.log('Usage by resource:', costs.usage.byResource);
 ```
 
-**Enable Free Tier (100GB/month data transfer):**
+---
+
+## 📦 What the Plugin Tracks
+
+1. Requests:
+`put`, `copy`, `list`, `get`, `head`, `delete` counters and subtotal.
+2. Storage:
+tracked bytes, GB, and estimated monthly storage subtotal.
+3. Data transfer:
+`inBytes`/`outBytes` and transfer subtotal (with optional free-tier mode).
+4. Usage dimensions:
+history points by timestamp with `resource`, `plugin`, `method`, `command`.
+5. Estimation:
+window snapshots and forward projections with optional plugin-level estimates.
+
+---
+
+## 📋 Documentation Index
+
+| Guide | Focus |
+|-------|-------|
+| [Configuration](/plugins/costs/guides/configuration.md) | Options, pricing tables, and data model |
+| [Usage Patterns](/plugins/costs/guides/usage-patterns.md) | `snapshot()` and `estimate()` in real workflows |
+| [Cost Optimization](/plugins/costs/guides/cost-optimization.md) | Concrete actions to reduce request volume/cost |
+| [Best Practices](/plugins/costs/guides/best-practices.md) | Production checklist, pitfalls, FAQ |
+
+---
+
+## 🔎 Core APIs
 
 ```javascript
-await CostsPlugin.setup(db, { considerFreeTier: true });
+const costsPlugin = db.plugins.CostsPlugin;
+
+// Raw session counters (live object)
+db.client.costs;
+
+// Windowed observed usage
+costsPlugin.snapshot({
+  windowMs: 60 * 60 * 1000, // last hour
+  resource: 'users',         // optional
+  plugin: 's3-queue'         // optional
+});
+
+// Projection for planning
+costsPlugin.estimate({
+  days: 30,
+  observedWindowMs: 24 * 60 * 60 * 1000,
+  requestMultiplier: 1.2,
+  includePluginEstimates: true
+});
 ```
 
 ---
 
-## Dependencies
+## 📚 See Also
 
-**Zero external dependencies** - built into s3db.js core.
-
-**What's Included:**
-- AWS S3 pricing tables (built-in)
-- Request tracking (automatic)
-- Storage calculation (automatic)
-- Data transfer tracking (automatic)
-- Tiered pricing logic (built-in)
-
----
-
-## Documentation Index
-
-| Guide | Description |
-|-------|-------------|
-| [Configuration](/plugins/costs/guides/configuration.md) | All options, AWS pricing structure, data structure reference |
-| [Usage Patterns](/plugins/costs/guides/usage-patterns.md) | Examples, advanced monitoring, cost analysis |
-| [Cost Optimization](/plugins/costs/guides/cost-optimization.md) | Proven strategies to reduce costs |
-| [Best Practices](/plugins/costs/guides/best-practices.md) | Production tips, troubleshooting, FAQ |
-
----
-
-## Quick Reference
-
-### Core Options
-
-| Parameter | Type | Default | Description |
-|-----------|------|---------|-------------|
-| `considerFreeTier` | boolean | `false` | Enable AWS free tier (100GB/month OUT) |
-| `region` | string | `'us-east-1'` | AWS region for pricing |
-
-### AWS S3 Pricing
-
-| Operation | Cost per 1000 requests |
-|-----------|------------------------|
-| PUT/POST/COPY/LIST | $0.005 |
-| GET/SELECT/HEAD/DELETE | $0.0004 |
-
-| Data Transfer | Price per GB |
-|---------------|--------------|
-| IN (Upload) | $0.00 (Free) |
-| OUT (First 10 TB) | $0.09 |
-| OUT (Free Tier) | $0.00 (100GB/month) |
-
-| Storage (S3 Standard) | Price per GB/month |
-|-----------------------|-------------------|
-| First 50 TB | $0.023 |
-| Next 450 TB | $0.022 |
-| Over 500 TB | $0.021 |
-
-### Key Access Points
-
-```javascript
-// Total cost
-s3db.client.costs.total
-
-// Request breakdown
-s3db.client.costs.requests.total       // Count
-s3db.client.costs.requests.counts      // By operation
-s3db.client.costs.requests.subtotal    // Cost
-
-// Storage
-s3db.client.costs.storage.totalGB      // Size
-s3db.client.costs.storage.subtotal     // Monthly cost
-
-// Data Transfer
-s3db.client.costs.dataTransfer.inGB    // Upload (free)
-s3db.client.costs.dataTransfer.outGB   // Download
-s3db.client.costs.dataTransfer.subtotal // Cost
-```
-
-### Quick Optimization Tips
-
-| Optimization | Effort | Savings |
-|--------------|--------|---------|
-| Batch operations | Low | 90% |
-| Enable free tier | Very Low | Up to $9/mo |
-| Use caching | Low | 90%+ |
-| Compression | Medium | 80% |
-| Partitions | Medium | 60-90% |
-
----
-
-## See Also
-
-- [Cache Plugin](/plugins/cache/README.md) - Reduce costs through intelligent caching
-- [Metrics Plugin](/plugins/metrics/README.md) - Monitor performance alongside costs
-- [Audit Plugin](/plugins/audit/README.md) - Track operations for cost analysis
+- [S3 Queue Plugin](/plugins/s3-queue/README.md)
+- [Cache Plugin](/plugins/cache/README.md)
+- [TTL Plugin](/plugins/ttl/README.md)

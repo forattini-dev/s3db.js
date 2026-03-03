@@ -18,6 +18,7 @@ await db.usePlugin(new SpiderPlugin({ patterns: { product: { match: '/products/:
 - RFC 9309 compliant robots.txt parser
 - Multi-format sitemap support (XML, gzip, RSS, Atom)
 - Link discovery with domain/pattern filtering
+- Pluggable queue backend (`S3QueuePlugin` or `QueueConsumerPlugin`)
 - DeepDiscovery: Crawler compatibility analysis for Google, Bing, Yandex, Baidu
 
 **Use cases:**
@@ -67,6 +68,14 @@ await spider.enqueueTarget({
 ## Dependencies
 
 **Zero external dependencies** - built directly into s3db.js core.
+
+For protected targets, install `curl-impersonate` via Recker:
+
+```bash
+npx recker setup
+# or
+rek setup
+```
 
 ---
 

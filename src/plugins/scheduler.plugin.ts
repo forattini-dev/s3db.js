@@ -671,6 +671,7 @@ export class SchedulerPlugin extends CoordinatorPlugin {
       'Global coordinator elected this worker as leader - starting job scheduling'
     );
 
+    this._stopScheduling();
     await this._startScheduling();
 
     this.emit('plg:scheduler:coordinator-promoted', {
@@ -684,6 +685,8 @@ export class SchedulerPlugin extends CoordinatorPlugin {
       { workerId: this.workerId },
       'Global coordinator demoted this worker from leader - job timers will be stopped automatically'
     );
+
+    this._stopScheduling();
 
     this.emit('plg:scheduler:coordinator-demoted', {
       workerId: this.workerId,
@@ -703,9 +706,22 @@ export class SchedulerPlugin extends CoordinatorPlugin {
     }
   }
 
+  private _stopScheduling(): void {
+    for (const timer of this.timers.values()) {
+      clearTimeout(timer);
+    }
+    this.timers.clear();
+  }
+
   private _scheduleNextExecution(jobName: string): void {
     const job = this.jobs.get(jobName);
     if (!job || !job.enabled) return;
+
+    const existingTimer = this.timers.get(jobName);
+    if (existingTimer) {
+      clearTimeout(existingTimer);
+      this.timers.delete(jobName);
+    }
 
     const nextRun = this._calculateNextRun(job.schedule);
     job.nextRun = nextRun;
@@ -1291,10 +1307,7 @@ export class SchedulerPlugin extends CoordinatorPlugin {
   }
 
   override async stop(): Promise<void> {
-    for (const timer of this.timers.values()) {
-      clearTimeout(timer);
-    }
-    this.timers.clear();
+    this._stopScheduling();
 
     if (!this._isTestEnvironment() && this.activeJobs.size > 0) {
       this.logger.debug({ activeJobCount: this.activeJobs.size }, `Waiting for ${this.activeJobs.size} active jobs to complete...`);

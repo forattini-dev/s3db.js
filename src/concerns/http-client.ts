@@ -1,5 +1,17 @@
 export type AuthType = 'bearer' | 'basic' | 'apikey';
 export type BackoffStrategy = 'fixed' | 'exponential';
+export type ProxyType = 'http' | 'https' | 'socks4' | 'socks4a' | 'socks5' | 'socks5h';
+
+export interface ProxyConfig {
+  url: string;
+  type?: ProxyType;
+  auth?: {
+    username: string;
+    password: string;
+  };
+}
+
+export type ProxyOption = string | ProxyConfig;
 
 export interface BearerAuth {
   type: 'bearer';
@@ -36,6 +48,9 @@ export interface HttpClientOptions {
   timeout?: number;
   retry?: RetryConfig;
   auth?: AuthConfig;
+  proxy?: ProxyOption | ProxyOption[];
+  useCurl?: boolean;
+  recker?: Record<string, unknown>;
 }
 
 export interface RequestOptions {
@@ -44,6 +59,9 @@ export interface RequestOptions {
   body?: unknown;
   timeout?: number;
   json?: unknown;
+  proxy?: ProxyOption | ProxyOption[];
+  useCurl?: boolean;
+  recker?: Record<string, unknown>;
 }
 
 export interface HttpClient {
@@ -59,6 +77,12 @@ interface ReckerModule {
   createClient(options: unknown): ReckerClient;
 }
 
+interface ReckerBinaryManager {
+  hasImpersonate(): Promise<boolean>;
+  installCurlImpersonate(logger?: unknown): Promise<void>;
+  getCurlPath(): string;
+}
+
 interface ReckerClient {
   get(url: string, options?: unknown): Promise<Response>;
   post(url: string, options?: unknown): Promise<Response>;
@@ -71,6 +95,8 @@ interface ReckerClient {
 
 let reckerModule: ReckerModule | null = null;
 let reckerLoadAttempted = false;
+let reckerBinaryManager: ReckerBinaryManager | null = null;
+let reckerBinaryManagerLoadAttempted = false;
 
 async function loadRecker(): Promise<ReckerModule | null> {
   if (reckerLoadAttempted) return reckerModule;
@@ -85,9 +111,76 @@ async function loadRecker(): Promise<ReckerModule | null> {
   }
 }
 
+async function loadReckerBinaryManager(): Promise<ReckerBinaryManager | null> {
+  if (reckerBinaryManagerLoadAttempted) return reckerBinaryManager;
+  reckerBinaryManagerLoadAttempted = true;
+
+  try {
+    const mod = await import('recker/utils/binary-manager');
+    reckerBinaryManager = mod as unknown as ReckerBinaryManager;
+    return reckerBinaryManager;
+  } catch {
+    return null;
+  }
+}
+
 export async function isReckerAvailable(): Promise<boolean> {
   const mod = await loadRecker();
   return mod !== null;
+}
+
+export interface ReckerCurlImpersonateStatus {
+  available: boolean;
+  path: string | null;
+  source: 'recker-binary-manager' | 'unavailable';
+}
+
+export interface EnsureReckerCurlImpersonateOptions {
+  installIfMissing?: boolean;
+  logger?: unknown;
+}
+
+export async function getReckerCurlImpersonateStatus(): Promise<ReckerCurlImpersonateStatus> {
+  const manager = await loadReckerBinaryManager();
+  if (!manager) {
+    return {
+      available: false,
+      path: null,
+      source: 'unavailable'
+    };
+  }
+
+  const available = await manager.hasImpersonate();
+  const path = process.env.RECKER_CURL_BIN || manager.getCurlPath();
+
+  return {
+    available,
+    path,
+    source: 'recker-binary-manager'
+  };
+}
+
+export async function installReckerCurlImpersonate(logger: unknown = console): Promise<ReckerCurlImpersonateStatus> {
+  const manager = await loadReckerBinaryManager();
+  if (!manager) {
+    throw new Error('Recker binary manager is not available. Run `npx recker setup` manually.');
+  }
+
+  await manager.installCurlImpersonate(logger);
+  return await getReckerCurlImpersonateStatus();
+}
+
+export async function ensureReckerCurlImpersonate(
+  options: EnsureReckerCurlImpersonateOptions = {}
+): Promise<ReckerCurlImpersonateStatus> {
+  const { installIfMissing = false, logger = console } = options;
+
+  const status = await getReckerCurlImpersonateStatus();
+  if (status.available || !installIfMissing) {
+    return status;
+  }
+
+  return await installReckerCurlImpersonate(logger);
 }
 
 function sleep(ms: number): Promise<void> {
@@ -125,6 +218,10 @@ function parseRetryAfter(retryAfter: string | null): number | null {
   }
 
   return null;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
 }
 
 export class FetchFallback implements HttpClient {
@@ -260,6 +357,7 @@ export class ReckerWrapper implements HttpClient {
   constructor(options: HttpClientOptions = {}, reckerMod: ReckerModule) {
     this.recker = reckerMod;
     this.options = options;
+    const reckerOptions = isRecord(options.recker) ? options.recker : {};
 
     const retryConfig = options.retry ? {
       maxAttempts: options.retry.maxAttempts ?? options.retry.limit ?? 3,
@@ -284,27 +382,43 @@ export class ReckerWrapper implements HttpClient {
       }
     }
 
+    const reckerHeaders = isRecord(reckerOptions.headers)
+      ? reckerOptions.headers as Record<string, string>
+      : {};
+
     this.client = reckerMod.createClient({
-      baseUrl: options.baseUrl,
+      ...reckerOptions,
+      baseUrl: options.baseUrl ?? reckerOptions.baseUrl,
       headers: {
         'Content-Type': 'application/json',
         'User-Agent': 's3db-http-client',
+        ...reckerHeaders,
         ...authHeaders,
         ...options.headers
       },
-      timeout: options.timeout || 30000,
-      retry: retryConfig
+      timeout: options.timeout ?? (reckerOptions.timeout as number | undefined) ?? 30000,
+      retry: retryConfig ?? reckerOptions.retry,
+      proxy: options.proxy ?? (reckerOptions.proxy as ProxyOption | ProxyOption[] | undefined),
+      useCurl: options.useCurl ?? (reckerOptions.useCurl as boolean | undefined)
     });
   }
 
   async request(url: string, options: RequestOptions = {}): Promise<Response> {
     const method = (options.method || 'GET').toUpperCase();
+    const reckerRequestOptions = isRecord(options.recker) ? options.recker : {};
     const requestOptions: Record<string, unknown> = {
-      headers: options.headers,
-      body: options.body
+      ...reckerRequestOptions,
+      headers: options.headers ?? reckerRequestOptions.headers,
+      body: options.body ?? reckerRequestOptions.body,
+      timeout: options.timeout ?? reckerRequestOptions.timeout,
+      proxy: options.proxy ?? reckerRequestOptions.proxy,
+      useCurl: options.useCurl ?? reckerRequestOptions.useCurl
     };
 
-    if (options.body && typeof options.body === 'object' && !(options.body instanceof Buffer)) {
+    if (options.json !== undefined) {
+      requestOptions.json = options.json;
+      delete requestOptions.body;
+    } else if (options.body && typeof options.body === 'object' && !(options.body instanceof Buffer)) {
       requestOptions.json = options.body;
       delete requestOptions.body;
     }
@@ -391,6 +505,9 @@ export default {
   httpGet,
   httpPost,
   isReckerAvailable,
+  getReckerCurlImpersonateStatus,
+  installReckerCurlImpersonate,
+  ensureReckerCurlImpersonate,
   preloadRecker,
   FetchFallback,
   ReckerWrapper

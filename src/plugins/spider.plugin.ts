@@ -5,10 +5,16 @@ import { requirePluginDependency } from './concerns/plugin-dependencies.js';
 import { getValidatedNamespace } from './namespace.js';
 import { PuppeteerPlugin } from './puppeteer.plugin.js';
 import { S3QueuePlugin } from './s3-queue.plugin.js';
+import { QueueConsumerPlugin, type QueueConsumerPluginOptions } from './queue-consumer.plugin.js';
 import { TTLPlugin } from './ttl.plugin.js';
 import tryFn from '../concerns/try-fn.js';
 import { PluginError } from '../errors.js';
 import { createLogger } from '../concerns/logger.js';
+import {
+  ensureReckerCurlImpersonate,
+  getReckerCurlImpersonateStatus,
+  installReckerCurlImpersonate
+} from '../concerns/http-client.js';
 import {
   AVAILABLE_ACTIVITIES,
   ACTIVITY_CATEGORIES,
@@ -25,12 +31,85 @@ import { URLPatternMatcher } from './spider/url-pattern-matcher.js';
 import { LinkDiscoverer } from './spider/link-discoverer.js';
 import { DeepDiscovery } from './spider/deep-discovery.js';
 
+type SpiderQueueBackend = 's3' | 'queue-consumer';
+type SpiderQueueProcessor = (task: any, context: any) => Promise<any>;
+
+interface SpiderQueueConsumerOptions extends QueueConsumerPluginOptions {
+  autoStart?: boolean;
+}
+
+class SpiderQueueConsumerBridge extends QueueConsumerPlugin {
+  private processor: SpiderQueueProcessor | null = null;
+
+  setProcessor(processor: SpiderQueueProcessor): void {
+    this.processor = processor;
+  }
+
+  override async onInstall(): Promise<void> {
+    // Startup is controlled by SpiderPlugin.startProcessing().
+  }
+
+  override async onStart(): Promise<void> {
+    if (this.consumers.length === 0) {
+      await super.onInstall();
+    }
+  }
+
+  override async _handleMessage(msg: any, configuredResource: string): Promise<unknown> {
+    if (!this.processor) {
+      throw new PluginError('Spider queue processor is not configured for QueueConsumer backend');
+    }
+
+    const payload = (msg && typeof msg === 'object' && msg.$body) ? msg.$body : msg;
+    const taskCandidate = payload && typeof payload === 'object'
+      && payload.data && typeof payload.data === 'object'
+      ? payload.data
+      : payload;
+
+    if (!taskCandidate || typeof taskCandidate !== 'object' || typeof taskCandidate.url !== 'string') {
+      throw new PluginError(
+        `QueueConsumer message for resource '${configuredResource}' must contain a task object with "url"`
+      );
+    }
+
+    return await this.processor(taskCandidate, {
+      backend: 'queue-consumer',
+      resource: configuredResource,
+      message: msg
+    });
+  }
+
+  async getStatus(): Promise<Record<string, any>> {
+    return {
+      backend: 'queue-consumer',
+      activeConsumers: this.consumers.length,
+      running: this.consumers.length > 0
+    };
+  }
+}
+
+export interface SpiderQueueConfig {
+  backend?: SpiderQueueBackend | 'consumer' | 'queueconsumer' | 'queue-consumer';
+  autoStart?: boolean;
+  concurrency?: number;
+  maxRetries?: number;
+  retryDelay?: number;
+  s3?: Record<string, any>;
+  consumer?: SpiderQueueConsumerOptions;
+  consumers?: QueueConsumerPluginOptions['consumers'];
+  [key: string]: any;
+}
+
 export interface SpiderPluginConfig {
   logLevel?: string;
   namespace?: string;
   resourcePrefix?: string;
   puppeteer?: Record<string, any>;
-  queue?: Record<string, any>;
+  queue?: SpiderQueueConfig;
+  recker?: {
+    ensureCurlImpersonate?: boolean;
+    [key: string]: any;
+  };
   ttl?: {
     enabled?: boolean;
     queue?: { ttl?: number; [key: string]: any };
@@ -119,7 +198,9 @@ export class SpiderPlugin extends Plugin {
   config: any;
   resourceNames: Record<string, string>;
   puppeteerPlugin: PuppeteerPlugin | null;
-  queuePlugin: S3QueuePlugin | null;
+  queuePlugin: S3QueuePlugin | SpiderQueueConsumerBridge | null;
+  queueBackend: SpiderQueueBackend;
+  queueProcessor: SpiderQueueProcessor | null;
   ttlPlugin: TTLPlugin | null;
   seoAnalyzer: any | null;
   techDetector: any | null;
@@ -169,11 +250,17 @@ export class SpiderPlugin extends Plugin {
 
       // Queue configuration
       queue: {
+        backend: 's3',
         autoStart: true,
         concurrency: 5,
         maxRetries: 3,
         retryDelay: 1000,
         ...options.queue
+      },
+
+      recker: {
+        ensureCurlImpersonate: options.recker?.ensureCurlImpersonate === true,
+        ...options.recker
       },
 
       // TTL configuration (optional)
@@ -296,6 +383,8 @@ export class SpiderPlugin extends Plugin {
     // Plugin instances
     this.puppeteerPlugin = null;
     this.queuePlugin = null;
+    this.queueBackend = this._resolveQueueBackend(this.config.queue.backend);
+    this.queueProcessor = null;
     this.ttlPlugin = null;
 
     // SEO and tech detection modules
@@ -321,6 +410,94 @@ export class SpiderPlugin extends Plugin {
     }
   }
 
+  _resolveQueueBackend(value: unknown): SpiderQueueBackend {
+    if (value === 'consumer' || value === 'queueconsumer' || value === 'queue-consumer') {
+      return 'queue-consumer';
+    }
+    return 's3';
+  }
+
+  async _initializeQueuePlugin(): Promise<void> {
+    const queueConfig = this.config.queue || {};
+    const backend = this._resolveQueueBackend(queueConfig.backend);
+    this.queueBackend = backend;
+
+    const { backend: _backend, s3, consumer, consumers, ...queueBaseConfig } = queueConfig;
+
+    if (backend === 'queue-consumer') {
+      const consumerConfig = {
+        ...queueBaseConfig,
+        ...(consumer || {})
+      };
+      const consumerDefinitions = consumerConfig.consumers || consumers || [];
+
+      if (!Array.isArray(consumerDefinitions) || consumerDefinitions.length === 0) {
+        throw new PluginError(
+          'SpiderPlugin queue.consumer.consumers (or queue.consumers) is required when queue.backend is "queue-consumer"'
+        );
+      }
+
+      this.queuePlugin = new SpiderQueueConsumerBridge({
+        ...consumerConfig,
+        autoStart: false,
+        consumers: consumerDefinitions,
+        namespace: this.namespace,
+        logLevel: (this as any).logLevel
+      } as SpiderQueueConsumerOptions);
+
+      if (this.queueProcessor) {
+        (this.queuePlugin as SpiderQueueConsumerBridge).setProcessor(this.queueProcessor);
+      }
+
+      await this.queuePlugin.install((this as any).database);
+      return;
+    }
+
+    const s3Config = {
+      ...queueBaseConfig,
+      ...(s3 || {})
+    };
+
+    this.queuePlugin = new S3QueuePlugin({
+      ...s3Config,
+      namespace: this.namespace,
+      resource: this.resourceNames.targets,
+      autoStart: false,
+      maxAttempts: s3Config.maxAttempts ?? s3Config.maxRetries ?? 3,
+      onMessage: this.queueProcessor || undefined,
+      logLevel: (this as any).logLevel
+    });
+
+    await this.queuePlugin.install((this as any).database);
+  }
+
+  override async onInstall(): Promise<void> {
+    await this.initialize();
+  }
+
+  override async onStop(): Promise<void> {
+    await this.stopProcessing();
+  }
+
+  override async onUninstall(_options: { purgeData?: boolean } = {}): Promise<void> {
+    await this.destroy();
+  }
+
+  async getCurlImpersonateStatus(): Promise<any> {
+    return await getReckerCurlImpersonateStatus();
+  }
+
+  async installCurlImpersonate(): Promise<any> {
+    return await installReckerCurlImpersonate(this.logger);
+  }
+
+  async ensureCurlImpersonate(): Promise<any> {
+    return await ensureReckerCurlImpersonate({
+      installIfMissing: true,
+      logger: this.logger
+    });
+  }
+
   /**
    * Initialize SpiderPlugin
    * Creates and initializes bundled plugins
@@ -332,8 +509,38 @@ export class SpiderPlugin extends Plugin {
       // Verify Puppeteer dependency
       requirePluginDependency('puppeteer', 'SpiderPlugin');
 
+      if (this.config.recker.ensureCurlImpersonate) {
+        const ensured = await ensureReckerCurlImpersonate({
+          installIfMissing: true,
+          logger: this.logger
+        });
+        this.logger.info(
+          {
+            available: ensured.available,
+            path: ensured.path,
+            source: ensured.source
+          },
+          'curl-impersonate check completed'
+        );
+      } else {
+        const status = await getReckerCurlImpersonateStatus();
+        if (status.available) {
+          this.logger.debug(
+            { path: status.path, source: status.source },
+            'curl-impersonate available for Recker'
+          );
+        } else {
+          this.logger.warn(
+            {
+              suggestion: 'Run `npx recker setup` (or `rek setup`) to install curl-impersonate for protected targets.'
+            },
+            'curl-impersonate not available'
+          );
+        }
+      }
+
       // 🪵 Debug: initializing bundled plugins
-      this.logger.debug('Initializing bundled plugins (Puppeteer, S3Queue, TTL)');
+      this.logger.debug('Initializing bundled plugins (Puppeteer, Queue, TTL)');
 
       // Initialize PuppeteerPlugin
       this.puppeteerPlugin = new PuppeteerPlugin({
@@ -341,16 +548,8 @@ export class SpiderPlugin extends Plugin {
         namespace: this.namespace,
         logLevel: (this as any).logLevel
       });
-      await (this.puppeteerPlugin as any).initialize((this as any).database);
-
-      // Initialize S3QueuePlugin
-      this.queuePlugin = new S3QueuePlugin({
-        ...this.config.queue,
-        namespace: this.namespace,
-        resource: this.resourceNames.targets,
-        logLevel: (this as any).logLevel
-      });
-      await (this.queuePlugin as any).initialize((this as any).database);
+      await this.puppeteerPlugin.install((this as any).database);
+      await this.puppeteerPlugin.start();
 
       // Initialize TTLPlugin if enabled
       if (this.config.ttl.enabled) {
@@ -363,7 +562,8 @@ export class SpiderPlugin extends Plugin {
           } as any,
           logLevel: (this as any).logLevel
         });
-        await (this.ttlPlugin as any).initialize((this as any).database);
+        await this.ttlPlugin.install((this as any).database);
+        await this.ttlPlugin.start();
       }
 
       // Load SEO analyzer, tech detector, and security analyzer
@@ -380,6 +580,13 @@ export class SpiderPlugin extends Plugin {
 
       // Set queue processor
       await this._setupQueueProcessor();
+
+      // Initialize queue backend
+      await this._initializeQueuePlugin();
+
+      if (this.config.queue.autoStart !== false) {
+        await this.startProcessing();
+      }
 
       this.initialized = true;
 
@@ -898,8 +1105,11 @@ export class SpiderPlugin extends Plugin {
       }
     };
 
-    // Set processor on queue plugin
-    (this.queuePlugin as any).setProcessor(processor);
+    this.queueProcessor = processor;
+
+    if (this.queuePlugin && typeof (this.queuePlugin as any).setProcessor === 'function') {
+      (this.queuePlugin as any).setProcessor(processor);
+    }
   }
 
   /**
@@ -975,6 +1185,17 @@ export class SpiderPlugin extends Plugin {
     }
 
     const targetsResource = await (this as any).database.getResource(this.resourceNames.targets);
+
+    if (
+      this.queueBackend === 's3'
+      && targetsResource
+      && typeof targetsResource.enqueue === 'function'
+    ) {
+      return await targetsResource.enqueue(task, {
+        maxAttempts: this.config.queue.maxAttempts ?? this.config.queue.maxRetries ?? 3
+      });
+    }
+
     return await targetsResource.insert(task);
   }
 
@@ -1305,7 +1526,14 @@ export class SpiderPlugin extends Plugin {
    */
   async getQueueStatus(): Promise<any> {
     if (!this.queuePlugin) return null;
-    return await (this.queuePlugin as any).getStatus?.() ?? (this.queuePlugin as any).getStats?.();
+    return await (this.queuePlugin as any).getStatus?.()
+      ?? await (this.queuePlugin as any).getStats?.()
+      ?? {
+        backend: this.queueBackend,
+        running: this.queueBackend === 'queue-consumer'
+          ? (this.queuePlugin as SpiderQueueConsumerBridge).consumers.length > 0
+          : false
+      };
   }
 
   /**
@@ -1313,7 +1541,14 @@ export class SpiderPlugin extends Plugin {
    */
   async startProcessing(): Promise<void> {
     if (!this.queuePlugin) return;
-    return await this.queuePlugin.start();
+    if (this.queueBackend === 's3' && this.queuePlugin instanceof S3QueuePlugin) {
+      await this.queuePlugin.startProcessing(this.queueProcessor, {
+        concurrency: this.config.queue.concurrency
+      });
+      return;
+    }
+
+    await this.queuePlugin.start();
   }
 
   /**
@@ -1321,7 +1556,12 @@ export class SpiderPlugin extends Plugin {
    */
   async stopProcessing(): Promise<void> {
     if (!this.queuePlugin) return;
-    return await this.queuePlugin.stop();
+    if (this.queueBackend === 's3' && this.queuePlugin instanceof S3QueuePlugin) {
+      await this.queuePlugin.stopProcessing();
+      return;
+    }
+
+    await this.queuePlugin.stop();
   }
 
   /**
@@ -1434,14 +1674,17 @@ export class SpiderPlugin extends Plugin {
   async destroy(): Promise<void> {
     try {
       if (this.queuePlugin) {
+        await this.stopProcessing();
         await (this.queuePlugin as any).destroy?.();
       }
 
       if (this.puppeteerPlugin) {
+        await this.puppeteerPlugin.stop();
         await (this.puppeteerPlugin as any).destroy?.();
       }
 
       if (this.ttlPlugin) {
+        await this.ttlPlugin.stop();
         await (this.ttlPlugin as any).destroy?.();
       }
 

@@ -589,6 +589,7 @@ export interface MapAwsErrorContext {
 export function mapAwsError(err: AwsErrorLike | Error, context: MapAwsErrorContext = {}): S3dbError {
   const awsErr = err as AwsErrorLike;
   const code = awsErr.code || awsErr.Code || awsErr.name;
+  const statusCode = awsErr.statusCode || awsErr.$metadata?.httpStatusCode;
   const metadata = awsErr.$metadata ? { ...awsErr.$metadata } : undefined;
   const { commandName, commandInput } = context;
   let description: string;
@@ -622,7 +623,7 @@ export function mapAwsError(err: AwsErrorLike | Error, context: MapAwsErrorConte
     });
   }
 
-  if (code === 'AccessDenied' || awsErr.statusCode === 403 || code === 'Forbidden') {
+  if (code === 'AccessDenied' || statusCode === 403 || code === 'Forbidden') {
     description = 'Access denied. Check your AWS credentials, IAM permissions, and bucket policy.';
     return new PermissionError('Access denied', {
       ...context,
@@ -635,7 +636,23 @@ export function mapAwsError(err: AwsErrorLike | Error, context: MapAwsErrorConte
     });
   }
 
-  if (code === 'ValidationError' || awsErr.statusCode === 400) {
+  if (code === 'PreconditionFailed' || statusCode === 412) {
+    description = 'Precondition failed. The resource changed and conditional write requirements were not met.';
+    return new ResourceError('Precondition failed', {
+      ...context,
+      code: 'PRECONDITION_FAILED',
+      statusCode: 412,
+      original: err,
+      metadata,
+      commandName,
+      commandInput,
+      description,
+      suggestion: 'Fetch latest state and retry with the updated ETag/version token.',
+      retriable: false,
+    });
+  }
+
+  if (code === 'ValidationError' || statusCode === 400) {
     description = 'Validation error. Check the request parameters and payload format.';
     return new ValidationError('Validation error', {
       ...context,

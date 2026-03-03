@@ -9,7 +9,14 @@ export { CachePlugin, resolveCacheMemoryLimit } from './cache.plugin.js';
 export type { CachePluginOptions, MemoryLimitResult } from './cache.plugin.js';
 
 export { CostsPlugin } from './costs.plugin.js';
-export type { CostsPluginOptions, CostsData } from './costs.plugin.js';
+export type {
+  CostsPluginOptions,
+  CostsData,
+  CostUsagePoint,
+  CostWindowSummary,
+  CostsEstimateOptions,
+  CostsEstimateResult
+} from './costs.plugin.js';
 
 export { FullTextPlugin } from './fulltext.plugin.js';
 export type { FullTextPluginOptions, SearchOptions, SearchResult, IndexStats, RebuildOptions } from './fulltext.plugin.js';
@@ -244,4 +251,3 @@ export const loadApiHelpers = async () => {
     initCookieChunking: apiModule.initCookieChunking
   };
 };
-

@@ -1,7 +1,8 @@
 import { join } from 'path';
 import { tryFn } from '../concerns/try-fn.js';
+import { isNotFoundError } from '../concerns/s3-errors.js';
 import { validateS3KeySegment } from '../concerns/s3-key.js';
-import { PartitionError, ResourceError } from '../errors.js';
+import { mapAwsError, PartitionError, ResourceError } from '../errors.js';
 import type { StringRecord } from '../types/common.types.js';
 
 export interface PartitionFields {
@@ -105,6 +106,28 @@ export class ResourcePartitions {
   constructor(resource: Resource, config: PartitionsConfigOptions = {}) {
     this.resource = resource;
     this._strictValidation = config.strictValidation !== false;
+  }
+
+  private _normalizePartitionError(
+    error: unknown,
+    context: { operation: string; key?: string; id?: string; partitionName?: string }
+  ): Error {
+    if (error instanceof PartitionError || error instanceof ResourceError) {
+      return error;
+    }
+
+    if (error && typeof error === 'object') {
+      const errObj = error as Record<string, unknown>;
+      if ('statusCode' in errObj || 'retriable' in errObj) {
+        return error as Error;
+      }
+    }
+
+    const safeError = error instanceof Error ? error : new Error(String(error ?? 'Unknown error'));
+    return mapAwsError(safeError, {
+      resourceName: this.resource.name,
+      ...context
+    });
   }
 
   getPartitions(): PartitionsConfig {
@@ -438,7 +461,13 @@ export class ResourcePartitions {
     }
 
     if (keysToDelete.length > 0) {
-      await tryFn(() => this.resource.client.deleteObjects(keysToDelete));
+      const [okDelete, errDelete] = await tryFn(() => this.resource.client.deleteObjects(keysToDelete));
+      if (!okDelete) {
+        throw this._normalizePartitionError(errDelete, {
+          operation: 'deleteReferences',
+          id: data.id
+        });
+      }
     }
   }
 
@@ -458,7 +487,7 @@ export class ResourcePartitions {
         const partitionMetadata = {
           _v: String(this.resource.version)
         };
-        await tryFn(async () => {
+        const [okPut, errPut] = await tryFn(async () => {
           await this.resource.client.putObject({
             key: partitionKey,
             metadata: partitionMetadata,
@@ -466,6 +495,14 @@ export class ResourcePartitions {
             contentType: undefined,
           });
         });
+        if (!okPut) {
+          throw this._normalizePartitionError(errPut, {
+            operation: 'updateReferences',
+            id: data.id,
+            partitionName,
+            key: partitionKey
+          });
+        }
       }
     }
   }
@@ -484,28 +521,73 @@ export class ResourcePartitions {
       return { partitionName, success: true };
     });
 
-    await Promise.allSettled(updatePromises);
+    const settledUpdates = await Promise.allSettled(updatePromises);
 
     const id = newData.id || oldData.id;
     const isNewInsert = !oldData || Object.keys(oldData).length === 0;
 
+    const updateFailures = settledUpdates
+      .map((result) => {
+        if (result.status === 'rejected') {
+          return result.reason as Error;
+        }
+        return result.value.error || null;
+      })
+      .filter((error): error is Error => Boolean(error));
+
+    if (updateFailures.length > 0) {
+      throw this._normalizePartitionError(updateFailures[0], {
+        operation: 'handleReferenceUpdates',
+        id
+      });
+    }
+
     if (!isNewInsert) {
       const cleanupPromises = Object.entries(partitions).map(async ([partitionName]) => {
         const prefix = `resource=${this.resource.name}/partition=${partitionName}`;
-        const [okKeys, , keys] = await tryFn<string[]>(() => this.resource.client.getAllKeys({ prefix }));
+        const [okKeys, errKeys, keys] = await tryFn<string[]>(() => this.resource.client.getAllKeys({ prefix }));
         if (!okKeys || !keys) {
-          return;
+          return this._normalizePartitionError(errKeys, {
+            operation: 'handleReferenceUpdates.listPartitionKeys',
+            id,
+            partitionName,
+            key: prefix
+          });
         }
 
         const validKey = this.getKey({ partitionName, id, data: newData });
         const staleKeys = keys.filter(key => key.endsWith(`/id=${id}`) && key !== validKey);
 
         if (staleKeys.length > 0) {
-          await tryFn(() => this.resource.client.deleteObjects(staleKeys));
+          const [okDelete, errDelete] = await tryFn(() => this.resource.client.deleteObjects(staleKeys));
+          if (!okDelete) {
+            return this._normalizePartitionError(errDelete, {
+              operation: 'handleReferenceUpdates.deleteStalePartitionKeys',
+              id,
+              partitionName
+            });
+          }
         }
+
+        return null;
       });
 
-      await Promise.allSettled(cleanupPromises);
+      const settledCleanup = await Promise.allSettled(cleanupPromises);
+      const cleanupFailures = settledCleanup
+        .map((result) => {
+          if (result.status === 'rejected') {
+            return result.reason as Error;
+          }
+          return result.value || null;
+        })
+        .filter((error): error is Error => Boolean(error));
+
+      if (cleanupFailures.length > 0) {
+        throw this._normalizePartitionError(cleanupFailures[0], {
+          operation: 'handleReferenceUpdates.cleanup',
+          id
+        });
+      }
     }
   }
 
@@ -522,13 +604,21 @@ export class ResourcePartitions {
 
     if (oldPartitionKey !== newPartitionKey) {
       if (oldPartitionKey) {
-        await tryFn(async () => {
+        const [okDelete, errDelete] = await tryFn(async () => {
           await this.resource.client.deleteObject(oldPartitionKey);
         });
+        if (!okDelete) {
+          throw this._normalizePartitionError(errDelete, {
+            operation: 'handleReferenceUpdate.deleteOld',
+            id,
+            partitionName,
+            key: oldPartitionKey
+          });
+        }
       }
 
       if (newPartitionKey) {
-        await tryFn(async () => {
+        const [okPut, errPut] = await tryFn(async () => {
           const partitionMetadata = {
             _v: String(this.resource.version)
           };
@@ -539,9 +629,17 @@ export class ResourcePartitions {
             contentType: undefined,
           });
         });
+        if (!okPut) {
+          throw this._normalizePartitionError(errPut, {
+            operation: 'handleReferenceUpdate.putNew',
+            id,
+            partitionName,
+            key: newPartitionKey
+          });
+        }
       }
     } else if (newPartitionKey) {
-      await tryFn(async () => {
+      const [okPut, errPut] = await tryFn(async () => {
         const partitionMetadata = {
           _v: String(this.resource.version)
         };
@@ -552,6 +650,14 @@ export class ResourcePartitions {
           contentType: undefined,
         });
       });
+      if (!okPut) {
+        throw this._normalizePartitionError(errPut, {
+          operation: 'handleReferenceUpdate.refreshCurrent',
+          id,
+          partitionName,
+          key: newPartitionKey
+        });
+      }
     }
   }
 
@@ -600,10 +706,19 @@ export class ResourcePartitions {
       `id=${id}`
     );
 
-    const [ok] = await tryFn(async () => {
+    const [ok, err] = await tryFn(async () => {
       await this.resource.client.headObject(partitionKey);
     });
     if (!ok) {
+      if (!isNotFoundError(err)) {
+        throw this._normalizePartitionError(err, {
+          operation: 'getFromPartition',
+          id,
+          partitionName,
+          key: partitionKey
+        });
+      }
+
       throw new ResourceError(`Resource with id '${id}' not found in partition '${partitionName}'`, {
         resourceName: this.resource.name,
         id,

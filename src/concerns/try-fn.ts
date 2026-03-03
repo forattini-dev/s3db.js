@@ -12,6 +12,33 @@ interface PromiseLike<T> {
 /** Input type for tryFn */
 type TryInput<T> = (() => T | PromiseLike<T>) | PromiseLike<T> | T;
 
+type CapturedError = Error & { capturedAtStack?: string };
+
+function normalizeError(error: unknown): Error {
+  return error instanceof Error ? error : new Error(String(error));
+}
+
+function attachCapturedStack(error: Error): Error {
+  const err = error as CapturedError;
+  if (!Object.isExtensible(err)) {
+    return err;
+  }
+
+  if (typeof err.capturedAtStack !== 'string') {
+    try {
+      Object.defineProperty(err, 'capturedAtStack', {
+        value: new Error().stack,
+        enumerable: false,
+        configurable: true,
+      });
+    } catch {
+      // Ignore
+    }
+  }
+
+  return err;
+}
+
 /**
  * tryFn - A robust error handling utility for JavaScript functions and values.
  *
@@ -29,9 +56,7 @@ export function tryFn<T>(fnOrPromise: () => T): TryResult<T>;
 export function tryFn<T>(fnOrPromise: T): TryResult<T>;
 export function tryFn<T>(fnOrPromise: TryInput<T>): TryResult<T> | Promise<TryResult<T>> {
   if (fnOrPromise == null) {
-    const err = new Error('fnOrPromise cannot be null or undefined');
-    err.stack = new Error().stack;
-    return [false, err, undefined];
+    return [false, new Error('fnOrPromise cannot be null or undefined'), undefined];
   }
 
   if (typeof fnOrPromise === 'function') {
@@ -46,33 +71,13 @@ export function tryFn<T>(fnOrPromise: TryInput<T>): TryResult<T> | Promise<TryRe
         return (result as Promise<T>)
           .then((data): TryResult<T> => [true, null, data])
           .catch((error: unknown): TryResult<T> => {
-            if (error instanceof Error && Object.isExtensible(error)) {
-              const desc = Object.getOwnPropertyDescriptor(error, 'stack');
-              if (desc?.writable && desc.configurable && Object.prototype.hasOwnProperty.call(error, 'stack')) {
-                try {
-                  error.stack = new Error().stack;
-                } catch {
-                  // Ignore
-                }
-              }
-            }
-            return [false, error instanceof Error ? error : new Error(String(error)), undefined];
+            return [false, attachCapturedStack(normalizeError(error)), undefined];
           });
       }
 
       return [true, null, result as T];
     } catch (error: unknown) {
-      if (error instanceof Error && Object.isExtensible(error)) {
-        const desc = Object.getOwnPropertyDescriptor(error, 'stack');
-        if (desc?.writable && desc.configurable && Object.prototype.hasOwnProperty.call(error, 'stack')) {
-          try {
-            error.stack = new Error().stack;
-          } catch {
-            // Ignore
-          }
-        }
-      }
-      return [false, error instanceof Error ? error : new Error(String(error)), undefined];
+      return [false, attachCapturedStack(normalizeError(error)), undefined];
     }
   }
 
@@ -80,17 +85,7 @@ export function tryFn<T>(fnOrPromise: TryInput<T>): TryResult<T> | Promise<TryRe
     return Promise.resolve(fnOrPromise as Promise<T>)
       .then((data): TryResult<T> => [true, null, data])
       .catch((error: unknown): TryResult<T> => {
-        if (error instanceof Error && Object.isExtensible(error)) {
-          const desc = Object.getOwnPropertyDescriptor(error, 'stack');
-          if (desc?.writable && desc.configurable && Object.prototype.hasOwnProperty.call(error, 'stack')) {
-            try {
-              error.stack = new Error().stack;
-            } catch {
-              // Ignore
-            }
-          }
-        }
-        return [false, error instanceof Error ? error : new Error(String(error)), undefined];
+        return [false, attachCapturedStack(normalizeError(error)), undefined];
       });
   }
 

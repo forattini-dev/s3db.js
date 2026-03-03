@@ -587,6 +587,7 @@ export class TTLPlugin extends CoordinatorPlugin {
       'Global coordinator elected this worker as leader - starting cleanup intervals'
     );
 
+    this.stopAllCronJobs();
     await this._startIntervals();
 
     this.emit('plg:ttl:coordinator-promoted', {
@@ -600,6 +601,9 @@ export class TTLPlugin extends CoordinatorPlugin {
       { workerId: this.workerId },
       'Global coordinator demoted this worker from leader - cleanup intervals will be stopped automatically'
     );
+
+    this.stopAllCronJobs();
+    this.isRunning = false;
 
     this.emit('plg:ttl:coordinator-demoted', {
       workerId: this.workerId,

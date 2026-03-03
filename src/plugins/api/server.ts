@@ -785,9 +785,15 @@ export class ApiServer {
     const openApiPath = applyBasePath(basePath, '/openapi.json');
     const usdPath = applyBasePath(basePath, '/api.usd.json');
     const docsPath = applyBasePath(basePath, '/docs');
+    const docsOpenApiPath = applyBasePath(basePath, '/docs/openapi.json');
+    const docsUsdJsonPath = applyBasePath(basePath, '/docs/usd.json');
+    const docsUsdYamlPath = applyBasePath(basePath, '/docs/usd.yaml');
 
     if (this.options.logLevel) {
-      this.logger.debug({ docsPath, openApiPath, usdPath }, 'Documentation paths configured');
+      this.logger.debug(
+        { docsPath, openApiPath, usdPath, docsOpenApiPath, docsUsdJsonPath, docsUsdYamlPath },
+        'Documentation paths configured'
+      );
     }
 
     if (this.options.docsEnabled) {
@@ -804,6 +810,7 @@ export class ApiServer {
               version: this.options.apiVersion || '1.0.0',
               description: this.options.apiDescription,
             },
+            protocols: ['http'],
             externalPaths: spec.paths as Record<string, never>,
             externalComponents: {
               schemas: spec.components.schemas as Record<string, never>,
@@ -820,12 +827,20 @@ export class ApiServer {
         );
       };
 
-      this.app!.get(openApiPath, () => getHandlers().serveOpenAPI());
+      this.app!.get(openApiPath, (c: Context) => {
+        return c.json(this.openApiGenerator.generate());
+      });
       this.app!.get(usdPath, () => getHandlers().serveUSD());
+      this.app!.get(docsOpenApiPath, () => getHandlers().serveOpenAPI());
+      this.app!.get(docsUsdJsonPath, () => getHandlers().serveUSD());
+      this.app!.get(docsUsdYamlPath, () => getHandlers().serveUSDYaml());
       this.app!.get(docsPath, () => getHandlers().serveUI());
 
       if (this.options.logLevel) {
-        this.logger.debug({ docsPath, openApiPath, usdPath }, 'Docs routes registered with Raffel USD');
+        this.logger.debug(
+          { docsPath, openApiPath, usdPath, docsOpenApiPath, docsUsdJsonPath, docsUsdYamlPath },
+          'Docs routes registered with Raffel USD'
+        );
       }
     }
   }

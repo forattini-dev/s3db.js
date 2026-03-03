@@ -5,7 +5,7 @@ import { idGenerator } from './id.js';
 import { streamToString } from '../stream/index.js';
 import { PluginStorageError, MetadataLimitError, BehaviorError } from '../errors.js';
 import { DistributedLock, computeBackoff, sleep, isPreconditionFailure, isValidLockPayload, isExpiredLockPayload, StorageAdapter, LockHandle, AcquireOptions } from './distributed-lock.js';
-import { DistributedSequence } from './distributed-sequence.js';
+
 
 const S3_METADATA_LIMIT = 2047;
 
@@ -248,7 +248,6 @@ export class PluginStorage {
   client: PluginClient;
   pluginSlug: string;
   private _lock: DistributedLock;
-  private _sequence: DistributedSequence;
   private _now: () => number;
 
   constructor(client: PluginClient, pluginSlug: string, options: PluginStorageOptions = {}) {
@@ -273,13 +272,6 @@ export class PluginStorage {
 
     this._lock = new DistributedLock(this as unknown as StorageAdapter, {
       keyGenerator: (name: string) => this.getPluginKey(null, 'locks', name)
-    });
-
-    this._sequence = new DistributedSequence(this as any, {
-      valueKeyGenerator: (name: string) =>
-        this.getSequenceKey(null, name, 'value'),
-      lockKeyGenerator: (name: string) =>
-        this.getSequenceKey(null, name, 'lock')
     });
   }
 
@@ -357,6 +349,10 @@ export class PluginStorage {
     return Promise.all(promises);
   }
 
+  async batchPut(items: BatchSetItem[]): Promise<BatchSetResult[]> {
+    return this.batchSet(items);
+  }
+
   async get(key: string): Promise<Record<string, unknown> | null> {
     const [ok, err, response] = await tryFn<GetObjectResponse>(() => this.client.getObject(key));
 
@@ -394,32 +390,30 @@ export class PluginStorage {
   private _parseMetadataValues(metadata: Record<string, string>): Record<string, unknown> {
     const parsed: Record<string, unknown> = {};
     for (const [key, value] of Object.entries(metadata)) {
-      if (typeof value === 'string') {
-        if (
-          (value.startsWith('{') && value.endsWith('}')) ||
-          (value.startsWith('[') && value.endsWith(']'))
-        ) {
-          try {
-            parsed[key] = JSON.parse(value);
-            continue;
-          } catch {
-            // Not JSON, keep as string
-          }
+      if (
+        (value.startsWith('{') && value.endsWith('}')) ||
+        (value.startsWith('[') && value.endsWith(']'))
+      ) {
+        try {
+          parsed[key] = JSON.parse(value);
+          continue;
+        } catch {
+          // Not JSON, keep as string
         }
+      }
 
-        if (!isNaN(Number(value)) && value.trim() !== '') {
-          parsed[key] = Number(value);
-          continue;
-        }
+      if (!isNaN(Number(value)) && value.trim() !== '') {
+        parsed[key] = Number(value);
+        continue;
+      }
 
-        if (value === 'true') {
-          parsed[key] = true;
-          continue;
-        }
-        if (value === 'false') {
-          parsed[key] = false;
-          continue;
-        }
+      if (value === 'true') {
+        parsed[key] = true;
+        continue;
+      }
+      if (value === 'false') {
+        parsed[key] = false;
+        continue;
       }
 
       parsed[key] = value;
@@ -599,6 +593,10 @@ export class PluginStorage {
       .map(item => item.data!);
   }
 
+  async listKeysWithPrefix(prefix: string = '', options: PluginStorageListOptions = {}): Promise<string[]> {
+    return this.list(prefix, options);
+  }
+
   protected _removeKeyPrefix(keys: string[]): string[] {
     const keyPrefix = this.client.config.keyPrefix;
     if (!keyPrefix) return keys;
@@ -732,15 +730,6 @@ export class PluginStorage {
     }
 
     return deleted;
-  }
-
-  async batchPut(items: BatchSetItem[]): Promise<BatchSetResult[]> {
-    const promises = items.map(async (item): Promise<BatchSetResult> => {
-      const [ok, error] = await tryFn(() => this.set(item.key, item.data, item.options));
-      return { key: item.key, ok, error: ok ? undefined : error as Error };
-    });
-
-    return Promise.all(promises);
   }
 
   async batchGet(keys: string[]): Promise<BatchGetResult[]> {
@@ -908,8 +897,7 @@ export class PluginStorage {
     const [headOk, , headResponse] = await tryFn<HeadObjectResponse>(() => this.client.headObject(key));
 
     if (headOk && headResponse?.Metadata) {
-      const metadata = headResponse.Metadata || {};
-      const parsedMetadata = this._parseMetadataValues(metadata);
+      const parsedMetadata = this._parseMetadataValues(headResponse.Metadata);
 
       const currentValue = (parsedMetadata.value as number) || 0;
       const newValue = currentValue + amount;
@@ -1032,7 +1020,7 @@ export class PluginStorage {
           throw err;
         }
 
-        if (timeout !== undefined && this._now() - startTime >= timeout) {
+        if (this._now() - startTime >= timeout) {
           return null;
         }
 

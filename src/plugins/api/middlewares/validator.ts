@@ -194,14 +194,23 @@ export const listQueryValidation = createQueryValidation({
     min: 1,
     max: 1000
   },
-  offset: {
+  page: {
     type: 'number',
-    min: 0
+    min: 1
+  },
+  cursor: {
+    type: 'string'
   },
   partition: {
     type: 'string'
   },
   partitionValues: {
+    type: 'string'
+  },
+  sort: {
+    type: 'string'
+  },
+  populate: {
     type: 'string'
   }
 });

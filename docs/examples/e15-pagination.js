@@ -1,18 +1,16 @@
 import S3DB from "../src/index.js";
 
-// Test configuration
 const config = {
   connectionString: "s3://test-bucket",
   passphrase: "secret",
   verbose: true
 };
 
-async function paginationDebugExample() {
-  console.log("Testing pagination with debug info...");
+async function paginationExample() {
+  console.log("Testing pagination modes...\n");
 
   const db = await setupDatabase();
 
-  // Create resource if it doesn't exist
   if (!db.resources.users) {
     await db.createResource({
       name: "users",
@@ -26,61 +24,98 @@ async function paginationDebugExample() {
   const users = db.resources.users;
 
   try {
-    // Test page method with debug info
-    console.log("\n1. Testing page method with debug...");
-    const page = await users.page({ 
-      offset: 0, 
-      size: 100,
-      skipCount: false 
-    });
-    
-    console.log("Page result:", {
-      items: page.items.length,
-      totalItems: page.totalItems,
-      page: page.page,
-      totalPages: page.totalPages,
-      debug: page._debug
+    // 1. Cursor-based pagination (recommended)
+    console.log("1. Cursor-based pagination");
+    console.log("   Best for: sequential traversal, large datasets\n");
+
+    const firstPage = await users.page({ size: 10 });
+    console.log("First page:", {
+      items: firstPage.items.length,
+      hasMore: firstPage.hasMore,
+      nextCursor: firstPage.nextCursor ? "(opaque token)" : null
     });
 
-    // Test with skipCount for performance
-    console.log("\n2. Testing page method with skipCount...");
-    const fastPage = await users.page({ 
-      offset: 0, 
-      size: 100,
-      skipCount: true 
+    if (firstPage.nextCursor) {
+      const secondPage = await users.page({
+        size: 10,
+        cursor: firstPage.nextCursor
+      });
+      console.log("Second page:", {
+        items: secondPage.items.length,
+        hasMore: secondPage.hasMore,
+        usedCursor: secondPage._debug.usedCursor
+      });
+    }
+
+    // 2. Page-based pagination
+    console.log("\n2. Page-based pagination");
+    console.log("   Best for: page-number navigation UIs\n");
+
+    const page3 = await users.page({ page: 3, size: 10 });
+    console.log("Page 3:", {
+      items: page3.items.length,
+      page: page3.page,
+      totalPages: page3.totalPages,
+      totalItems: page3.totalItems,
+      hasMore: page3.hasMore
     });
-    
-    console.log("Fast page result:", {
+
+    // 3. skipCount for performance
+    console.log("\n3. skipCount mode");
+    console.log("   Best for: large collections where you don't need totals\n");
+
+    const fastPage = await users.page({
+      size: 10,
+      skipCount: true
+    });
+    console.log("Fast page:", {
       items: fastPage.items.length,
-      totalItems: fastPage.totalItems, // Should be null
-      page: fastPage.page,
-      totalPages: fastPage.totalPages, // Should be null
+      totalItems: fastPage.totalItems,   // null (skipped)
+      totalPages: fastPage.totalPages,   // null (skipped)
+      hasMore: fastPage.hasMore,         // still works
       debug: fastPage._debug
     });
 
-    // Test with different page sizes
-    console.log("\n3. Testing different page sizes...");
-    const smallPage = await users.page({ offset: 0, size: 5 });
-    const largePage = await users.page({ offset: 0, size: 1000 });
-    
-    console.log("Small page:", {
-      items: smallPage.items.length,
-      totalItems: smallPage.totalItems,
-      pageSize: smallPage.pageSize
+    // 4. Partition + cursor pagination
+    console.log("\n4. Partition + cursor pagination\n");
+
+    const partitioned = await users.page({
+      size: 5,
+      partition: "byStatus",
+      partitionValues: { status: "active" }
     });
-    
-    console.log("Large page:", {
-      items: largePage.items.length,
-      totalItems: largePage.totalItems,
-      pageSize: largePage.pageSize
+    console.log("Partitioned page:", {
+      items: partitioned.items.length,
+      hasMore: partitioned.hasMore,
+      nextCursor: partitioned.nextCursor ? "(opaque token)" : null
     });
+
+    // 5. Full traversal with cursor
+    console.log("\n5. Full cursor traversal\n");
+
+    let cursor = null;
+    let totalTraversed = 0;
+    let pageNum = 0;
+
+    do {
+      const result = await users.page({
+        size: 25,
+        cursor,
+        skipCount: true
+      });
+      totalTraversed += result.items.length;
+      pageNum++;
+      cursor = result.nextCursor;
+      console.log(`  Batch ${pageNum}: ${result.items.length} items (total so far: ${totalTraversed})`);
+    } while (cursor);
+
+    console.log(`  Done. Traversed ${totalTraversed} records in ${pageNum} batches.`);
 
   } catch (error) {
     console.error("Test failed:", error.message);
-  }  } finally {
+  } finally {
     await teardownDatabase();
   }
 }
 
-// Run the example
-paginationDebugExample().catch(console.error); 
+paginationExample().catch(console.error);

@@ -49,14 +49,7 @@ export interface PaginationInfo {
 export interface ListResponse<T = unknown> {
   success: true;
   data: T[];
-  pagination: {
-    total?: number | null;
-    page?: number | null;
-    pageSize?: number;
-    pageCount?: number | null;
-    hasMore?: boolean;
-    nextCursor?: string | null;
-  };
+  pagination: PaginationInfo;
   meta: ResponseMeta;
   _status: number;
 }

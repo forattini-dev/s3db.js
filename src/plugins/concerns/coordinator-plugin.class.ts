@@ -82,6 +82,7 @@ export class CoordinatorPlugin<TOptions extends CoordinatorConfig = CoordinatorC
   currentLeaderId: string | null;
 
   protected _globalCoordinator: GlobalCoordinatorService | null;
+  protected _coordinatorSubscriptionId: string | null;
   protected _leaderChangeListener: ((event: LeaderChangeEvent) => Promise<void>) | null;
   protected _heartbeatHandle: IntervalHandle | null;
   protected _coordinatorWorkHandle: IntervalHandle | null;
@@ -112,6 +113,7 @@ export class CoordinatorPlugin<TOptions extends CoordinatorConfig = CoordinatorC
     this.currentLeaderId = null;
 
     this._globalCoordinator = null;
+    this._coordinatorSubscriptionId = null;
     this._leaderChangeListener = null;
 
     this._heartbeatHandle = null;
@@ -236,6 +238,11 @@ export class CoordinatorPlugin<TOptions extends CoordinatorConfig = CoordinatorC
   async stopCoordination(): Promise<void> {
     if (!this._coordinatorConfig.enableCoordinator) return;
 
+    if (this._globalCoordinator && this._coordinatorSubscriptionId) {
+      this._globalCoordinator.unsubscribePlugin(this._coordinatorSubscriptionId);
+      this._coordinatorSubscriptionId = null;
+    }
+
     this._clearLeaderChangeListener();
 
     this._clearIntervalHandle(this._heartbeatHandle);
@@ -249,6 +256,7 @@ export class CoordinatorPlugin<TOptions extends CoordinatorConfig = CoordinatorC
     this.currentLeaderId = null;
     this.coldStartPhase = 'not_started';
     this.coldStartCompleted = false;
+    this._globalCoordinator = null;
 
     this.logger.debug('Coordination stopped');
   }
@@ -378,6 +386,7 @@ export class CoordinatorPlugin<TOptions extends CoordinatorConfig = CoordinatorC
     }) as unknown as GlobalCoordinatorService;
 
     const pluginId = this.instanceName || this.slug || this.constructor.name.toLowerCase();
+    this._coordinatorSubscriptionId = pluginId;
     await this._globalCoordinator!.subscribePlugin(pluginId, this);
 
     this._setupLeaderChangeListener();

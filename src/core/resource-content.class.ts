@@ -1,5 +1,6 @@
 import { tryFn } from '../concerns/try-fn.js';
-import { ResourceError } from '../errors.js';
+import { isNotFoundError } from '../concerns/s3-errors.js';
+import { mapAwsError, ResourceError } from '../errors.js';
 import type { StringRecord } from '../types/common.types.js';
 
 export interface S3Response {
@@ -65,8 +66,18 @@ export class ResourceContent {
   }
 
   async setContent({ id, buffer, contentType = 'application/octet-stream' }: SetContentParams): Promise<StringRecord> {
+    const key = this.resource.getResourceKey(id);
     const [ok, err, currentData] = await tryFn(() => this.resource.get(id));
     if (!ok || !currentData) {
+      if (err && !isNotFoundError(err)) {
+        throw mapAwsError(err as Error, {
+          resourceName: this.resource.name,
+          operation: 'setContent',
+          id,
+          key
+        });
+      }
+
       throw new ResourceError(`Resource with id '${id}' not found`, {
         resourceName: this.resource.name,
         id,
@@ -85,13 +96,20 @@ export class ResourceContent {
     const mappedMetadata = await this.resource.schema.mapper(updatedData);
 
     const [ok2, err2] = await tryFn(() => this.client.putObject({
-      key: this.resource.getResourceKey(id),
+      key,
       metadata: mappedMetadata,
       body: buffer,
       contentType
     }));
 
-    if (!ok2) throw err2;
+    if (!ok2) {
+      throw mapAwsError(err2 as Error, {
+        resourceName: this.resource.name,
+        operation: 'setContent',
+        id,
+        key
+      });
+    }
 
     this.resource._emitStandardized('content-set', { id, contentType, contentLength: bufferLength }, id);
     return updatedData;
@@ -109,7 +127,12 @@ export class ResourceContent {
           contentType: null
         };
       }
-      throw err;
+      throw mapAwsError(error, {
+        resourceName: this.resource.name,
+        operation: 'content',
+        id,
+        key
+      });
     }
 
     const s3Response = response as S3Response;
@@ -126,8 +149,18 @@ export class ResourceContent {
 
   async hasContent(id: string): Promise<boolean> {
     const key = this.resource.getResourceKey(id);
-    const [ok, , response] = await tryFn(() => this.client.headObject(key));
-    if (!ok) return false;
+    const [ok, err, response] = await tryFn(() => this.client.headObject(key));
+    if (!ok) {
+      if (isNotFoundError(err)) {
+        return false;
+      }
+      throw mapAwsError(err as Error, {
+        resourceName: this.resource.name,
+        operation: 'hasContent',
+        id,
+        key
+      });
+    }
     const s3Response = response as S3Response;
     return (s3Response.ContentLength || 0) > 0;
   }
@@ -135,7 +168,14 @@ export class ResourceContent {
   async deleteContent(id: string): Promise<void> {
     const key = this.resource.getResourceKey(id);
     const [ok, err, existingObject] = await tryFn(() => this.client.headObject(key));
-    if (!ok) throw err;
+    if (!ok) {
+      throw mapAwsError(err as Error, {
+        resourceName: this.resource.name,
+        operation: 'deleteContent',
+        id,
+        key
+      });
+    }
 
     const s3Response = existingObject as S3Response;
     const existingMetadata = s3Response.Metadata || {};
@@ -146,7 +186,14 @@ export class ResourceContent {
       metadata: existingMetadata,
     }));
 
-    if (!ok2) throw err2;
+    if (!ok2) {
+      throw mapAwsError(err2 as Error, {
+        resourceName: this.resource.name,
+        operation: 'deleteContent',
+        id,
+        key
+      });
+    }
 
     this.resource._emitStandardized('content-deleted', id, id);
   }

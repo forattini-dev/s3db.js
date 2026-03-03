@@ -424,6 +424,32 @@ export class Router {
 </html>`;
   }
 
+  private resolveResourcePrefix(resourceName: string, resource: ResourceLike, version: string): string {
+    const resourceConfig = this.resources[resourceName];
+    let versionPrefixConfig: string | boolean | undefined;
+
+    if (resourceConfig && resourceConfig.versionPrefix !== undefined) {
+      versionPrefixConfig = resourceConfig.versionPrefix;
+    } else if (resource.config && resource.config.versionPrefix !== undefined) {
+      versionPrefixConfig = resource.config.versionPrefix;
+    } else if (this.versionPrefix !== undefined) {
+      versionPrefixConfig = this.versionPrefix;
+    } else {
+      versionPrefixConfig = false;
+    }
+
+    if (versionPrefixConfig === true) {
+      return version;
+    }
+    if (versionPrefixConfig === false) {
+      return '';
+    }
+    if (typeof versionPrefixConfig === 'string') {
+      return versionPrefixConfig;
+    }
+    return '';
+  }
+
   private mountResourceRoutes(app: HttpAppType, events: EventEmitter): void {
     const databaseResources = this.database.resources;
     this.routeSummaries = [];
@@ -443,26 +469,7 @@ export class Router {
       }
 
       const version = resource.config?.currentVersion || resource.version || 'v1';
-
-      let versionPrefixConfig: string | boolean | undefined;
-      if (resourceConfig && resourceConfig.versionPrefix !== undefined) {
-        versionPrefixConfig = resourceConfig.versionPrefix;
-      } else if (resource.config && resource.config.versionPrefix !== undefined) {
-        versionPrefixConfig = resource.config.versionPrefix;
-      } else if (this.versionPrefix !== undefined) {
-        versionPrefixConfig = this.versionPrefix;
-      } else {
-        versionPrefixConfig = false;
-      }
-
-      let prefix = '';
-      if (versionPrefixConfig === true) {
-        prefix = version;
-      } else if (versionPrefixConfig === false) {
-        prefix = '';
-      } else if (typeof versionPrefixConfig === 'string') {
-        prefix = versionPrefixConfig;
-      }
+      const prefix = this.resolveResourcePrefix(name, resource, version);
 
       const middlewares: MiddlewareHandler[] = [];
       const authDisabled = resourceConfig?.auth === false;
@@ -493,17 +500,12 @@ export class Router {
           .map(method => typeof method === 'string' ? method.toUpperCase() : method);
       }
 
-      const enableValidation = resourceConfig?.validation !== undefined
-        ? resourceConfig.validation !== false
-        : resource.config?.validation !== false;
-
       const resourceApp = createResourceRoutes(
         resource as unknown as Parameters<typeof createResourceRoutes>[0],
         version,
         {
           methods,
           customMiddleware: middlewares,
-          enableValidation,
           versionPrefix: prefix,
           events,
           relationsPlugin: this.relationsPlugin as unknown
@@ -728,6 +730,7 @@ export class Router {
       }
 
       const version = resource.config?.currentVersion || resource.version || 'v1';
+      const prefix = this.resolveResourcePrefix(resourceName, resource, version);
 
       for (const [relationName, relationConfig] of Object.entries(relationsDef)) {
         if (relationConfig.type === 'belongsTo') {
@@ -749,7 +752,9 @@ export class Router {
           this.HttpApp as unknown as Parameters<typeof createRelationalRoutes>[4]
         );
 
-        const relationPath = this._withBasePath(`/${version}/${resourceName}/:id/${relationName}`);
+        const relationPath = this._withBasePath(
+          prefix ? `/${prefix}/${resourceName}/:id/${relationName}` : `/${resourceName}/:id/${relationName}`
+        );
         app.route(relationPath, relationalApp as unknown as HttpAppType);
 
         this.logger?.debug({ path: relationPath, type: relationConfig.type, targetResource: relationConfig.resource }, `Mounted relational route: ${relationPath} (${relationConfig.type} -> ${relationConfig.resource})`);

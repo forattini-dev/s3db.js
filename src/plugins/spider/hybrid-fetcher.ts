@@ -13,7 +13,9 @@ export interface HybridFetcherConfig {
   acceptLanguage?: string;
   platform?: 'Windows' | 'Mac' | 'Linux';
   headers?: Record<string, string>;
-  proxy?: string | null;
+  proxy?: string | string[] | null;
+  useCurl?: boolean;
+  recker?: Record<string, unknown>;
   viewport?: { width: number; height: number };
 }
 

@@ -1,5 +1,6 @@
 import { tryFn } from '../concerns/try-fn.js';
-import { PartitionError } from '../errors.js';
+import { isNotFoundError } from '../concerns/s3-errors.js';
+import { PartitionError, mapAwsError } from '../errors.js';
 import type { StringRecord } from '../types/common.types.js';
 import { createHash } from 'node:crypto';
 
@@ -97,7 +98,6 @@ export interface ListParams {
 }
 
 export interface PageParams {
-  offset?: number;
   page?: number;
   size?: number;
   partition?: string | null;
@@ -109,7 +109,7 @@ export interface PageParams {
 export interface PageResult {
   items: ResourceData[];
   totalItems: number | null;
-  page: number;
+  page: number | null;
   pageSize: number;
   totalPages: number | null;
   hasMore: boolean;
@@ -568,7 +568,7 @@ export class ResourceQuery {
     const { results } = await this.resource._executeBatchHelper(operations, {
       onItemError: (error, index) => {
         this.resource.emit('error', error, ids[index]);
-        this.resource.observers.map((x) => x.emit('error', this.resource.name, error, ids[index]));
+        this.resource.observers.forEach((x) => x.emit('error', this.resource.name, error, ids[index]));
       }
     });
 
@@ -599,7 +599,7 @@ export class ResourceQuery {
     const { results } = await this.resource._executeBatchHelper(operations, {
       onItemError: (error, index) => {
         this.resource.emit('error', error, ids[index]);
-        this.resource.observers.map((x) => x.emit('error', this.resource.name, error, ids[index]));
+        this.resource.observers.forEach((x) => x.emit('error', this.resource.name, error, ids[index]));
       }
     });
 
@@ -619,12 +619,24 @@ export class ResourceQuery {
   }
 
   handleListError(error: Error, { partition, partitionValues }: { partition: string | null; partitionValues: StringRecord }): ResourceData[] {
-    if (error.message.includes("Partition '") && error.message.includes("' not found")) {
-      this.resource._emitStandardized('list', { partition, partitionValues, count: 0, errors: 1 });
+    if (error instanceof PartitionError || isNotFoundError(error)) {
+      this.resource._emitStandardized('list', { partition, partitionValues, count: 0, errors: 0 });
       return [];
     }
+
     this.resource._emitStandardized('list', { partition, partitionValues, count: 0, errors: 1 });
-    return [];
+
+    if (error && typeof error === 'object') {
+      const errObj = error as Record<string, unknown>;
+      if ('statusCode' in errObj || 'retriable' in errObj) {
+        throw error;
+      }
+    }
+
+    throw mapAwsError(error, {
+      resourceName: this.resource.name,
+      operation: 'list'
+    });
   }
 
   async getMany(ids: string[]): Promise<ResourceData[]> {
@@ -647,7 +659,7 @@ export class ResourceQuery {
     const { results } = await this.resource._executeBatchHelper(operations, {
       onItemError: (error, index) => {
         this.resource.emit('error', error, ids[index]);
-        this.resource.observers.map((x) => x.emit('error', this.resource.name, error, ids[index]));
+        this.resource.observers.forEach((x) => x.emit('error', this.resource.name, error, ids[index]));
         return {
           id: ids[index],
           _error: error.message,
@@ -698,7 +710,7 @@ export class ResourceQuery {
         onItemError: (error, index) => {
           const batchId = batchIds[index];
           this.resource.emit('error', error, batchId);
-          this.resource.observers.map((x) => x.emit('error', this.resource.name, error, batchId));
+          this.resource.observers.forEach((x) => x.emit('error', this.resource.name, error, batchId));
         }
       });
 
@@ -916,15 +928,14 @@ export class ResourceQuery {
 
   async page(params: PageParams = {}): Promise<PageResult> {
     const {
-      offset = 0,
       page,
       size = 100,
       partition = null,
       partitionValues = {},
-      skipCount = false,
       cursor = null
     } = params;
     const effectiveSize = size > 0 ? size : 100;
+    const offsetOptionProvided = Object.prototype.hasOwnProperty.call(params, 'offset');
     const cursorOptionProvided = Object.prototype.hasOwnProperty.call(params, 'cursor');
     const pageOptionProvided = Object.prototype.hasOwnProperty.call(params, 'page');
     const normalizedPage = typeof page === 'number' && Number.isFinite(page)
@@ -934,7 +945,14 @@ export class ResourceQuery {
       ? cursor.trim()
       : null;
     const usingPageNumber = pageOptionProvided;
-    const usingCursor = cursorOptionProvided || usingPageNumber;
+
+    if (offsetOptionProvided) {
+      throw new PartitionError('Offset pagination is not supported', {
+        resourceName: this.resource.name,
+        partitionName: partition || undefined,
+        operation: 'page'
+      });
+    }
 
     if (usingPageNumber && (normalizedPage === null || normalizedPage < 1)) {
       throw new PartitionError('Invalid pagination page number', {
@@ -955,16 +973,9 @@ export class ResourceQuery {
       });
     }
 
-    let totalItems: number | null = null;
-    let totalPages: number | null = null;
-    if (!skipCount && !usingCursor) {
-      totalItems = await this.count({ partition, partitionValues });
-      totalPages = Math.ceil(totalItems / effectiveSize);
-    }
-
     const currentPage = usingPageNumber
       ? normalizedPage!
-      : (usingCursor ? 0 : Math.floor(offset / effectiveSize));
+      : null;
     let items: ResourceData[] = [];
     let nextCursor: string | null = null;
 
@@ -977,7 +988,7 @@ export class ResourceQuery {
       });
       items = pageResult.items;
       nextCursor = pageResult.nextCursor;
-    } else if (usingCursor) {
+    } else {
       const cursorResult = await this._listPageByCursor({
         cursor: normalizedCursor,
         size: effectiveSize,
@@ -986,27 +997,23 @@ export class ResourceQuery {
       });
       items = cursorResult.items;
       nextCursor = cursorResult.nextCursor;
-    } else {
-      items = await this.list({ partition, partitionValues, limit: effectiveSize, offset });
     }
 
     const pageResult: PageResult = {
       items,
-      totalItems,
+      totalItems: null,
       page: currentPage,
       pageSize: effectiveSize,
-      totalPages,
-      hasMore: usingCursor
-        ? Boolean(nextCursor)
-        : items.length === effectiveSize && (offset + effectiveSize) < (totalItems || Infinity),
+      totalPages: null,
+      hasMore: Boolean(nextCursor),
       nextCursor,
       _debug: {
         requestedSize: size,
-        requestedOffset: offset,
+        requestedOffset: 0,
         actualItemsReturned: items.length,
-        skipCount,
-        hasTotalItems: totalItems !== null,
-        usedCursor: usingCursor,
+        skipCount: false,
+        hasTotalItems: false,
+        usedCursor: !usingPageNumber,
         hasNextCursor: Boolean(nextCursor)
       }
     };

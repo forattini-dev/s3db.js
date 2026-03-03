@@ -974,15 +974,14 @@ console.log(`Deleted ${count} users`);
 
 #### list(options?)
 
-List documents with pagination and partition support.
+List documents with limit and partition support.
 
 ```javascript
 // Simple list (all documents)
 const allUsers = await users.list();
 
-// With pagination
-const page1 = await users.list({ limit: 10, offset: 0 });
-const page2 = await users.list({ limit: 10, offset: 10 });
+// With limit
+const first10 = await users.list({ limit: 10 });
 
 // With partition
 const activeUsers = await users.list({
@@ -990,12 +989,11 @@ const activeUsers = await users.list({
   partitionValues: { status: 'active' }
 });
 
-// Combine partition + pagination
+// Combine partition + limit
 const activeUsersPage1 = await users.list({
   partition: 'byStatus',
   partitionValues: { status: 'active' },
-  limit: 10,
-  offset: 0
+  limit: 10
 });
 ```
 
@@ -1003,13 +1001,14 @@ const activeUsersPage1 = await users.list({
 ```typescript
 {
   limit?: number;          // Max results (default: all)
-  offset?: number;         // Skip N results (default: 0)
   partition?: string;      // Partition name
   partitionValues?: object; // Partition field values
 }
 ```
 
 **Returns:** Array of documents
+
+> **Note:** For paginated access with cursor support, use [`page()`](#pageoptions) instead.
 
 **Triggers:**
 - Hooks: `beforeList`, `afterList`
@@ -1062,7 +1061,7 @@ const activeCount = await users.count({
 });
 ```
 
-**Options:** Same as `list()` but without limit/offset
+**Options:** Same as `list()` but without limit
 
 **Returns:** Number
 
@@ -1071,46 +1070,77 @@ const activeCount = await users.count({
 
 #### page(options)
 
-Paginate results with rich metadata.
+Paginate results with rich metadata. Supports **cursor-based** and **page-based** pagination.
 
+**Cursor-based pagination** (recommended for large datasets):
 ```javascript
-const page = await users.page({
-  offset: 0,
-  size: 10
-});
+// First page
+const first = await users.page({ size: 10 });
+console.log('Items:', first.items);
+console.log('Has more:', first.hasMore);
 
-console.log('Items:', page.items);
-console.log('Total:', page.totalItems);
-console.log('Page:', page.page);
-console.log('Total pages:', page.totalPages);
-console.log('Has more:', page.hasMore);
+// Next page using cursor
+if (first.nextCursor) {
+  const second = await users.page({
+    size: 10,
+    cursor: first.nextCursor
+  });
+}
+```
+
+**Page-based pagination** (uses cached cursor checkpoints internally):
+```javascript
+const page3 = await users.page({ page: 3, size: 10 });
+console.log('Page:', page3.page);
+console.log('Total pages:', page3.totalPages);
+```
+
+**Performance tip — `skipCount`:**
+```javascript
+// Skip the count operation for faster responses on large collections
+const fast = await users.page({ size: 10, skipCount: true });
+// fast.totalItems and fast.totalPages will be null
+```
+
+**With partitions:**
+```javascript
+const result = await users.page({
+  size: 10,
+  partition: 'byStatus',
+  partitionValues: { status: 'active' }
+});
 ```
 
 **Options:**
 ```typescript
 {
-  offset: number;           // Start position
-  size: number;             // Page size
-  partition?: string;       // Partition name
-  partitionValues?: object; // Partition field values
+  size?: number;              // Page size (default: 100)
+  cursor?: string | null;     // Opaque cursor token from a previous nextCursor
+  page?: number;              // 1-indexed page number (uses cached checkpoints)
+  skipCount?: boolean;        // Skip count for performance (totalItems/totalPages become null)
+  partition?: string;         // Partition name
+  partitionValues?: object;   // Partition field values
 }
 ```
 
 **Returns:**
 ```typescript
 {
-  items: Array<Document>;   // Page items
-  totalItems: number | null;   // Total items (null when skipCount = true)
-  page: number;                 // 0-based page index
-  pageSize: number;             // Requested size used internally (at least 1)
-  totalPages: number | null;    // Null when count is skipped
-  hasMore: boolean;             // Whether more items are available
-  _debug: {                     // Internal pagination trace
+  items: Array<Document>;         // Page items
+  totalItems: number | null;      // Total items (null when skipCount = true)
+  page: number | null;            // Page number (null in cursor-only mode)
+  pageSize: number;               // Requested size used internally (at least 1)
+  totalPages: number | null;      // Null when count is skipped or cursor-only mode
+  hasMore: boolean;               // Whether more items are available
+  nextCursor?: string | null;     // Opaque cursor token for next page (cursor mode only)
+  _debug: {                       // Internal pagination trace
     requestedSize: number;
     requestedOffset: number;
     actualItemsReturned: number;
     skipCount: boolean;
     hasTotalItems: boolean;
+    usedCursor?: boolean;         // Whether cursor mode was used
+    hasNextCursor?: boolean;      // Whether a nextCursor was generated
   };
 }
 ```
@@ -1129,10 +1159,10 @@ const results = await users.query({
   age: 25
 });
 
-// With pagination
+// With limit
 const results = await users.query(
   { status: 'active' },
-  { limit: 10, offset: 0 }
+  { limit: 10 }
 );
 ```
 

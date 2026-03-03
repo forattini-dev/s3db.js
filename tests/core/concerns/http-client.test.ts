@@ -5,6 +5,8 @@ import {
   httpGet,
   httpPost,
   isReckerAvailable,
+  getReckerCurlImpersonateStatus,
+  ensureReckerCurlImpersonate,
   preloadRecker,
   FetchFallback,
   ReckerWrapper
@@ -363,6 +365,116 @@ describe('HTTP Client Wrapper', () => {
     });
   });
 
+  describe('ReckerWrapper', () => {
+    it('should not force curl impersonation by default', () => {
+      const mockClient = {
+        get: vi.fn(),
+        post: vi.fn(),
+        put: vi.fn(),
+        patch: vi.fn(),
+        delete: vi.fn(),
+        request: vi.fn()
+      };
+
+      const createClient = vi.fn().mockReturnValue(mockClient);
+      const wrapper = new ReckerWrapper({
+        baseUrl: 'https://api.example.com',
+        proxy: ['http://proxy1:8080', 'socks5://proxy2:1080']
+      }, {
+        createClient
+      } as any);
+
+      expect(wrapper).toBeDefined();
+      expect(createClient).toHaveBeenCalledWith(expect.objectContaining({
+        useCurl: undefined,
+        proxy: ['http://proxy1:8080', 'socks5://proxy2:1080']
+      }));
+    });
+
+    it('should allow disabling curl impersonation', () => {
+      const mockClient = {
+        get: vi.fn(),
+        post: vi.fn(),
+        put: vi.fn(),
+        patch: vi.fn(),
+        delete: vi.fn(),
+        request: vi.fn()
+      };
+
+      const createClient = vi.fn().mockReturnValue(mockClient);
+      new ReckerWrapper({
+        baseUrl: 'https://api.example.com',
+        useCurl: false
+      }, {
+        createClient
+      } as any);
+
+      expect(createClient).toHaveBeenCalledWith(expect.objectContaining({
+        useCurl: false
+      }));
+    });
+
+    it('should pass through full recker client options', () => {
+      const mockClient = {
+        get: vi.fn(),
+        post: vi.fn(),
+        put: vi.fn(),
+        patch: vi.fn(),
+        delete: vi.fn(),
+        request: vi.fn()
+      };
+
+      const createClient = vi.fn().mockReturnValue(mockClient);
+      new ReckerWrapper({
+        baseUrl: 'https://api.example.com',
+        recker: {
+          http2: { enabled: true },
+          dns: { servers: ['1.1.1.1'] },
+          searchParams: { env: 'test' }
+        }
+      }, {
+        createClient
+      } as any);
+
+      expect(createClient).toHaveBeenCalledWith(expect.objectContaining({
+        baseUrl: 'https://api.example.com',
+        http2: { enabled: true },
+        dns: { servers: ['1.1.1.1'] },
+        searchParams: { env: 'test' }
+      }));
+    });
+
+    it('should pass through full recker request options', async () => {
+      const mockClient = {
+        get: vi.fn().mockResolvedValue({ ok: true, status: 200 }),
+        post: vi.fn().mockResolvedValue({ ok: true, status: 200 }),
+        put: vi.fn().mockResolvedValue({ ok: true, status: 200 }),
+        patch: vi.fn().mockResolvedValue({ ok: true, status: 200 }),
+        delete: vi.fn().mockResolvedValue({ ok: true, status: 200 }),
+        request: vi.fn().mockResolvedValue({ ok: true, status: 200 })
+      };
+
+      const createClient = vi.fn().mockReturnValue(mockClient);
+      const wrapper = new ReckerWrapper({}, { createClient } as any);
+
+      await wrapper.request('https://api.example.com/data', {
+        method: 'OPTIONS',
+        recker: {
+          searchParams: { page: 1 },
+          http2: { enabled: true }
+        }
+      });
+
+      expect(mockClient.request).toHaveBeenCalledWith(
+        'https://api.example.com/data',
+        expect.objectContaining({
+          searchParams: { page: 1 },
+          http2: { enabled: true }
+        })
+      );
+    });
+  });
+
   describe('createHttpClient', () => {
     it('should create a client instance', async () => {
       const client = await createHttpClient({
@@ -442,6 +554,21 @@ describe('HTTP Client Wrapper', () => {
       } else {
         expect(client.scrape).toBeUndefined();
       }
+    });
+
+    it('should expose curl-impersonate status helpers', async () => {
+      const status = await getReckerCurlImpersonateStatus();
+
+      expect(typeof status.available).toBe('boolean');
+      expect(typeof status.source).toBe('string');
+      if (status.path !== null) {
+        expect(typeof status.path).toBe('string');
+      }
+    });
+
+    it('should not install impersonate when ensure is called without installIfMissing', async () => {
+      const status = await ensureReckerCurlImpersonate({ installIfMissing: false });
+      expect(typeof status.available).toBe('boolean');
     });
   });
 

@@ -76,7 +76,7 @@ interface Resource {
   get(id: string): Promise<Record<string, unknown>>;
   list(options?: { limit?: number }): Promise<Record<string, unknown>[]>;
   query(filter: Record<string, unknown>, options?: { limit?: number }): Promise<Record<string, unknown>[]>;
-  page(options?: { size?: number; offset?: number }): Promise<{ items: Record<string, unknown>[] }>;
+  page(options?: { size?: number; page?: number; skipCount?: boolean; cursor?: string | null; partition?: string | null }): Promise<{ items: Record<string, unknown>[]; nextCursor?: string | null }>;
   delete(id: string): Promise<void>;
   deleteMany: (ids: string[]) => Promise<void>;
   _originalDeleteMany?: (ids: string[]) => Promise<void>;
@@ -426,8 +426,12 @@ export class AuditPlugin extends Plugin {
 
       return items.slice(offset, offset + limit);
     } else {
-      const result = await this.auditResource.page({ size: limit, offset });
-      return (result.items || []) as unknown as AuditRecord[];
+      const pageNumber = Math.floor(offset / limit) + 1;
+      const skipWithinPage = offset % limit;
+      const fetchSize = limit + skipWithinPage;
+      const result = await this.auditResource.page({ size: fetchSize, page: pageNumber, skipCount: true });
+      const pageItems = (result.items || []) as unknown as AuditRecord[];
+      return pageItems.slice(skipWithinPage, skipWithinPage + limit);
     }
   }
 

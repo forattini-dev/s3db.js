@@ -98,41 +98,49 @@ export class OpenAPIGeneratorCached {
   }
 
   private generateCacheKey(): string {
-    const components = {
-      resources: Object.keys(this.database.resources).map(name => {
-        const resource = this.database.resources[name]!;
-        return {
-          name,
-          version: resource.config?.currentVersion || resource.version || 'v1',
-          attributes: Object.keys(resource.attributes || {}).sort().join(',')
-        };
-      }),
+    const resourcesSignature = Object.entries(this.database.resources || {})
+      .sort(([leftName], [rightName]) => leftName.localeCompare(rightName))
+      .map(([name, resource]) => ({
+        name,
+        version: resource.config?.currentVersion || resource.version || 'v1',
+        config: this.normalizeForHash(resource.config || {}),
+        attributes: this.normalizeForHash(resource.attributes || {}),
+        schema: this.normalizeForHash((resource as ResourceLike & { $schema?: Record<string, unknown> }).$schema || {}),
+        relations: this.normalizeForHash((resource as ResourceLike & { _relations?: Record<string, unknown> })._relations || {})
+      }));
 
-      auth: {
-        drivers: this.options.auth?.drivers?.map((d: { driver?: string }) => d.driver).sort() || [],
-        pathRules: this.options.auth?.pathRules?.length || 0,
-        pathAuth: !!this.options.auth?.pathAuth
-      },
-
-      resourceConfig: Object.keys(this.options.resources || {}).sort(),
-      customRoutes: Object.keys(this.options.routes || {}).sort(),
-
+    const optionsSignature = this.normalizeForHash({
+      title: this.options.title,
+      version: this.options.version,
+      description: this.options.description,
+      serverUrl: this.options.serverUrl,
+      auth: this.options.auth || {},
+      resources: this.options.resources || {},
+      routes: this.options.routes || {},
       versionPrefix: this.options.versionPrefix,
-      basePath: this.options.basePath || '',
+      basePath: this.options.basePath || ''
+    });
 
-      apiInfo: {
-        title: this.options.title,
-        version: this.options.version,
-        description: this.options.description
-      },
+    const appRoutesSignature = this.app
+      ? this.app.getRoutes()
+        .map((route: RouteMetadata) => ({
+          method: route.method,
+          path: route.path,
+          description: route.description,
+          operationId: route.operationId,
+          tags: route.tags || []
+        }))
+        .sort((left, right) => {
+          const leftKey = `${left.method}:${left.path}`;
+          const rightKey = `${right.method}:${right.path}`;
+          return leftKey.localeCompare(rightKey);
+        })
+      : [];
 
-      appRoutes: this.app ? this.app.getRoutes().map((r: RouteMetadata) => ({
-        method: r.method,
-        path: r.path,
-        description: r.description,
-        operationId: r.operationId,
-        tags: r.tags
-      })) : []
+    const components = {
+      resources: resourcesSignature,
+      options: optionsSignature,
+      appRoutes: this.normalizeForHash(appRoutesSignature)
     };
 
     const hash = createHash('sha256')
@@ -141,6 +149,37 @@ export class OpenAPIGeneratorCached {
       .substring(0, 16);
 
     return hash;
+  }
+
+  private normalizeForHash(value: unknown): unknown {
+    if (value === null || value === undefined) {
+      return value;
+    }
+
+    if (typeof value === 'function') {
+      const fn = value as Function;
+      return `[Function:${fn.name || 'anonymous'}]`;
+    }
+
+    if (value instanceof Date) {
+      return value.toISOString();
+    }
+
+    if (Array.isArray(value)) {
+      return value.map(item => this.normalizeForHash(item));
+    }
+
+    if (typeof value === 'object') {
+      const input = value as Record<string, unknown>;
+      const normalized: Record<string, unknown> = {};
+      const keys = Object.keys(input).sort((left, right) => left.localeCompare(right));
+      for (const key of keys) {
+        normalized[key] = this.normalizeForHash(input[key]);
+      }
+      return normalized;
+    }
+
+    return value;
   }
 
   invalidate(): void {

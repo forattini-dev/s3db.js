@@ -6,13 +6,6 @@ import { QueueError } from "./queue.errors.js";
 import { getCronManager } from "../concerns/cron-manager.js";
 import { createLogger, type LogLevel } from '../concerns/logger.js';
 
-interface Logger {
-  info(obj: unknown, msg?: string): void;
-  warn(obj: unknown, msg?: string): void;
-  error(obj: unknown, msg?: string): void;
-  debug(obj: unknown, msg?: string): void;
-}
-
 interface Resource {
   name: string;
   get(id: string): Promise<QueueEntry>;
@@ -32,6 +25,7 @@ interface Resource {
   countQueue?: (status?: QueueMessageStatusQuery) => Promise<number>;
   truncateQueue?: (options?: QueuePurgeOptions) => Promise<QueuePurgeResult>;
   deleteQueue?: (options?: QueueDeleteOptions) => Promise<QueueDeleteResult>;
+  estimateQueueUsage?: (options?: QueueUsageEstimateOptions) => QueueUsageEstimate;
 }
 
 interface ResourceConfig {
@@ -84,8 +78,7 @@ interface QueueStats {
   dead: number;
 }
 
-type QueueMessageStatus = 'pending' | 'processing' | 'completed' | 'failed' | 'dead';
-type QueueMessageStatusQuery = QueueMessageStatus | 'all';
+type QueueMessageStatusQuery = 'pending' | 'processing' | 'completed' | 'failed' | 'dead' | 'all';
 
 interface QueuePurgeOptions {
   includeDeadLetter?: boolean;
@@ -105,6 +98,46 @@ interface QueueDeleteResult extends QueuePurgeResult {
   removedTickets: number;
   queueResourceDeleted: boolean;
   deadLetterResourceDeleted: boolean;
+}
+
+export interface QueueUsageEstimateOptions {
+  days?: number;
+  concurrency?: number;
+  processedMessagesPerSecond?: number;
+  retriesPerMessage?: number;
+  lockRenewalsPerMessage?: number;
+  statsCallsPerMinute?: number;
+}
+
+export interface QueueUsageEstimate {
+  windowDays: number;
+  windowSeconds: number;
+  assumptions: {
+    concurrency: number;
+    pollIntervalMs: number;
+    maxPollIntervalMs: number;
+    recoveryIntervalMs: number;
+    dispatchIntervalMs: number;
+    enableCoordinator: boolean;
+    orderingGuarantee: boolean;
+    processedMessagesPerSecond: number;
+    retriesPerMessage: number;
+    lockRenewalsPerMessage: number;
+    statsCallsPerMinute: number;
+    perMessageBaseRequests: number;
+    perRetryRequests: number;
+    perLockRenewalRequests: number;
+    perStatsCallRequests: number;
+  };
+  estimatedRequests: {
+    idle: number;
+    throughput: number;
+    stats: number;
+    total: number;
+    workerPolling: number;
+    coordinatorPolling: number;
+    recoveryPolling: number;
+  };
 }
 
 interface ProcessingOptions {
@@ -148,7 +181,8 @@ interface PluginStorage {
   ): Promise<string | null>;
   delete(key: string): Promise<void>;
   deleteIfVersion?(key: string, version: string): Promise<boolean>;
-  listWithPrefix(prefix: string): Promise<TicketData[]>;
+  listWithPrefix(prefix: string, options?: { limit?: number }): Promise<TicketData[]>;
+  listKeysWithPrefix?(prefix: string, options?: { limit?: number }): Promise<string[]>;
   acquireLock(name: string, options: LockOptions): Promise<Lock | null>;
   releaseLock(lock: Lock): Promise<void>;
   getPluginKey(namespace: string | null, ...parts: string[]): string;
@@ -360,8 +394,6 @@ export class S3QueuePlugin extends CoordinatorPlugin<S3QueuePluginOptions> {
       epochDuration = 300000,
       ticketBatchSize = 10,
       dispatchInterval = 100,
-      coldStartDuration = 0,
-      skipColdStart = false,
       consumerJitterMs = 0,
       retryJitterMs = 0,
       autoAcknowledge = false,
@@ -654,6 +686,131 @@ export class S3QueuePlugin extends CoordinatorPlugin<S3QueuePluginOptions> {
     resource.deleteQueue = async function(options: QueueDeleteOptions = {}): Promise<QueueDeleteResult> {
       return await plugin.deleteQueue(options);
     };
+
+    resource.estimateQueueUsage = function(options: QueueUsageEstimateOptions = {}): QueueUsageEstimate {
+      return plugin.estimateUsage(options);
+    };
+  }
+
+  estimateUsage(options: QueueUsageEstimateOptions = {}): QueueUsageEstimate {
+    const windowDays = Number.isFinite(options.days) ? Math.max(1 / 24, Number(options.days)) : 30;
+    const windowSeconds = Math.max(1, Math.floor(windowDays * 24 * 60 * 60));
+    const concurrency = Number.isFinite(options.concurrency)
+      ? Math.max(1, Math.floor(Number(options.concurrency)))
+      : Math.max(1, this.config.concurrency);
+
+    const pollIntervalMs = Math.max(100, this.config.pollInterval);
+    const maxPollIntervalMs = Math.max(pollIntervalMs, this.config.maxPollInterval || pollIntervalMs);
+    const recoveryIntervalMs = Math.max(1000, this.config.recoveryInterval || 1000);
+    const dispatchIntervalMs = Math.max(50, this.config.dispatchInterval || 50);
+    const effectiveIdleIntervalMs = Math.max(maxPollIntervalMs, dispatchIntervalMs);
+    const idleCycleSeconds = effectiveIdleIntervalMs / 1000;
+
+    const workerCycles = (windowSeconds / idleCycleSeconds) * concurrency;
+    const workerRequestsPerCycle = this.config.enableCoordinator
+      ? (this.config.orderingGuarantee ? 2 : 1)
+      : 1;
+    const workerPolling = workerCycles * workerRequestsPerCycle;
+
+    const coordinatorCycles = this.config.enableCoordinator
+      ? (windowSeconds / idleCycleSeconds)
+      : 0;
+    const coordinatorPolling = this.config.enableCoordinator ? coordinatorCycles * 2 : 0;
+
+    const recoveryPolling = windowSeconds / (recoveryIntervalMs / 1000);
+
+    const processedMessagesPerSecond = Number.isFinite(options.processedMessagesPerSecond)
+      ? Math.max(0, Number(options.processedMessagesPerSecond))
+      : 0;
+    const retriesPerMessage = Number.isFinite(options.retriesPerMessage)
+      ? Math.max(0, Number(options.retriesPerMessage))
+      : 0;
+    const lockRenewalsPerMessage = Number.isFinite(options.lockRenewalsPerMessage)
+      ? Math.max(0, Number(options.lockRenewalsPerMessage))
+      : 0;
+    const statsCallsPerMinute = Number.isFinite(options.statsCallsPerMinute)
+      ? Math.max(0, Number(options.statsCallsPerMinute))
+      : 0;
+
+    const processedMessages = processedMessagesPerSecond * windowSeconds;
+    const perMessageBaseRequests = this.config.enableCoordinator ? 14 : 8;
+    const perRetryRequests = 2;
+    const perLockRenewalRequests = 2;
+    const perStatsCallRequests = 6;
+
+    const throughput = (
+      processedMessages * perMessageBaseRequests
+      + (processedMessages * retriesPerMessage) * perRetryRequests
+      + (processedMessages * lockRenewalsPerMessage) * perLockRenewalRequests
+    );
+
+    const statsCalls = (windowSeconds / 60) * statsCallsPerMinute;
+    const stats = statsCalls * perStatsCallRequests;
+
+    const idle = workerPolling + coordinatorPolling + recoveryPolling;
+    const total = idle + throughput + stats;
+
+    return {
+      windowDays,
+      windowSeconds,
+      assumptions: {
+        concurrency,
+        pollIntervalMs,
+        maxPollIntervalMs,
+        recoveryIntervalMs,
+        dispatchIntervalMs,
+        enableCoordinator: this.config.enableCoordinator,
+        orderingGuarantee: this.config.orderingGuarantee,
+        processedMessagesPerSecond,
+        retriesPerMessage,
+        lockRenewalsPerMessage,
+        statsCallsPerMinute,
+        perMessageBaseRequests,
+        perRetryRequests,
+        perLockRenewalRequests,
+        perStatsCallRequests
+      },
+      estimatedRequests: {
+        idle: Math.ceil(idle),
+        throughput: Math.ceil(throughput),
+        stats: Math.ceil(stats),
+        total: Math.ceil(total),
+        workerPolling: Math.ceil(workerPolling),
+        coordinatorPolling: Math.ceil(coordinatorPolling),
+        recoveryPolling: Math.ceil(recoveryPolling)
+      }
+    };
+  }
+
+  private _logCostForecast(concurrency: number): void {
+    const daily = this.estimateUsage({ days: 1, concurrency });
+    const monthly = this.estimateUsage({ days: 30, concurrency });
+    const payload = {
+      resource: this.config.resource,
+      queueResource: this.queueResourceName,
+      concurrency,
+      enableCoordinator: this.config.enableCoordinator,
+      orderingGuarantee: this.config.orderingGuarantee,
+      pollIntervalMs: this.config.pollInterval,
+      maxPollIntervalMs: this.config.maxPollInterval,
+      recoveryIntervalMs: this.config.recoveryInterval,
+      idleRequestsPerDay: daily.estimatedRequests.idle,
+      idleRequestsPerMonth: monthly.estimatedRequests.idle,
+      estimatedRequestsPerMonth: monthly.estimatedRequests.total
+    };
+
+    this.logger.debug(payload, 'S3 queue request usage estimate');
+    this.emit('plg:s3-queue:usage-estimate', payload);
+
+    if (monthly.estimatedRequests.idle >= 1_000_000) {
+      this.logger.warn(
+        {
+          ...payload,
+          suggestion: 'Increase maxPollInterval, reduce concurrency, or disable coordinator/order guarantee when strict FIFO is not required.'
+        },
+        'High idle request forecast for queue polling'
+      );
+    }
   }
 
   async truncateQueue({ includeDeadLetter = false }: QueuePurgeOptions = {}): Promise<QueuePurgeResult> {
@@ -763,37 +920,47 @@ export class S3QueuePlugin extends CoordinatorPlugin<S3QueuePluginOptions> {
   }
 
   private async _clearAllTickets(): Promise<number> {
-    const storage = this.getStorage() as unknown as PluginStorage;
     const prefix = 'tickets/';
-
-    const [okTickets, errTickets, tickets] = await tryFn(() => storage.listWithPrefix(prefix));
-    if (!okTickets || !tickets || tickets.length === 0) {
-      if (!okTickets && errTickets && (errTickets as { code?: string }).code !== 'NoSuchKey' && (errTickets as { code?: string }).code !== 'NotFound') {
-        this.logger.warn(
-          { error: (errTickets as Error).message || errTickets },
-          `Failed to list queue tickets: ${(errTickets as Error).message || errTickets}`
-        );
-      }
-      return 0;
+    const [okTickets, errTickets, ticketKeys] = await tryFn(() => this._listTicketKeys(prefix));
+    if (!okTickets && errTickets && (errTickets as { code?: string }).code !== 'NoSuchKey' && (errTickets as { code?: string }).code !== 'NotFound') {
+      this.logger.warn(
+        { error: (errTickets as Error).message || errTickets },
+        `Failed to list queue tickets: ${(errTickets as Error).message || errTickets}`
+      );
     }
 
+    const storage = this.getStorage() as unknown as PluginStorage;
     let removed = 0;
-    for (const ticket of tickets) {
-      const ticketData = asTicketData(ticket);
-      if (!ticketData?.ticketId) {
-        continue;
-      }
-
-      const key = storage.getPluginKey(null, 'tickets', ticketData.ticketId);
+    for (const key of okTickets && ticketKeys ? ticketKeys : []) {
+      const ticketId = key.split('/').pop() || key;
       const [okDelete, errDelete] = await tryFn(() => storage.delete(key));
       if (okDelete) {
         removed++;
       } else if (errDelete && (errDelete as { code?: string }).code !== 'NoSuchKey' && (errDelete as { code?: string }).code !== 'NotFound') {
         this.logger.warn(
-          { ticketId: ticketData.ticketId, error: (errDelete as Error).message || errDelete },
+          { ticketId, error: (errDelete as Error).message || errDelete },
           `Failed to delete queue ticket: ${(errDelete as Error).message || errDelete}`
         );
       }
+    }
+
+    const [okIndex, errIndex, availabilityKeys] = await tryFn(() => this._listAvailableTicketKeys());
+    if (okIndex && availabilityKeys && availabilityKeys.length > 0) {
+      const storage = this.getStorage() as unknown as PluginStorage;
+      for (const key of availabilityKeys) {
+        const [okDelete, errDelete] = await tryFn(() => storage.delete(key));
+        if (!okDelete && errDelete && (errDelete as { code?: string }).code !== 'NoSuchKey' && (errDelete as { code?: string }).code !== 'NotFound') {
+          this.logger.warn(
+            { key, error: (errDelete as Error).message || errDelete },
+            `Failed to delete ticket availability entry: ${(errDelete as Error).message || errDelete}`
+          );
+        }
+      }
+    } else if (!okIndex && errIndex && (errIndex as { code?: string }).code !== 'NoSuchKey' && (errIndex as { code?: string }).code !== 'NotFound') {
+      this.logger.warn(
+        { error: (errIndex as Error).message || errIndex },
+        `Failed to list ticket availability entries: ${(errIndex as Error).message || errIndex}`
+      );
     }
 
     return removed;
@@ -901,6 +1068,91 @@ export class S3QueuePlugin extends CoordinatorPlugin<S3QueuePluginOptions> {
     await Promise.all(ids.map((id) => this._clearProcessedMarker(id)));
   }
 
+  private async _listTicketKeys(prefix: string, options: { limit?: number } = {}): Promise<string[]> {
+    const storage = this.getStorage() as unknown as PluginStorage;
+
+    if (typeof storage.listKeysWithPrefix === 'function') {
+      return await storage.listKeysWithPrefix(prefix, options);
+    }
+
+    const tickets = await storage.listWithPrefix(prefix, options);
+    return tickets
+      .map((ticket) => {
+        const ticketData = asTicketData(ticket);
+        if (!ticketData?.ticketId) return null;
+        return storage.getPluginKey(null, 'tickets', ticketData.ticketId);
+      })
+      .filter((key): key is string => typeof key === 'string' && key.length > 0);
+  }
+
+  private _normalizeTicketOrderIndex(orderIndex: number): string {
+    const normalized = Number.isFinite(orderIndex)
+      ? Math.max(0, Math.floor(orderIndex))
+      : 0;
+    return String(normalized).padStart(16, '0');
+  }
+
+  private _ticketAvailabilityKey(ticketId: string, orderIndex: number): string {
+    const storage = this.getStorage() as unknown as PluginStorage;
+    return storage.getPluginKey(
+      null,
+      'tickets-available',
+      `${this._normalizeTicketOrderIndex(orderIndex)}-${ticketId}`
+    );
+  }
+
+  private async _markTicketAvailable(ticket: TicketData): Promise<void> {
+    const storage = this.getStorage() as unknown as PluginStorage;
+    const key = this._ticketAvailabilityKey(ticket.ticketId, ticket.orderIndex || 0);
+    const [ok, err] = await tryFn(() =>
+      storage.set(key, {
+        ...ticket,
+        status: 'available',
+        claimedBy: null,
+        claimedAt: null
+      }, {
+        ttl: ticket.ticketTTL || ticket._ttl || 60,
+        behavior: 'body-only'
+      })
+    );
+
+    if (!ok && err && (err as { code?: string }).code !== 'NoSuchKey' && (err as { code?: string }).code !== 'NotFound') {
+      this.logger.warn(
+        { ticketId: ticket.ticketId, error: (err as Error).message || err },
+        `Failed to update ticket availability index for ${ticket.ticketId}`
+      );
+    }
+  }
+
+  private async _unmarkTicketAvailable(ticket: Pick<TicketData, 'ticketId' | 'orderIndex'>): Promise<void> {
+    const storage = this.getStorage() as unknown as PluginStorage;
+    const key = this._ticketAvailabilityKey(ticket.ticketId, ticket.orderIndex || 0);
+    const [ok, err] = await tryFn(() => storage.delete(key));
+    if (!ok && err && (err as { code?: string }).code !== 'NoSuchKey' && (err as { code?: string }).code !== 'NotFound') {
+      this.logger.warn(
+        { ticketId: ticket.ticketId, error: (err as Error).message || err },
+        `Failed to remove ticket availability index for ${ticket.ticketId}`
+      );
+    }
+  }
+
+  private async _listAvailableTicketKeys(options: { limit?: number } = {}): Promise<string[]> {
+    const storage = this.getStorage() as unknown as PluginStorage;
+    const prefix = 'tickets-available/';
+    if (typeof storage.listKeysWithPrefix === 'function') {
+      return await storage.listKeysWithPrefix(prefix, options);
+    }
+
+    const tickets = await storage.listWithPrefix(prefix, options);
+    return tickets
+      .map((ticket) => {
+        const ticketData = asTicketData(ticket);
+        if (!ticketData?.ticketId) return null;
+        return this._ticketAvailabilityKey(ticketData.ticketId, ticketData.orderIndex || 0);
+      })
+      .filter((key): key is string => typeof key === 'string' && key.length > 0);
+  }
+
   async _publishTickets(): Promise<number> {
     if (!this.isCoordinator) return 0;
 
@@ -996,6 +1248,7 @@ export class S3QueuePlugin extends CoordinatorPlugin<S3QueuePluginOptions> {
 
     this.isRunning = true;
     const concurrency = options.concurrency || this.config.concurrency;
+    this._logCostForecast(concurrency);
 
     const cronManager = getCronManager();
     const jobName = `queue-cache-cleanup-${this.workerId}`;
@@ -1318,10 +1571,6 @@ export class S3QueuePlugin extends CoordinatorPlugin<S3QueuePluginOptions> {
         this.messageLocks.delete(lock.name);
       }
     }
-  }
-
-  async cleanupStaleLocks(): Promise<void> {
-    // TTL automatically expires locks
   }
 
   async attemptClaim(msg: QueueEntry, options: { enforceOrder?: boolean } = {}): Promise<ClaimedMessage | null> {
@@ -2455,6 +2704,7 @@ export class S3QueuePlugin extends CoordinatorPlugin<S3QueuePluginOptions> {
 
       if (ok) {
         published++;
+        await this._markTicketAvailable(ticketData);
       } else {
         this.logger.warn(
           { ticketId, error: (err as Error)?.message },
@@ -2470,25 +2720,72 @@ export class S3QueuePlugin extends CoordinatorPlugin<S3QueuePluginOptions> {
     if (!this.config.enableCoordinator) return [];
 
     const storage = this.getStorage() as unknown as PluginStorage;
-    const prefix = 'tickets/';
+    const available: TicketData[] = [];
 
-    const [ok, err, tickets] = await tryFn(() => storage.listWithPrefix(prefix));
+    const indexLimit = Math.max(this.config.ticketBatchSize * 2, 16);
+    const [okIndex, errIndex, availableKeys] = await tryFn(() => this._listAvailableTicketKeys({ limit: indexLimit }));
+    if (okIndex && availableKeys && availableKeys.length > 0) {
+      for (const key of availableKeys) {
+        const [okSnapshot, , snapshot] = await tryFn(() => storage.getWithVersion(key));
+        if (!okSnapshot || !snapshot?.data) {
+          continue;
+        }
 
-    if (!ok) {
+        const ticket = asTicketData(snapshot.data);
+        if (!ticket || ticket.status !== 'available' || ticket.claimedBy) {
+          continue;
+        }
+
+        available.push(ticket);
+        if (available.length >= this.config.ticketBatchSize) {
+          break;
+        }
+      }
+
+      available.sort((a, b) => (a.orderIndex || 0) - (b.orderIndex || 0));
+      if (available.length > 0) {
+        return available;
+      }
+    } else if (!okIndex) {
       this.logger.warn(
-        { error: (err as Error)?.message },
-        `Failed to list tickets: ${(err as Error)?.message}`
+        { error: (errIndex as Error)?.message },
+        `Failed to list available ticket index: ${(errIndex as Error)?.message}`
+      );
+    }
+
+    const fallbackLimit = Math.max(this.config.ticketBatchSize * 4, 32);
+    const [okFallback, errFallback, ticketKeys] = await tryFn(() => this._listTicketKeys('tickets/', { limit: fallbackLimit }));
+
+    if (!okFallback) {
+      this.logger.warn(
+        { error: (errFallback as Error)?.message },
+        `Failed to list tickets: ${(errFallback as Error)?.message}`
       );
       return [];
     }
 
-    if (!tickets || tickets.length === 0) {
+    if (!ticketKeys || ticketKeys.length === 0) {
       return [];
     }
 
-    const available = tickets
-      .filter(t => t && t.status === 'available' && !t.claimedBy)
-      .sort((a, b) => (a.orderIndex || 0) - (b.orderIndex || 0));
+    for (const key of ticketKeys) {
+      const [okSnapshot, , snapshot] = await tryFn(() => storage.getWithVersion(key));
+      if (!okSnapshot || !snapshot?.data) {
+        continue;
+      }
+
+      const ticket = asTicketData(snapshot.data);
+      if (!ticket || ticket.status !== 'available' || ticket.claimedBy) {
+        continue;
+      }
+
+      available.push(ticket);
+      if (available.length >= this.config.ticketBatchSize) {
+        break;
+      }
+    }
+
+    available.sort((a, b) => (a.orderIndex || 0) - (b.orderIndex || 0));
 
     return available;
   }
@@ -2549,6 +2846,8 @@ export class S3QueuePlugin extends CoordinatorPlugin<S3QueuePluginOptions> {
       return null;
     }
 
+    await this._unmarkTicketAvailable(ticketData);
+
     const [okMsg, errMsg, msg] = await tryFn(() =>
       this.queueResource!.get(ticket.messageId)
     );
@@ -2583,6 +2882,11 @@ export class S3QueuePlugin extends CoordinatorPlugin<S3QueuePluginOptions> {
         );
       }
       return;
+    }
+
+    const ticketData = asTicketData(snapshot.data);
+    if (ticketData) {
+      await this._unmarkTicketAvailable(ticketData);
     }
 
     if (typeof storage.deleteIfVersion === 'function') {
@@ -2665,7 +2969,15 @@ export class S3QueuePlugin extends CoordinatorPlugin<S3QueuePluginOptions> {
         { ticketId, error: (errRelease as Error)?.message },
         `Failed to release ticket: ${(errRelease as Error)?.message}`
       );
+      return;
     }
+
+    await this._markTicketAvailable({
+      ...ticketData,
+      status: 'available',
+      claimedBy: null,
+      claimedAt: null
+    });
   }
 
   async recoverStalledTickets(): Promise<void> {
@@ -2682,8 +2994,9 @@ export class S3QueuePlugin extends CoordinatorPlugin<S3QueuePluginOptions> {
     try {
       const storage = this.getStorage() as unknown as PluginStorage;
       const prefix = 'tickets/';
+      const limit = Math.max(this.config.recoveryBatchSize * 6, 50);
 
-      const [okTickets, , tickets] = await tryFn(() => storage.listWithPrefix(prefix));
+      const [okTickets, , tickets] = await tryFn(() => storage.listWithPrefix(prefix, { limit }));
 
       if (!okTickets || !tickets || tickets.length === 0) {
         return;

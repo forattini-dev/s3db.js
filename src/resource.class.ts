@@ -17,7 +17,6 @@ import { ResourceQuery } from './core/resource-query.class.js';
 import { ResourceContent } from './core/resource-content.class.js';
 import { ResourceStreams } from './core/resource-streams.class.js';
 import { ResourcePersistence } from './core/resource-persistence.class.js';
-import { streamToString } from './stream/index.js';
 import tryFn, { tryFnSync } from './concerns/try-fn.js';
 import { ResourceReader, ResourceWriter } from './stream/index.js';
 import { getBehavior, DEFAULT_BEHAVIOR } from './behaviors/index.js';
@@ -48,18 +47,14 @@ import type {
 } from './core/resource-middleware.class.js';
 import type {
   PartitionDefinition,
-  PartitionsConfig,
-  PageResult as QueryPageResult
+  PartitionsConfig
 } from './core/resource-query.class.js';
 import type {
   HooksModule,
   OrphanedPartitions
 } from './core/resource-partitions.class.js';
 import type {
-  UpdateConditionalOptions,
-  UpdateConditionalResult as PersistenceUpdateConditionalResult,
-  DeleteManyResult as PersistenceDeleteManyResult,
-  ResourceData as PersistenceResourceData
+  UpdateConditionalOptions
 } from './core/resource-persistence.class.js';
 import type {
   ResourceConfigInput
@@ -184,11 +179,22 @@ export interface SetContentParams {
 
 export interface PageResult {
   items: ResourceData[];
-  total: number;
-  offset: number;
-  size: number;
+  totalItems: number | null;
+  page: number | null;
+  pageSize: number;
+  totalPages: number | null;
   hasMore: boolean;
   nextCursor?: string | null;
+  _debug?: {
+    requestedSize: number;
+    requestedOffset: number;
+    actualItemsReturned: number;
+    skipCount: boolean;
+    hasTotalItems: boolean;
+    usedCursor?: boolean;
+    hasNextCursor?: boolean;
+    error?: string;
+  };
 }
 
 export interface QueryFilter {
@@ -218,8 +224,9 @@ export interface CountOptions {
 export interface UpdateConditionalResult {
   success: boolean;
   data?: ResourceData;
+  etag?: string;
   error?: string;
-  currentETag?: string;
+  validationErrors?: Array<{ message?: string; field?: string }>;
 }
 
 export interface DeleteManyResult {
@@ -229,20 +236,12 @@ export interface DeleteManyResult {
 }
 
 export interface PageOptions {
-  offset?: number;
   page?: number;
   size?: number;
   partition?: string | null;
   partitionValues?: StringRecord;
   skipCount?: boolean;
   cursor?: string | null;
-}
-
-export interface UpdateConditionalResult {
-  success: boolean;
-  data?: ResourceData;
-  etag?: string;
-  error?: string;
 }
 
 export interface ComposeFullObjectParams {
@@ -594,11 +593,6 @@ export class Resource extends AsyncEventEmitter implements Disposable {
     return normalized;
   }
 
-  configureIdGenerator(customIdGenerator: IdGeneratorFunction | number | string | undefined, idSize: number): IdGeneratorFunction | IncrementalGenerator | null {
-    const tempGenerator = new ResourceIdGenerator(this as any, { idGenerator: customIdGenerator as IdGeneratorConfig, idSize });
-    return tempGenerator.getGenerator();
-  }
-
   private _initIncrementalIdGenerator(): void {
     this._idGenerator.initIncremental();
     this.idGenerator = this._idGenerator.getGenerator();
@@ -665,10 +659,6 @@ export class Resource extends AsyncEventEmitter implements Disposable {
 
   hasAsyncIdGenerator(): boolean {
     return this._idGenerator.isAsync();
-  }
-
-  getIdGeneratorType(customIdGenerator: IdGeneratorFunction | number | undefined, idSize: number): IdGeneratorConfig | undefined {
-    return this._idGenerator.getType(customIdGenerator as IdGeneratorConfig, idSize);
   }
 
   export(): ResourceExport {
@@ -1001,9 +991,9 @@ export class Resource extends AsyncEventEmitter implements Disposable {
     return this._persistence.patch(id, fields, options) as Promise<ResourceData>;
   }
 
-  async _patchViaCopyObject(id: string, fields: Record<string, unknown>, options: Record<string, unknown> = {}): Promise<ResourceData> {
+  async _patchViaCopyObject(id: string, fields: Record<string, unknown>): Promise<ResourceData> {
     this._ensureSchemaCompiled();
-    return this._persistence._patchViaCopyObject(id, fields, options) as Promise<ResourceData>;
+    return this._persistence._patchViaCopyObject(id, fields) as Promise<ResourceData>;
   }
 
   async replace(id: string, fullData: Record<string, unknown>, options: { partition?: string; partitionValues?: StringRecord } = {}): Promise<ResourceData> {
@@ -1158,7 +1148,7 @@ export class Resource extends AsyncEventEmitter implements Disposable {
     return versionPart ? versionPart.replace('v=', '') : null;
   }
 
-  async getSchemaForVersion(version: string): Promise<Schema> {
+  async getSchemaForVersion(_version: string): Promise<Schema> {
     this._ensureSchemaCompiled();
     return this.schema;
   }
@@ -1385,24 +1375,12 @@ export class Resource extends AsyncEventEmitter implements Disposable {
     return filtered;
   }
 
-  _normalizeGuard(guard: GuardConfig): GuardConfig | null {
-    const tempGuards = new ResourceGuards(this as any, { guard });
-    return tempGuards.getGuard();
-  }
-
   async executeGuard(operation: string, context: GuardContext, resource: ResourceData | null = null): Promise<boolean> {
     return this._guards.execute(operation, context, resource);
   }
 
   _checkRolesScopes(requiredRolesScopes: string[], user: JWTUser): boolean {
     return (this._guards as any)._checkRolesScopes(requiredRolesScopes, user);
-  }
-
-  _initMiddleware(): void {
-    if (!this._middleware) {
-      this._middleware = new ResourceMiddleware(this as any);
-    }
-    this._middleware.init();
   }
 
   useMiddleware(method: SupportedMethod, fn: MiddlewareFunction): void {

@@ -53,7 +53,6 @@ export interface AuthDriver {
 export interface AuthConfig {
   drivers?: AuthDriver[];
   pathRules?: PathAuthRule[];
-  pathAuth?: boolean;
   jwt?: { enabled?: boolean };
   apiKey?: { enabled?: boolean };
   basic?: { enabled?: boolean };
@@ -819,7 +818,6 @@ export function generateResourcePaths(
   const hasRelations = resource._relations && Object.keys(resource._relations).length > 0;
 
   const paths: Record<string, OpenAPIPathItem> = {};
-  const runtimeBasePath = basePath;
   const runtimeItemPath = toRuntimePath(`${basePath}/{id}`);
 
   const security: Array<Record<string, string[]>> = [];
@@ -867,10 +865,6 @@ export function generateResourcePaths(
     const examplePartition = partitionNames[0]!;
     const exampleFields = partitions[examplePartition]?.fields || {};
     const exampleFieldKeys = Object.keys(exampleFields);
-    const exampleFieldsDoc = Object.entries(exampleFields)
-      .map(([field, type]) => `"${field}": <${type} value>`)
-      .join(', ');
-
     partitionValuesDescription = `Partition field values as JSON string. Must match the structure of the selected partition.\n\nExample for "${examplePartition}" partition: \`{"${exampleFieldKeys[0] || 'field'}": "value"}\``;
 
     partitionExample = examplePartition;
@@ -885,49 +879,26 @@ export function generateResourcePaths(
     partitionValuesExample = JSON.stringify({ [firstField]: exampleValue });
   }
 
-  const attributeQueryParams: OpenAPIParameter[] = [];
-
+  const partitionFieldQueryParams: OpenAPIParameter[] = [];
   if (hasPartitions) {
-    const partitionFieldsSet = new Set<string>();
-
-    for (const [, partition] of Object.entries(partitions)) {
+    const partitionFieldRules = new Map<string, string>();
+    const reservedQueryParamNames = new Set(['limit', 'cursor', 'page', 'partition', 'partitionValues', 'sort', 'populate']);
+    for (const partition of Object.values(partitions)) {
       const fields = partition.fields || {};
-      for (const fieldName of Object.keys(fields)) {
-        partitionFieldsSet.add(fieldName);
+      for (const [fieldName, fieldType] of Object.entries(fields)) {
+        if (!partitionFieldRules.has(fieldName) && !reservedQueryParamNames.has(fieldName)) {
+          partitionFieldRules.set(fieldName, fieldType);
+        }
       }
     }
 
-    const allAttributes = resource.config?.attributes || resource.attributes || {};
-
-    const pluginAttrNames = resource.schema?._pluginAttributes
-      ? Object.values(resource.schema._pluginAttributes).flat()
-      : [];
-
-    const filteredAttributes = Object.fromEntries(
-      Object.entries(allAttributes).filter(([name]) => !pluginAttrNames.includes(name))
-    );
-
-    for (const fieldName of partitionFieldsSet) {
-      const fieldDef = filteredAttributes[fieldName];
-      if (!fieldDef) continue;
-
-      let fieldType: string;
-      if (typeof fieldDef === 'object' && fieldDef !== null && 'type' in fieldDef) {
-        fieldType = (fieldDef as { type: string }).type;
-      } else if (typeof fieldDef === 'string') {
-        fieldType = (fieldDef.split('|')[0] || 'string').trim();
-      } else {
-        fieldType = 'string';
-      }
-
-      const openAPIType = mapFieldTypeToOpenAPI(fieldType);
-
-      attributeQueryParams.push({
+    for (const [fieldName, fieldType] of partitionFieldRules.entries()) {
+      partitionFieldQueryParams.push({
         name: fieldName,
         in: 'query',
-        description: `Filter by ${fieldName} field (indexed via partitions for efficient querying). Value will be parsed as JSON if possible, otherwise treated as string.`,
+        description: `Partition field filter. When all fields of a partition are provided, the API automatically converts them to partitionValues.`,
         required: false,
-        schema: openAPIType
+        schema: mapFieldTypeToOpenAPI(fieldType)
       });
     }
   }
@@ -937,11 +908,14 @@ export function generateResourcePaths(
       get: {
         tags: [resourceName],
         summary: `List ${resourceLabel}`,
-        description: `Retrieve a paginated list of ${resourceLabel}. Supports filtering by passing any resource field as a query parameter (e.g., ?status=active&year=2024). Values are parsed as JSON if possible, otherwise treated as strings.
+        description: `Retrieve a paginated list of ${resourceLabel}.
 
 **Pagination**:
 - Cursor mode: \`?limit=10\` for first page (or \`?limit=10&cursor=\` explicitly), then reuse \`nextCursor\` from response.
 - Page mode: \`?limit=10&page=3\` for page-number navigation backed by cached cursor checkpoints.
+
+Ad-hoc field filters and custom sort are not supported in cursor mode. Use partition-aware queries (\`partition\` + \`partitionValues\`) when available.
+When you provide all query fields of a known partition, the API automatically converts them into \`partitionValues\`.
 
 The response includes pagination metadata in the \`pagination\` object, including \`nextCursor\` when cursor pagination is used.${hasPartitions ? '\n\n**Partitioning**: This resource supports partitioned queries for optimized filtering. Use the `partition` and `partitionValues` parameters together.' : ''}`,
         parameters: [
@@ -983,7 +957,8 @@ The response includes pagination metadata in the \`pagination\` object, includin
               description: partitionValuesDescription,
               schema: { type: 'string' },
               example: partitionValuesExample
-            }
+            },
+            ...partitionFieldQueryParams
           ] : []),
           ...(hasRelations ? [
             {
@@ -993,8 +968,7 @@ The response includes pagination metadata in the \`pagination\` object, includin
               schema: { type: 'string' },
               example: 'customer,items.product'
             }
-          ] : []),
-          ...attributeQueryParams
+          ] : [])
         ],
         responses: {
           200: {
@@ -1060,12 +1034,12 @@ The response includes pagination metadata in the \`pagination\` object, includin
               },
               'X-Pagination-Mode': {
                 description: 'Pagination mode used to serve this response',
-                schema: { type: 'string', enum: ['cursor'] }
+                schema: { type: 'string', enum: ['cursor', 'page'] }
               }
             }
           }
         },
-        security: formatSecurityForPath(runtimeBasePath)
+        security: formatSecurityForPath(basePath)
       }
     };
   }
@@ -1186,7 +1160,7 @@ The response includes pagination metadata in the \`pagination\` object, includin
           }
         }
       },
-      security: formatSecurityForPath(runtimeBasePath)
+      security: formatSecurityForPath(basePath)
     };
   }
 
@@ -1349,7 +1323,7 @@ The response includes pagination metadata in the \`pagination\` object, includin
           }
         }
       },
-      security: formatSecurityForPath(runtimeBasePath)
+      security: formatSecurityForPath(basePath)
     };
 
     if (!paths[`${basePath}/{id}`]) paths[`${basePath}/{id}`] = {};
@@ -1474,7 +1448,7 @@ function generateRelationalPaths(
   resource: ResourceLike,
   relationName: string,
   relationConfig: RelationConfig,
-  version: string,
+  _version: string,
   relatedSchema: OpenAPISchemaObject,
   versionPrefix: string = '',
   basePathPrefix: string = '',
@@ -1514,7 +1488,8 @@ function generateRelationalPaths(
       summary: `Get ${relationLabel} of ${resourceLabel}`,
       description: `Retrieve ${relationLabel} (${relationConfig.type}) associated with this ${resourceLabel}. ` +
                    `This endpoint uses the RelationPlugin to efficiently load related data` +
-                   (relationConfig.partitionHint ? ` via the '${relationConfig.partitionHint}' partition.` : '.'),
+                   (relationConfig.partitionHint ? ` via the '${relationConfig.partitionHint}' partition.` : '.') +
+                   (isToMany ? ' Supports cursor mode (`cursor`) and page mode (`page`). Do not send both in the same request.' : ''),
       parameters: [
         {
           name: 'id',
@@ -1527,14 +1502,20 @@ function generateRelationalPaths(
           {
             name: 'limit',
             in: 'query' as const,
-            description: 'Maximum number of items to return',
+            description: 'Maximum number of related items to return',
             schema: { type: 'integer', default: 100, minimum: 1, maximum: 1000 }
           },
           {
-            name: 'offset',
+            name: 'cursor',
             in: 'query' as const,
-            description: 'Number of items to skip',
-            schema: { type: 'integer', default: 0, minimum: 0 }
+            description: 'Opaque cursor token for cursor-mode pagination. Use empty value (`cursor=`) for first cursor page.',
+            schema: { type: 'string' }
+          },
+          {
+            name: 'page',
+            in: 'query' as const,
+            description: 'Page number (1-indexed). Cannot be combined with `cursor`.',
+            schema: { type: 'integer', default: 1, minimum: 1 }
           }
         ] : [])
       ],
@@ -1554,10 +1535,12 @@ function generateRelationalPaths(
                   pagination: {
                     type: 'object',
                     properties: {
-                      total: { type: 'integer' },
-                      page: { type: 'integer' },
+                      total: { type: 'integer', nullable: true, description: 'Total related items. Null in cursor mode.' },
+                      page: { type: 'integer', nullable: true, description: 'Current page number. Null in cursor mode.' },
                       pageSize: { type: 'integer' },
-                      pageCount: { type: 'integer' }
+                      pageCount: { type: 'integer', nullable: true, description: 'Total pages. Null in cursor mode.' },
+                      hasMore: { type: 'boolean' },
+                      nextCursor: { type: 'string', nullable: true }
                     }
                   }
                 }
@@ -1579,6 +1562,14 @@ function generateRelationalPaths(
               'X-Page-Count': {
                 description: 'Total number of pages',
                 schema: { type: 'integer' }
+              },
+              'X-Pagination-Mode': {
+                description: 'Pagination mode used to serve this response (`cursor` or `page`)',
+                schema: { type: 'string', enum: ['cursor', 'page'] }
+              },
+              'X-Next-Cursor': {
+                description: 'Cursor token for the next page in cursor mode',
+                schema: { type: 'string' }
               }
             }
           } : {})

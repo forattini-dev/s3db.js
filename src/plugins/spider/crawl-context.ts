@@ -3,7 +3,9 @@ export interface CrawlContextConfig {
   acceptLanguage?: string;
   platform?: 'Windows' | 'Mac' | 'Linux';
   headers?: Record<string, string>;
-  proxy?: string | null;
+  proxy?: string | string[] | null;
+  useCurl?: boolean;
+  recker?: Record<string, unknown>;
   viewport?: { width: number; height: number };
   screen?: { width: number; height: number };
   timezone?: string;
@@ -39,7 +41,9 @@ export interface PuppeteerCookie {
 export interface HttpClientConfig {
   headers: Record<string, string>;
   timeout: number;
-  proxy?: string;
+  proxy?: string | string[];
+  useCurl?: boolean;
+  recker?: Record<string, unknown>;
   retry: {
     maxAttempts: number;
     delay: number;
@@ -63,7 +67,9 @@ export interface CrawlContextJSON {
   platform: string;
   cookies: CookieData[];
   headers: Record<string, string>;
-  proxy: string | null;
+  proxy: string | string[] | null;
+  useCurl?: boolean;
+  recker?: Record<string, unknown>;
   viewport: { width: number; height: number };
   screen: { width: number; height: number };
   timezone: string;
@@ -103,7 +109,9 @@ export class CrawlContext {
   _platform: string;
   _cookies: Map<string, CookieData[]>;
   _headers: Record<string, string>;
-  _proxy: string | null;
+  _proxy: string | string[] | null;
+  _useCurl: boolean | undefined;
+  _reckerOptions: Record<string, unknown> | undefined;
   _viewport: { width: number; height: number };
   _screen: { width: number; height: number };
   _timezone: string;
@@ -134,7 +142,9 @@ export class CrawlContext {
       ...config.headers
     };
 
-    this._proxy = config.proxy || null;
+    this._proxy = this._normalizeProxy(config.proxy);
+    this._useCurl = typeof config.useCurl === 'boolean' ? config.useCurl : undefined;
+    this._reckerOptions = this._normalizeReckerOptions(config.recker);
 
     this._viewport = config.viewport || { width: 1920, height: 1080 };
     this._screen = config.screen || { width: 1920, height: 1080 };
@@ -324,6 +334,14 @@ export class CrawlContext {
       config.proxy = this._proxy;
     }
 
+    if (typeof this._useCurl === 'boolean') {
+      config.useCurl = this._useCurl;
+    }
+
+    if (this._reckerOptions) {
+      config.recker = { ...this._reckerOptions };
+    }
+
     return config;
   }
 
@@ -342,8 +360,9 @@ export class CrawlContext {
       '--disable-setuid-sandbox'
     ];
 
-    if (this._proxy) {
-      args.push(`--proxy-server=${this._proxy}`);
+    const browserProxy = this._getBrowserProxy();
+    if (browserProxy) {
+      args.push(`--proxy-server=${browserProxy}`);
     }
 
     return {
@@ -450,6 +469,8 @@ export class CrawlContext {
       cookies,
       headers: this._headers,
       proxy: this._proxy,
+      useCurl: this._useCurl,
+      recker: this._reckerOptions,
       viewport: this._viewport,
       screen: this._screen,
       timezone: this._timezone,
@@ -468,6 +489,8 @@ export class CrawlContext {
       platform: json.platform as 'Windows' | 'Mac' | 'Linux',
       headers: json.headers,
       proxy: json.proxy,
+      useCurl: json.useCurl,
+      recker: json.recker,
       viewport: json.viewport,
       screen: json.screen,
       timezone: json.timezone,
@@ -486,6 +509,38 @@ export class CrawlContext {
     ctx._referer = json.referer || null;
 
     return ctx;
+  }
+
+  private _normalizeProxy(proxy: string | string[] | null | undefined): string | string[] | null {
+    if (proxy === null || proxy === undefined) return null;
+
+    if (Array.isArray(proxy)) {
+      const valid = proxy.filter((entry): entry is string => typeof entry === 'string' && entry.trim().length > 0);
+      if (valid.length === 0) return null;
+      return valid;
+    }
+
+    if (typeof proxy === 'string' && proxy.trim().length > 0) {
+      return proxy;
+    }
+
+    return null;
+  }
+
+  private _normalizeReckerOptions(options: unknown): Record<string, unknown> | undefined {
+    if (!options || typeof options !== 'object' || Array.isArray(options)) {
+      return undefined;
+    }
+
+    return { ...(options as Record<string, unknown>) };
+  }
+
+  private _getBrowserProxy(): string | null {
+    if (!this._proxy) return null;
+    if (Array.isArray(this._proxy)) {
+      return this._proxy[0] || null;
+    }
+    return this._proxy;
   }
 
   private _generateUserAgent(): string {

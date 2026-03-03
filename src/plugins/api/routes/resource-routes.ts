@@ -5,11 +5,11 @@ import { asyncHandler } from '../utils/error-handler.js';
 import { createLogger } from '../../../concerns/logger.js';
 import type { Logger } from '../../../concerns/logger.js';
 import * as formatter from '../utils/response-formatter.js';
-import { filterProtectedFields } from '../utils/response-formatter.js';
 import { guardMiddleware } from '../utils/guards.js';
 import type { GuardsConfig } from '../utils/guards.js';
 import { generateRecordETag, validateIfMatch, validateIfNoneMatch } from '../utils/etag.js';
 import { ValidationError } from '../../../errors.js';
+import { createHash } from 'node:crypto';
 
 const logger: Logger = createLogger({ name: 'ResourceRoutes', level: 'info' });
 
@@ -43,7 +43,6 @@ export interface ResourceLike {
   query(filters: Record<string, unknown>, options?: { limit?: number; offset?: number }): Promise<Record<string, unknown>[]>;
   page?(options?: {
     size?: number;
-    offset?: number;
     page?: number;
     cursor?: string | null;
     partition?: string | null;
@@ -64,6 +63,7 @@ export interface ResourceLike {
   update(id: string, data: Record<string, unknown>, options?: { user?: unknown; request?: unknown }): Promise<Record<string, unknown>>;
   delete(id: string): Promise<void>;
   count(options?: { partition?: string | null; partitionValues?: Record<string, unknown> }): Promise<number>;
+  applyPartitionRule?(value: unknown, rule: string): string;
 }
 
 export interface DatabaseLike {
@@ -91,7 +91,6 @@ export interface EventsEmitter {
 export interface ResourceRoutesConfig {
   methods?: string[];
   customMiddleware?: MiddlewareHandler[];
-  enableValidation?: boolean;
   versionPrefix?: string;
   events?: EventsEmitter | null;
   relationsPlugin?: RelationsPluginLike | null;
@@ -108,6 +107,40 @@ type IncludesTree = Record<string, boolean | IncludesNode>;
 
 interface IncludesNode {
   include: IncludesTree;
+}
+
+interface PartitionCandidate {
+  partition: string;
+  partitionValues: Record<string, unknown>;
+  remainingFilters: Record<string, unknown>;
+  fieldCount: number;
+}
+
+interface PartitionResolution {
+  partition: string | null;
+  partitionValues: Record<string, unknown> | undefined;
+  remainingFilters: Record<string, unknown>;
+  error?: {
+    message: string;
+    details?: Record<string, unknown>;
+    suggestion?: string;
+  };
+}
+
+interface ApiFilterCursorPayload {
+  v: 1;
+  type: 'api-filter';
+  cursor: string | null;
+  pageSize: number;
+  filtersHash: string;
+  partitionSignature: string;
+}
+
+interface RelationListCursorPayload {
+  v: 1;
+  type: 'relation-list';
+  index: number;
+  pageSize: number;
 }
 
 function parsePopulateValues(raw: unknown): string[] {
@@ -147,6 +180,337 @@ function parsePartitionValues(raw: unknown): Record<string, unknown> | undefined
   }
 
   return value as Record<string, unknown>;
+}
+
+function parseQueryFilterValue(raw: unknown): unknown {
+  if (typeof raw !== 'string') return raw;
+  try {
+    return JSON.parse(raw);
+  } catch {
+    return raw;
+  }
+}
+
+function getPartitionFieldRules(resource: ResourceLike, partitionName: string): Record<string, string> {
+  const partitions = resource.config?.partitions || {};
+  const partitionDef = partitions[partitionName] as { fields?: Record<string, unknown> } | undefined;
+  if (!partitionDef?.fields || typeof partitionDef.fields !== 'object' || Array.isArray(partitionDef.fields)) {
+    return {};
+  }
+
+  const result: Record<string, string> = {};
+  for (const [field, rule] of Object.entries(partitionDef.fields)) {
+    if (typeof rule === 'string') {
+      result[field] = rule;
+    }
+  }
+  return result;
+}
+
+function listPartitionNames(resource: ResourceLike): string[] {
+  return Object.keys(resource.config?.partitions || {});
+}
+
+function normalizePartitionFieldValue(resource: ResourceLike, value: unknown, rule: string): unknown {
+  if (typeof resource.applyPartitionRule !== 'function') {
+    return value;
+  }
+
+  try {
+    return resource.applyPartitionRule(value, rule);
+  } catch {
+    return value;
+  }
+}
+
+function resolvePartitionFromFilters(
+  resource: ResourceLike,
+  queryFilters: Record<string, unknown>,
+  explicitPartition: string | null,
+  explicitPartitionValues: Record<string, unknown> | undefined
+): PartitionResolution {
+  const partitions = listPartitionNames(resource);
+
+  if (explicitPartitionValues && !explicitPartition) {
+    return {
+      partition: null,
+      partitionValues: undefined,
+      remainingFilters: queryFilters,
+      error: {
+        message: 'partitionValues requires partition parameter',
+        details: { partitionValues: explicitPartitionValues },
+        suggestion: 'Provide both ?partition=<name> and ?partitionValues=<json>, or only partition field filters.'
+      }
+    };
+  }
+
+  if (explicitPartition) {
+    if (!partitions.includes(explicitPartition)) {
+      return {
+        partition: null,
+        partitionValues: undefined,
+        remainingFilters: queryFilters,
+        error: {
+          message: 'Invalid partition parameter',
+          details: {
+            partition: explicitPartition,
+            availablePartitions: partitions
+          },
+          suggestion: 'Use one of the available partitions or omit partition to allow auto-resolution from query filters.'
+        }
+      };
+    }
+
+    const rules = getPartitionFieldRules(resource, explicitPartition);
+    const fields = Object.keys(rules);
+    if (explicitPartitionValues) {
+      const remaining = { ...queryFilters };
+      for (const field of fields) {
+        delete remaining[field];
+      }
+
+      return {
+        partition: explicitPartition,
+        partitionValues: explicitPartitionValues,
+        remainingFilters: remaining
+      };
+    }
+
+    const missing = fields.filter((field) => !Object.prototype.hasOwnProperty.call(queryFilters, field));
+    if (missing.length > 0) {
+      return {
+        partition: null,
+        partitionValues: undefined,
+        remainingFilters: queryFilters,
+        error: {
+          message: 'Missing partition fields for automatic partitionValues',
+          details: {
+            partition: explicitPartition,
+            missingFields: missing,
+            requiredFields: fields
+          },
+          suggestion: 'Provide all partition fields in query string or send partitionValues explicitly.'
+        }
+      };
+    }
+
+    const derivedValues: Record<string, unknown> = {};
+    for (const field of fields) {
+      derivedValues[field] = normalizePartitionFieldValue(resource, queryFilters[field], rules[field]!);
+    }
+
+    const remaining = { ...queryFilters };
+    for (const field of fields) {
+      delete remaining[field];
+    }
+
+    return {
+      partition: explicitPartition,
+      partitionValues: derivedValues,
+      remainingFilters: remaining
+    };
+  }
+
+  if (Object.keys(queryFilters).length === 0 || partitions.length === 0) {
+    return {
+      partition: null,
+      partitionValues: undefined,
+      remainingFilters: queryFilters
+    };
+  }
+
+  const candidates: PartitionCandidate[] = [];
+  for (const partition of partitions) {
+    const rules = getPartitionFieldRules(resource, partition);
+    const fields = Object.keys(rules);
+    if (fields.length === 0) continue;
+
+    const hasAllFields = fields.every((field) => Object.prototype.hasOwnProperty.call(queryFilters, field));
+    if (!hasAllFields) continue;
+
+    const values: Record<string, unknown> = {};
+    for (const field of fields) {
+      values[field] = normalizePartitionFieldValue(resource, queryFilters[field], rules[field]!);
+    }
+
+    const remaining = { ...queryFilters };
+    for (const field of fields) {
+      delete remaining[field];
+    }
+
+    candidates.push({
+      partition,
+      partitionValues: values,
+      remainingFilters: remaining,
+      fieldCount: fields.length
+    });
+  }
+
+  if (candidates.length === 0) {
+    return {
+      partition: null,
+      partitionValues: undefined,
+      remainingFilters: queryFilters
+    };
+  }
+
+  const exactCandidates = candidates.filter((candidate) => Object.keys(candidate.remainingFilters).length === 0);
+  if (exactCandidates.length > 1) {
+    return {
+      partition: null,
+      partitionValues: undefined,
+      remainingFilters: queryFilters,
+      error: {
+        message: 'Ambiguous partition filters',
+        details: {
+          matchingPartitions: exactCandidates.map((candidate) => candidate.partition),
+          providedFilters: Object.keys(queryFilters)
+        },
+        suggestion: 'Specify ?partition=<name> explicitly when multiple partitions match the same query fields.'
+      }
+    };
+  }
+
+  const chosen = (exactCandidates[0] || candidates.sort((a, b) => b.fieldCount - a.fieldCount)[0])!;
+  return {
+    partition: chosen.partition,
+    partitionValues: chosen.partitionValues,
+    remainingFilters: chosen.remainingFilters
+  };
+}
+
+function stableSerialize(value: unknown): string {
+  if (value === null || value === undefined) return JSON.stringify(value);
+  if (Array.isArray(value)) {
+    return `[${value.map(item => stableSerialize(item)).join(',')}]`;
+  }
+  if (typeof value === 'object') {
+    const entries = Object.entries(value as Record<string, unknown>)
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([key, entryValue]) => `${JSON.stringify(key)}:${stableSerialize(entryValue)}`);
+    return `{${entries.join(',')}}`;
+  }
+  return JSON.stringify(value);
+}
+
+function hashStableValue(value: unknown): string {
+  return createHash('sha256')
+    .update(stableSerialize(value))
+    .digest('hex');
+}
+
+function valuesEqual(left: unknown, right: unknown): boolean {
+  return stableSerialize(left) === stableSerialize(right);
+}
+
+function readPathValue(source: unknown, path: string): unknown {
+  const segments = String(path || '')
+    .split('.')
+    .map(segment => segment.trim())
+    .filter(Boolean);
+
+  let current: unknown = source;
+  for (const segment of segments) {
+    if (current === null || current === undefined) return undefined;
+
+    if (Array.isArray(current)) {
+      const index = Number(segment);
+      if (!Number.isInteger(index) || index < 0) {
+        return undefined;
+      }
+      current = current[index];
+      continue;
+    }
+
+    if (typeof current !== 'object') {
+      return undefined;
+    }
+
+    current = (current as Record<string, unknown>)[segment];
+  }
+
+  return current;
+}
+
+function matchesQueryFilters(item: Record<string, unknown>, filters: Record<string, unknown>): boolean {
+  for (const [field, expectedValue] of Object.entries(filters)) {
+    const actualValue = readPathValue(item, field);
+    if (!valuesEqual(actualValue, expectedValue)) {
+      return false;
+    }
+  }
+  return true;
+}
+
+function encodeSimpleCursor(payload: Record<string, unknown>): string {
+  return Buffer.from(JSON.stringify(payload), 'utf8')
+    .toString('base64')
+    .replace(/\+/g, '-')
+    .replace(/\//g, '_')
+    .replace(/=+$/g, '');
+}
+
+function decodeSimpleCursor<T extends Record<string, unknown>>(cursor: string): T | null {
+  try {
+    const normalized = cursor.replace(/-/g, '+').replace(/_/g, '/');
+    const padded = normalized + '='.repeat((4 - (normalized.length % 4)) % 4);
+    const decoded = Buffer.from(padded, 'base64').toString('utf8');
+    const parsed = JSON.parse(decoded) as T;
+
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      return null;
+    }
+
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
+function decodeApiFilterCursor(cursor: string): ApiFilterCursorPayload | null {
+  const parsed = decodeSimpleCursor<Record<string, unknown>>(cursor);
+  if (!parsed) return null;
+  if (parsed.v !== 1) return null;
+  if (parsed.type !== 'api-filter') return null;
+
+  const cursorValue = parsed.cursor;
+  const pageSize = parsed.pageSize;
+  const filtersHash = parsed.filtersHash;
+  const partitionSignature = parsed.partitionSignature;
+
+  if (cursorValue !== null && typeof cursorValue !== 'string') return null;
+  if (typeof pageSize !== 'number' || !Number.isFinite(pageSize) || pageSize <= 0) return null;
+  if (typeof filtersHash !== 'string' || filtersHash.length === 0) return null;
+  if (typeof partitionSignature !== 'string' || partitionSignature.length === 0) return null;
+
+  return {
+    v: 1,
+    type: 'api-filter',
+    cursor: cursorValue,
+    pageSize,
+    filtersHash,
+    partitionSignature
+  };
+}
+
+function decodeRelationListCursor(cursor: string): RelationListCursorPayload | null {
+  const parsed = decodeSimpleCursor<Record<string, unknown>>(cursor);
+  if (!parsed) return null;
+  if (parsed.v !== 1) return null;
+  if (parsed.type !== 'relation-list') return null;
+
+  const index = parsed.index;
+  const pageSize = parsed.pageSize;
+
+  if (typeof index !== 'number' || !Number.isFinite(index) || index < 0) return null;
+  if (typeof pageSize !== 'number' || !Number.isFinite(pageSize) || pageSize <= 0) return null;
+
+  return {
+    v: 1,
+    type: 'relation-list',
+    index: Math.floor(index),
+    pageSize
+  };
 }
 
 function addPopulatePath(tree: IncludesTree, parts: string[]): void {
@@ -243,14 +607,12 @@ function resolvePopulate(resource: ResourceLike, relationsPlugin: RelationsPlugi
 interface ParsedRoute {
   method: string;
   path: string;
-  isAsync: boolean;
 }
 
 function parseCustomRoute(routeDef: string): ParsedRoute {
   let def = routeDef.trim();
-  const isAsync = def.startsWith('async ');
 
-  if (isAsync) {
+  if (def.startsWith('async ')) {
     def = def.substring(6).trim();
   }
 
@@ -272,14 +634,14 @@ function parseCustomRoute(routeDef: string): ParsedRoute {
     throw new Error(`Invalid route path: "${path}". Path must start with "/"`);
   }
 
-  return { method, path, isAsync };
+  return { method, path };
 }
 
 interface HttpAppWithDescribe extends HttpAppType {
   describe?(meta: Record<string, unknown>): HttpAppWithDescribe;
 }
 
-export function createResourceRoutes(resource: ResourceLike, version: string, config: ResourceRoutesConfig = {}, HttpApp: new () => HttpAppType): HttpAppType {
+export function createResourceRoutes(resource: ResourceLike, _version: string, config: ResourceRoutesConfig = {}, HttpApp: new () => HttpAppType): HttpAppType {
   const app = new HttpApp() as HttpAppWithDescribe;
 
   if (!app.describe) {
@@ -354,9 +716,9 @@ export function createResourceRoutes(resource: ResourceLike, version: string, co
       const limit = Number.isFinite(parsedLimit) && parsedLimit > 0
         ? Math.min(parsedLimit, 1000)
         : 100;
-      const hasOffsetParam = Object.prototype.hasOwnProperty.call(query, 'offset');
       const hasCursorParam = Object.prototype.hasOwnProperty.call(query, 'cursor');
       const hasPageParam = Object.prototype.hasOwnProperty.call(query, 'page');
+      const hasOffsetParam = Object.prototype.hasOwnProperty.call(query, 'offset');
       const hasSortParam = Object.prototype.hasOwnProperty.call(query, 'sort');
       const rawCursor = query.cursor;
       const cursor = typeof rawCursor === 'string' && rawCursor.trim().length > 0
@@ -368,6 +730,9 @@ export function createResourceRoutes(resource: ResourceLike, version: string, co
         : 1;
       const partition = query.partition;
       const partitionValues = parsePartitionValues(query.partitionValues);
+      const explicitPartition = typeof partition === 'string' && partition.trim().length > 0
+        ? partition
+        : null;
 
       const populateValues = parsePopulateValues(query.populate);
       let populateIncludes: Record<string, unknown> | null = null;
@@ -385,22 +750,23 @@ export function createResourceRoutes(resource: ResourceLike, version: string, co
         populateIncludes = populateResult.includes || null;
       }
 
-      if (hasOffsetParam) {
-        const response = formatter.error('Offset pagination is not supported in this endpoint', {
-          status: 400,
-          code: 'INVALID_PAGINATION',
-          details: {
-            suggestion: 'Use cursor pagination only: ?limit=10 for first page, then reuse pagination.nextCursor'
-          }
-        });
-        return c.json(response, response._status as ContentfulStatusCode);
-      }
-
       if (hasCursorParam && hasPageParam) {
         const response = formatter.error('Use either cursor token or page number, not both', {
           status: 400,
           code: 'INVALID_PAGINATION',
           details: {
+            suggestion: 'Use ?page=N for page-based navigation or ?cursor=TOKEN for token-based continuation'
+          }
+        });
+        return c.json(response, response._status as ContentfulStatusCode);
+      }
+
+      if (hasOffsetParam) {
+        const response = formatter.error('Offset pagination is not supported', {
+          status: 400,
+          code: 'INVALID_PAGINATION',
+          details: {
+            offset: query.offset,
             suggestion: 'Use ?page=N for page-based navigation or ?cursor=TOKEN for token-based continuation'
           }
         });
@@ -419,41 +785,111 @@ export function createResourceRoutes(resource: ResourceLike, version: string, co
         return c.json(response, response._status as ContentfulStatusCode);
       }
 
-      const reservedKeys = ['limit', 'cursor', 'page', 'partition', 'partitionValues', 'sort', 'populate'];
-      const filters: Record<string, unknown> = {};
+      const reservedKeys = ['limit', 'cursor', 'page', 'offset', 'partition', 'partitionValues', 'sort', 'populate'];
+      const queryFilters: Record<string, unknown> = {};
       for (const [key, value] of Object.entries(query)) {
         if (!reservedKeys.includes(key)) {
-          try {
-            filters[key] = JSON.parse(value);
-          } catch {
-            filters[key] = value;
-          }
+          queryFilters[key] = parseQueryFilterValue(value);
         }
       }
 
-      const guardPartitionFilters = c.get('partitionFilters') as Array<{ partitionName: string; partitionFields: unknown }> | undefined || [];
+      const partitionResolution = resolvePartitionFromFilters(
+        resource,
+        queryFilters,
+        explicitPartition,
+        partitionValues
+      );
 
-      let items: Record<string, unknown>[];
-      let nextCursor: string | null = null;
-      let hasMore = false;
-
-      if (Object.keys(filters).length > 0) {
-        const response = formatter.error('Cursor pagination does not support ad-hoc filters yet', {
+      if (partitionResolution.error) {
+        const response = formatter.error(partitionResolution.error.message, {
           status: 400,
-          code: 'UNSUPPORTED_CURSOR_FILTERS',
+          code: 'INVALID_PARTITION_FILTERS',
           details: {
-            suggestion: 'Use partition + partitionValues with cursor'
+            ...(partitionResolution.error.details || {}),
+            suggestion: partitionResolution.error.suggestion
           }
         });
         return c.json(response, response._status as ContentfulStatusCode);
       }
 
+      const resolvedPartition = partitionResolution.partition;
+      const resolvedPartitionValues = partitionResolution.partitionValues;
+      const remainingFilters = partitionResolution.remainingFilters || {};
+      const remainingFilterKeys = Object.keys(remainingFilters);
+
+      const guardPartitionFilters = c.get('partitionFilters') as Array<{ partitionName: string; partitionFields: unknown }> | undefined || [];
+      const primaryGuardFilter = guardPartitionFilters.length > 0 ? guardPartitionFilters[0] : null;
+
+      let effectivePartition: string | null = resolvedPartition;
+      let effectivePartitionValues: Record<string, unknown> | undefined = resolvedPartitionValues;
+      let partitionMode: 'guard' | 'explicit' | 'auto' | null = null;
+
+      if (primaryGuardFilter) {
+        const guardValues = parsePartitionValues(primaryGuardFilter.partitionFields);
+        if (!guardValues) {
+          const response = formatter.error('Invalid partition guard configuration', {
+            status: 500,
+            code: 'INVALID_GUARD_PARTITION'
+          });
+          return c.json(response, response._status as ContentfulStatusCode);
+        }
+
+        if (resolvedPartition && resolvedPartition !== primaryGuardFilter.partitionName) {
+          const response = formatter.error('Query partition does not match guard partition', {
+            status: 403,
+            code: 'PARTITION_GUARD_CONFLICT',
+            details: {
+              guardPartition: primaryGuardFilter.partitionName,
+              requestedPartition: resolvedPartition,
+              suggestion: 'Remove explicit partition filters that conflict with access guard constraints.'
+            }
+          });
+          return c.json(response, response._status as ContentfulStatusCode);
+        }
+
+        if (resolvedPartitionValues && guardValues && !valuesEqual(resolvedPartitionValues, guardValues)) {
+          const response = formatter.error('Query partition values do not match guard constraints', {
+            status: 403,
+            code: 'PARTITION_GUARD_CONFLICT',
+            details: {
+              guardPartition: primaryGuardFilter.partitionName,
+              suggestion: 'Remove explicit partitionValues or use values allowed by the active guard.'
+            }
+          });
+          return c.json(response, response._status as ContentfulStatusCode);
+        }
+
+        effectivePartition = primaryGuardFilter.partitionName;
+        effectivePartitionValues = guardValues;
+        partitionMode = 'guard';
+      } else if (resolvedPartition && resolvedPartitionValues) {
+        effectivePartition = resolvedPartition;
+        effectivePartitionValues = resolvedPartitionValues;
+        partitionMode = explicitPartition ? 'explicit' : 'auto';
+      }
+
+      let items: Record<string, unknown>[];
+      let nextCursor: string | null = null;
+      let hasMore = false;
+
       if (hasSortParam) {
-        const response = formatter.error('Cursor pagination does not support sort parameter', {
+        const response = formatter.error('Cursor/page pagination does not support sort parameter', {
           status: 400,
           code: 'UNSUPPORTED_CURSOR_SORT',
           details: {
-            suggestion: 'Remove sort when using cursor pagination'
+            suggestion: 'Remove sort parameter from this request.'
+          }
+        });
+        return c.json(response, response._status as ContentfulStatusCode);
+      }
+
+      if (hasPageParam && remainingFilterKeys.length > 0) {
+        const response = formatter.error('Page mode does not support additional query filters after partition resolution', {
+          status: 400,
+          code: 'UNSUPPORTED_PAGE_FILTERS',
+          details: {
+            unsupportedFilters: remainingFilterKeys,
+            suggestion: 'Use cursor mode when combining partition filters with additional query filters.'
           }
         });
         return c.json(response, response._status as ContentfulStatusCode);
@@ -467,38 +903,112 @@ export function createResourceRoutes(resource: ResourceLike, version: string, co
         return c.json(response, response._status as ContentfulStatusCode);
       }
 
-      if (guardPartitionFilters.length > 0 && guardPartitionFilters[0]) {
-        const { partitionName, partitionFields } = guardPartitionFilters[0];
-        const partitionValuesFromGuard = parsePartitionValues(partitionFields);
+      const filterCursorHashes = {
+        filtersHash: hashStableValue(remainingFilters),
+        partitionSignature: hashStableValue({
+          partition: effectivePartition,
+          partitionValues: effectivePartitionValues || null
+        })
+      };
 
-        const pageResult = await resource.page!({
-          size: limit,
-          ...(hasPageParam ? { page } : {}),
-          ...(!hasPageParam ? { cursor: hasCursorParam ? cursor : null } : {}),
-          partition: partitionName,
-          partitionValues: partitionValuesFromGuard,
-          skipCount: true
-        });
-        items = pageResult.items || [];
-        nextCursor = pageResult.nextCursor ?? null;
-        hasMore = pageResult.hasMore ?? Boolean(nextCursor);
-      } else if (partition && partitionValues) {
-        const pageResult = await resource.page!({
-          size: limit,
-          ...(hasPageParam ? { page } : {}),
-          ...(!hasPageParam ? { cursor: hasCursorParam ? cursor : null } : {}),
-          partition,
-          partitionValues,
-          skipCount: true
-        });
-        items = pageResult.items || [];
-        nextCursor = pageResult.nextCursor ?? null;
-        hasMore = pageResult.hasMore ?? Boolean(nextCursor);
+      let requestCursorForPage = hasCursorParam ? cursor : null;
+      if (!hasPageParam && requestCursorForPage) {
+        const decodedFilterCursor = decodeApiFilterCursor(requestCursorForPage);
+        if (decodedFilterCursor) {
+          if (decodedFilterCursor.pageSize !== limit) {
+            const response = formatter.error('Cursor pageSize does not match current limit', {
+              status: 400,
+              code: 'INVALID_CURSOR',
+              details: {
+                cursorPageSize: decodedFilterCursor.pageSize,
+                requestedLimit: limit,
+                suggestion: 'Reuse the same limit value used when this cursor was generated.'
+              }
+            });
+            return c.json(response, response._status as ContentfulStatusCode);
+          }
+
+          if (decodedFilterCursor.filtersHash !== filterCursorHashes.filtersHash ||
+              decodedFilterCursor.partitionSignature !== filterCursorHashes.partitionSignature) {
+            const response = formatter.error('Cursor does not match current filters/partition scope', {
+              status: 400,
+              code: 'INVALID_CURSOR',
+              details: {
+                suggestion: 'Restart pagination without cursor after changing filters, partition, or guard scope.'
+              }
+            });
+            return c.json(response, response._status as ContentfulStatusCode);
+          }
+
+          requestCursorForPage = decodedFilterCursor.cursor;
+        }
+      }
+
+      if (remainingFilterKeys.length > 0) {
+        const effectiveFilterLimit = limit;
+        const collected: Record<string, unknown>[] = [];
+        let scanCursor: string | null = requestCursorForPage;
+        let safetyCounter = 0;
+
+        while (collected.length < effectiveFilterLimit) {
+          const pageResult = await resource.page!({
+            size: effectiveFilterLimit,
+            cursor: scanCursor,
+            ...(effectivePartition && effectivePartitionValues
+              ? {
+                  partition: effectivePartition,
+                  partitionValues: effectivePartitionValues
+                }
+              : {}),
+            skipCount: true
+          });
+
+          const pageItems = pageResult.items || [];
+          if (pageItems.length > 0) {
+            const matched = pageItems.filter(item => matchesQueryFilters(item, remainingFilters));
+            if (matched.length > 0) {
+              collected.push(...matched);
+            }
+          }
+
+          scanCursor = pageResult.nextCursor ?? null;
+          if (!scanCursor) {
+            break;
+          }
+
+          if (pageItems.length === 0) {
+            break;
+          }
+
+          safetyCounter += 1;
+          if (safetyCounter > 1024) {
+            break;
+          }
+        }
+
+        items = collected.slice(0, effectiveFilterLimit);
+        hasMore = Boolean(scanCursor);
+        nextCursor = scanCursor
+          ? encodeSimpleCursor({
+              v: 1,
+              type: 'api-filter',
+              cursor: scanCursor,
+              pageSize: effectiveFilterLimit,
+              filtersHash: filterCursorHashes.filtersHash,
+              partitionSignature: filterCursorHashes.partitionSignature
+            })
+          : null;
       } else {
         const pageResult = await resource.page!({
           size: limit,
           ...(hasPageParam ? { page } : {}),
-          ...(!hasPageParam ? { cursor: hasCursorParam ? cursor : null } : {}),
+          ...(!hasPageParam ? { cursor: requestCursorForPage } : {}),
+          ...(effectivePartition && effectivePartitionValues
+            ? {
+                partition: effectivePartition,
+                partitionValues: effectivePartitionValues
+              }
+            : {}),
           skipCount: true
         });
         items = pageResult.items || [];
@@ -510,7 +1020,7 @@ export function createResourceRoutes(resource: ResourceLike, version: string, co
         await relationsPlugin.populate(resource, items, populateIncludes);
       }
 
-      const filteredItems = filterProtectedFields(items, protectedFields);
+      const filteredItems = formatter.filterProtectedFields(items, protectedFields);
 
       const response = formatter.list(filteredItems, {
         total: null,
@@ -521,6 +1031,12 @@ export function createResourceRoutes(resource: ResourceLike, version: string, co
         nextCursor
       });
 
+      if (partitionMode && effectivePartition && effectivePartitionValues) {
+        response.meta.partitionMode = partitionMode;
+        response.meta.partition = effectivePartition;
+        response.meta.partitionValues = effectivePartitionValues;
+      }
+
       c.header('X-Pagination-Mode', 'cursor');
       if (nextCursor) {
         c.header('X-Next-Cursor', nextCursor);
@@ -529,8 +1045,9 @@ export function createResourceRoutes(resource: ResourceLike, version: string, co
       return c.json(response, response._status as ContentfulStatusCode);
     });
 
+    const listGuard = guardMiddleware(guards, 'list', { globalGuards });
     app.describe!({
-      description: `List ${resourceName} records with pagination and filtering`,
+      description: `List ${resourceName} records with cursor/page pagination and partition-aware filtering`,
       tags: [resourceName],
       operationId: `list_${resourceName}`,
       responseSchema: {
@@ -551,7 +1068,8 @@ export function createResourceRoutes(resource: ResourceLike, version: string, co
           }
         }
       }
-    }).get('/', guardMiddleware(guards, 'list', { globalGuards }), listHandler);
+    }).get('/', listGuard, listHandler);
+    app.get('', listGuard, listHandler);
   }
 
   if (methods.includes('GET')) {
@@ -607,7 +1125,7 @@ export function createResourceRoutes(resource: ResourceLike, version: string, co
         return c.body(null, 304);
       }
 
-      const filteredItem = filterProtectedFields(item, protectedFields);
+      const filteredItem = formatter.filterProtectedFields(item, protectedFields);
 
       const response = formatter.success(filteredItem);
       return c.json(response, response._status as ContentfulStatusCode);
@@ -657,12 +1175,13 @@ export function createResourceRoutes(resource: ResourceLike, version: string, co
         return c.body(null, 201);
       }
 
-      const filteredItem = filterProtectedFields(item, protectedFields);
+      const filteredItem = formatter.filterProtectedFields(item, protectedFields);
 
       const response = formatter.created(filteredItem, location);
       return c.json(response, response._status as ContentfulStatusCode);
     });
 
+    const createGuard = guardMiddleware(guards, 'create', { globalGuards });
     app.describe!({
       description: `Create new ${resourceName} record`,
       tags: [resourceName],
@@ -674,7 +1193,8 @@ export function createResourceRoutes(resource: ResourceLike, version: string, co
           data: { type: 'object' }
         }
       }
-    }).post('/', guardMiddleware(guards, 'create', { globalGuards }), createHandler);
+    }).post('/', createGuard, createHandler);
+    app.post('', createGuard, createHandler);
   }
 
   if (methods.includes('PUT')) {
@@ -728,7 +1248,7 @@ export function createResourceRoutes(resource: ResourceLike, version: string, co
         return c.body(null, 200);
       }
 
-      const filteredUpdated = filterProtectedFields(updated, protectedFields);
+      const filteredUpdated = formatter.filterProtectedFields(updated, protectedFields);
 
       const response = formatter.success(filteredUpdated);
       return c.json(response, response._status as ContentfulStatusCode);
@@ -801,7 +1321,7 @@ export function createResourceRoutes(resource: ResourceLike, version: string, co
         return c.body(null, 200);
       }
 
-      const filteredUpdated = filterProtectedFields(updated, protectedFields);
+      const filteredUpdated = formatter.filterProtectedFields(updated, protectedFields);
 
       const response = formatter.success(filteredUpdated);
       return c.json(response, response._status as ContentfulStatusCode);
@@ -912,12 +1432,13 @@ export function createResourceRoutes(resource: ResourceLike, version: string, co
     // Use on() for HEAD - fallback gracefully if on() not available (bundling issues)
     if (typeof (app as any).on === 'function') {
       (app as any).on('HEAD', '/', headListHandler);
+      (app as any).on('HEAD', '', headListHandler);
       (app as any).on('HEAD', '/:id', headItemHandler);
     }
   }
 
   if (methods.includes('OPTIONS')) {
-    app.options('/', asyncHandler(async (c: Context) => {
+    const collectionOptionsHandler = asyncHandler(async (c: Context) => {
       c.header('Allow', methods.join(', '));
       c.header('Accept-Patch', 'application/json');
 
@@ -974,10 +1495,9 @@ export function createResourceRoutes(resource: ResourceLike, version: string, co
           limit: 'number (1-1000, default: 100)',
           cursor: 'string (opaque cursor token for cursor pagination; omit or use cursor= for first cursor page)',
           page: 'number (>= 1, page-based navigation backed by cached cursor checkpoints)',
-          sort: 'string (sorting is not supported with cursor mode)',
           partition: 'string (partition name)',
           partitionValues: 'JSON string',
-          '[any field]': 'any (filter by field value)'
+          '[partition field]': 'any (when all fields of a partition are provided, API auto-converts query fields into partitionValues)'
         },
 
         statusCodes: {
@@ -992,7 +1512,10 @@ export function createResourceRoutes(resource: ResourceLike, version: string, co
       };
 
       return c.json(metadata);
-    }));
+    });
+
+    app.options('/', collectionOptionsHandler);
+    app.options('', collectionOptionsHandler);
 
     app.options('/:id', (c: Context) => {
       const itemMethods = methods.filter(m => m !== 'POST');
@@ -1019,7 +1542,7 @@ export interface RelationConfig {
   [key: string]: unknown;
 }
 
-export function createRelationalRoutes(sourceResource: ResourceLike, relationName: string, relationConfig: RelationConfig, version: string, HttpApp: new () => HttpAppType): HttpAppType {
+export function createRelationalRoutes(sourceResource: ResourceLike, relationName: string, relationConfig: RelationConfig, _version: string, HttpApp: new () => HttpAppType): HttpAppType {
   const app = new HttpApp();
   const resourceName = sourceResource.name;
   const relatedResourceName = relationConfig.resource;
@@ -1059,20 +1582,100 @@ export function createRelationalRoutes(sourceResource: ResourceLike, relationNam
 
     if (relationConfig.type === 'hasMany' || relationConfig.type === 'belongsToMany') {
       const items = Array.isArray(relatedData) ? relatedData : [relatedData];
-      const limit = parseInt(query.limit || '100') || 100;
-      const offset = parseInt(query.offset || '0') || 0;
+      const parsedLimit = parseInt(query.limit || '100', 10);
+      const limit = Number.isFinite(parsedLimit) && parsedLimit > 0
+        ? Math.min(parsedLimit, 1000)
+        : 100;
+      const hasCursorParam = Object.prototype.hasOwnProperty.call(query, 'cursor');
+      const hasPageParam = Object.prototype.hasOwnProperty.call(query, 'page');
 
-      const paginatedItems = items.slice(offset, offset + limit);
+      if (hasCursorParam && hasPageParam) {
+        const response = formatter.error('Use either cursor token or page number, not both', {
+          status: 400,
+          code: 'INVALID_PAGINATION',
+          details: {
+            suggestion: 'Use ?page=N for page-based navigation or ?cursor=TOKEN for token-based continuation'
+          }
+        });
+        return c.json(response, response._status as ContentfulStatusCode);
+      }
+
+      let start = 0;
+      let page: number | null = null;
+
+      if (hasPageParam) {
+        const parsedPage = parseInt(query.page || '1', 10);
+        if (!Number.isFinite(parsedPage) || parsedPage < 1) {
+          const response = formatter.error('Invalid page parameter', {
+            status: 400,
+            code: 'INVALID_PAGINATION',
+            details: {
+              page: query.page,
+              suggestion: 'Use a page number greater than or equal to 1'
+            }
+          });
+          return c.json(response, response._status as ContentfulStatusCode);
+        }
+        page = parsedPage;
+        start = (page - 1) * limit;
+      } else if (hasCursorParam && typeof query.cursor === 'string' && query.cursor.trim().length > 0) {
+        const relationCursor = decodeRelationListCursor(query.cursor.trim());
+        if (!relationCursor) {
+          const response = formatter.error('Invalid relation cursor', {
+            status: 400,
+            code: 'INVALID_CURSOR',
+            details: {
+              suggestion: 'Use the nextCursor returned by this relation endpoint.'
+            }
+          });
+          return c.json(response, response._status as ContentfulStatusCode);
+        }
+
+        if (relationCursor.pageSize !== limit) {
+          const response = formatter.error('Cursor pageSize does not match current limit', {
+            status: 400,
+            code: 'INVALID_CURSOR',
+            details: {
+              cursorPageSize: relationCursor.pageSize,
+              requestedLimit: limit,
+              suggestion: 'Reuse the same limit value used when this cursor was generated.'
+            }
+          });
+          return c.json(response, response._status as ContentfulStatusCode);
+        }
+
+        start = relationCursor.index;
+      }
+
+      const paginatedItems = items.slice(start, start + limit);
+      const nextIndex = start + paginatedItems.length;
+      const hasMore = nextIndex < items.length;
+      const nextCursor = hasMore
+        ? encodeSimpleCursor({
+            v: 1,
+            type: 'relation-list',
+            index: nextIndex,
+            pageSize: limit
+          })
+        : null;
 
       const response = formatter.list(paginatedItems as Record<string, unknown>[], {
-        total: items.length,
-        page: Math.floor(offset / limit) + 1,
+        total: hasPageParam ? items.length : null,
+        page,
         pageSize: limit,
-        pageCount: Math.ceil(items.length / limit)
+        pageCount: hasPageParam ? Math.ceil(items.length / limit) : null,
+        hasMore,
+        nextCursor
       });
 
-      c.header('X-Total-Count', items.length.toString());
-      c.header('X-Page-Count', Math.ceil(items.length / limit).toString());
+      if (hasPageParam) {
+        c.header('X-Total-Count', items.length.toString());
+        c.header('X-Page-Count', Math.ceil(items.length / limit).toString());
+      }
+      c.header('X-Pagination-Mode', hasPageParam ? 'page' : 'cursor');
+      if (nextCursor) {
+        c.header('X-Next-Cursor', nextCursor);
+      }
 
       return c.json(response, response._status as ContentfulStatusCode);
     } else {

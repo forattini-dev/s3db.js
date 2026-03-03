@@ -34,6 +34,10 @@ const spider = new SpiderPlugin({
     autoStart: true,
     concurrency: 5,
     retryAttempts: 3
+  },
+
+  recker: {
+    ensureCurlImpersonate: false
   }
 })
 ```
@@ -44,6 +48,7 @@ const spider = new SpiderPlugin({
 | `patterns` | object | `{}` | URL pattern configurations |
 | `discovery` | object | `{}` | Link discovery options |
 | `queue` | object | `{}` | Queue processing options |
+| `recker` | object | `{}` | Recker transport and curl-impersonate setup options |
 
 ---
 
@@ -167,19 +172,100 @@ discovery: {
 
 ```javascript
 queue: {
+  backend: 's3', // 's3' | 'queue-consumer'
   autoStart: true,
   concurrency: 5,
-  retryAttempts: 3,
-  retryDelay: 1000
+  maxRetries: 3,
+  retryDelay: 1000,
+
+  // Optional S3Queue-specific overrides
+  s3: {
+    orderingGuarantee: true
+  },
+
+  // Optional QueueConsumer backend
+  consumer: {
+    consumers: [
+      {
+        driver: 'sqs',
+        config: { queueUrl: process.env.SPIDER_QUEUE_URL },
+        consumers: [{ resources: 'crawl_jobs' }]
+      }
+    ]
+  }
 }
 ```
 
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
+| `backend` | string | `'s3'` | Queue backend (`'s3'` or `'queue-consumer'`) |
 | `autoStart` | boolean | `true` | Start processing automatically |
 | `concurrency` | number | `5` | Concurrent URL processing |
-| `retryAttempts` | number | `3` | Retry failed URLs |
+| `maxRetries` | number | `3` | Retry failed URLs |
 | `retryDelay` | number | `1000` | Delay between retries (ms) |
+| `s3` | object | `{}` | S3QueuePlugin-specific overrides |
+| `consumer` | object | `{}` | QueueConsumerPlugin backend options |
+| `consumers` | array | `[]` | Shortcut for `queue.consumer.consumers` |
+
+---
+
+## Recker and curl-impersonate
+
+By default, Spider + Recker keeps transport selection automatic.
+You can enable forced curl impersonation only when needed via `useCurl: true`.
+If you want automatic installation during plugin boot, set `recker.ensureCurlImpersonate: true`.
+
+### Install curl-impersonate with Recker
+
+```bash
+# No global install
+npx recker setup
+
+# Or global CLI
+rek setup
+```
+
+### Auto-ensure at plugin startup
+
+```javascript
+const spider = new SpiderPlugin({
+  recker: {
+    ensureCurlImpersonate: true
+  }
+})
+```
+
+### Force impersonation for specific crawls
+
+```javascript
+const context = new CrawlContext({
+  useCurl: true,
+  proxy: [
+    'http://proxy1.example.com:8080',
+    'socks5://proxy2.example.com:1080'
+  ]
+})
+```
+
+### Pass complete Recker config
+
+```javascript
+const context = new CrawlContext({
+  recker: {
+    http2: { enabled: true },
+    dns: { servers: ['1.1.1.1', '8.8.8.8'] },
+    searchParams: { source: 'spider' }
+  }
+})
+```
+
+### Runtime helpers (SpiderPlugin)
+
+```javascript
+const status = await spider.getCurlImpersonateStatus()
+await spider.installCurlImpersonate()
+await spider.ensureCurlImpersonate()
+```
 
 ---
 
@@ -305,6 +391,11 @@ const match = spider.matchUrl(url)
 spider.addPattern(name, config)
 spider.removePattern(name)
 const patterns = spider.getPatternNames()
+
+// curl-impersonate lifecycle (Recker)
+const impersonate = await spider.getCurlImpersonateStatus()
+await spider.installCurlImpersonate()
+await spider.ensureCurlImpersonate()
 ```
 
 ### LinkDiscoverer
@@ -376,4 +467,3 @@ const stats = discoverer.getStats()
 - [Usage Patterns](/plugins/spider/guides/usage-patterns.md) - Crawling patterns, discovery, real-world examples
 - [Best Practices](/plugins/spider/guides/best-practices.md) - Performance, troubleshooting, FAQ
 - [Deep Discovery](/plugins/spider/deep-discovery.md) - Advanced crawler compatibility analysis
-
