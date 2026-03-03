@@ -28,11 +28,17 @@ subfinder/
 # AI Agent directories
 .agent/
 .gemini/
+.claude/
+.codex/
 .claude.json
+.mcp.json
+.mailmap
+AGENTS.md
+CLAUDE.md
+GEMINI.md
 
 # pnpm store
 .pnpm-store/
 
 # OpenSpec (AI planning documents)
 openspec/
-.claude/commands/openspec/
