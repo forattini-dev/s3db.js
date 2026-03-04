@@ -17,7 +17,11 @@ await db.usePlugin(new SpiderPlugin({ patterns: { product: { match: '/products/:
 - Express-style URL pattern matching with parameter extraction
 - RFC 9309 compliant robots.txt parser
 - Multi-format sitemap support (XML, gzip, RSS, Atom)
-- Link discovery with domain/pattern filtering
+- Link discovery with domain/pattern filtering and tracking param removal
+- Block detection (Cloudflare, Akamai, DataDome, WAF) with auto puppeteer fallback
+- Header randomization (Sec-CH-UA, Accept-Language) for anti-bot evasion
+- Rate limiting via Recker RequestPool (sliding window, concurrency control)
+- CSS data extraction via Recker ScrapeDocument
 - Pluggable queue backend (`S3QueuePlugin` or `QueueConsumerPlugin`)
 - DeepDiscovery: Crawler compatibility analysis for Google, Bing, Yandex, Baidu
 
@@ -96,8 +100,10 @@ rek setup
 
 | Component | Description |
 |-----------|-------------|
-| **SpiderPlugin** | Queue-based URL processing with pattern matching |
-| **LinkDiscoverer** | Extract and filter links from HTML |
+| **SpiderPlugin** | Queue-based URL processing with pattern matching and rate limiting |
+| **HybridFetcher** | HTTP/puppeteer fetcher with block detection and CSS extraction |
+| **CrawlContext** | Shared session state with header randomization |
+| **LinkDiscoverer** | Extract and filter links from HTML with tracking param removal |
 | **RobotsParser** | Parse and respect robots.txt rules |
 | **SitemapParser** | Parse sitemaps (XML, gzip, RSS, Atom) |
 | **DeepDiscovery** | Crawler compatibility analysis |
@@ -127,7 +133,11 @@ patterns: {
 await spider.enqueueTarget({ url, activities, priority })
 const match = spider.matchUrl(url)
 
-// LinkDiscoverer
+// HybridFetcher (block detection + extraction)
+const result = await fetcher.fetch(url, { extract: { title: 'h1' } })
+console.log(result.blocked, result.extracted)
+
+// LinkDiscoverer (auto-strips tracking params)
 const links = await discoverer.extractLinksAsync(html, baseUrl, depth)
 const sitemapLinks = await discoverer.discoverFromSitemaps(url)
 
@@ -181,7 +191,13 @@ console.log('Crawl time:', report.crawlBudget.estimatedCrawlTime.google)
 const spider = new SpiderPlugin({
   discovery: {
     respectRobotsTxt: true,
-    robotsUserAgent: 'MyBot/1.0 (+https://example.com/bot)'
+    robotsUserAgent: '*',
+    removeTrackingParams: true  // Clean utm_*, gclid, fbclid from URLs
+  },
+  rateLimit: {
+    concurrency: 3,
+    requestsPerInterval: 5,
+    interval: 1000
   },
   queue: {
     concurrency: 3,

@@ -597,10 +597,12 @@ export class Router {
       passwordField,
       jwtSecret: (driverConfig as Record<string, string>).jwtSecret || (driverConfig as Record<string, string>).secret,
       jwtExpiresIn: (driverConfig as Record<string, string>).jwtExpiresIn || (driverConfig as Record<string, string>).expiresIn || '7d',
+      jwtRefreshExpiresIn: (driverConfig as Record<string, string>).jwtRefreshExpiresIn || (driverConfig as Record<string, string>).refreshExpiresIn || '30d',
       passphrase: (driverConfig as Record<string, string>).passphrase || 'secret',
       allowRegistration: registrationConfig.enabled,
       registration: registrationConfig,
-      loginThrottle: loginThrottleConfig
+      loginThrottle: loginThrottleConfig,
+      clientCredentials: (driverConfig as Record<string, unknown>).clientCredentials || {}
     };
 
         const authApp = createAuthRoutes(

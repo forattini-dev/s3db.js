@@ -48,6 +48,7 @@ const spider = new SpiderPlugin({
 | `patterns` | object | `{}` | URL pattern configurations |
 | `discovery` | object | `{}` | Link discovery options |
 | `queue` | object | `{}` | Queue processing options |
+| `rateLimit` | object | `{}` | Rate limiting via Recker RequestPool |
 | `recker` | object | `{}` | Recker transport and curl-impersonate setup options |
 
 ---
@@ -141,7 +142,7 @@ discovery: {
   followRegex: /\/(products|category)\//,
   ignoreRegex: /\/(api|admin)\//,
   respectRobotsTxt: true,
-  robotsUserAgent: 's3db-spider',
+  robotsUserAgent: '*',
   robotsCacheTimeout: 3600000,
   useSitemaps: true,
   sitemapMaxUrls: 10000
@@ -160,8 +161,9 @@ discovery: {
 | `followPatterns` | string[] | `[]` | Only follow URLs matching these patterns |
 | `followRegex` | RegExp | `null` | Regex filter for URLs to follow |
 | `ignoreRegex` | RegExp | `null` | Regex filter for URLs to ignore |
+| `removeTrackingParams` | boolean | `true` | Strip utm_*, gclid, fbclid, etc. from discovered URLs |
 | `respectRobotsTxt` | boolean | `true` | Respect robots.txt rules |
-| `robotsUserAgent` | string | `'s3db-spider'` | User-agent for robots.txt |
+| `robotsUserAgent` | string | `'*'` | User-agent for robots.txt rule matching |
 | `robotsCacheTimeout` | number | `3600000` | Robots.txt cache TTL (ms) |
 | `useSitemaps` | boolean | `true` | Discover URLs from sitemaps |
 | `sitemapMaxUrls` | number | `10000` | Maximum URLs from sitemaps |
@@ -206,6 +208,30 @@ queue: {
 | `s3` | object | `{}` | S3QueuePlugin-specific overrides |
 | `consumer` | object | `{}` | QueueConsumerPlugin backend options |
 | `consumers` | array | `[]` | Shortcut for `queue.consumer.consumers` |
+
+---
+
+## Rate Limiting
+
+Spider uses Recker's `RequestPool` (dynamic import from `recker/utils/request-pool`) for sliding-window rate limiting on page navigations.
+
+```javascript
+const spider = new SpiderPlugin({
+  rateLimit: {
+    concurrency: 5,
+    requestsPerInterval: 10,
+    interval: 1000
+  }
+})
+```
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `concurrency` | number | `5` | Maximum parallel requests |
+| `requestsPerInterval` | number | `10` | Maximum requests per interval window |
+| `interval` | number | `1000` | Sliding window interval in milliseconds |
+
+If `recker/utils/request-pool` is not available, rate limiting is silently disabled.
 
 ---
 
@@ -282,7 +308,8 @@ const discoverer = new LinkDiscoverer({
   maxUrls: 1000,
   sameDomainOnly: true,
   respectRobotsTxt: true,
-  useSitemaps: true
+  useSitemaps: true,
+  removeTrackingParams: true  // Strips utm_*, gclid, fbclid, etc. (default: true)
 })
 ```
 
@@ -292,7 +319,7 @@ const discoverer = new LinkDiscoverer({
 import { RobotsParser } from 's3db.js'
 
 const parser = new RobotsParser({
-  userAgent: 's3db-spider',
+  userAgent: '*',
   defaultAllow: true,
   cacheTimeout: 3600000
 })
@@ -300,7 +327,7 @@ const parser = new RobotsParser({
 
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
-| `userAgent` | string | `'s3db-spider'` | User-agent for matching rules |
+| `userAgent` | string | `'*'` | User-agent for robots.txt rule matching |
 | `defaultAllow` | boolean | `true` | Default if no rules match |
 | `cacheTimeout` | number | `3600000` | Cache TTL (ms) |
 
@@ -321,7 +348,7 @@ Sitemap: https://example.com/sitemap.xml
 import { SitemapParser } from 's3db.js'
 
 const parser = new SitemapParser({
-  userAgent: 's3db-spider',
+  userAgent: '*',
   maxUrls: 50000,
   timeout: 30000
 })
@@ -329,7 +356,7 @@ const parser = new SitemapParser({
 
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
-| `userAgent` | string | `'s3db-spider'` | HTTP user-agent |
+| `userAgent` | string | `'*'` | User-agent for robots.txt rule matching |
 | `maxUrls` | number | `50000` | Maximum URLs to parse |
 | `timeout` | number | `30000` | Request timeout (ms) |
 
@@ -369,6 +396,84 @@ const discoverer = new DeepDiscovery({
 | `detectFrameworks` | boolean | `true` | Detect JS frameworks |
 | `detectEcommerce` | boolean | `true` | Detect e-commerce platforms |
 | `detectCMS` | boolean | `true` | Detect CMS platforms |
+
+### CrawlContext
+
+```javascript
+import { CrawlContext } from 's3db.js'
+
+const context = new CrawlContext({
+  userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+  platform: 'Windows',
+  proxy: 'http://proxy:8080',
+  randomizeHeaders: true,  // Vary Sec-CH-UA, Accept-Language per request
+  viewport: { width: 1920, height: 1080 },
+  timezone: 'America/New_York'
+})
+```
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `userAgent` | string | Auto-generated Chrome UA | HTTP User-Agent string |
+| `platform` | string | `'Windows'` | Platform for UA and Sec-CH-UA-Platform |
+| `proxy` | string/string[] | `null` | Proxy URL(s) |
+| `randomizeHeaders` | boolean | `false` | Randomize Sec-CH-UA and Accept-Language per request |
+| `viewport` | object | `{ width: 1920, height: 1080 }` | Browser viewport size |
+| `timezone` | string | `'America/New_York'` | Timezone emulation |
+| `useCurl` | boolean | `undefined` | Force curl-impersonate transport |
+| `recker` | object | `undefined` | Recker HTTP client options |
+
+### HybridFetcher
+
+```javascript
+import { HybridFetcher } from 's3db.js'
+
+const fetcher = new HybridFetcher({
+  context: new CrawlContext({ randomizeHeaders: true }),
+  strategy: 'auto',
+  detectBlocks: true,  // Detect Cloudflare, Akamai, WAF blocks (default: true)
+  timeout: 30000
+})
+
+// Fetch with CSS data extraction
+const result = await fetcher.fetch('https://example.com', {
+  extract: { title: 'h1', price: '.price' }
+})
+```
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `context` | CrawlContext | Auto-created | Shared session state |
+| `strategy` | string | `'auto'` | `'auto'`, `'recker-only'`, or `'puppeteer-only'` |
+| `detectBlocks` | boolean | `true` | Detect WAF/CDN blocks via `recker/utils/block-detector` |
+| `timeout` | number | `30000` | Request timeout (ms) |
+| `navigationTimeout` | number | `30000` | Puppeteer navigation timeout (ms) |
+| `puppeteerOptions` | object | `{}` | Puppeteer launch options |
+| `jsDetectionPatterns` | RegExp[] | Built-in SPA patterns | Patterns to detect JS-rendered pages |
+
+**FetchOptions:**
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `method` | string | `'GET'` | HTTP method |
+| `headers` | object | `{}` | Extra headers |
+| `body` | unknown | `undefined` | Request body |
+| `timeout` | number | Fetcher timeout | Per-request timeout |
+| `keepPage` | boolean | `false` | Keep puppeteer page open |
+| `extract` | object | `undefined` | CSS selector schema for data extraction |
+
+**FetchResult fields:**
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `html` | string | Page HTML content |
+| `source` | string | `'recker'` or `'puppeteer'` |
+| `status` | number | HTTP status code |
+| `blocked` | boolean | `true` if WAF/CDN block detected |
+| `blockReason` | string | `'cloudflare'`, `'akamai'`, `'datadome'`, `'waf'`, `'rate-limit'` |
+| `captcha` | boolean | `true` if CAPTCHA detected |
+| `captchaProvider` | string | `'recaptcha'`, `'hcaptcha'`, `'turnstile'`, `'funcaptcha'` |
+| `extracted` | object | CSS-extracted data (when `extract` option is used) |
 
 ---
 
@@ -441,6 +546,30 @@ const locations = await parser.probeCommonLocations(baseUrl)
 const stats = parser.getStats()
 parser.clearCache(url)
 parser.resetStats()
+```
+
+### HybridFetcher
+
+```javascript
+// Fetch with auto strategy (HTTP → puppeteer fallback on JS/block)
+const result = await fetcher.fetch(url, options)
+
+// Force HTTP-only or puppeteer-only
+const result = await fetcher.fetchWithRecker(url, options)
+const result = await fetcher.fetchWithPuppeteer(url, options)
+
+// CSS data extraction on raw HTML
+const data = await fetcher.extract(html, { title: 'h1', price: '.price' })
+
+// HEAD request
+const head = await fetcher.head(url)
+
+// Check if URL needs puppeteer
+const needsJs = await fetcher.needsPuppeteer(url)
+
+// Stats and cleanup
+const stats = fetcher.getStats()
+await fetcher.close()
 ```
 
 ### DeepDiscovery

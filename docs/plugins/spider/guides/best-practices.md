@@ -47,20 +47,19 @@ async function politelyCrawl(url) {
 }
 ```
 
-### 3. Use Descriptive User-Agents
+### 3. Use Realistic User-Agents
+
+CrawlContext auto-generates a realistic Chrome user-agent by default. Use `randomizeHeaders: true` to vary browser fingerprint per request:
 
 ```javascript
-// Good: Descriptive and includes contact
-const spider = new SpiderPlugin({
-  discovery: {
-    robotsUserAgent: 'MyCompany-SEOBot/1.0 (+https://example.com/bot)'
-  }
+const context = new CrawlContext({
+  randomizeHeaders: true  // Varies Sec-CH-UA, Accept-Language per request
 })
 
-// Bad: Generic or misleading
+// robotsUserAgent is only for robots.txt rule matching — use '*' to match all rules
 const spider = new SpiderPlugin({
   discovery: {
-    robotsUserAgent: 'Mozilla/5.0'  // Don't impersonate browsers!
+    robotsUserAgent: '*'
   }
 })
 ```

@@ -1,13 +1,14 @@
 import type { URLPatternMatcher, MatchResult } from './url-pattern-matcher.js';
 import { ReckerRobotsValidator } from './recker-robots-validator.js';
 import { ReckerSitemapValidator } from './recker-sitemap-validator.js';
-import type {
-  LinkDiscovererConfig,
-  DiscoveredLink,
-  RobotsCheckResult,
-  DiscoveryStats,
-  SitemapDiscoveryOptions,
-  ResetOptions
+import {
+  TRACKING_PARAMS,
+  type LinkDiscovererConfig,
+  type DiscoveredLink,
+  type RobotsCheckResult,
+  type DiscoveryStats,
+  type SitemapDiscoveryOptions,
+  type ResetOptions
 } from './link-discoverer.js';
 
 type ReckerExtractedLink = {
@@ -69,6 +70,7 @@ export class ReckerLinkDiscoverer {
       respectRobotsTxt: config.respectRobotsTxt !== false,
       ignoreQueryString: config.ignoreQueryString || false,
       ignoreHash: config.ignoreHash !== false,
+      removeTrackingParams: config.removeTrackingParams !== false,
       robotsUserAgent: config.robotsUserAgent || 's3db-spider',
       robotsCacheTimeout: config.robotsCacheTimeout || 3600000,
       useSitemaps: config.useSitemaps !== false,
@@ -509,6 +511,13 @@ export class ReckerLinkDiscoverer {
 
     if (!this.config.ignoreQueryString && urlObj.search) {
       const params = new URLSearchParams(urlObj.search);
+      if (this.config.removeTrackingParams) {
+        for (const key of [...params.keys()]) {
+          if (TRACKING_PARAMS.has(key.toLowerCase())) {
+            params.delete(key);
+          }
+        }
+      }
       const sortedParams = new URLSearchParams([...params.entries()].sort());
       const queryString = sortedParams.toString();
       if (queryString) {

@@ -617,6 +617,22 @@ export class ApiPlugin extends Plugin {
 }
 
 export { OIDCClient } from './auth/oidc-client.js';
+
+export {
+  createToken,
+  verifyToken,
+  createRefreshToken,
+  verifyRefreshToken,
+  jwtRefresh,
+  createAuthMiddleware,
+  generateApiKey,
+  createOAuth2Handler,
+  clearJWKSCache
+} from './auth/index.js';
+
+export type { JWTConfig, JWTPayload, LoginResult, UserRecord } from './auth/jwt-auth.js';
+export type { OAuth2Config, OAuth2User, OAuth2Handler } from './auth/oauth2-auth.js';
+export type { ClientCredentialsConfig, AuthRoutesConfig } from './routes/auth-routes.js';
 export * from './concerns/guards-helpers.js';
 
 export { setupTemplateEngine, ejsEngine, pugEngine, jsxEngine } from './utils/template-engine.js';

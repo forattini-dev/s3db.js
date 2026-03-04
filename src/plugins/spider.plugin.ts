@@ -175,6 +175,11 @@ export interface SpiderPluginConfig {
     maxWebSocketMessages?: number;
     [key: string]: any;
   };
+  rateLimit?: {
+    concurrency?: number;
+    requestsPerInterval?: number;
+    interval?: number;
+  };
   patterns?: Record<string, any>;
   discovery?: {
     enabled?: boolean;
@@ -207,6 +212,7 @@ export class SpiderPlugin extends Plugin {
   securityAnalyzer: any | null;
   patternMatcher: URLPatternMatcher | null;
   linkDiscoverer: LinkDiscoverer | null;
+  _requestPool: any | null;
   initialized: boolean = false;
   override namespace: string;
 
@@ -345,6 +351,13 @@ export class SpiderPlugin extends Plugin {
         ...options.security
       },
 
+      // Rate limiting configuration
+      rateLimit: {
+        concurrency: options.rateLimit?.concurrency ?? 5,
+        requestsPerInterval: options.rateLimit?.requestsPerInterval ?? 10,
+        interval: options.rateLimit?.interval ?? 1000,
+      },
+
       // URL Patterns configuration
       patterns: options.patterns || {},
 
@@ -395,6 +408,7 @@ export class SpiderPlugin extends Plugin {
     // Pattern matching and discovery
     this.patternMatcher = null;
     this.linkDiscoverer = null;
+    this._requestPool = null;
 
     // Initialize pattern matcher if patterns configured
     if (Object.keys(this.config.patterns).length > 0) {
@@ -537,6 +551,22 @@ export class SpiderPlugin extends Plugin {
             'curl-impersonate not available'
           );
         }
+      }
+
+      // Initialize RequestPool for rate limiting
+      try {
+        const { RequestPool } = await import('recker/utils/request-pool');
+        this._requestPool = new RequestPool({
+          concurrency: this.config.rateLimit.concurrency,
+          requestsPerInterval: this.config.rateLimit.requestsPerInterval,
+          interval: this.config.rateLimit.interval,
+        });
+        this.logger.debug(
+          { concurrency: this.config.rateLimit.concurrency, rps: this.config.rateLimit.requestsPerInterval },
+          'RequestPool initialized for rate limiting'
+        );
+      } catch {
+        this.logger.warn('recker RequestPool not available, rate limiting disabled');
       }
 
       // 🪵 Debug: initializing bundled plugins
@@ -812,10 +842,13 @@ export class SpiderPlugin extends Plugin {
           this.logger.debug({ activities: task.activities }, `Activities: ${task.activities.join(', ')}`);
         }
 
-        // Open browser page using navigate method
-        const page = await this.puppeteerPlugin!.navigate(task.url, {
+        // Open browser page using navigate method (rate-limited if RequestPool available)
+        const navigateFn = () => this.puppeteerPlugin!.navigate(task.url, {
           waitUntil: 'networkidle2'
         });
+        const page = this._requestPool
+          ? await this._requestPool.run(navigateFn)
+          : await navigateFn();
 
         // Collect data
         const html = await (page as any).content();

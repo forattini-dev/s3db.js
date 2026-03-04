@@ -32,13 +32,16 @@ export interface JWTConfig {
   secret?: string;
   userField?: string;
   passwordField?: string;
-  passphrase?: string; // Not needed for bcrypt, but might be used for other secret fields
+  passphrase?: string;
   expiresIn?: string;
+  refreshExpiresIn?: string;
   optional?: boolean;
   cookieName?: string | null;
   issuer?: string;
   audience?: string | string[];
   clockTolerance?: number;
+  jwksUri?: string;
+  algorithms?: string[];
 }
 
 export interface JWTSignOptions {
@@ -64,8 +67,14 @@ export interface UserRecord {
 export interface LoginResult {
   success: boolean;
   token?: string;
+  refreshToken?: string;
   user?: UserRecord;
   error?: string;
+}
+
+interface JWKSVerifierLike {
+  verify(token: string): Promise<Record<string, unknown>>;
+  clearCache(): void;
 }
 
 const AUTH_HEADER_REGEX = /^Bearer\s+(.+)$/i;
@@ -241,15 +250,33 @@ export async function createJWTHandler(
     cookieName = null,
     issuer,
     audience,
-    clockTolerance = 0
+    clockTolerance = 0,
+    jwksUri
   } = config;
 
-  if (!secret) {
-    throw new Error('JWT driver: secret is required');
+  if (!secret && !jwksUri) {
+    throw new Error('JWT driver: secret or jwksUri is required');
   }
 
   if (!database) {
     throw new Error('JWT driver: database is required');
+  }
+
+  let jwksVerifier: JWKSVerifierLike | null = null;
+  if (jwksUri) {
+    try {
+      const { createJWKSVerifier } = await import('raffel');
+      jwksVerifier = createJWKSVerifier({
+        jwksUri,
+        issuer,
+        audience: audience ? (Array.isArray(audience) ? audience[0] : audience) : undefined,
+        algorithms: config.algorithms || ['RS256', 'ES256'],
+        clockTolerance: clockTolerance || 60
+      });
+      logger.debug(`JWT driver: JWKS verifier initialized for ${jwksUri}`);
+    } catch {
+      throw new Error('JWT driver: jwksUri requires raffel package (pnpm add raffel)');
+    }
   }
 
   const manager = new JWTResourceManager(database, 'jwt', config as unknown as ConstructorParameters<typeof JWTResourceManager>[2]);
@@ -261,16 +288,30 @@ export async function createJWTHandler(
     return c.json(response, response._status as ContentfulStatusCode);
   };
 
+  const verifyTokenPayload = async (token: string): Promise<JWTPayload | null> => {
+    if (jwksVerifier) {
+      try {
+        const claims = await jwksVerifier.verify(token);
+        return claims as JWTPayload;
+      } catch {
+        return null;
+      }
+    }
+    if (secret) {
+      return verifyToken(token, secret, { issuer, audience, clockTolerance });
+    }
+    return null;
+  };
+
   return async (c: Context, next: Next): Promise<Response | void> => {
     const authHeader = c.req.header('authorization');
-    const verificationOptions = { issuer, audience, clockTolerance };
 
     if (!authHeader) {
       if (cookieName) {
         try {
           const token = getCookie(c, cookieName);
           if (token) {
-            const payload = verifyToken(token, secret, verificationOptions);
+            const payload = await verifyTokenPayload(token);
             if (payload) {
               const userIdentifier = payload[userField];
               if (typeof userIdentifier === 'string' || typeof userIdentifier === 'number') {
@@ -315,7 +356,7 @@ export async function createJWTHandler(
       return buildUnauthorized(c);
     }
 
-    const payload = verifyToken(token, secret, verificationOptions);
+    const payload = await verifyTokenPayload(token);
     if (!payload) {
       return buildUnauthorized(c);
     }
@@ -349,6 +390,74 @@ export async function createJWTHandler(
   };
 }
 
+export function createRefreshToken(payload: JWTPayload, secret: string, expiresIn: string = '30d', options: JWTSignOptions = {}): string {
+  return createToken({ ...payload, type: 'refresh' }, secret, expiresIn, options);
+}
+
+export function verifyRefreshToken(token: string, secret: string, options: JWTVerificationOptions = {}): JWTPayload | null {
+  const payload = verifyToken(token, secret, options);
+  if (!payload || payload.type !== 'refresh') return null;
+  return payload;
+}
+
+export async function jwtRefresh(
+  authResource: ResourceLike,
+  refreshToken: string,
+  config: JWTConfig = {}
+): Promise<LoginResult> {
+  const {
+    secret,
+    userField = 'email',
+    expiresIn = '7d',
+    refreshExpiresIn = '30d',
+    issuer,
+    audience,
+    clockTolerance = 0
+  } = config;
+
+  if (!secret) {
+    return { success: false, error: 'JWT secret is required' };
+  }
+
+  const payload = verifyRefreshToken(refreshToken, secret, { issuer, audience, clockTolerance });
+  if (!payload) {
+    return { success: false, error: 'Invalid or expired refresh token' };
+  }
+
+  const userIdentifier = payload[userField];
+  if (typeof userIdentifier !== 'string' && typeof userIdentifier !== 'number') {
+    return { success: false, error: 'Invalid refresh token payload' };
+  }
+
+  try {
+    const users = await authResource.query({ [userField]: userIdentifier }, { limit: 1 }) as UserRecord[];
+    const user = users[0];
+
+    if (!user) {
+      return { success: false, error: 'User not found' };
+    }
+
+    if (user.active === false || user.isActive === false) {
+      return { success: false, error: 'User account is inactive' };
+    }
+
+    const tokenPayload = {
+      [userField]: user[userField],
+      id: user.id,
+      role: user.role || 'user',
+      scopes: user.scopes || []
+    };
+
+    const newToken = createToken(tokenPayload, secret, expiresIn, { issuer, audience });
+    const newRefreshToken = createRefreshToken(tokenPayload, secret, refreshExpiresIn, { issuer, audience });
+
+    return { success: true, token: newToken, refreshToken: newRefreshToken, user };
+  } catch (err) {
+    logger.error({ error: (err as Error).message }, 'Token refresh error');
+    return { success: false, error: 'Token refresh error' };
+  }
+}
+
 export async function jwtLogin(
   authResource: ResourceLike,
   username: string,
@@ -360,6 +469,7 @@ export async function jwtLogin(
     userField = 'email',
     passwordField = 'password',
     expiresIn = '7d',
+    refreshExpiresIn = '30d',
     issuer,
     audience
   } = config;
@@ -390,19 +500,19 @@ export async function jwtLogin(
       return { success: false, error: 'Invalid credentials' };
     }
 
-    const token = createToken(
-      {
-        [userField]: user[userField],
-        id: user.id,
-        role: user.role || 'user',
-        scopes: user.scopes || []
-      },
-      secret,
-      expiresIn,
-      { issuer, audience }
-    );
+    const tokenPayload = {
+      [userField]: user[userField],
+      id: user.id,
+      role: user.role || 'user',
+      scopes: user.scopes || []
+    };
 
-    return { success: true, token, user };
+    const token = createToken(tokenPayload, secret, expiresIn, { issuer, audience });
+    const refreshToken = refreshExpiresIn
+      ? createRefreshToken(tokenPayload, secret, refreshExpiresIn, { issuer, audience })
+      : undefined;
+
+    return { success: true, token, refreshToken, user };
   } catch (err) {
     logger.error({ error: (err as Error).message }, 'Login error');
     return { success: false, error: 'Authentication error' };
@@ -412,6 +522,9 @@ export async function jwtLogin(
 export default {
   createToken,
   verifyToken,
+  createRefreshToken,
+  verifyRefreshToken,
   createJWTHandler,
-  jwtLogin
+  jwtLogin,
+  jwtRefresh
 };

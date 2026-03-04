@@ -10,6 +10,7 @@ export interface CrawlContextConfig {
   screen?: { width: number; height: number };
   timezone?: string;
   locale?: string;
+  randomizeHeaders?: boolean;
 }
 
 export interface CookieData {
@@ -104,6 +105,17 @@ interface HttpResponse {
 }
 
 export class CrawlContext {
+  private static readonly CHROME_VERSIONS = [
+    '120.0.0.0', '121.0.0.0', '122.0.0.0', '123.0.0.0', '124.0.0.0', '125.0.0.0'
+  ];
+
+  private static readonly ACCEPT_LANGUAGE_VARIANTS = [
+    'en-US,en;q=0.9',
+    'en-US,en;q=0.9,es;q=0.8',
+    'en-GB,en;q=0.9,en-US;q=0.8',
+    'en-US,en;q=0.9,fr;q=0.8',
+  ];
+
   _userAgent: string;
   _acceptLanguage: string;
   _platform: string;
@@ -118,6 +130,7 @@ export class CrawlContext {
   _locale: string;
   _lastUrl: string | null;
   _referer: string | null;
+  _randomizeHeaders: boolean;
 
   constructor(config: CrawlContextConfig = {}) {
     this._platform = config.platform || 'Windows';
@@ -154,6 +167,7 @@ export class CrawlContext {
 
     this._lastUrl = null;
     this._referer = null;
+    this._randomizeHeaders = config.randomizeHeaders || false;
   }
 
   get userAgent(): string {
@@ -170,6 +184,25 @@ export class CrawlContext {
 
   get timezone(): string {
     return this._timezone;
+  }
+
+  getRandomizedHeaders(): Record<string, string> {
+    if (!this._randomizeHeaders) return { ...this._headers };
+
+    const chromeVersion = CrawlContext.CHROME_VERSIONS[
+      Math.floor(Math.random() * CrawlContext.CHROME_VERSIONS.length)
+    ]!;
+    const lang = CrawlContext.ACCEPT_LANGUAGE_VARIANTS[
+      Math.floor(Math.random() * CrawlContext.ACCEPT_LANGUAGE_VARIANTS.length)
+    ]!;
+
+    return {
+      ...this._headers,
+      'Accept-Language': lang,
+      'Sec-CH-UA': `"Chromium";v="${chromeVersion.split('.')[0]}", "Not-A.Brand";v="99"`,
+      'Sec-CH-UA-Mobile': '?0',
+      'Sec-CH-UA-Platform': `"${this._platform}"`,
+    };
   }
 
   setCookies(cookies: CookieData[], source: string = 'manual'): void {

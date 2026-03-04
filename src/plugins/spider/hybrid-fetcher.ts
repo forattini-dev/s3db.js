@@ -17,6 +17,7 @@ export interface HybridFetcherConfig {
   useCurl?: boolean;
   recker?: Record<string, unknown>;
   viewport?: { width: number; height: number };
+  detectBlocks?: boolean;
 }
 
 export interface FetchResult {
@@ -29,6 +30,11 @@ export interface FetchResult {
   source: 'recker' | 'puppeteer';
   method?: string;
   page?: Page;
+  blocked?: boolean;
+  blockReason?: string;
+  captcha?: boolean;
+  captchaProvider?: string;
+  extracted?: Record<string, unknown>;
 }
 
 export interface FetchOptions {
@@ -38,6 +44,7 @@ export interface FetchOptions {
   waitUntil?: string;
   timeout?: number;
   keepPage?: boolean;
+  extract?: Record<string, string>;
 }
 
 export interface HeadResult {
@@ -105,6 +112,7 @@ export class HybridFetcher {
   _browser: Browser | null;
   _puppeteer: PuppeteerModule | null;
   _jsPatterns: RegExp[];
+  _detectBlocks: boolean;
   stats: {
     reckerRequests: number;
     puppeteerRequests: number;
@@ -119,6 +127,7 @@ export class HybridFetcher {
     this.navigationTimeout = config.navigationTimeout || 30000;
     this.puppeteerOptions = config.puppeteerOptions || {};
     this._customHttpClient = config.httpClient || null;
+    this._detectBlocks = config.detectBlocks !== false;
 
     this._httpClient = null;
     this._browser = null;
@@ -211,7 +220,7 @@ export class HybridFetcher {
     const client = await this._getHttpClient(url);
 
     const headers: Record<string, string> = {
-      ...this.context._headers,
+      ...this.context.getRandomizedHeaders(),
       'User-Agent': this.context.userAgent,
       ...options.headers
     };
@@ -241,7 +250,7 @@ export class HybridFetcher {
 
     const html = await response.text();
 
-    return {
+    const result: FetchResult = {
       html,
       response,
       url,
@@ -251,6 +260,24 @@ export class HybridFetcher {
       source: 'recker',
       method: 'http'
     };
+
+    if (this._detectBlocks) {
+      try {
+        const { detectBlock, detectCaptcha } = await import('recker/utils/block-detector');
+        const blockResult = detectBlock(response, html);
+        if (blockResult.blocked) {
+          result.blocked = true;
+          result.blockReason = blockResult.reason;
+        }
+        const captchaResult = detectCaptcha(response, html);
+        if (captchaResult.detected) {
+          result.captcha = true;
+          result.captchaProvider = captchaResult.provider;
+        }
+      } catch { /* recker block-detector not available */ }
+    }
+
+    return result;
   }
 
   async fetchWithPuppeteer(url: string, options: FetchOptions = {}): Promise<FetchResult> {
@@ -298,24 +325,27 @@ export class HybridFetcher {
 
   async fetch(url: string, options: FetchOptions = {}): Promise<FetchResult> {
     try {
+      let result: FetchResult;
+
       if (this.strategy === 'puppeteer-only') {
-        return await this.fetchWithPuppeteer(url, options);
-      }
+        result = await this.fetchWithPuppeteer(url, options);
+      } else if (this.strategy === 'recker-only') {
+        result = await this.fetchWithRecker(url, options);
+      } else {
+        result = await this.fetchWithRecker(url, options);
 
-      if (this.strategy === 'recker-only') {
-        return await this.fetchWithRecker(url, options);
-      }
-
-      const result = await this.fetchWithRecker(url, options);
-
-      if (this._needsJavaScript(result.html)) {
-        this.stats.fallbacks++;
-        try {
-          return await this.fetchWithPuppeteer(url, options);
-        } catch (e) {
-          console.warn(`Puppeteer fallback failed for ${url}: ${(e as Error).message}`);
-          return result;
+        if (this._needsJavaScript(result.html) || result.blocked) {
+          this.stats.fallbacks++;
+          try {
+            result = await this.fetchWithPuppeteer(url, options);
+          } catch (e) {
+            console.warn(`Puppeteer fallback failed for ${url}: ${(e as Error).message}`);
+          }
         }
+      }
+
+      if (options.extract && result.html) {
+        result.extracted = await this.extract(result.html, options.extract);
       }
 
       return result;
@@ -353,6 +383,20 @@ export class HybridFetcher {
       return this._needsJavaScript(result.html);
     } catch {
       return true;
+    }
+  }
+
+  async extract(html: string, schema: Record<string, string>): Promise<Record<string, unknown>> {
+    try {
+      const { ScrapeDocument } = await import('recker/scrape');
+      const doc = ScrapeDocument.createSync(html);
+      const result: Record<string, unknown> = {};
+      for (const [key, selector] of Object.entries(schema)) {
+        result[key] = doc.text(selector) || null;
+      }
+      return result;
+    } catch {
+      return {};
     }
   }
 

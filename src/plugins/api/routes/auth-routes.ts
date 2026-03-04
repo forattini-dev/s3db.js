@@ -4,7 +4,7 @@ import type { Context, MiddlewareHandler } from '#src/plugins/shared/http-runtim
 import type { ContentfulStatusCode } from '#src/plugins/shared/http-runtime.js';
 import { asyncHandler } from '../utils/error-handler.js';
 import * as formatter from '../utils/response-formatter.js';
-import { createToken } from '../auth/jwt-auth.js';
+import { createToken, createRefreshToken, verifyRefreshToken } from '../auth/jwt-auth.js';
 import { generateApiKey } from '../auth/api-key-auth.js';
 import { hashPassword, isBcryptHash, verifyPassword } from '../../../concerns/password-hashing.js';
 
@@ -56,6 +56,12 @@ export interface LoginThrottleConfig {
   maxEntries?: number;
 }
 
+export interface ClientCredentialsConfig {
+  enabled?: boolean;
+  expiresIn?: string;
+  defaultScopes?: string[];
+}
+
 export interface AuthRoutesConfig {
   driver?: string;
   drivers?: string[];
@@ -63,9 +69,11 @@ export interface AuthRoutesConfig {
   passwordField?: string;
   jwtSecret?: string;
   jwtExpiresIn?: string;
+  jwtRefreshExpiresIn?: string;
   passphrase?: string;
   registration?: RegistrationConfig;
   loginThrottle?: LoginThrottleConfig;
+  clientCredentials?: ClientCredentialsConfig;
 }
 
 interface ThrottleRecord {
@@ -97,8 +105,10 @@ export function createAuthRoutes(authResource: AuthResource, config: AuthRoutesC
     passwordField = 'password',
     jwtSecret,
     jwtExpiresIn = '7d',
+    jwtRefreshExpiresIn = '30d',
     registration = {},
-    loginThrottle = {}
+    loginThrottle = {},
+    clientCredentials = {}
   } = config;
 
   if (authMiddleware) {
@@ -439,16 +449,16 @@ export function createAuthRoutes(authResource: AuthResource, config: AuthRoutesC
       }
 
       let token: string | null = null;
+      let refreshToken: string | undefined;
       if (jwtSecret) {
-        token = createToken(
-          {
-            userId: user.id,
-            [usernameField]: user[usernameField],
-            role: user.role
-          },
-          jwtSecret,
-          jwtExpiresIn
-        );
+        const tokenPayload = {
+          userId: user.id,
+          [usernameField]: user[usernameField],
+          role: user.role,
+          scopes: ((user as Record<string, unknown>).scopes as string[] | undefined) || []
+        };
+        token = createToken(tokenPayload, jwtSecret, jwtExpiresIn);
+        refreshToken = createRefreshToken(tokenPayload, jwtSecret, jwtRefreshExpiresIn);
       }
 
       if (loginThrottleConfig.enabled && throttleKey) {
@@ -458,6 +468,7 @@ export function createAuthRoutes(authResource: AuthResource, config: AuthRoutesC
       const response = formatter.success({
         user: buildPublicUser(user),
         token,
+        refreshToken,
         expiresIn: jwtExpiresIn
       });
 
@@ -467,21 +478,63 @@ export function createAuthRoutes(authResource: AuthResource, config: AuthRoutesC
 
   if (jwtSecret) {
     app.post('/token/refresh', asyncHandler(async (c: Context) => {
-      const user = c.get('user') as AuthUser | undefined;
+      const data = await c.req.json().catch(() => ({})) as Record<string, string>;
+      const refreshTokenValue = data.refreshToken || data.refresh_token;
 
+      if (refreshTokenValue) {
+        const payload = verifyRefreshToken(refreshTokenValue, jwtSecret);
+        if (!payload) {
+          const response = formatter.unauthorized('Invalid or expired refresh token');
+          return c.json(response, response._status as ContentfulStatusCode);
+        }
+
+        const userIdentifier = payload[usernameField] || payload.userId;
+        if (typeof userIdentifier === 'string' || typeof userIdentifier === 'number') {
+          const users = await authResource.query({ [usernameField]: userIdentifier });
+          const user = users[0];
+          if (!user || user.active === false || user.isActive === false) {
+            const response = formatter.unauthorized('User not found or inactive');
+            return c.json(response, response._status as ContentfulStatusCode);
+          }
+
+          const tokenPayload = {
+            userId: user.id,
+            [usernameField]: user[usernameField],
+            role: user.role,
+            scopes: ((user as Record<string, unknown>).scopes as string[] | undefined) || []
+          };
+
+          const newToken = createToken(tokenPayload, jwtSecret, jwtExpiresIn);
+          const newRefreshToken = createRefreshToken(tokenPayload, jwtSecret, jwtRefreshExpiresIn);
+
+          const response = formatter.success({
+            token: newToken,
+            refreshToken: newRefreshToken,
+            expiresIn: jwtExpiresIn
+          });
+          return c.json(response, response._status as ContentfulStatusCode);
+        }
+      }
+
+      const user = c.get('user') as AuthUser | undefined;
       if (!user) {
         const response = formatter.unauthorized('Authentication required');
         return c.json(response, response._status as ContentfulStatusCode);
       }
 
-      const token = createToken(
-        { userId: user.id, username: user.username, role: user.role },
-        jwtSecret,
-        jwtExpiresIn
-      );
+      const tokenPayload = {
+        userId: user.id,
+        [usernameField]: user[usernameField],
+        role: user.role,
+        scopes: ((user as Record<string, unknown>).scopes as string[] | undefined) || []
+      };
+
+      const token = createToken(tokenPayload, jwtSecret, jwtExpiresIn);
+      const refreshToken = createRefreshToken(tokenPayload, jwtSecret, jwtRefreshExpiresIn);
 
       const response = formatter.success({
         token,
+        refreshToken,
         expiresIn: jwtExpiresIn
       });
 
@@ -522,6 +575,120 @@ export function createAuthRoutes(authResource: AuthResource, config: AuthRoutesC
 
     return c.json(response, response._status as ContentfulStatusCode);
   }));
+
+  if (clientCredentials.enabled && jwtSecret) {
+    const ccExpiresIn = clientCredentials.expiresIn || '1h';
+    const ccDefaultScopes = clientCredentials.defaultScopes || [];
+
+    app.post('/token', asyncHandler(async (c: Context) => {
+      const contentType = c.req.header('content-type') || '';
+      let data: Record<string, string>;
+
+      if (contentType.includes('application/x-www-form-urlencoded')) {
+        const body = await c.req.text();
+        data = Object.fromEntries(new URLSearchParams(body));
+      } else {
+        data = await c.req.json() as Record<string, string>;
+      }
+
+      const grantType = data.grant_type;
+      if (grantType !== 'client_credentials') {
+        const response = formatter.error('Unsupported grant_type. Use "client_credentials"', {
+          status: 400,
+          code: 'UNSUPPORTED_GRANT_TYPE'
+        });
+        return c.json(response, response._status as ContentfulStatusCode);
+      }
+
+      const clientId = data.client_id;
+      const clientSecret = data.client_secret;
+
+      if (!clientId || !clientSecret) {
+        const response = formatter.validationError([
+          ...(!clientId ? [{ field: 'client_id', message: 'client_id is required' }] : []),
+          ...(!clientSecret ? [{ field: 'client_secret', message: 'client_secret is required' }] : [])
+        ]);
+        return c.json(response, response._status as ContentfulStatusCode);
+      }
+
+      let serviceUser: AuthUser | null = null;
+
+      const byApiKey = await authResource.query({ apiKey: clientId });
+      if (byApiKey.length > 0) {
+        const candidate = byApiKey[0]!;
+        const storedSecret = (candidate as Record<string, unknown>)[passwordField] as string | undefined;
+
+        if (storedSecret) {
+          let secretValid = false;
+          if (isBcryptHash(storedSecret)) {
+            secretValid = await verifyPassword(clientSecret, storedSecret);
+          } else {
+            secretValid = secureStringEquals(clientSecret, storedSecret);
+          }
+          if (secretValid) {
+            serviceUser = candidate;
+          }
+        }
+      }
+
+      if (!serviceUser) {
+        const byUsername = await authResource.query({ [usernameField]: clientId });
+        if (byUsername.length > 0) {
+          const candidate = byUsername[0]!;
+          const storedSecret = (candidate as Record<string, unknown>)[passwordField] as string | undefined;
+
+          if (storedSecret) {
+            let secretValid = false;
+            if (isBcryptHash(storedSecret)) {
+              secretValid = await verifyPassword(clientSecret, storedSecret);
+            } else {
+              secretValid = secureStringEquals(clientSecret, storedSecret);
+            }
+            if (secretValid) {
+              serviceUser = candidate;
+            }
+          }
+        }
+      }
+
+      if (!serviceUser) {
+        const response = formatter.unauthorized('Invalid client credentials');
+        return c.json(response, response._status as ContentfulStatusCode);
+      }
+
+      if (serviceUser.active === false || serviceUser.isActive === false) {
+        const response = formatter.unauthorized('Client account is inactive');
+        return c.json(response, response._status as ContentfulStatusCode);
+      }
+
+      const requestedScopes = data.scope ? data.scope.split(' ') : ccDefaultScopes;
+      const userScopes = ((serviceUser as Record<string, unknown>).scopes as string[] | undefined) || [];
+      const grantedScopes = requestedScopes.length > 0
+        ? requestedScopes.filter((s: string) => userScopes.includes(s) || userScopes.length === 0)
+        : userScopes.length > 0 ? userScopes : ccDefaultScopes;
+
+      const token = createToken(
+        {
+          sub: serviceUser.id,
+          client_id: clientId,
+          role: serviceUser.role || 'service',
+          scopes: grantedScopes,
+          grant_type: 'client_credentials'
+        },
+        jwtSecret,
+        ccExpiresIn
+      );
+
+      const response = formatter.success({
+        access_token: token,
+        token_type: 'Bearer',
+        expires_in: ccExpiresIn,
+        scope: grantedScopes.join(' ')
+      });
+
+      return c.json(response, response._status as ContentfulStatusCode);
+    }));
+  }
 
   return app;
 }

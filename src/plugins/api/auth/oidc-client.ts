@@ -1,7 +1,7 @@
 /**
  * OIDC Client Middleware for Resource Servers
  *
- * Validates RS256 JWT tokens issued by an OAuth2/OIDC Authorization Server.
+ * Validates JWT tokens (RS256/ES256+) issued by an OAuth2/OIDC Authorization Server.
  * Fetches and caches JWKS (public keys) from the issuer's /.well-known/jwks.json endpoint.
  *
  * @example
@@ -308,7 +308,7 @@ export class OIDCClient {
       const jwks = await response.json() as JWKS;
 
       for (const jwk of jwks.keys) {
-        if (jwk.kty === 'RSA' && jwk.use === 'sig' && jwk.kid) {
+        if ((jwk.kty === 'RSA' || jwk.kty === 'EC') && jwk.use === 'sig' && jwk.kid) {
           const publicKey = this.jwkToPem(jwk);
           this.keys.set(jwk.kid, publicKey);
         }
@@ -357,7 +357,7 @@ export class OIDCClient {
   }
 
   /**
-   * Verify RS256 JWT token
+   * Verify JWT token (RS256, RS384, RS512, ES256, ES384, ES512)
    */
   async verifyToken(token: string): Promise<TokenVerificationResult> {
     try {
@@ -370,7 +370,17 @@ export class OIDCClient {
 
       const header = JSON.parse(Buffer.from(encodedHeader!, 'base64url').toString()) as { alg: string; kid?: string };
 
-      if (header.alg !== 'RS256') {
+      const SUPPORTED_ALGORITHMS: Record<string, string> = {
+        'RS256': 'RSA-SHA256',
+        'RS384': 'RSA-SHA384',
+        'RS512': 'RSA-SHA512',
+        'ES256': 'SHA256',
+        'ES384': 'SHA384',
+        'ES512': 'SHA512'
+      };
+
+      const verifyAlg = SUPPORTED_ALGORITHMS[header.alg];
+      if (!verifyAlg) {
         return { valid: false, error: `Unsupported algorithm: ${header.alg}` };
       }
 
@@ -380,11 +390,13 @@ export class OIDCClient {
         return { valid: false, error: `Public key not found for kid: ${header.kid}` };
       }
 
-      const verify = createVerify('RSA-SHA256');
+      const verify = createVerify(verifyAlg);
       verify.update(`${encodedHeader}.${encodedPayload}`);
       verify.end();
 
-      const isValid = verify.verify(publicKey!, signature!, 'base64url');
+      const isValid = header.alg.startsWith('ES')
+        ? verify.verify({ key: publicKey!, dsaEncoding: 'ieee-p1363' }, signature!, 'base64url')
+        : verify.verify(publicKey!, signature!, 'base64url');
 
       if (!isValid) {
         return { valid: false, error: 'Invalid signature' };

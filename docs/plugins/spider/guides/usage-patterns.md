@@ -90,7 +90,7 @@ for (const link of links) {
 ```javascript
 const discoverer = new LinkDiscoverer({
   respectRobotsTxt: true,
-  robotsUserAgent: 'my-bot'
+  robotsUserAgent: '*'
 })
 
 // Async extraction checks robots.txt
@@ -129,7 +129,7 @@ const discoverer = new LinkDiscoverer({
 import { RobotsParser } from 's3db.js'
 
 const parser = new RobotsParser({
-  userAgent: 's3db-spider',
+  userAgent: '*',
   defaultAllow: true
 })
 
@@ -176,7 +176,7 @@ const allowed = await parser.isAllowed('https://example.com/page1')
 import { SitemapParser } from 's3db.js'
 
 const parser = new SitemapParser({
-  userAgent: 's3db-spider',
+  userAgent: '*',
   maxUrls: 50000
 })
 
@@ -370,7 +370,7 @@ for (const site of sites) {
 ### Respect Rate Limits
 
 ```javascript
-const parser = new RobotsParser({ userAgent: 'my-bot' })
+const parser = new RobotsParser()
 
 async function crawlWithRateLimit(urls) {
   for (const url of urls) {
@@ -393,6 +393,75 @@ async function crawlWithRateLimit(urls) {
     await crawlUrl(url)
   }
 }
+```
+
+### Block Detection & Anti-Bot Bypass
+
+```javascript
+import { HybridFetcher, CrawlContext } from 's3db.js'
+
+const context = new CrawlContext({
+  userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+  randomizeHeaders: true  // Vary browser fingerprint per request
+})
+
+const fetcher = new HybridFetcher({
+  context,
+  strategy: 'auto',
+  detectBlocks: true  // Enable Cloudflare/Akamai/WAF detection
+})
+
+const result = await fetcher.fetch('https://protected-site.com')
+
+if (result.blocked) {
+  console.log(`Blocked by: ${result.blockReason}`)  // 'cloudflare', 'akamai', 'datadome', ...
+  // In auto mode, fetcher already tried puppeteer fallback
+}
+
+if (result.captcha) {
+  console.log(`CAPTCHA detected: ${result.captchaProvider}`)  // 'recaptcha', 'hcaptcha', 'turnstile'
+}
+```
+
+### CSS Data Extraction
+
+```javascript
+const fetcher = new HybridFetcher({ strategy: 'auto' })
+
+// Extract structured data with CSS selectors
+const result = await fetcher.fetch('https://shop.example.com/product/123', {
+  extract: {
+    title: 'h1.product-title',
+    price: '.price-current',
+    description: 'meta[name="description"]',
+    rating: '.star-rating'
+  }
+})
+
+console.log(result.extracted)
+// { title: 'Product Name', price: '$29.99', description: '...', rating: '4.5' }
+
+// Or extract from any HTML string
+const data = await fetcher.extract(someHtml, {
+  links: 'nav a',
+  heading: 'h1'
+})
+```
+
+### Rate-Limited Crawling with RequestPool
+
+```javascript
+const spider = new SpiderPlugin({
+  rateLimit: {
+    concurrency: 3,          // Max 3 parallel requests
+    requestsPerInterval: 5,  // Max 5 requests per second
+    interval: 1000
+  },
+  discovery: {
+    enabled: true,
+    removeTrackingParams: true  // Clean utm_*, gclid, fbclid from URLs
+  }
+})
 ```
 
 ### CI/CD Integration

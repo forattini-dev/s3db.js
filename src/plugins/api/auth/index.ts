@@ -1,6 +1,6 @@
 import type { Context, Next, MiddlewareHandler } from '#src/plugins/shared/http-runtime.js';
 import type { DatabaseLike } from './resource-manager.js';
-import { createJWTHandler, createToken, verifyToken, type JWTConfig } from './jwt-auth.js';
+import { createJWTHandler, createToken, verifyToken, createRefreshToken, verifyRefreshToken, jwtRefresh, type JWTConfig } from './jwt-auth.js';
 import { createApiKeyHandler, generateApiKey, type ApiKeyConfig } from './api-key-auth.js';
 import { createBasicAuthHandler, type BasicAuthConfig } from './basic-auth.js';
 import { createOAuth2Handler, type OAuth2Config } from './oauth2-auth.js';
@@ -65,7 +65,7 @@ export async function createAuthMiddleware(options: AuthMiddlewareOptions): Prom
 
   const middlewares: AuthMethodEntry[] = [];
 
-  if (normalizedMethods.includes('jwt') && jwtConfig.secret) {
+  if (normalizedMethods.includes('jwt') && (jwtConfig.secret || jwtConfig.jwksUri)) {
     const jwtHandler = await createJWTHandler(jwtConfig, database);
     middlewares.push({
       name: 'jwt',
@@ -221,7 +221,8 @@ export async function createAuthMiddleware(options: AuthMiddlewareOptions): Prom
   };
 }
 
-export { OIDCClient, createToken, verifyToken, generateApiKey };
+export { OIDCClient, createToken, verifyToken, createRefreshToken, verifyRefreshToken, jwtRefresh, generateApiKey, createOAuth2Handler };
+export { clearJWKSCache } from './oauth2-auth.js';
 
 export default {
   createAuthMiddleware,
@@ -231,6 +232,9 @@ export default {
   createOAuth2Handler,
   createToken,
   verifyToken,
+  createRefreshToken,
+  verifyRefreshToken,
+  jwtRefresh,
   generateApiKey,
   OIDCClient
 };

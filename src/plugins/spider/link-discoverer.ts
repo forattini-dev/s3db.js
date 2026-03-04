@@ -2,6 +2,14 @@ import { RobotsParser } from './robots-parser.js';
 import { SitemapParser } from './sitemap-parser.js';
 import type { URLPatternMatcher, MatchResult } from './url-pattern-matcher.js';
 
+export const TRACKING_PARAMS = new Set([
+  'utm_source', 'utm_medium', 'utm_campaign', 'utm_term', 'utm_content',
+  'gclid', 'gclsrc', 'dclid', 'fbclid', 'fb_action_ids', 'fb_action_types',
+  'fb_source', 'fb_ref', 'msclkid', 'twclid', 'ref', 'referer', 'referrer',
+  'source', '_ga', '_gl', '_hsenc', '_hsmi', 'mc_cid', 'mc_eid',
+  'yclid', 'ymclid', 'igshid', '_t', 't', 'timestamp', 'ts', 'nocache', 'cache',
+]);
+
 export interface LinkDiscovererConfig {
   enabled?: boolean;
   maxDepth?: number;
@@ -16,6 +24,7 @@ export interface LinkDiscovererConfig {
   respectRobotsTxt?: boolean;
   ignoreQueryString?: boolean;
   ignoreHash?: boolean;
+  removeTrackingParams?: boolean;
   robotsUserAgent?: string;
   robotsCacheTimeout?: number;
   useSitemaps?: boolean;
@@ -92,6 +101,7 @@ export class LinkDiscoverer {
       respectRobotsTxt: config.respectRobotsTxt !== false,
       ignoreQueryString: config.ignoreQueryString || false,
       ignoreHash: config.ignoreHash !== false,
+      removeTrackingParams: config.removeTrackingParams !== false,
       robotsUserAgent: config.robotsUserAgent || 's3db-spider',
       robotsCacheTimeout: config.robotsCacheTimeout || 3600000,
       useSitemaps: config.useSitemaps !== false,
@@ -405,6 +415,13 @@ export class LinkDiscoverer {
 
     if (!this.config.ignoreQueryString && urlObj.search) {
       const params = new URLSearchParams(urlObj.search);
+      if (this.config.removeTrackingParams) {
+        for (const key of [...params.keys()]) {
+          if (TRACKING_PARAMS.has(key.toLowerCase())) {
+            params.delete(key);
+          }
+        }
+      }
       const sortedParams = new URLSearchParams([...params.entries()].sort());
       const queryString = sortedParams.toString();
       if (queryString) {

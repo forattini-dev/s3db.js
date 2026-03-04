@@ -92,6 +92,8 @@ export interface OAuth2Config {
   cacheTTL?: number;
   clockTolerance?: number;
   validateScopes?: boolean;
+  requiredScopes?: string[];
+  scopeMode?: 'any' | 'all';
   fetchUserInfo?: boolean;
   userMapping?: OAuth2UserMapping;
   introspection?: OAuth2IntrospectionConfig | null;
@@ -139,7 +141,10 @@ export async function createOAuth2Handler(
       username: 'preferred_username',
       role: 'role'
     },
-    introspection = null
+    introspection = null,
+    validateScopes = false,
+    requiredScopes = [],
+    scopeMode = 'any'
   } = config;
 
   if (!issuer) {
@@ -203,6 +208,14 @@ export async function createOAuth2Handler(
     return jwks;
   };
 
+  const checkScopes = (userScopes: string[]): boolean => {
+    if (!validateScopes || requiredScopes.length === 0) return true;
+    if (scopeMode === 'all') {
+      return requiredScopes.every((s) => userScopes.includes(s));
+    }
+    return requiredScopes.some((s) => userScopes.includes(s));
+  };
+
   return async (c: Context): Promise<OAuth2User | null> => {
     const authHeader = c.req.header('authorization') || c.req.header('Authorization');
 
@@ -260,12 +273,23 @@ export async function createOAuth2Handler(
           return null;
         }
 
+        const effectiveScopes = user.scopes || scopes;
+        if (!checkScopes(effectiveScopes)) {
+          logger.debug('OAuth2: insufficient scopes (JWT verify, DB user)');
+          return null;
+        }
+
         return {
           ...user,
-          scopes: user.scopes || scopes,
+          scopes: effectiveScopes,
           role: user.role || role,
           tokenClaims: payload
         };
+      }
+
+      if (!checkScopes(scopes)) {
+        logger.debug('OAuth2: insufficient scopes (JWT verify, virtual user)');
+        return null;
       }
 
       return {
@@ -356,12 +380,23 @@ export async function createOAuth2Handler(
             return null;
           }
 
+          const effectiveScopes = user.scopes || scopes;
+          if (!checkScopes(effectiveScopes)) {
+            logger.debug('OAuth2: insufficient scopes (introspection, DB user)');
+            return null;
+          }
+
           return {
             ...user,
-            scopes: user.scopes || scopes,
+            scopes: effectiveScopes,
             role: user.role || role,
             tokenClaims: data
           };
+        }
+
+        if (!checkScopes(scopes)) {
+          logger.debug('OAuth2: insufficient scopes (introspection, virtual user)');
+          return null;
         }
 
         return {
