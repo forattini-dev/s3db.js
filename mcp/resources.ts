@@ -1,4 +1,4 @@
-import { readFileSync } from 'fs';
+import { readFileSync, existsSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 
@@ -106,6 +106,12 @@ export const staticResources: MCPResource[] = [
     description: 'Summary of all available methods and their signatures',
     mimeType: 'text/markdown',
   },
+  {
+    uri: 's3db://best-practices',
+    name: 'Best Practices',
+    description: 'Best practices for behaviors, partitions, update methods, pagination, caching, and cost optimization',
+    mimeType: 'text/markdown',
+  },
 ];
 
 // =============================================================================
@@ -154,6 +160,10 @@ export function readResource(uri: string): MCPResourceContent | null {
 
       case 'api-summary':
         text = generateApiSummary();
+        break;
+
+      case 'best-practices':
+        text = generateBestPractices();
         break;
 
       case 'core':
@@ -224,21 +234,22 @@ Transform AWS S3 into a powerful document database with ORM-like interface.
 
 | Method | Description | Performance |
 |--------|-------------|-------------|
-| \`insert()\` | Insert document | Baseline |
-| \`get()\` | Get by ID | Fastest |
+| \`insert()\` | Insert document (atomic via ifNoneMatch) | Baseline |
+| \`get()\` | Get by ID | Fastest (single S3 call) |
 | \`update()\` | GET+PUT merge | Baseline |
-| \`patch()\` | HEAD+COPY merge | 40-60% faster |
-| \`replace()\` | PUT only | 30-40% faster |
-| \`list()\` | List with pagination | O(n) or O(1) with partitions |
+| \`patch()\` | HEAD+COPY merge | **40-60% faster** than update |
+| \`replace()\` | PUT only | **30-40% faster** than update |
+| \`page()\` | Cursor or page-number pagination | Recommended for pagination |
+| \`list()\` | List with limit/offset | O(n) or O(1) with partitions |
 | \`query()\` | Query with filters | O(n) or O(1) with partitions |
 
 ## Connection Strings
 
 \`\`\`
 s3://KEY:SECRET@bucket?region=us-east-1     # AWS S3
-http://KEY:SECRET@localhost:9000/bucket     # MinIO
-memory://bucket/path                        # MemoryClient (testing)
-file:///tmp/s3db                            # FileSystemClient (testing)
+http://KEY:SECRET@localhost:9000/bucket      # MinIO
+memory://bucket/path                         # MemoryClient (testing)
+file:///tmp/s3db                             # FileSystemClient (testing)
 \`\`\`
 
 ## Quick Example
@@ -260,15 +271,77 @@ const users = await db.createResource({
     bio: 'string',
   },
   behavior: 'body-overflow',
+  partitions: {
+    byEmail: { fields: { email: 'string' } }
+  }
 });
 
 await users.insert({ email: 'john@example.com', name: 'John Doe' });
 const user = await users.get('user-id');
 \`\`\`
 
-## Available Plugins
+## How to Learn
 
-${plugins.map(p => `- **${p.name}**: ${p.description}`).join('\n')}
+| What you need | Resource |
+|---------------|----------|
+| Best practices & decision guides | \`s3db://best-practices\` |
+| Plugin documentation (full README) | \`s3db://plugin/{name}\` (e.g., \`s3db://plugin/cache\`) |
+| Usage guides | \`s3db://guide/{topic}\` (getting-started, performance, testing, security) |
+| Field type reference | \`s3db://field-type/{type}\` (string, secret, embedding, ip4, etc.) |
+| Behavior reference | \`s3db://behavior/{name}\` (body-overflow, body-only, enforce-limits) |
+| Quick reference card | \`s3db://quick-reference\` |
+| API signatures | \`s3db://api-summary\` |
+| Search docs | \`s3dbSearchCoreDocs\` / \`s3dbSearchPluginDocs\` tools |
+
+## Decision Guide
+
+**Which behavior?** Start with \`body-overflow\`. Use \`body-only\` for large docs, \`enforce-limits\` for strict schemas.
+
+**Which update method?** \`patch()\` for partial updates (fastest), \`replace()\` for full replacement, \`update()\` when you need the merged result.
+
+**Need partitions?** Yes, if >100 docs AND you filter by specific fields. Define partitions on those fields.
+
+**Which pagination?** \`page()\` with cursor for sequential, \`page()\` with page number for random access. Avoid \`list()\` with large offsets.
+
+## Plugin Categories
+
+**Core** — Essential for most deployments:
+- **CachePlugin**: Memory/filesystem cache to reduce S3 calls
+- **CostsPlugin**: Track S3 API call costs
+- **TTLPlugin**: Auto-cleanup expired documents (O(1) partition-based)
+- **MetricsPlugin**: Prometheus-compatible metrics
+- **AuditPlugin**: Track all data changes
+
+**Data** — Advanced data capabilities:
+- **VectorPlugin**: Vector embeddings + similarity search (AI/RAG)
+- **FullTextPlugin**: Indexed text search with stemming
+- **GraphPlugin**: Graph relationships and traversal
+- **StateMachinePlugin**: State transitions with history
+- **RelationPlugin**: Resource relationships (1:N, N:M)
+- **TreePlugin**: Hierarchical data structures
+
+**Integration** — Connect with external systems:
+- **ApiPlugin**: REST API with OpenAPI docs, guards, rate limiting
+- **ReplicatorPlugin**: Sync to PostgreSQL/BigQuery/SQS
+- **WebSocketPlugin**: Real-time subscriptions
+- **SMTPPlugin**: Send emails
+- **IdentityPlugin**: Authentication (OAuth2, OIDC, API keys)
+
+**Utility** — Operations and automation:
+- **BackupPlugin**: Automated backups
+- **S3QueuePlugin**: Distributed job queue
+- **SchedulerPlugin**: Cron-like scheduling
+- **QueueConsumerPlugin**: Process queue messages
+- **ImporterPlugin**: Bulk data import
+
+**Specialized** — Domain-specific:
+- **SpiderPlugin**: Web crawling with hybrid HTTP/browser fetching
+- **PuppeteerPlugin**: Browser automation
+- **ReconPlugin**: OSINT and reconnaissance
+- **CloudInventoryPlugin**: Cloud resource inventory
+- **KubernetesInventoryPlugin**: K8s cluster inventory
+- **TfStatePlugin**: Terraform state management
+- **TournamentPlugin**: Tournament brackets and matchmaking
 `;
 }
 
@@ -307,21 +380,35 @@ const users = await db.createResource({
 \`\`\`javascript
 // Create
 const user = await users.insert({ email: 'john@example.com' });
+const many = await users.insertMany([{ email: 'a@b.com' }, { email: 'c@d.com' }]);
 
 // Read
 const user = await users.get(id);
+const batch = await users.getMany([id1, id2]);
 const all = await users.list({ limit: 100 });
+const ids = await users.listIds({ limit: 100 });
+const everything = await users.getAll();
 
 // Update
-await users.update(id, { name: 'John' });  // GET+PUT
-await users.patch(id, { name: 'John' });   // HEAD+COPY (faster)
-await users.replace(id, fullData);         // PUT only (fastest)
+await users.update(id, { name: 'John' });  // GET+PUT merge (baseline)
+await users.patch(id, { name: 'John' });   // HEAD+COPY merge (40-60% faster)
+await users.replace(id, fullData);          // PUT only (30-40% faster)
+await users.upsert({ id, name: 'John' });  // Insert or update
 
 // Delete
 await users.delete(id);
+await users.deleteMany([id1, id2]);
+await users.deleteAll();
 
-// Query
+// Query & Count
 const active = await users.query({ status: 'active' });
+const count = await users.count();
+const exists = await users.exists(id);
+
+// Pagination (cursor-based or page-number)
+const page1 = await users.page({ size: 20 });
+const page2 = await users.page({ size: 20, cursor: page1.nextCursor });
+const pageN = await users.page({ size: 20, page: 3 });
 \`\`\`
 
 ## Partitions (O(1) queries)
@@ -378,28 +465,37 @@ class Database {
 
 \`\`\`typescript
 class Resource {
-  // CRUD
+  // Create
   insert(data: object): Promise<object>
+  insertMany(items: object[]): Promise<object[]>
+
+  // Read
   get(id: string): Promise<object | null>
-  update(id: string, data: object): Promise<object>
-  patch(id: string, data: object): Promise<object>  // HEAD+COPY (faster)
-  replace(id: string, data: object): Promise<object>  // PUT only (fastest)
-  delete(id: string): Promise<void>
+  getMany(ids: string[]): Promise<object[]>
+  getAll(): Promise<object[]>
+  exists(id: string): Promise<boolean>
+
+  // Update
+  update(id: string, data: object): Promise<object>    // GET+PUT merge (baseline)
+  patch(id: string, data: object): Promise<object>      // HEAD+COPY merge (40-60% faster)
+  replace(id: string, data: object): Promise<object>    // PUT only (30-40% faster)
   upsert(data: object): Promise<object>
+
+  // Delete
+  delete(id: string): Promise<void>
+  deleteMany(ids: string[]): Promise<void>
+  deleteAll(): Promise<void>
 
   // Query
   list(options?: ListOptions): Promise<object[]>
+  listIds(options?: ListOptions): Promise<string[]>
+  page(options?: PageOptions): Promise<PageResult>
   query(filters: object, options?: QueryOptions): Promise<object[]>
-  count(): Promise<number>
+  count(options?: CountOptions): Promise<number>
 
   // Partitions
   listPartition(name: string, values: object): Promise<object[]>
   getFromPartition(name: string, values: object, id: string): Promise<object>
-
-  // Bulk
-  bulkInsert(items: object[]): Promise<object[]>
-  bulkUpdate(filters: object, updates: object): Promise<number>
-  bulkDelete(filters: object): Promise<number>
 
   // Streaming
   stream(options?: StreamOptions): AsyncIterable<object>
@@ -421,11 +517,35 @@ class Resource {
 interface ListOptions {
   limit?: number
   offset?: number
-  sort?: { field: string, order: 'asc' | 'desc' }
+  partition?: string
+  partitionValues?: Record<string, any>
 }
 
-interface QueryOptions extends ListOptions {
-  filters?: Record<string, any>
+interface PageOptions {
+  size?: number          // Page size (default: 20)
+  cursor?: string        // Cursor from previous result (for cursor-based)
+  page?: number          // Page number, 1-based (for page-number)
+  partition?: string
+  partitionValues?: Record<string, any>
+  skipCount?: boolean    // Skip total count for faster queries
+}
+
+interface PageResult {
+  data: object[]
+  nextCursor?: string    // Cursor for next page (null if last page)
+  totalCount?: number    // Total documents (omitted if skipCount)
+  pageSize: number
+}
+
+interface QueryOptions {
+  limit?: number
+  partition?: string
+  partitionValues?: Record<string, any>
+}
+
+interface CountOptions {
+  partition?: string
+  partitionValues?: Record<string, any>
 }
 
 interface ResourceConfig {
@@ -440,6 +560,167 @@ interface ResourceConfig {
 interface PartitionConfig {
   fields: Record<string, string>
 }
+\`\`\`
+`;
+}
+
+function generateBestPractices(): string {
+  return `# s3db.js Best Practices
+
+## 1. Behavior Selection
+
+S3 has a **2KB metadata limit**. Choose a behavior based on your data size:
+
+| Behavior | When to Use | Trade-off |
+|----------|-------------|-----------|
+| \`body-overflow\` | **Default choice.** Most data fits in metadata, large docs overflow to body | Balanced — fast reads for small docs, works for all sizes |
+| \`body-only\` | Documents always >2KB (blog posts, logs with details, JSON blobs) | Always uses GET (body read), slightly slower for small docs |
+| \`enforce-limits\` | Production schemas where you KNOW data is <2KB | Rejects oversized data — safest for strict schemas |
+| \`truncate-data\` | Logs, previews, analytics where data loss is acceptable | **DATA LOSS** — truncates to fit 2KB |
+| \`user-managed\` | Custom handling via events | You handle overflow yourself |
+
+**Rule of thumb:** Start with \`body-overflow\`. Switch to \`body-only\` if most documents are >2KB. Use \`enforce-limits\` in production for small, fixed schemas.
+
+## 2. Partitions (Critical for Performance)
+
+Without partitions, **every query scans ALL objects** — O(n). With partitions, queries become O(1).
+
+**When to create partitions:**
+- Resource will have >100 documents
+- You filter by specific fields (\`status\`, \`type\`, \`userId\`, \`category\`)
+- You need fast lookups on non-ID fields
+
+**How to design partitions:**
+\`\`\`javascript
+const orders = await db.createResource({
+  name: 'orders',
+  attributes: {
+    status: 'string|required',
+    customerId: 'string|required',
+    total: 'number',
+  },
+  partitions: {
+    byStatus: { fields: { status: 'string' } },         // "pending", "shipped", "delivered"
+    byCustomer: { fields: { customerId: 'string' } },    // Per-customer lookup
+  },
+  behavior: 'body-overflow',
+});
+
+// O(1) instead of O(n):
+const pending = await orders.list({ partition: 'byStatus', partitionValues: { status: 'pending' } });
+\`\`\`
+
+**Composite partitions** for multi-field filtering:
+\`\`\`javascript
+partitions: {
+  byStatusAndCustomer: { fields: { status: 'string', customerId: 'string' } }
+}
+\`\`\`
+
+## 3. Update Methods
+
+| Method | Mechanism | Speed | Use When |
+|--------|-----------|-------|----------|
+| \`patch(id, data)\` | HEAD + COPY | **40-60% faster** | Partial updates (change 1-2 fields) |
+| \`update(id, data)\` | GET + PUT | Baseline | Need the full merged document back |
+| \`replace(id, data)\` | PUT only | **30-40% faster** | Full document replacement (you have all fields) |
+
+**Rule of thumb:** Use \`patch()\` for partial updates, \`replace()\` when you have the complete document, \`update()\` when you need the merged result.
+
+## 4. Pagination
+
+\`\`\`javascript
+// GOOD: Cursor-based pagination (efficient, consistent)
+const page1 = await resource.page({ size: 20 });
+const page2 = await resource.page({ size: 20, cursor: page1.nextCursor });
+
+// GOOD: Page-number pagination (random access)
+const page3 = await resource.page({ size: 20, page: 3 });
+
+// AVOID: list() with offset for large datasets (scans all objects)
+const items = await resource.list({ limit: 20, offset: 100 }); // Slow on large datasets
+\`\`\`
+
+## 5. ID Strategies
+
+\`\`\`javascript
+// UUID (default) — universally unique, no coordination needed
+idGenerator: 'uuid'
+
+// Incremental — human-readable, sequential
+idGenerator: 'incremental'           // 1, 2, 3...
+idGenerator: 'incremental:1000'      // Start at 1000
+idGenerator: 'incremental:ORD-0001'  // Prefixed: ORD-0001, ORD-0002...
+idGenerator: 'incremental:fast'      // Batch mode (~1ms/ID)
+
+// Custom ID — use email, slug, etc. as ID for O(1) lookups
+await users.insert({ id: 'daniel@tetis.io', name: 'Daniel' });
+await users.get('daniel@tetis.io'); // O(1) direct lookup
+\`\`\`
+
+## 6. Caching
+
+Use \`CachePlugin\` in production to reduce S3 API calls and costs:
+\`\`\`javascript
+import { CachePlugin } from 's3db.js';
+
+db.use(new CachePlugin({
+  driver: 'memory',         // or FilesystemCache for persistence
+  memoryOptions: {
+    maxSize: 1000,          // Max items in cache
+    ttl: 300000,            // 5 minutes TTL
+  },
+  includePartitions: true,  // Cache partition lookups too
+}));
+\`\`\`
+
+## 7. Cost Optimization
+
+- Use \`CostsPlugin\` to track S3 API call costs
+- \`patch()\` over \`update()\` saves 1 GET per update (HEAD is cheaper)
+- Partitions avoid full scans (1 LIST vs N GETs)
+- Cache frequently accessed data
+- Use \`page()\` with \`skipCount: true\` when total count is not needed
+
+## 8. Testing
+
+| Client | Use Case | Notes |
+|--------|----------|-------|
+| \`FileSystemClient\` | **Default for tests** | Safe parallelism, isolated directories |
+| \`MemoryClient\` | Single-file tests only | RAM explosion risk with many objects |
+| \`S3Client\` | Integration tests | Real S3/MinIO connection |
+
+\`\`\`javascript
+// Test with FileSystemClient
+const db = new Database({ connectionString: 'file:///tmp/test-db' });
+
+// Test with MemoryClient (single test only)
+const db = new Database({ connectionString: 'memory://test-bucket' });
+\`\`\`
+
+## 9. Schema Design
+
+- \`secret\` fields are AES-256-GCM encrypted at rest
+- \`embedding:N\` fields get 77% compression (for AI vectors)
+- Nested objects auto-detect: \`profile: { bio: 'string', age: 'number' }\`
+- Use \`|required\` for mandatory fields: \`email: 'email|required'\`
+- Use \`|default:value\` for defaults: \`active: 'bool|default:true'\`
+
+## 10. Hooks for Common Patterns
+
+\`\`\`javascript
+// Auto-timestamps
+resource.beforeInsert(async (data) => {
+  data.createdAt = new Date().toISOString();
+  return data;
+});
+
+resource.beforeUpdate(async (data) => {
+  data.updatedAt = new Date().toISOString();
+  return data;
+});
+
+// Or use timestamps: true in resource config (automatic)
 \`\`\`
 `;
 }
@@ -614,11 +895,65 @@ await db.connect();
 `;
 }
 
+const PLUGIN_DIR_MAP: Record<string, string> = {
+  cache: 'cache',
+  api: 'api',
+  audit: 'audit',
+  ttl: 'ttl',
+  vector: 'vector',
+  geo: 'geo',
+  replicator: 'replicator',
+  metrics: 'metrics',
+  backup: 'backup',
+  scheduler: 'scheduler',
+  fulltext: 'fulltext',
+  s3queue: 's3-queue',
+  queue: 's3-queue',
+  eventualconsistency: 'eventual-consistency',
+  websocket: 'websocket',
+  graph: 'graph',
+  statemachine: 'state-machine',
+  ml: 'ml',
+  puppeteer: 'puppeteer',
+  spider: 'spider',
+  costs: 'costs',
+  smtp: 'smtp',
+  cloudinventory: 'cloud-inventory',
+  kubernetesinventory: 'kubernetes-inventory',
+  identity: 'identity',
+  tree: 'tree',
+  coordinator: 'coordinator',
+  tournament: 'tournament',
+  cookiefarm: 'cookie-farm',
+  queueconsumer: 'queue-consumer',
+  importer: 'importer',
+  tfstate: 'tfstate',
+  recon: 'recon',
+  relation: 'relation',
+};
+
+function resolvePluginDir(name: string): string | null {
+  const normalized = name.toLowerCase().replace(/plugin$/i, '').replace(/[-_\s]/g, '');
+  return PLUGIN_DIR_MAP[normalized] || null;
+}
+
 function generatePluginDoc(name: string): string {
   const plugin = getPluginByName(name);
   if (!plugin) {
     const availablePlugins = plugins.map(p => p.name.replace('Plugin', '').toLowerCase()).join(', ');
     return `# Plugin: ${name}\n\nPlugin not found. Available plugins: ${availablePlugins}`;
+  }
+
+  const dirName = resolvePluginDir(name);
+  if (dirName) {
+    const readmePath = join(DOCS_ROOT, 'plugins', dirName, 'README.md');
+    if (existsSync(readmePath)) {
+      try {
+        return readFileSync(readmePath, 'utf-8');
+      } catch {
+        // Fall through to generated stub
+      }
+    }
   }
 
   const configTable = plugin.configOptions.length > 0

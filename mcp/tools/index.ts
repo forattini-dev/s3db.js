@@ -12,7 +12,7 @@ import { partitionTools, createPartitionHandlers } from './partitions.js';
 import { bulkTools, createBulkHandlers } from './bulk.js';
 import { exportImportTools, createExportImportHandlers } from './export-import.js';
 import { statsTools, createStatsHandlers } from './stats.js';
-import { documentationTools, createDocumentationHandlers } from './documentation.js';
+import { docsSearchTools, createDocsSearchHandlers } from './docs-search.js';
 import type { S3dbMCPServer } from '../entrypoint.js';
 
 /**
@@ -20,7 +20,7 @@ import type { S3dbMCPServer } from '../entrypoint.js';
  */
 export function getAllTools(): any[] {
   return [
-    ...documentationTools,
+    ...docsSearchTools,
     ...connectionTools,
     ...resourceManagementTools,
     ...crudTools,
@@ -40,7 +40,7 @@ export function getAllTools(): any[] {
  */
 export function createAllHandlers(server: S3dbMCPServer): Record<string, Function> {
   return {
-    ...createDocumentationHandlers(server),
+    ...createDocsSearchHandlers(server),
     ...createConnectionHandlers(server),
     ...createResourceManagementHandlers(server),
     ...createCrudHandlers(server),
@@ -58,7 +58,7 @@ export function createAllHandlers(server: S3dbMCPServer): Record<string, Functio
  */
 export function getToolsByCategory(): Record<string, any[]> {
   return {
-    documentation: documentationTools,
+    docsSearch: docsSearchTools,
     connection: connectionTools,
     resources: resourceManagementTools,
     crud: crudTools,

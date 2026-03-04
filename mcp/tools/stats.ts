@@ -1,12 +1,11 @@
 import type { S3dbMCPServer } from '../entrypoint.js';
 import type { DbClearCacheArgs, ResourceGetStatsArgs, CacheGetStatsArgs } from '../types/index.js';
-import type { S3db } from '../../database.class.js';
-import type { CachePlugin } from '../../dist/s3db.es.js'; // Assuming it's typed
+import type { S3db, CachePlugin } from '../../src/index.js';
 
 export const statsTools = [
   {
     name: 'dbGetStats',
-    description: 'Get database statistics including costs and cache performance',
+    description: 'Get database statistics: S3 API call costs (via CostsPlugin), cache hit/miss ratios, resource counts. Use to monitor costs and optimize.',
     inputSchema: {
       type: 'object',
       properties: {},
@@ -29,7 +28,7 @@ export const statsTools = [
   },
   {
     name: 'resourceGetStats',
-    description: 'Get detailed statistics for a specific resource',
+    description: 'Get detailed resource statistics: document count, schema info, partition stats. Use to understand resource size and partition distribution.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -48,7 +47,7 @@ export const statsTools = [
   },
   {
     name: 'cacheGetStats',
-    description: 'Get detailed cache statistics including hit/miss ratios and memory usage',
+    description: 'Get detailed cache statistics: hit/miss ratios, memory usage, keys per resource. Use to verify cache is working and tune TTL/maxSize.',
     inputSchema: {
       type: 'object',
       properties: {

@@ -1,11 +1,11 @@
 import type { S3dbMCPServer } from '../entrypoint.js';
 import type { DbCreateResourceArgs } from '../types/index.js';
-import type { S3db } from '../../database.class.js';
+import type { S3db } from '../../src/index.js';
 
 export const resourceManagementTools = [
   {
     name: 'dbCreateResource',
-    description: 'Create a new resource (collection/table) in the database',
+    description: 'Create a resource (collection/table). Key decisions: behavior (body-overflow default, handles 2KB S3 metadata limit), partitions (define on queried fields for O(1) lookups), timestamps (auto createdAt/updatedAt). Read s3db://best-practices for guidance.',
     inputSchema: {
       type: 'object',
       properties: {

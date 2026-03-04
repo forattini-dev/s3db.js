@@ -6,14 +6,15 @@ import type {
   ResourceCountArgs,
   ResourceUpdateArgs,
   ResourceUpsertArgs,
-  ResourceDeleteArgs
+  ResourceDeleteArgs,
+  ResourcePageArgs
 } from '../types/index.js';
-import type { S3db } from '../../database.class.js';
+import type { S3db } from '../../src/index.js';
 
 export const crudTools = [
   {
     name: 'resourceInsert',
-    description: 'Insert a new document into a resource',
+    description: 'Insert a new document (atomic via ifNoneMatch — no duplicate ID race conditions). ID is auto-generated unless provided in data.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -94,7 +95,7 @@ export const crudTools = [
   },
   {
     name: 'resourceUpdate',
-    description: 'Update a document in a resource',
+    description: 'Update via GET+PUT merge (baseline speed). For partial updates, prefer resourcePatch (40-60% faster, HEAD+COPY). For full replacement, prefer resourceReplace (30-40% faster, PUT only).',
     inputSchema: {
       type: 'object',
       properties: {
@@ -197,7 +198,7 @@ export const crudTools = [
   },
   {
     name: 'resourceList',
-    description: 'List documents in a resource with pagination and filtering',
+    description: 'List documents (O(n) scan without partitions). For large datasets, provide partition + partitionValues for O(1) lookup. For paginated access, prefer resourcePage with cursor.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -275,7 +276,7 @@ export const crudTools = [
   },
   {
     name: 'resourceGetAll',
-    description: 'Get all documents from a resource (use with caution on large datasets)',
+    description: 'Get ALL documents from a resource. WARNING: loads everything into memory. Use resourceList with pagination or resourcePage for large datasets.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -303,6 +304,46 @@ export const crudTools = [
         }
       },
       required: ['resourceName', 'confirm']
+    }
+  },
+  {
+    name: 'resourcePage',
+    description: 'Paginate documents using cursor-based or page-number pagination. Use cursor for sequential access or page for random access. Returns nextCursor for cursor-based navigation.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        resourceName: {
+          type: 'string',
+          description: 'Name of the resource'
+        },
+        size: {
+          type: 'number',
+          description: 'Page size (default: 20)',
+          default: 20
+        },
+        cursor: {
+          type: 'string',
+          description: 'Cursor from previous page result (null/omit for first page)'
+        },
+        page: {
+          type: 'number',
+          description: 'Page number (1-based) for page-number pagination'
+        },
+        partition: {
+          type: 'string',
+          description: 'Partition name to filter by'
+        },
+        partitionValues: {
+          type: 'object',
+          description: 'Partition values for filtering'
+        },
+        skipCount: {
+          type: 'boolean',
+          description: 'Skip total count for faster queries',
+          default: false
+        }
+      },
+      required: ['resourceName']
     }
   }
 ];
@@ -581,6 +622,22 @@ export function createCrudHandlers(server: S3dbMCPServer) {
         success: true,
         message: `All documents deleted from ${resourceName}`
       };
+    },
+
+    async resourcePage(args: ResourcePageArgs, database: S3db): Promise<any> {
+      server.ensureConnected(database);
+      const { resourceName, size = 20, cursor, page, partition, partitionValues, skipCount } = args;
+
+      const resource = server.getResource(database, resourceName);
+      const options: any = { size };
+      if (cursor !== undefined) options.cursor = cursor;
+      if (page !== undefined) options.page = page;
+      if (partition) options.partition = partition;
+      if (partitionValues) options.partitionValues = partitionValues;
+      if (skipCount) options.skipCount = skipCount;
+
+      const result = await resource.page(options);
+      return { success: true, ...result };
     }
   };
 }

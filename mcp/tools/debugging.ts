@@ -1,11 +1,11 @@
 import type { S3dbMCPServer } from '../entrypoint.js';
 import type { DbInspectResourceArgs, ResourceValidateArgs, DbHealthCheckArgs, DbGetRawArgs } from '../types/index.js';
-import type { S3db } from '../../database.class.js';
+import type { S3db } from '../../src/index.js';
 
 export const debuggingTools = [
   {
     name: 'dbInspectResource',
-    description: 'Inspect detailed information about a resource including schema, partitions, behaviors, and configuration',
+    description: 'Inspect full resource config: schema, partitions, behavior, hooks, S3 paths. Use to debug issues or understand how a resource is set up.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -46,7 +46,7 @@ export const debuggingTools = [
   },
   {
     name: 'dbHealthCheck',
-    description: 'Perform comprehensive health check on database including orphaned partitions detection',
+    description: 'Health check: detect orphaned partitions, verify connectivity, report resource configs. Run after schema changes or to diagnose issues.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -61,7 +61,7 @@ export const debuggingTools = [
   },
   {
     name: 'resourceGetRaw',
-    description: 'Get raw S3 object data (metadata + body) for debugging',
+    description: 'Get raw S3 object (metadata + body) for debugging. Shows whether data lives in metadata (HEAD) or body (GET). Use to diagnose behavior and encoding issues.',
     inputSchema: {
       type: 'object',
       properties: {

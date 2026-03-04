@@ -4,7 +4,7 @@
  */
 
 import { readFileSync, readdirSync, statSync, existsSync, mkdirSync, rmSync } from 'fs';
-import { join, dirname, basename } from 'path';
+import { join, dirname, basename, relative } from 'path';
 import { fileURLToPath } from 'url';
 import { homedir } from 'os';
 import { execSync } from 'child_process';

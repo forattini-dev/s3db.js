@@ -1,6 +1,6 @@
 import type { S3dbMCPServer } from '../entrypoint.js';
 import type { ResourceUpdateManyArgs, ResourceBulkUpsertArgs } from '../types/index.js';
-import type { S3db } from '../../database.class.js';
+import type { S3db } from '../../src/index.js';
 
 export const bulkTools = [
   {

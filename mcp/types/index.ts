@@ -65,6 +65,16 @@ export interface ResourceDeleteArgs {
   id: string;
 }
 
+export interface ResourcePageArgs {
+  resourceName: string;
+  size?: number;
+  cursor?: string;
+  page?: number;
+  partition?: string;
+  partitionValues?: Record<string, any>;
+  skipCount?: boolean;
+}
+
 export interface ResourceUpdateManyArgs {
   resourceName: string;
   filters: Record<string, any>;

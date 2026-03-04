@@ -9,7 +9,6 @@ import {
   ReadResourceRequestSchema,
   ListPromptsRequestSchema,
   GetPromptRequestSchema,
-  CompleteRequestSchema,
 } from '@modelcontextprotocol/sdk/types.js';
 import { S3db, CachePlugin, CostsPlugin } from '../src/index.js';
 import { FilesystemCache } from '../src/plugins/cache/filesystem-cache.class.js';
@@ -28,13 +27,8 @@ import { createBulkHandlers, bulkTools } from './tools/bulk.js';
 import { createExportImportHandlers, exportImportTools } from './tools/export-import.js';
 import { createStatsHandlers, statsTools } from './tools/stats.js';
 import { createDocsSearchHandlers, docsSearchTools, preloadSearch } from './tools/docs-search.js';
-import { createDocumentationHandlers, documentationTools } from './tools/documentation.js';
-
-// MCP Resources, Prompts, and Completions
 import { resourceTemplates, listResources, readResource } from './resources.js';
 import { prompts, getPrompt } from './prompts.js';
-import { complete, completeToolArgument } from './completions.js';
-
 import type { TransportArgs } from './types/index.js';
 
 config({ quiet: true });
@@ -48,6 +42,51 @@ let database: S3db | null = null;
 // Server configuration
 const SERVER_NAME = 's3db-mcp';
 const SERVER_VERSION = '1.0.0';
+
+const SERVER_INSTRUCTIONS = `s3db.js — S3-based document database with ORM-like interface. Turns AWS S3 (or MinIO) into a queryable database with schema validation, partitions, encryption, and 26+ plugins.
+
+## Workflow
+1. \`dbConnect\` with a connection string (MUST call first)
+2. \`dbCreateResource\` to define collections with schema + behavior + partitions
+3. CRUD: \`resourceInsert\`, \`resourceGet\`, \`resourceUpdate\`, \`resourceDelete\`, etc.
+
+## Key Constraints
+- **2KB metadata limit**: S3 allows only 2KB of user-defined metadata per object. Choose a behavior to handle this:
+  - \`body-overflow\` (default): small data in metadata, large overflows to body
+  - \`body-only\`: always store in body (large documents)
+  - \`enforce-limits\`: reject data >2KB (strict validation)
+  - \`truncate-data\`: accept data loss (logs, previews)
+- **No indexes**: S3 has no native indexing. Without partitions, queries scan ALL objects O(n). Define partitions on queried fields for O(1) lookups.
+- **Atomic insert**: \`insert()\` uses \`ifNoneMatch\` — no duplicate ID race conditions.
+
+## Performance Tips
+- \`patch()\` is 40-60% faster than \`update()\` (HEAD+COPY vs GET+PUT) — use for partial updates
+- \`replace()\` is 30-40% faster than \`update()\` (PUT only) — use for full replacement
+- \`page()\` with cursor for pagination, not \`list()\` with offset
+- Define partitions on fields you filter by (\`status\`, \`type\`, \`userId\`, etc.)
+
+## Learning Resources
+- Read \`s3db://overview\` for full capabilities and plugin list
+- Read \`s3db://best-practices\` for behavior selection, partitions, update methods, caching
+- Read \`s3db://plugin/{name}\` for detailed plugin docs (cache, api, audit, ttl, vector, etc.)
+- Read \`s3db://guide/{topic}\` for guides (getting-started, performance, testing, security)
+- Use \`s3dbSearchCoreDocs\` / \`s3dbSearchPluginDocs\` to search documentation
+
+## Plugins (26+)
+**Core**: CachePlugin, CostsPlugin, TTLPlugin, MetricsPlugin, AuditPlugin
+**Data**: VectorPlugin, FullTextPlugin, GraphPlugin, StateMachinePlugin, RelationPlugin, TreePlugin
+**Integration**: ApiPlugin, ReplicatorPlugin, WebSocketPlugin, SMTPPlugin, IdentityPlugin
+**Utility**: BackupPlugin, S3QueuePlugin, SchedulerPlugin, QueueConsumerPlugin, ImporterPlugin
+**Specialized**: SpiderPlugin, PuppeteerPlugin, ReconPlugin, CloudInventoryPlugin, KubernetesInventoryPlugin, TfStatePlugin
+
+## Connection Strings
+\`\`\`
+s3://KEY:SECRET@bucket?region=us-east-1     # AWS S3
+http://KEY:SECRET@localhost:9000/bucket      # MinIO
+memory://bucket/path                         # Testing (MemoryClient)
+file:///tmp/s3db                             # Testing (FileSystemClient)
+\`\`\`
+`;
 
 export class S3dbMCPServer {
   private server: Server;
@@ -66,14 +105,13 @@ export class S3dbMCPServer {
           prompts: { listChanged: true },
           logging: {},
         },
+        instructions: SERVER_INSTRUCTIONS,
       }
     );
 
     this.allToolHandlers = this.setupToolHandlers();
     this.setupResourceHandlers();
     this.setupPromptHandlers();
-    // Note: Completions not supported by current MCP SDK version
-    // this.setupCompletionHandlers();
     this.setupTransport();
   }
 
@@ -92,7 +130,6 @@ export class S3dbMCPServer {
           ...bulkTools,
           ...exportImportTools,
           ...statsTools,
-          ...documentationTools, // Legacy
         ]
       };
     });
@@ -108,7 +145,6 @@ export class S3dbMCPServer {
       ...createExportImportHandlers(this),
       ...createStatsHandlers(this),
       ...createDocsSearchHandlers(this),
-      ...createDocumentationHandlers(this), // Legacy
     };
 
     // Handle tool calls
@@ -121,6 +157,16 @@ export class S3dbMCPServer {
           throw new Error(`Unknown tool: ${name}`);
         }
         const result = await handler(args, database, { S3db, CachePlugin, CostsPlugin, FilesystemCache });
+
+        // Update global database state from connection handlers
+        if (result?.database instanceof S3db) {
+          database = result.database;
+          delete result.database;
+        }
+        if (result?.clearDatabase) {
+          database = null;
+          delete result.clearDatabase;
+        }
 
         return {
           content: [
@@ -217,19 +263,6 @@ export class S3dbMCPServer {
           role: m.role,
           content: m.content,
         })),
-      };
-    });
-  }
-
-  setupCompletionHandlers(): void {
-    // Handle completion requests for prompts and resources
-    this.server.setRequestHandler(CompleteRequestSchema, async (request) => {
-      const { ref, argument } = request.params;
-
-      const result = complete({ ref, argument });
-
-      return {
-        completion: result,
       };
     });
   }

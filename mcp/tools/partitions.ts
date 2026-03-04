@@ -1,5 +1,5 @@
 import type { S3dbMCPServer } from '../entrypoint.js';
-import type { S3db } from '../../database.class.js';
+import type { S3db } from '../../src/index.js';
 import type {
   ResourceListPartitionsArgs,
   ResourceListPartitionValuesArgs,
@@ -10,7 +10,7 @@ import type {
 export const partitionTools = [
   {
     name: 'resourceListPartitions',
-    description: 'List all partitions defined for a resource',
+    description: 'List all partitions defined for a resource. Partitions enable O(1) lookups on specific fields instead of O(n) full scans.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -24,7 +24,7 @@ export const partitionTools = [
   },
   {
     name: 'resourceListPartitionValues',
-    description: 'List unique values for a specific partition field',
+    description: 'List unique values for a partition field. Use to discover what partition values exist (e.g., all unique statuses, categories, userIds).',
     inputSchema: {
       type: 'object',
       properties: {

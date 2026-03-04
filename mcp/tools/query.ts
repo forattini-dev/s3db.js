@@ -1,11 +1,11 @@
 import type { S3dbMCPServer } from '../entrypoint.js';
 import type { ResourceQueryArgs } from '../types/index.js';
-import type { S3db } from '../../database.class.js';
+import type { S3db } from '../../src/index.js';
 
 export const queryTools = [
   {
     name: 'resourceQuery',
-    description: 'Query documents with complex filters and conditions',
+    description: 'Query documents with filters (e.g., {status: "active", age: {$gt: 18}}). O(n) scan without partitions — define partitions on frequently queried fields for O(1) performance.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -33,7 +33,7 @@ export const queryTools = [
   },
   {
     name: 'resourceSearch',
-    description: 'Search for documents by text in specific fields',
+    description: 'Text search across string fields (in-memory scan). For production full-text search with stemming and indexing, consider FullTextPlugin instead.',
     inputSchema: {
       type: 'object',
       properties: {

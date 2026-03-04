@@ -1,13 +1,12 @@
 import type { S3dbMCPServer } from '../entrypoint.js';
 import type { DbConnectArgs } from '../types/index.js';
-import type { S3db } from '../../database.class.js'; // Assuming S3db is Database
-import type { CachePlugin, CostsPlugin } from '../../dist/s3db.es.js'; // Assuming S3db and plugins are typed
-import type { FilesystemCache } from '../../src/plugins/cache/filesystem-cache.class.js'; // Assuming it's typed
+import type { S3db, CachePlugin, CostsPlugin } from '../../src/index.js';
+import type { FilesystemCache } from '../../src/plugins/cache/filesystem-cache.class.js';
 
 export const connectionTools = [
   {
     name: 'dbConnect',
-    description: 'Connect to an S3DB database with automatic costs tracking and configurable cache (memory or filesystem)',
+    description: 'Connect to S3DB database (MUST call first before any other operation). Connection string formats: s3://key:secret@bucket (AWS S3), http://key:secret@host:9000/bucket (MinIO), memory://bucket (testing), file:///path (testing). Auto-enables CostsPlugin and CachePlugin.',
     inputSchema: {
       type: 'object',
       properties: {
