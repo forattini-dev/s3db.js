@@ -1,6 +1,10 @@
 import { createDatabaseForTest, sleep } from '../../config.js';
 import { TTLPlugin } from '../../../src/plugins/ttl.plugin.js';
 
+function uid() {
+  return `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
 describe('TTLPlugin v2 - Callback Strategy', () => {
   test('should keep record and index when callback returns false', async () => {
     const db = createDatabaseForTest('ttl-v2-callback-false');
@@ -27,15 +31,16 @@ describe('TTLPlugin v2 - Callback Strategy', () => {
 
     await plugin.install(db);
 
-    await items.insert({ id: 'cb-1', name: 'keep-me' });
-    await sleep(1500);
+    const id = `cb-keep-${uid()}`;
+    await items.insert({ id, name: 'keep-me' });
+    await sleep(2000);
 
     const indexResource = db.resources[(plugin as any).indexResourceName];
-    const indexEntryId = 'callback_items:cb-1';
+    const indexEntryId = `callback_items:${id}`;
 
     await plugin.runCleanup();
 
-    const item = await items.get('cb-1');
+    const item = await items.get(id);
     expect(item).toBeDefined();
 
     const indexEntry = await indexResource.get(indexEntryId).catch(() => null);
@@ -73,12 +78,13 @@ describe('TTLPlugin v2 - Callback Strategy', () => {
 
     await plugin.install(db);
 
-    await items.insert({ id: 'cb-2', name: 'bad-result' });
-    await sleep(1500);
+    const id = `cb-bad-${uid()}`;
+    await items.insert({ id, name: 'bad-result' });
+    await sleep(2000);
 
     await plugin.runCleanup();
 
-    const item = await items.get('cb-2').catch(() => null);
+    const item = await items.get(id).catch(() => null);
     expect(item).toBeDefined();
     expect(plugin.getStats().totalErrors).toBeGreaterThan(0);
 

@@ -2,6 +2,10 @@
 import { createDatabaseForTest, sleep } from '../../config.js';
 import { TTLPlugin } from '../../../src/plugins/ttl.plugin.js';
 
+function uid() {
+  return `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
 describe('TTLPlugin v2 - Hard Delete Strategy', () => {
   let db;
   let tempFiles;
@@ -38,40 +42,69 @@ describe('TTLPlugin v2 - Hard Delete Strategy', () => {
   });
 
   test('should hard-delete expired file', async () => {
-    await tempFiles.insert({ id: 'file-1', filename: 'temp.txt' });
+    const id = `file-expire-${uid()}`;
+    await tempFiles.insert({ id, filename: 'temp.txt' });
 
-    await sleep(1500);
+    await sleep(2000);
     await plugin.runCleanup();
 
-    const file = await tempFiles.get('file-1').catch(() => null);
+    const file = await tempFiles.get(id).catch(() => null);
     expect(file).toBeNull();
   });
 
   test('should not delete non-expired file', async () => {
-    await tempFiles.insert({ id: 'file-2', filename: 'temp2.txt' });
+    const id = `file-active-${uid()}`;
+    await tempFiles.insert({ id, filename: 'temp2.txt' });
 
     await plugin.runCleanup();
 
-    const file = await tempFiles.get('file-2');
+    const file = await tempFiles.get(id);
     expect(file).toBeDefined();
     expect(file.filename).toBe('temp2.txt');
   });
 
   test('should update stats after hard-delete', async () => {
-    await tempFiles.insert({ id: 'file-3', filename: 'temp3.txt' });
+    const scopedDb = createDatabaseForTest('ttl-v2-hard-delete-stats');
+    await scopedDb.connect();
 
-    await sleep(1500);
+    const scopedFiles = await scopedDb.createResource({
+      name: 'temp_files',
+      attributes: {
+        id: 'string|optional',
+        filename: 'string'
+      }
+    });
 
-    const statsBefore = plugin.getStats();
-    await plugin.runCleanup();
-    const statsAfter = plugin.getStats();
+    const scopedPlugin = new TTLPlugin({
+      logLevel: 'silent',
+      resources: {
+        temp_files: {
+          ttl: 1,
+          onExpire: 'hard-delete'
+        }
+      }
+    });
+
+    await scopedPlugin.install(scopedDb);
+
+    const id = `file-stats-${uid()}`;
+    await scopedFiles.insert({ id, filename: 'temp3.txt' });
+
+    await sleep(2000);
+
+    const statsBefore = scopedPlugin.getStats();
+    await scopedPlugin.runCleanup();
+    const statsAfter = scopedPlugin.getStats();
 
     expect(statsAfter.totalDeleted).toBeGreaterThan(statsBefore.totalDeleted);
+
+    await scopedPlugin.uninstall();
+    await scopedDb.disconnect();
   });
 
   test('should remove stale TTL index entries for unmanaged resources', async () => {
     const indexResource = db.resources[(plugin as any).indexResourceName];
-    const staleEntryId = 'stale-entry-legacy';
+    const staleEntryId = `stale-entry-${uid()}`;
     const now = new Date();
 
     await indexResource.insert({
@@ -116,14 +149,15 @@ describe('TTLPlugin v2 - Hard Delete Strategy', () => {
 
     const indexResource = scopedDb.resources[(scopedPlugin as any).indexResourceName];
     const now = new Date();
-    const entryId = 'ephemeral_files:missing-resource';
+    const recordId = `missing-${uid()}`;
+    const entryId = `ephemeral_files:${recordId}`;
 
-    await scopedResource.insert({ id: 'missing-resource', filename: 'lost.txt' });
+    await scopedResource.insert({ id: recordId, filename: 'lost.txt' });
 
     await indexResource.upsert({
       id: entryId,
       resourceName: 'ephemeral_files',
-      recordId: 'missing-resource',
+      recordId,
       expiresAtCohort: now.toISOString().substring(0, 16),
       expiresAtTimestamp: now.getTime() - 1000,
       granularity: 'minute',
