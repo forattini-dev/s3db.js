@@ -1,5 +1,6 @@
 import { createDatabaseForTest } from '../config.js';
 import { startApiPlugin } from './api/helpers/server.js';
+import { verifyPassword } from '../../src/concerns/password-hashing.js';
 
 describe('API Plugin - Security Contracts', () => {
   describe('JWT driver protections', () => {
@@ -7,6 +8,8 @@ describe('API Plugin - Security Contracts', () => {
     let apiPlugin;
     let port;
     let validToken;
+    let registeredUserId;
+    const registeredPassword = 'StrongPass123!';
     const authResourceName = 'plg_security_auth_users';
 
     beforeAll(async () => {
@@ -99,6 +102,8 @@ describe('API Plugin - Security Contracts', () => {
         throw new Error(`Registration failed: ${JSON.stringify(registerBody)}`);
       }
 
+      registeredUserId = registerBody.data.id;
+
       const loginResponse = await fetch(`http://127.0.0.1:${port}/auth/login`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -162,6 +167,34 @@ describe('API Plugin - Security Contracts', () => {
       const body = await response.json();
       expect(body.success).toBe(true);
       expect(body.data.data).toBe('ultra secret');
+    });
+
+    it('does not rehash password when login updates lastLoginAt', async () => {
+      const authResource = db.resources[authResourceName];
+      expect(registeredUserId).toBeDefined();
+
+      await authResource.update(registeredUserId, {
+        lastLoginAt: '2024-01-01T00:00:00.000Z'
+      });
+
+      const beforeLogin = await authResource.get(registeredUserId);
+      const beforePassword = beforeLogin.password;
+
+      const loginResponse = await fetch(`http://127.0.0.1:${port}/auth/login`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          email: 'security@test.com',
+          password: registeredPassword
+        })
+      });
+
+      expect(loginResponse.status).toBe(200);
+
+      const afterLogin = await authResource.get(registeredUserId);
+      expect(afterLogin.password).toBe(beforePassword);
+      expect(await verifyPassword(registeredPassword, afterLogin.password)).toBe(true);
+      expect(beforeLogin.lastLoginAt).not.toBe(afterLogin.lastLoginAt);
     });
 
     it('keeps public resources accessible without auth', async () => {
