@@ -1,5 +1,5 @@
 import EventEmitter from "events";
-import { Writable, WritableOptions } from 'stream';
+import { Writable, WritableOptions } from 'node:stream';
 import { TasksPool } from '../tasks/tasks-pool.class.js';
 import tryFn from "../concerns/try-fn.js";
 

@@ -908,8 +908,6 @@ const pending = await orders.listPartition('byStatus', { status: 'pending' });
 const customerOrders = await orders.listPartition('byCustomer', { customerId: 'cust-123' });
 \`\`\`
 `,
-  };
-
     security: `# Security Configuration
 
 All security options are consolidated under the \`security\` sub-object in the Database constructor (or per-resource override).

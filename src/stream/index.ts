@@ -1,4 +1,4 @@
-import { Readable } from 'stream';
+import { Readable } from 'node:stream';
 import { StreamError } from '../errors.js';
 
 export * from "./resource-reader.class.js";

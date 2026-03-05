@@ -5,7 +5,7 @@ import * as fs from 'fs';
 import * as readline from 'readline';
 import zlib from 'node:zlib';
 import { PluginError } from '../../errors.js';
-import type { Readable } from 'stream';
+import type { Readable } from 'node:stream';
 
 interface ImporterDriverConfig {
   [key: string]: unknown;

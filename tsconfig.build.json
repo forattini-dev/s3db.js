@@ -2,10 +2,12 @@
   "extends": "./tsconfig.json",
   "compilerOptions": {
     "declaration": true,
-    "declarationDir": "./dist/types",
-    "emitDeclarationOnly": false,
+    "declarationMap": true,
+    "sourceMap": true,
     "outDir": "./dist",
-    "allowJs": false,
+    "rootDir": "./src",
+    "removeComments": true,
+    "allowJs": false
   },
   "include": ["src/**/*.ts"],
   "exclude": ["**/*.test.ts", "**/*.spec.ts", "node_modules", "dist", "tests"]

@@ -1,5 +1,5 @@
 import type EventEmitter from 'events';
-import type { Readable } from 'stream';
+import type { Readable } from 'node:stream';
 
 export interface S3ClientConfig {
   logLevel?: string;

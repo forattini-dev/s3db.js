@@ -4,7 +4,7 @@ import { createBackupDriver, validateBackupConfig } from './backup/index.js';
 import { StreamingExporter } from './backup/streaming-exporter.js';
 import { createWriteStream, createReadStream } from 'fs';
 import zlib from 'node:zlib';
-import { pipeline } from 'stream/promises';
+import { pipeline } from 'node:stream/promises';
 import { mkdir, writeFile, readFile, stat } from 'fs/promises';
 import path from 'path';
 import crypto from 'crypto';

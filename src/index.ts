@@ -2,6 +2,9 @@
 // Core Classes & Utilities
 // =============================================================================
 
+// Version
+export { getVersion } from './version.js';
+
 // Main classes (explicit named exports for better tree-shaking)
 export { Database as S3db } from './database.class.js';
 export { Database } from './database.class.js';

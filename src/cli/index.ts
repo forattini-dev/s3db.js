@@ -24,6 +24,7 @@ import {
 } from './components/index.js';
 import { prompt } from 'tuiuiu.js';
 import { S3db } from '../database.class.js';
+import { getVersion } from '../version.js';
 import fs from 'fs/promises';
 import path from 'path';
 import os from 'os';
@@ -107,7 +108,7 @@ async function getDatabase(connection?: string): Promise<S3db> {
 
 const cli = createCLI({
   name: 's3db',
-  version: '19.4.10',
+  version: getVersion(),
   description: 'S3DB CLI - Transform AWS S3 into a powerful document database',
   autoShort: true,
   options: {

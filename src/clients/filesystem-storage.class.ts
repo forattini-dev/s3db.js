@@ -1,7 +1,7 @@
 import { createHash } from 'crypto';
 import { mkdir, writeFile, readFile, unlink, stat, readdir, rename, copyFile, appendFile } from 'fs/promises';
 import { existsSync, Dirent, Stats } from 'fs';
-import { Readable } from 'stream';
+import { Readable } from 'node:stream';
 import path from 'path';
 import { platform } from 'os';
 import zlib from 'zlib';

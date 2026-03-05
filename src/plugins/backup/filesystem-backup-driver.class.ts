@@ -9,7 +9,7 @@ import BaseBackupDriver, {
 } from './base-backup-driver.class.js';
 import { mkdir, copyFile, unlink, readdir, stat, access, writeFile, readFile } from 'fs/promises';
 import { createReadStream, createWriteStream } from 'fs';
-import { pipeline } from 'stream/promises';
+import { pipeline } from 'node:stream/promises';
 import path from 'path';
 import crypto from 'crypto';
 import tryFn from '../../concerns/try-fn.js';

@@ -1,5 +1,5 @@
 import EventEmitter from "events";
-import { Transform, TransformCallback } from "stream";
+import { Transform, TransformCallback } from "node:stream";
 
 import { ResourceIdsPageReader } from "./resource-ids-page-reader.class.js";
 import { TasksPool } from '../tasks/tasks-pool.class.js';

@@ -1,4 +1,5 @@
 import tryFn, { tryFnSync } from './concerns/try-fn.js';
+import { getVersion } from './version.js';
 import type { SecurityConfig } from './concerns/password-hashing.js';
 import { S3Client } from './clients/s3-client.class.js';
 import { MemoryClient } from './clients/memory-client.class.js';
@@ -159,12 +160,7 @@ export class Database extends SafeEventEmitter {
     })();
 
     this.version = '1';
-    this.s3dbVersion = (() => {
-      const [ok, , version] = tryFnSync(() => (typeof (globalThis as any)['__PACKAGE_VERSION__'] !== 'undefined' && (globalThis as any)['__PACKAGE_VERSION__'] !== '__PACKAGE_VERSION__'
-        ? (globalThis as any)['__PACKAGE_VERSION__']
-        : 'latest'));
-      return ok ? version : 'latest';
-    })();
+    this.s3dbVersion = getVersion();
 
     this._resourcesMap = {};
     this.resources = new Proxy(this._resourcesMap, {

@@ -1,6 +1,6 @@
 import { createHash } from 'crypto';
 import { writeFile, readFile } from 'fs/promises';
-import { Readable } from 'stream';
+import { Readable } from 'node:stream';
 
 import { tryFn } from '../concerns/try-fn.js';
 import { MetadataLimitError, ResourceError, ValidationError } from '../errors.js';
