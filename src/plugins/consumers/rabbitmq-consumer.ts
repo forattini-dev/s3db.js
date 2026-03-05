@@ -21,6 +21,7 @@ interface Channel {
   consume(queue: string, callback: (msg: RabbitMQMessage | null) => void): Promise<void>;
   ack(message: RabbitMQMessage): void;
   nack(message: RabbitMQMessage, allUpTo?: boolean, requeue?: boolean): void;
+  sendToQueue(queue: string, content: Buffer, options?: Record<string, unknown>): boolean;
   close(): Promise<void>;
 }
 
@@ -80,6 +81,15 @@ export class RabbitMqConsumer {
     this._stopped = true;
     if (this.channel) await this.channel.close();
     if (this.connection) await this.connection.close();
+  }
+
+  async publish(data: unknown, options: Record<string, unknown> = {}): Promise<void> {
+    if (!this.channel) {
+      throw new Error('RabbitMqConsumer not started. Call start() before publishing.');
+    }
+
+    const content = Buffer.from(typeof data === 'string' ? data : JSON.stringify(data));
+    this.channel.sendToQueue(this.queue, content, { persistent: true, ...options });
   }
 
   private async _connect(): Promise<void> {

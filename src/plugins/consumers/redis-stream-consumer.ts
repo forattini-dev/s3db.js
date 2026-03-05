@@ -45,6 +45,7 @@ interface RedisClient {
     id: string
   ): Promise<[string, [string, string[]][]][] | null>;
   xack(stream: string, group: string, ...ids: string[]): Promise<number>;
+  xadd(stream: string, id: string, ...fieldsAndValues: string[]): Promise<string>;
   xautoclaim(
     stream: string, group: string, consumer: string,
     minIdleTime: number, startId: string,
@@ -156,6 +157,15 @@ export class RedisStreamConsumer {
     this._stopped = false;
     this._poll();
     this._claimTimer = setInterval(() => this._claimLoop(), this.claimInterval);
+  }
+
+  async publish(data: unknown): Promise<string> {
+    if (!this.client) {
+      throw new Error('RedisStreamConsumer not started. Call start() before publishing.');
+    }
+
+    const value = typeof data === 'string' ? data : JSON.stringify(data);
+    return this.client.xadd(this.stream, '*', 'data', value);
   }
 
   async stop(): Promise<void> {

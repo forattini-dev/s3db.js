@@ -25,9 +25,11 @@ interface Resource {
 interface Consumer {
   start(): Promise<void>;
   stop(): Promise<void>;
+  publish(data: unknown, options?: unknown): Promise<unknown>;
 }
 
 interface ConsumerDefinition {
+  name?: string;
   resources: string | string[];
   queueUrl?: string;
   queueName?: string;
@@ -72,6 +74,7 @@ export class QueueConsumerPlugin extends Plugin {
 
   driversConfig: DriverDefinition[];
   consumers: Consumer[] = [];
+  _consumersByName: Map<string, Consumer> = new Map();
   startConcurrency: number;
   stopConcurrency: number;
 
@@ -98,7 +101,7 @@ export class QueueConsumerPlugin extends Plugin {
       const { driver, config: driverConfig = {}, consumers: consumerDefs = [] } = driverDef;
 
       for (const consumerDef of consumerDefs) {
-        const { resources, ...consumerConfig } = consumerDef;
+        const { resources, name: explicitName, ...consumerConfig } = consumerDef;
         const resourceList = Array.isArray(resources) ? resources : [resources];
 
         for (const resource of resourceList) {
@@ -114,6 +117,9 @@ export class QueueConsumerPlugin extends Plugin {
               });
               await consumer.start();
               this.consumers.push(consumer);
+
+              const consumerName = explicitName || this._deriveConsumerName(driver, mergedConfig, resource);
+              this._consumersByName.set(consumerName, consumer);
             }
           });
         }
@@ -182,6 +188,7 @@ export class QueueConsumerPlugin extends Plugin {
     }
 
     this.consumers = [];
+    this._consumersByName.clear();
   }
 
   async _handleMessage(msg: QueueMessage, configuredResource: string): Promise<unknown> {
@@ -248,6 +255,34 @@ export class QueueConsumerPlugin extends Plugin {
       throw err;
     }
     return res;
+  }
+
+  async publish(target: string, data: unknown, options?: unknown): Promise<unknown> {
+    const consumer = this._consumersByName.get(target);
+    if (!consumer) {
+      const available = Array.from(this._consumersByName.keys());
+      throw new QueueError(`Publisher '${target}' not found`, {
+        operation: 'publish',
+        queueName: target,
+        suggestion: available.length > 0
+          ? `Available publishers: ${available.join(', ')}`
+          : 'No consumers registered. Ensure the plugin is installed and consumers are configured.'
+      });
+    }
+    return consumer.publish(data, options);
+  }
+
+  getPublisher(target: string): Consumer | undefined {
+    return this._consumersByName.get(target);
+  }
+
+  listPublishers(): string[] {
+    return Array.from(this._consumersByName.keys());
+  }
+
+  _deriveConsumerName(driver: string, config: Record<string, unknown>, resource: string): string {
+    const queueId = config.queueUrl || config.queue || config.key || config.stream || (config.channels as string[])?.[0] || resource;
+    return `${driver}:${queueId}`;
   }
 
   _handleError(_err: Error, _raw: unknown, _resourceName: string): void {

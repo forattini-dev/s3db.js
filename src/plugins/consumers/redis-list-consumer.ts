@@ -27,6 +27,8 @@ interface RedisListConsumerOptions {
 interface RedisClient {
   brpop(key: string, timeout: number): Promise<[string, string] | null>;
   blpop(key: string, timeout: number): Promise<[string, string] | null>;
+  lpush(key: string, ...values: string[]): Promise<number>;
+  rpush(key: string, ...values: string[]): Promise<number>;
   quit(): Promise<string>;
   on(event: string, handler: (...args: unknown[]) => void): void;
   status: string;
@@ -108,6 +110,19 @@ export class RedisListConsumer {
 
     this._stopped = false;
     this._poll();
+  }
+
+  async publish(data: unknown): Promise<void> {
+    if (!this.client) {
+      throw new Error('RedisListConsumer not started. Call start() before publishing.');
+    }
+
+    const value = typeof data === 'string' ? data : JSON.stringify(data);
+    if (this.direction === 'fifo') {
+      await this.client.lpush(this.key, value);
+    } else {
+      await this.client.rpush(this.key, value);
+    }
   }
 
   async stop(): Promise<void> {

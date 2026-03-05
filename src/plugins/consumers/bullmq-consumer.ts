@@ -51,11 +51,21 @@ interface BullMqWorker {
   on(event: string, handler: (...args: unknown[]) => void): void;
 }
 
+interface BullMqQueue {
+  add(name: string, data: unknown, opts?: Record<string, unknown>): Promise<{ id: string }>;
+  close(): Promise<void>;
+}
+
 type WorkerConstructor = new (
   name: string,
   processor: (job: BullMqJob) => Promise<void>,
   options: Record<string, unknown>
 ) => BullMqWorker;
+
+type QueueConstructor = new (
+  name: string,
+  options: Record<string, unknown>
+) => BullMqQueue;
 
 export class BullMqConsumer {
   driver: string;
@@ -70,6 +80,8 @@ export class BullMqConsumer {
   onMessage: MessageHandler;
   onError?: ErrorHandler;
   worker: BullMqWorker | null = null;
+  private _queue: BullMqQueue | null = null;
+  private _QueueConstructor: QueueConstructor | null = null;
   private _connection: { host: string; port: number; password?: string; db: number };
   private _workerOptions: Record<string, unknown>;
 
@@ -117,7 +129,8 @@ export class BullMqConsumer {
       throw new Error(`BullMqConsumer requires bullmq: ${(err as Error).message}`);
     }
 
-    const { Worker } = mod as unknown as { Worker: WorkerConstructor };
+    const { Worker, Queue } = mod as unknown as { Worker: WorkerConstructor; Queue: QueueConstructor };
+    this._QueueConstructor = Queue;
 
     const processor = async (job: BullMqJob): Promise<void> => {
       await this.onMessage({
@@ -166,7 +179,25 @@ export class BullMqConsumer {
     });
   }
 
+  async publish(data: unknown, options: { name?: string; jobOptions?: Record<string, unknown> } = {}): Promise<string> {
+    if (!this._QueueConstructor) {
+      throw new Error('BullMqConsumer not started. Call start() before publishing.');
+    }
+
+    if (!this._queue) {
+      this._queue = new this._QueueConstructor(this.queue, { connection: this._connection });
+    }
+
+    const jobName = options.name || 'default';
+    const result = await this._queue.add(jobName, data, options.jobOptions);
+    return result.id;
+  }
+
   async stop(): Promise<void> {
+    if (this._queue) {
+      await this._queue.close();
+      this._queue = null;
+    }
     if (this.worker) {
       await this.worker.close();
       this.worker = null;

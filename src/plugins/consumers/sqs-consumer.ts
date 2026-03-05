@@ -42,7 +42,7 @@ interface SqsConsumerOptions {
 }
 
 interface SQSClientInstance {
-  send(command: unknown): Promise<{ Messages?: SQSMessage[] }>;
+  send(command: unknown): Promise<{ Messages?: SQSMessage[]; MessageId?: string }>;
 }
 
 type SQSClientConstructor = new (config: {
@@ -52,6 +52,12 @@ type SQSClientConstructor = new (config: {
 }) => SQSClientInstance;
 
 type CommandConstructor = new (params: Record<string, unknown>) => unknown;
+
+interface PublishOptions {
+  messageAttributes?: Record<string, { DataType: string; StringValue: string }>;
+  messageGroupId?: string;
+  messageDeduplicationId?: string;
+}
 
 export class SqsConsumer {
   driver: string;
@@ -71,6 +77,7 @@ export class SqsConsumer {
   private _SQSClient: SQSClientConstructor | null = null;
   private _ReceiveMessageCommand: CommandConstructor | null = null;
   private _DeleteMessageCommand: CommandConstructor | null = null;
+  private _SendMessageCommand: CommandConstructor | null = null;
 
   constructor({
     queueUrl,
@@ -109,15 +116,17 @@ export class SqsConsumer {
       });
     }
 
-    const { SQSClient, ReceiveMessageCommand, DeleteMessageCommand } = sdk as unknown as {
+    const { SQSClient, ReceiveMessageCommand, DeleteMessageCommand, SendMessageCommand } = sdk as unknown as {
       SQSClient: SQSClientConstructor;
       ReceiveMessageCommand: CommandConstructor;
       DeleteMessageCommand: CommandConstructor;
+      SendMessageCommand: CommandConstructor;
     };
 
     this._SQSClient = SQSClient;
     this._ReceiveMessageCommand = ReceiveMessageCommand;
     this._DeleteMessageCommand = DeleteMessageCommand;
+    this._SendMessageCommand = SendMessageCommand;
     this.sqs = new SQSClient({
       region: this.region,
       credentials: this.credentials,
@@ -177,6 +186,24 @@ export class SqsConsumer {
     }
 
     this._timer = setTimeout(() => this._poll(), this.poolingInterval);
+  }
+
+  async publish(data: unknown, options: PublishOptions = {}): Promise<string | undefined> {
+    if (!this.sqs || !this._SendMessageCommand) {
+      await this.start();
+    }
+
+    const params: Record<string, unknown> = {
+      QueueUrl: this.queueUrl,
+      MessageBody: typeof data === 'string' ? data : JSON.stringify(data),
+    };
+
+    if (options.messageAttributes) params.MessageAttributes = options.messageAttributes;
+    if (options.messageGroupId) params.MessageGroupId = options.messageGroupId;
+    if (options.messageDeduplicationId) params.MessageDeduplicationId = options.messageDeduplicationId;
+
+    const result = await this.sqs!.send(new this._SendMessageCommand!(params));
+    return result.MessageId;
   }
 
   private _parseMessage(msg: SQSMessage): ParsedMessage {

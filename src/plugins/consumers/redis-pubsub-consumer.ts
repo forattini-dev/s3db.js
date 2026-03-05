@@ -28,9 +28,11 @@ interface RedisClient {
   psubscribe(...patterns: string[]): Promise<number>;
   unsubscribe(...channels: string[]): Promise<void>;
   punsubscribe(...patterns: string[]): Promise<void>;
+  publish(channel: string, message: string): Promise<number>;
   quit(): Promise<string>;
   on(event: string, handler: (...args: unknown[]) => void): void;
   status: string;
+  duplicate(): RedisClient;
 }
 
 type RedisConstructor = new (options: Record<string, unknown>) => RedisClient;
@@ -43,12 +45,14 @@ export class RedisPubSubConsumer {
   onMessage: MessageHandler;
   onError?: ErrorHandler;
   client: RedisClient | null = null;
+  private _publisher: RedisClient | null = null;
   private _stopped: boolean = false;
   private _host: string;
   private _port: number;
   private _password?: string;
   private _db: number;
   private _redisOptions: Record<string, unknown>;
+  private _RedisConstructor: RedisConstructor | null = null;
 
   constructor({
     host = 'localhost',
@@ -88,6 +92,7 @@ export class RedisPubSubConsumer {
     }
 
     const Redis = (mod as unknown as { default: RedisConstructor }).default;
+    this._RedisConstructor = Redis;
     this.client = new Redis({
       host: this._host,
       port: this._port,
@@ -125,8 +130,38 @@ export class RedisPubSubConsumer {
     }
   }
 
+  async publish(data: unknown, channel?: string): Promise<void> {
+    if (!this._RedisConstructor) {
+      throw new Error('RedisPubSubConsumer not started. Call start() before publishing.');
+    }
+
+    if (!this._publisher) {
+      this._publisher = new this._RedisConstructor({
+        host: this._host,
+        port: this._port,
+        password: this._password,
+        db: this._db,
+        lazyConnect: false,
+        ...this._redisOptions
+      });
+    }
+
+    const targetChannel = channel || this.channels[0];
+    if (!targetChannel) {
+      throw new Error('No channel specified for publish and no default channel configured.');
+    }
+
+    const message = typeof data === 'string' ? data : JSON.stringify(data);
+    await this._publisher.publish(targetChannel, message);
+  }
+
   async stop(): Promise<void> {
     this._stopped = true;
+    if (this._publisher) {
+      const [ok] = await tryFn(() => this._publisher!.quit());
+      if (!ok) { /* client already closed */ }
+      this._publisher = null;
+    }
     if (this.client) {
       const [ok] = await tryFn(async () => {
         if (this.channels.length > 0) await this.client!.unsubscribe(...this.channels);
