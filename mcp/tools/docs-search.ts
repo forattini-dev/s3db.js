@@ -149,7 +149,25 @@ function loadPluginDocs(): void {
   pluginIndex = buildIndex(pluginDocs);
 }
 
-function extractSnippet(content: string, query: string, maxLength = 200): string {
+function pathToResourceUri(path: string): string | null {
+  // Convert doc file paths to s3db:// URIs
+  // plugins/cache/README.md → s3db://plugin/cache
+  // core/partitions.md → s3db://core/partitions
+  // guides/testing.md → s3db://guide/testing
+  // schema.md → s3db://core/schema
+  const normalized = path.replace(/\\/g, '/');
+  const pluginMatch = normalized.match(/^plugins\/([^/]+)/);
+  if (pluginMatch) return `s3db://plugin/${pluginMatch[1]}`;
+  const coreMatch = normalized.match(/^core\/([^.]+)\.md$/);
+  if (coreMatch) return `s3db://core/${coreMatch[1]}`;
+  const guideMatch = normalized.match(/^guides\/([^.]+)\.md$/);
+  if (guideMatch) return `s3db://guide/${guideMatch[1].replace(/-/g, '-')}`;
+  const refMatch = normalized.match(/^reference\/([^.]+)\.md$/);
+  if (refMatch) return `s3db://reference/${refMatch[1]}`;
+  return null;
+}
+
+function extractSnippet(content: string, query: string, maxLength = 300): string {
   const lowerContent = content.toLowerCase();
   const terms = query.toLowerCase().split(/\s+/).filter(t => t.length > 2);
 
@@ -189,41 +207,24 @@ function search(index: Fuse<DocEntry> | null, docs: DocEntry[], query: string, l
 
 async function searchDocs(type: 'core' | 'plugins', query: string, limit = 5): Promise<any> {
   try {
-    if (type === 'core') {
-      loadCoreDocs();
-      const results = search(coreIndex, coreDocs, query, limit);
-      return {
-        success: true,
-        query,
-        type,
-        mode: 'fuzzy',
-        resultCount: results.length,
-        totalDocs: coreDocs.length,
-        results: results.map(r => ({
-          ...r,
-          fullContent: r.content.length > 3000
-            ? r.content.slice(0, 3000) + '\n\n... (truncated)'
-            : r.content,
-        })),
-      };
-    } else {
-      loadPluginDocs();
-      const results = search(pluginIndex, pluginDocs, query, limit);
-      return {
-        success: true,
-        query,
-        type,
-        mode: 'fuzzy',
-        resultCount: results.length,
-        totalDocs: pluginDocs.length,
-        results: results.map(r => ({
-          ...r,
-          fullContent: r.content.length > 3000
-            ? r.content.slice(0, 3000) + '\n\n... (truncated)'
-            : r.content,
-        })),
-      };
-    }
+    const docs = type === 'core' ? (loadCoreDocs(), coreDocs) : (loadPluginDocs(), pluginDocs);
+    const index = type === 'core' ? coreIndex : pluginIndex;
+    const results = search(index, docs, query, limit);
+
+    return {
+      success: true,
+      query,
+      type,
+      resultCount: results.length,
+      totalDocs: docs.length,
+      results: results.map(r => ({
+        title: r.title,
+        path: r.path,
+        uri: pathToResourceUri(r.path),
+        snippet: r.snippet,
+        score: r.score,
+      })),
+    };
   } catch (error: any) {
     return {
       success: false,
@@ -358,12 +359,8 @@ export function createDocsSearchHandlers(server: S3dbMCPServer) {
         query,
         resultCount: allResults.length,
         totalDocs: (coreResults.totalDocs || 0) + (pluginResults.totalDocs || 0),
-        results: allResults.map(r => ({
-          ...r,
-          fullContent: r.content?.length > 3000
-            ? r.content.slice(0, 3000) + '\n\n... (truncated)'
-            : r.content,
-        })),
+        results: allResults,
+        hint: 'Read full docs via s3db:// URIs shown in each result.',
       };
     },
 
