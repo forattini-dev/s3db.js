@@ -56,8 +56,16 @@ const db = new Database({
   },
 
   // Security
-  passphrase: 'string',                 // For 'secret' field encryption
-  bcryptRounds: 10,                     // For password hashing
+  security: {
+    passphrase: 'string',              // For 'secret' field encryption
+    pepper: 'string',                  // Extra entropy for password hashing
+    bcrypt: { rounds: 12 },            // For password hashing (min 12)
+    argon2: {                          // For argon2id password hashing
+      memoryCost: 65536,
+      timeCost: 3,
+      parallelism: 4,
+    },
+  },
 
   // Behavior
   versioningEnabled: false,             // Enable S3 versioning integration
@@ -262,7 +270,9 @@ const db = new Database({
   connectionString: process.env.S3_CONNECTION_STRING,
   logLevel: 'info',
   executorPool: { concurrency: 20 },
-  passphrase: process.env.ENCRYPTION_KEY,
+  security: {
+    passphrase: process.env.ENCRYPTION_KEY,
+  },
   plugins: [
     new CachePlugin({ driver: 'memory', ttl: 300000 }),
     new TTLPlugin({ defaultTTL: 86400000 })

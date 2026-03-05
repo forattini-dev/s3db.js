@@ -24,10 +24,28 @@ export const connectionTools = [
           description: 'Number of parallel operations',
           default: 10
         },
-        passphrase: {
-          type: 'string',
-          description: 'Passphrase for encryption',
-          default: 'secret'
+        security: {
+          type: 'object',
+          description: 'Security configuration (passphrase for encryption, bcrypt rounds, etc.)',
+          properties: {
+            passphrase: {
+              type: 'string',
+              description: 'Passphrase for encryption',
+              default: 'secret'
+            },
+            bcrypt: {
+              type: 'object',
+              description: 'Bcrypt configuration',
+              properties: {
+                rounds: {
+                  type: 'number',
+                  description: 'Number of bcrypt rounds',
+                  default: 10
+                }
+              }
+            }
+          },
+          default: { passphrase: 'secret' }
         },
         versioningEnabled: {
           type: 'boolean',
@@ -101,7 +119,7 @@ export function createConnectionHandlers(server: S3dbMCPServer) {
         connectionString,
         verbose = false,
         parallelism = 10,
-        passphrase = 'secret',
+        security = { passphrase: 'secret' },
         versioningEnabled = false,
         enableCache = true,
         enableCosts = true,
@@ -165,7 +183,7 @@ export function createConnectionHandlers(server: S3dbMCPServer) {
         connectionString,
         verbose,
         parallelism,
-        passphrase,
+        security,
         versioningEnabled,
         plugins
       });

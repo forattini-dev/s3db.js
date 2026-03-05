@@ -356,7 +356,7 @@ pm2 restart s3db-mcp
         "S3DB_CACHE_DRIVER": "filesystem",
         "S3DB_CACHE_DIRECTORY": "/var/cache/s3db",
         "S3DB_CACHE_TTL": "1800000",
-        "S3DB_PASSPHRASE": "your-strong-passphrase-here",
+        "S3DB_SECURITY_PASSPHRASE": "your-strong-passphrase-here",
         "S3DB_VERSIONING_ENABLED": "true",
         "NODE_ENV": "production"
       }
@@ -461,7 +461,7 @@ The S3DB MCP Server can be configured through multiple methods (in order of prec
 | `S3DB_CONNECTION_STRING` | - | ✅ Yes | Complete S3 connection URL | See [Connection String Formats](#connection-string-formats) below |
 | `S3DB_VERBOSE` | `false` | No | Enable detailed operation logs | `true` for debugging, `false` for production |
 | `S3DB_PARALLELISM` | `10` | No | Max concurrent S3 operations | `5` (conservative), `20` (aggressive), `50` (high-performance) |
-| `S3DB_PASSPHRASE` | `secret` | No | Encryption key for sensitive fields | Any strong passphrase (min 12 chars recommended) |
+| `S3DB_SECURITY_PASSPHRASE` | `secret` | No | Encryption key for sensitive fields (inside `security` sub-object) | Any strong passphrase (min 12 chars recommended) |
 | `S3DB_VERSIONING_ENABLED` | `false` | No | Track resource schema versions | `true` for production, `false` for development |
 
 #### **Performance Tuning Guidelines**
@@ -875,7 +875,7 @@ The search covers **ALL** s3db.js documentation:
 
 | Tool | Description | Parameters |
 |------|-------------|------------|
-| `dbConnect` | Connect to S3DB database with costs & cache | `connectionString`, `logLevel?`, `parallelism?`, `passphrase?`, `versioningEnabled?`, `enableCache?`, `enableCosts?`, `cacheDriver?`, `cacheMaxSize?`, `cacheTtl?`, `cacheDirectory?`, `cachePrefix?` |
+| `dbConnect` | Connect to S3DB database with costs & cache | `connectionString`, `logLevel?`, `parallelism?`, `security?` (`{ passphrase?, pepper?, bcrypt?, argon2? }`), `versioningEnabled?`, `enableCache?`, `enableCosts?`, `cacheDriver?`, `cacheMaxSize?`, `cacheTtl?`, `cacheDirectory?`, `cachePrefix?` |
 | `dbDisconnect` | Disconnect from database | - |
 | `dbStatus` | Get connection status | - |
 | `dbCreateResource` | Create resource/collection | `name`, `attributes`, `behavior?`, `timestamps?`, `partitions?`, `paranoid?` |
@@ -1777,7 +1777,7 @@ await agent.callTool('dbCreateResource', {
   attributes: {
     publicInfo: 'string',
     privateData: 'secret',  // Automatically encrypted
-    ssn: 'secret',          // Encrypted with passphrase
+    ssn: 'secret',          // Encrypted with security.passphrase
     creditCard: 'secret'    // Encrypted
   }
 });

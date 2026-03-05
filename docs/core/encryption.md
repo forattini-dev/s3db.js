@@ -7,7 +7,9 @@ s3db.js provides field-level encryption using AES-256-GCM for sensitive data pro
 ```javascript
 const db = new Database({
   connectionString: '...',
-  passphrase: 'your-secret-passphrase-min-16-chars'  // Encryption key
+  security: {
+    passphrase: 'your-secret-passphrase-min-16-chars',  // Encryption key
+  },
 });
 
 const users = await db.createResource({
@@ -69,7 +71,9 @@ s3db.js uses industry-standard encryption:
 ```javascript
 const db = new Database({
   connectionString: '...',
-  passphrase: process.env.ENCRYPTION_KEY
+  security: {
+    passphrase: process.env.ENCRYPTION_KEY,
+  },
 });
 ```
 
@@ -79,7 +83,9 @@ const db = new Database({
 const sensitiveResource = await db.createResource({
   name: 'secrets',
   attributes: { ... },
-  passphrase: 'different-key-for-this-resource'
+  security: {
+    passphrase: 'different-key-for-this-resource',
+  },
 });
 ```
 
@@ -125,33 +131,45 @@ const hash = await sha256('data to hash');
 const checksum = await md5('data');  // Node.js only
 ```
 
-## Password Hashing (bcrypt)
+## Password Hashing
 
-For password verification, use bcrypt instead of encryption:
+For user passwords, use the `password` type instead of `secret`. It supports bcrypt (default) and argon2id:
 
 ```javascript
-import bcrypt from 'bcrypt';
-
 const users = await db.createResource({
   name: 'users',
   attributes: {
     email: 'string|required',
-    passwordHash: 'string|required'  // Store hash, not encrypted password
+    password: 'password|required|min:8',           // Defaults to bcrypt
+    securePass: 'password:argon2id|required|min:8', // Argon2id
   }
 });
 
-// On registration
-const hash = await bcrypt.hash('userPassword', db.bcryptRounds);
-await users.insert({ email: 'user@example.com', passwordHash: hash });
+// On registration - auto-hashed on insert
+await users.insert({ email: 'user@example.com', password: 'userPassword' });
 
-// On login
+// On login - verify with verifyPassword()
+import { verifyPassword } from 's3db.js';
 const user = await users.get(userId);
-const valid = await bcrypt.compare('inputPassword', user.passwordHash);
+const valid = await verifyPassword('inputPassword', user.password);
+```
+
+Configure hashing via the `security` config:
+
+```javascript
+const db = new Database({
+  connectionString: '...',
+  security: {
+    pepper: 'my-pepper',
+    bcrypt: { rounds: 12 },
+    argon2: { memoryCost: 65536, timeCost: 3, parallelism: 4 },
+  },
+});
 ```
 
 **When to use what:**
+- `password` type: Non-retrievable data (user passwords) - bcrypt or argon2id
 - `secret` type: Retrievable data (API keys, tokens, SSN)
-- bcrypt hash: Non-retrievable data (passwords)
 
 ## Security Best Practices
 
@@ -159,10 +177,10 @@ const valid = await bcrypt.compare('inputPassword', user.passwordHash);
 
 ```javascript
 // Use environment variables for passphrase
-passphrase: process.env.ENCRYPTION_KEY
+security: { passphrase: process.env.ENCRYPTION_KEY }
 
 // Use strong passphrases (16+ characters)
-passphrase: 'a-very-long-and-random-passphrase-here'
+security: { passphrase: 'a-very-long-and-random-passphrase-here' }
 
 // Rotate keys periodically
 // (requires re-encrypting all secret fields)
@@ -172,10 +190,10 @@ passphrase: 'a-very-long-and-random-passphrase-here'
 
 ```javascript
 // Don't hardcode passphrases
-passphrase: 'hardcoded-secret'  // Bad!
+security: { passphrase: 'hardcoded-secret' }  // Bad!
 
 // Don't use weak passphrases
-passphrase: 'password123'  // Bad!
+security: { passphrase: 'password123' }  // Bad!
 
 // Don't log secret values
 console.log(user);  // May leak decrypted secrets
@@ -193,7 +211,7 @@ async function rotateEncryptionKey(resource, oldKey, newKey) {
     // Read with old key
     const oldDb = new Database({
       connectionString: '...',
-      passphrase: oldKey
+      security: { passphrase: oldKey },
     });
     await oldDb.connect();
     const oldResource = await oldDb.getResource(resource.name);
@@ -202,7 +220,7 @@ async function rotateEncryptionKey(resource, oldKey, newKey) {
     // Write with new key
     const newDb = new Database({
       connectionString: '...',
-      passphrase: newKey
+      security: { passphrase: newKey },
     });
     await newDb.connect();
     const newResource = await newDb.getResource(resource.name);

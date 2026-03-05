@@ -130,7 +130,9 @@ const users = await db.createResource({
     ssn: 'secret|required',        // Encrypted
     apiKey: 'secret|optional'      // Encrypted
   },
-  passphrase: 'your-secure-passphrase'
+  security: {
+    passphrase: 'your-secure-passphrase',
+  },
 });
 ```
 

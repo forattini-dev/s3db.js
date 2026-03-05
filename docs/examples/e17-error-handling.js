@@ -3,7 +3,7 @@ import S3DB from "../src/index.js";
 // Test configuration
 const config = {
   connectionString: "s3://test-bucket",
-  passphrase: "secret",
+  security: { passphrase: "secret" },
   verbose: true
 };
 

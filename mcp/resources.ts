@@ -774,7 +774,9 @@ import { Database } from 's3db.js';
 
 const db = new Database({
   connectionString: 's3://KEY:SECRET@bucket?region=us-east-1',
-  passphrase: 'encryption-key',  // optional, for secret fields
+  security: {
+    passphrase: 'encryption-key',  // optional, for secret fields
+  },
 });
 
 await db.connect();

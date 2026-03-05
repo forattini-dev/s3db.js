@@ -44,7 +44,7 @@ async function generateExamples() {
   // Initialize database without connecting (we only need the plugin, not storage)
   const db = new Database({
     connectionString: 's3://test:test@localhost:9000/recon-examples',
-    passphrase: 'example-passphrase'
+    security: { passphrase: 'example-passphrase' }
   });
 
   // Skip connection - we don't need storage for this example

@@ -26,29 +26,53 @@ const users = await db.createResource({
 // DO: Use environment variables
 const db = new Database({
   connectionString: '...',
-  passphrase: process.env.ENCRYPTION_KEY  // 32+ characters
+  security: {
+    passphrase: process.env.ENCRYPTION_KEY,  // 32+ characters
+  },
 });
 
 // DON'T: Hardcode passphrases
 const db = new Database({
-  passphrase: 'hardcoded-secret'  // Security risk!
+  security: {
+    passphrase: 'hardcoded-secret',  // Security risk!
+  },
 });
 ```
 
 ### Password Hashing
 
-For user passwords, use bcrypt instead of encryption:
+For user passwords, use the `password` type (bcrypt by default, or argon2id):
 
 ```javascript
-import bcrypt from 'bcrypt';
+const users = await db.createResource({
+  name: 'users',
+  attributes: {
+    email: 'string|required',
+    password: 'password|required|min:8',           // Defaults to bcrypt
+    securePass: 'password:argon2id|required|min:8', // Argon2id
+  }
+});
 
-// Store hashed password (not encrypted)
-const hash = await bcrypt.hash(password, 12);
-await users.insert({ email, passwordHash: hash });
+// Passwords are auto-hashed on insert
+await users.insert({ email, password: 'userPassword' });
 
 // Verify password
+import { verifyPassword } from 's3db.js';
 const user = await users.get(userId);
-const valid = await bcrypt.compare(inputPassword, user.passwordHash);
+const valid = await verifyPassword(inputPassword, user.password);
+```
+
+Configure hashing via the `security` config:
+
+```javascript
+const db = new Database({
+  connectionString: '...',
+  security: {
+    pepper: 'my-pepper',
+    bcrypt: { rounds: 12 },            // Min 12
+    argon2: { memoryCost: 65536, timeCost: 3, parallelism: 4 },
+  },
+});
 ```
 
 ## AWS Credentials
@@ -332,7 +356,9 @@ import 'dotenv/config';
 
 const db = new Database({
   connectionString: process.env.S3_CONNECTION_STRING,
-  passphrase: process.env.ENCRYPTION_KEY
+  security: {
+    passphrase: process.env.ENCRYPTION_KEY,
+  },
 });
 ```
 
@@ -352,7 +378,9 @@ const secrets = JSON.parse(response.SecretString);
 
 const db = new Database({
   connectionString: secrets.connectionString,
-  passphrase: secrets.encryptionKey
+  security: {
+    passphrase: secrets.encryptionKey,
+  },
 });
 ```
 

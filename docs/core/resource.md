@@ -155,8 +155,10 @@ const orders = await db.createResource({
   // Async partitions for faster writes
   asyncPartitions: true,
 
-  // Encryption passphrase
-  passphrase: 'my-secret-key',
+  // Security (optional override, deep-merges with database security)
+  security: {
+    bcrypt: { rounds: 14 },
+  },
 
   // Auto-decrypt secret fields
   autoDecrypt: true,
@@ -206,7 +208,7 @@ const orders = await db.createResource({
 | `idSize` | `number` | `22` | Size for auto-generated IDs |
 | `partitions` | `object` | `{}` | Partition definitions |
 | `asyncPartitions` | `boolean` | `false` | Enable async partition indexing (70-100% faster writes) |
-| `passphrase` | `string` | `'secret'` | Encryption passphrase for secret fields |
+| `security` | `object` | `{}` | Security config override (deep-merges with database security). Supports `passphrase`, `pepper`, `bcrypt: { rounds }`, `argon2: { memoryCost, timeCost, parallelism }` |
 | `autoDecrypt` | `boolean` | `true` | Auto-decrypt secret fields on retrieval |
 | `paranoid` | `boolean` | `true` | Prevent dangerous operations (deleteAll, etc.) |
 | `parallelism` | `number` | `100` | Concurrent operations for bulk ops (Separate OperationsPool per Database) |

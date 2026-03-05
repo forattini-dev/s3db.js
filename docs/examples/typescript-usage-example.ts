@@ -28,7 +28,7 @@ const config: DatabaseConfig = {
   region: 'us-east-1',
   verbose: true,
   parallelism: 10,
-  passphrase: 'my-secret-key',
+  security: { passphrase: 'my-secret-key' },
   cache: {
     enabled: true,
     ttl: 3600

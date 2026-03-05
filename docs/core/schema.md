@@ -34,7 +34,9 @@ import { S3DB } from 's3db';
 
 const database = new S3DB({
   connection: 's3://key:secret@bucket?region=us-east-1',
-  passphrase: 'your-encryption-key'
+  security: {
+    passphrase: 'your-encryption-key',
+  },
 });
 
 // Create a resource with schema
@@ -79,23 +81,25 @@ const user = await users.insert({
 
 S3DB extends standard types with custom types optimized for S3's 2KB metadata limit. These types provide automatic compression, encryption, and encoding.
 
-### 🔑 `password` - One-Way Bcrypt Hashing
+### 🔑 `password` - One-Way Hashing (bcrypt or argon2id)
 
-**Store user passwords securely with bcrypt (RECOMMENDED FOR PASSWORDS):**
+**Store user passwords securely with bcrypt or argon2id (RECOMMENDED FOR PASSWORDS):**
 
 ```javascript
 attributes: {
-  userPassword: 'password|required|min:8',     // Auto-hashed with bcrypt
-  adminPassword: 'password|required|min:12',   // With validation
+  userPassword: 'password|required|min:8',          // Defaults to bcrypt
+  adminPassword: 'password:bcrypt|required|min:12', // Explicit bcrypt
+  securePassword: 'password:argon2id|required|min:8', // Argon2id
 }
 ```
 
 **Key Features:**
 - ✅ **One-way hashing** - Cannot be decrypted (industry standard for passwords)
-- ✅ **Bcrypt algorithm** - Resistant to brute-force attacks
-- ✅ **Space optimized** - Compacted from 60 to 53 bytes (11.6% savings)
+- ✅ **Bcrypt algorithm** (default) - Resistant to brute-force attacks
+- ✅ **Argon2id algorithm** (optional) - Memory-hard, GPU-resistant
+- ✅ **Space optimized** - bcrypt 60→56 chars, argon2 97→~76 chars (compact base62 format)
 - ✅ **Auto-hashed** - Automatically hashed on insert/update
-- ✅ **Configurable rounds** - Default 10 rounds (configurable 4-31)
+- ✅ **Configurable** - bcrypt rounds (min 12), argon2 memoryCost/timeCost/parallelism
 
 **Verification:**
 ```javascript
@@ -220,7 +224,7 @@ console.log(post.metadata.views);  // 100 (auto-parsed)
 
 | Type | Input Example | Stored As | Savings | Use Case |
 |------|---------------|-----------|---------|----------|
-| `password` | `"MyPass123"` (11 bytes) | `"compacted_hash"` (53 bytes) | One-way | **User passwords** (bcrypt, irreversible) |
+| `password` | `"MyPass123"` (11 bytes) | `"compacted_hash"` (56 bytes bcrypt, ~76 bytes argon2) | One-way | **User passwords** (bcrypt/argon2id, irreversible) |
 | `secret` | `"sk-abc123"` | `"salt:iv:encrypted:tag"` | Encrypted | API keys, tokens (AES-256, reversible) |
 | `embedding:1536` | `[0.1, 0.2, ...]` (30KB) | `"2kF_nX..."` (7KB) | **77%** | Vector search, RAG, ML |
 | `ip4` | `"192.168.1.1"` (15 bytes) | `"wKgBAQ=="` (8 bytes) | **47%** | IP tracking, analytics |
@@ -422,9 +426,14 @@ await users.insert({
 
 This section provides full documentation for each custom type. For a quick overview, see [Custom Types Summary](#-custom-types---space-optimized-for-s3).
 
-### `password` - One-Way Bcrypt Hashing
+### `password` - One-Way Hashing (bcrypt or argon2id)
 
-Store user passwords securely with bcrypt one-way hashing. **Use this for user passwords, NOT the `secret` type!**
+Store user passwords securely with one-way hashing. **Use this for user passwords, NOT the `secret` type!**
+
+Supports three variants:
+- `password` - defaults to bcrypt
+- `password:bcrypt` - explicit bcrypt
+- `password:argon2id` - argon2id (memory-hard, GPU-resistant)
 
 #### Usage
 
@@ -433,18 +442,19 @@ const users = await database.createResource({
   name: 'users',
   attributes: {
     email: 'string|required',
-    password: 'password|required|min:8',   // Bcrypt hashed
+    password: 'password|required|min:8',           // Defaults to bcrypt
+    securePass: 'password:argon2id|required|min:8', // Argon2id
   }
 });
 
-// Insert - password auto-hashed with bcrypt
+// Insert - password auto-hashed
 const user = await users.insert({
   email: 'alan@turing.com',
   password: 'MySecurePass123',
 });
 
-// Password is stored as compacted bcrypt hash (53 bytes)
-console.log(user.password); // "saltsaltsalt...hash..." (compacted, no $2b$10$ prefix)
+// Password is stored as compact base62 hash (bcrypt 56 chars, argon2 ~76 chars)
+console.log(user.password); // compact base62 hash
 
 // To verify a password, use verifyPassword()
 import { verifyPassword } from 's3db.js';
@@ -454,12 +464,32 @@ console.log(isValid); // true
 
 #### Configuration
 
-Configure bcrypt rounds at database level (default: 10):
+Configure hashing via the `security` config:
 
 ```javascript
 const database = new Database({
   connectionString: '...',
-  bcryptRounds: 12  // Higher = more secure but slower (4-31)
+  security: {
+    pepper: 'my-pepper',
+    bcrypt: { rounds: 12 },            // Min 12, higher = more secure but slower
+    argon2: {                           // For password:argon2id fields
+      memoryCost: 65536,
+      timeCost: 3,
+      parallelism: 4,
+    },
+  },
+});
+```
+
+Resource-level override (deep-merges with database security):
+
+```javascript
+const users = await database.createResource({
+  name: 'users',
+  attributes: { password: 'password|required|min:8' },
+  security: {
+    bcrypt: { rounds: 14 },
+  },
 });
 ```
 
@@ -1677,7 +1707,9 @@ await users.insert({ password: 'secret' });
 // ✅ Fix - Provide passphrase
 const db = new S3DB({
   connection: 's3://...',
-  passphrase: 'your-encryption-key'
+  security: {
+    passphrase: 'your-encryption-key',
+  },
 });
 ```
 
@@ -1759,7 +1791,7 @@ console.log(size, 'bytes');  // 30 bytes
 
 ✅ **Security**
 - [ ] Encrypt sensitive fields with `secret`
-- [ ] Store passphrase in environment
+- [ ] Store passphrase in environment via `security.passphrase`
 - [ ] Rotate encryption keys periodically
 - [ ] Validate user input
 - [ ] Use paranoid mode for soft deletes

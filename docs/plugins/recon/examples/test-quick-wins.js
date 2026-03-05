@@ -14,7 +14,7 @@ async function testSecretsStage() {
 
   const db = new Database({
     connectionString: 's3://test:test@localhost:9000/test-recon',
-    passphrase: 'test-passphrase'
+    security: { passphrase: 'test-passphrase' }
   });
 
   const plugin = new ReconPlugin({
@@ -79,7 +79,7 @@ async function testSubdomainTakeover() {
 
   const db = new Database({
     connectionString: 's3://test:test@localhost:9000/test-recon',
-    passphrase: 'test-passphrase'
+    security: { passphrase: 'test-passphrase' }
   });
 
   const plugin = new ReconPlugin({
@@ -166,7 +166,7 @@ async function testBehaviorPresets() {
 
   const db = new Database({
     connectionString: 's3://test:test@localhost:9000/test-recon',
-    passphrase: 'test-passphrase'
+    security: { passphrase: 'test-passphrase' }
   });
 
   const presets = ['passive', 'stealth', 'aggressive'];

@@ -614,7 +614,9 @@ export async function startServer(args?: TransportArgs): Promise<void> {
 
       database = new S3db({
         connectionString,
-        passphrase: process.env.S3DB_PASSPHRASE || 'secret',
+        security: {
+          passphrase: process.env.S3DB_PASSPHRASE || 'secret',
+        },
         plugins
       });
       await database.connect();

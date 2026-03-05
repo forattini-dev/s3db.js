@@ -39,7 +39,7 @@ async function main() {
   // 1. Create database with users resource
   const db = new Database({
     connectionString: 'memory://oidc-enhancements-demo',
-    passphrase: process.env.SECRET_PASSPHRASE || 'dev-secret-passphrase',
+    security: { passphrase: process.env.SECRET_PASSPHRASE || 'dev-secret-passphrase' },
     verbose: false
   });
   await db.connect();

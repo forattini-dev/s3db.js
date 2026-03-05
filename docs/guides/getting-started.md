@@ -291,7 +291,9 @@ LOG_LEVEL=info
 ```javascript
 const db = new S3db({
   connectionString: process.env.S3_CONNECTION_STRING,
-  passphrase: process.env.ENCRYPTION_KEY,
+  security: {
+    passphrase: process.env.ENCRYPTION_KEY,
+  },
   logLevel: process.env.LOG_LEVEL
 });
 ```
@@ -391,7 +393,9 @@ import { CachePlugin, TTLPlugin } from 's3db.js';
 // Initialize
 const db = new S3db({
   connectionString: process.env.S3_CONNECTION_STRING,
-  passphrase: process.env.ENCRYPTION_KEY,
+  security: {
+    passphrase: process.env.ENCRYPTION_KEY,
+  },
   logLevel: 'info',
   plugins: [
     new CachePlugin({ driver: 'memory', ttl: 60000 }),

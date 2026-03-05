@@ -3,7 +3,10 @@ export interface DbConnectArgs {
   connectionString: string;
   verbose?: boolean;
   parallelism?: number;
-  passphrase?: string;
+  security?: {
+    passphrase?: string;
+    bcrypt?: { rounds?: number };
+  };
   versioningEnabled?: boolean;
   enableCache?: boolean;
   enableCosts?: boolean;

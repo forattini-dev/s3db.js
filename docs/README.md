@@ -404,7 +404,7 @@ An S3db instance is a logical container for your resources, stored in a specific
 | `logLevel` | `boolean` | `false` | Enable debug logging for debugging |
 | `parallelism` | `number` | `100` | Concurrent operations for bulk operations (Separate Executor Pools per Database) |
 | `versioningEnabled` | `boolean` | `false` | Enable automatic resource versioning |
-| `passphrase` | `string` | `'secret'` | Default passphrase for field encryption |
+| `security` | `object` | `{}` | Security config: `{ passphrase, pepper, bcrypt: { rounds }, argon2: { memoryCost, timeCost, parallelism } }` |
 | `plugins` | `array` | `[]` | Array of plugin instances to extend functionality |
 
 ### Connection Strings
