@@ -5,7 +5,7 @@ describe('Schema custom type: secret', () => {
   const schema = new Schema({
     name: 'secret-test',
     attributes: { secret: 'secret' },
-    passphrase: 'test-secret'
+    security: { passphrase: 'test-secret' }
   });
 
   const mapAndUnmap = async value => schema.unmapper(await schema.mapper({ secret: value }));

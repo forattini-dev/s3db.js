@@ -145,7 +145,7 @@ describe('Schema Unit Tests', () => {
           attributes: {
             password: 'secret|required'
           },
-          passphrase: 'test-passphrase'
+          security: { passphrase: 'test-passphrase' }
         });
 
         expect(schema).toBeDefined();
@@ -276,7 +276,7 @@ describe('Schema Unit Tests', () => {
           attributes: {
             password: 'secret|required'
           },
-          passphrase
+          security: { passphrase }
         });
 
         const original = { password: 'my-secret-pass' };
@@ -292,7 +292,7 @@ describe('Schema Unit Tests', () => {
           attributes: {
             password: 'secret|required'
           },
-          passphrase
+          security: { passphrase }
         });
 
         const original = { password: 'my-secret-pass' };

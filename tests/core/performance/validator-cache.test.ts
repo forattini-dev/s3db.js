@@ -257,13 +257,13 @@ describe('Validator Cache', () => {
       const resource1 = await db.createResource({
         name: 'test1',
         attributes: { password: 'secret' },
-        passphrase: 'secret1'
+        security: { passphrase: 'secret1' }
       });
 
       const resource2 = await db.createResource({
         name: 'test2',
         attributes: { password: 'secret' },
-        passphrase: 'secret2'
+        security: { passphrase: 'secret2' }
       });
 
       // Different passphrases = different validators

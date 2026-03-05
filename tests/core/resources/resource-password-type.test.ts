@@ -7,7 +7,7 @@ describe('Resource - Password Type with bcrypt hashing', () => {
 
   beforeEach(async () => {
     database = createDatabaseForTest('suite=resources/password-type', {
-      bcryptRounds: 4 // Low rounds for fast tests
+      security: { bcrypt: { rounds: 12 } }
     });
 
     usersResource = await database.createResource({
@@ -30,7 +30,7 @@ describe('Resource - Password Type with bcrypt hashing', () => {
     }
   });
 
-  test('should auto-hash password on insert with compacted bcrypt (60→53 bytes)', async () => {
+  test('should auto-hash password on insert with compact bcrypt format', async () => {
     const plainPassword = 'MySecurePassword123';
 
     const user = await usersResource.insert({
@@ -39,14 +39,10 @@ describe('Resource - Password Type with bcrypt hashing', () => {
       password: plainPassword
     });
 
-    // Password should be hashed
     expect(user.password).not.toBe(plainPassword);
-
-    // Bcrypt hash should be compacted (53 bytes instead of 60)
-    expect(user.password.length).toBe(53);
-
-    // Should not start with $ (compacted format)
-    expect(user.password.startsWith('$')).toBe(false);
+    // b62(12) = "c", compact = $c$<53 saltHash> = 56 chars
+    expect(user.password).toMatch(/^\$c\$.{53}$/);
+    expect(user.password.length).toBe(56);
   });
 
   test('should verify password with verifyPassword() helper', async () => {
@@ -58,11 +54,9 @@ describe('Resource - Password Type with bcrypt hashing', () => {
       password: plainPassword
     });
 
-    // Correct password should verify
     const isValid = await verifyPassword(plainPassword, user.password);
     expect(isValid).toBe(true);
 
-    // Wrong password should fail
     const isInvalid = await verifyPassword('WrongPassword', user.password);
     expect(isInvalid).toBe(false);
   });
@@ -76,21 +70,17 @@ describe('Resource - Password Type with bcrypt hashing', () => {
 
     const oldHash = user.password;
 
-    // Update password
     const updated = await usersResource.update(user.id, {
       password: 'NewPassword456'
     });
 
-    // Password should be re-hashed
     expect(updated.password).not.toBe('NewPassword456');
     expect(updated.password).not.toBe(oldHash);
-    expect(updated.password.length).toBe(53);
+    expect(updated.password).toMatch(/^\$c\$/);
 
-    // Old password should not work
     const oldWorks = await verifyPassword('OldPassword123', updated.password);
     expect(oldWorks).toBe(false);
 
-    // New password should work
     const newWorks = await verifyPassword('NewPassword456', updated.password);
     expect(newWorks).toBe(true);
   });
@@ -100,15 +90,14 @@ describe('Resource - Password Type with bcrypt hashing', () => {
       usersResource.insert({
         email: 'test@example.com',
         name: 'Test User',
-        password: 'short'  // Less than 8 characters
+        password: 'short'
       })
     ).rejects.toThrow();
   });
 
   test('should handle different bcrypt rounds', async () => {
-    // Create database with different bcrypt rounds
     const dbWithHigherRounds = createDatabaseForTest('suite=resources/password-type-rounds', {
-      bcryptRounds: 4 // Low rounds for fast tests
+      security: { bcrypt: { rounds: 14 } }
     });
 
     const resource = await dbWithHigherRounds.createResource({
@@ -125,15 +114,12 @@ describe('Resource - Password Type with bcrypt hashing', () => {
       password: plainPassword
     });
 
-    // Should still be 53 bytes (compacted)
-    expect(user.password.length).toBe(53);
+    // b62(14) = "e"
+    expect(user.password).toMatch(/^\$e\$.{53}$/);
     expect(user.password).not.toBe(plainPassword);
 
-    // Password should be hashed
-    expect(user.password.startsWith('$')).toBe(false); // Compacted format
-
-    // Note: verifyPassword() with bcrypt.compare() works regardless of rounds
-    // The rounds are encoded in the hash itself, so verification is automatic
+    const isValid = await verifyPassword(plainPassword, user.password);
+    expect(isValid).toBe(true);
 
     await dbWithHigherRounds.disconnect();
   });
@@ -154,20 +140,14 @@ describe('Resource - Password Type with bcrypt hashing', () => {
       recoveryPassword: 'RecoveryPassword456!'
     });
 
-    // Both passwords should be hashed
     expect(account.password).not.toBe('MainPassword123');
     expect(account.recoveryPassword).not.toBe('RecoveryPassword456!');
 
-    // Both should be 53 bytes
-    expect(account.password.length).toBe(53);
-    expect(account.recoveryPassword.length).toBe(53);
+    expect(account.password).toMatch(/^\$c\$/);
+    expect(account.recoveryPassword).toMatch(/^\$c\$/);
 
-    // Both should verify correctly
-    const mainValid = await verifyPassword('MainPassword123', account.password);
-    const recoveryValid = await verifyPassword('RecoveryPassword456!', account.recoveryPassword);
-
-    expect(mainValid).toBe(true);
-    expect(recoveryValid).toBe(true);
+    expect(await verifyPassword('MainPassword123', account.password)).toBe(true);
+    expect(await verifyPassword('RecoveryPassword456!', account.recoveryPassword)).toBe(true);
   });
 
   test('should work with patch() method', async () => {
@@ -177,35 +157,30 @@ describe('Resource - Password Type with bcrypt hashing', () => {
       password: 'OldPassword123'
     });
 
-    // Patch only the password
     const patched = await usersResource.patch(user.id, {
       password: 'NewPatchedPassword456'
     });
 
-    // Password should be hashed
     expect(patched.password).not.toBe('NewPatchedPassword456');
-    expect(patched.password.length).toBe(53);
+    expect(patched.password).toMatch(/^\$c\$/);
 
-    // Should verify
     const isValid = await verifyPassword('NewPatchedPassword456', patched.password);
     expect(isValid).toBe(true);
   });
 
   test('should differentiate between password and secret types', async () => {
-    // Create database with passphrase for secret type and autoDecrypt disabled
     const dbWithPassphrase = createDatabaseForTest('suite=resources/password-secret-types', {
-      bcryptRounds: 4, // Low rounds for fast tests
-      passphrase: 'test-encryption-key'
+      security: { passphrase: 'test-encryption-key', bcrypt: { rounds: 12 } }
     });
 
     const resource = await dbWithPassphrase.createResource({
       name: 'accounts_with_both',
       attributes: {
         email: 'string|required',
-        password: 'password|required',      // One-way hash (bcrypt)
-        apiKey: 'secret|required'            // Reversible encryption (AES)
+        password: 'password|required',
+        apiKey: 'secret|required'
       },
-      autoDecrypt: false  // Disable auto-decrypt to see encrypted value
+      autoDecrypt: false
     });
 
     const account = await resource.insert({
@@ -214,25 +189,14 @@ describe('Resource - Password Type with bcrypt hashing', () => {
       apiKey: 'sk-1234567890'
     });
 
-    // Password: bcrypt hash (53 bytes, compacted)
-    expect(account.password.length).toBe(53);
-    expect(account.password.startsWith('$')).toBe(false);
+    expect(account.password).toMatch(/^\$c\$/);
+    expect(account.password.length).toBe(56);
 
-    // API Key: AES encrypted (should be encrypted, not plaintext)
     expect(account.apiKey).not.toBe('sk-1234567890');
-    // AES encryption produces different length than bcrypt hash
-    expect(account.apiKey.length).not.toBe(53);
+    expect(account.apiKey.length).not.toBe(56);
 
-    // Password verification works (one-way)
-    const passwordValid = await verifyPassword('UserPassword123', account.password);
-    expect(passwordValid).toBe(true);
-
-    // Wrong password fails
-    const passwordInvalid = await verifyPassword('WrongPassword', account.password);
-    expect(passwordInvalid).toBe(false);
-
-    // Secret type cannot be verified like password (it's reversibly encrypted)
-    // To verify a secret, you'd need to decrypt it first
+    expect(await verifyPassword('UserPassword123', account.password)).toBe(true);
+    expect(await verifyPassword('WrongPassword', account.password)).toBe(false);
 
     await dbWithPassphrase.disconnect();
   });
@@ -253,14 +217,12 @@ describe('Resource - Password Type with bcrypt hashing', () => {
       email: 'test@example.com',
       name: 'Test User',
       password: 'SecurePassword123',
-      bio: 'A'.repeat(3000)  // Force body overflow
+      bio: 'A'.repeat(3000)
     });
 
-    // Password should still be hashed
     expect(user.password).not.toBe('SecurePassword123');
-    expect(user.password.length).toBe(53);
+    expect(user.password).toMatch(/^\$c\$/);
 
-    // Verification should work
     const isValid = await verifyPassword('SecurePassword123', user.password);
     expect(isValid).toBe(true);
   });

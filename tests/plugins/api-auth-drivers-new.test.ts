@@ -63,7 +63,7 @@ describe('API Plugin - Auth Drivers (New API)', () => {
       port = getRandomPort();
       db = createDatabaseForTest(`api-auth-jwt-${Date.now()}`, {
         logLevel: 'silent',
-        passphrase: 'test-passphrase' // Required for secret type encryption
+        security: { passphrase: 'test-passphrase' } // Required for secret type encryption
       });
       await db.connect();
 
@@ -180,7 +180,7 @@ describe('API Plugin - Auth Drivers (New API)', () => {
       port = getRandomPort();
       db = createDatabaseForTest(`api-auth-apikey-${Date.now()}`, {
         logLevel: 'silent',
-        passphrase: 'api-key-passphrase' // Required for secret type encryption
+        security: { passphrase: 'api-key-passphrase' } // Required for secret type encryption
       });
       await db.connect();
 
@@ -279,7 +279,7 @@ describe('API Plugin - Auth Drivers (New API)', () => {
       port = getRandomPort();
       db = createDatabaseForTest(`api-auth-basic-${Date.now()}`, {
         logLevel: 'silent',
-        passphrase: 'basic-pass' // Required for secret type encryption
+        security: { passphrase: 'basic-pass' } // Required for secret type encryption
       });
       await db.connect();
 
@@ -370,7 +370,7 @@ describe('API Plugin - Auth Drivers (New API)', () => {
       port = getRandomPort();
       db = createDatabaseForTest(`api-auth-multi-${Date.now()}`, {
         logLevel: 'silent',
-        passphrase: 'secret' // Required for secret type encryption
+        security: { passphrase: 'secret' } // Required for secret type encryption
       });
       await db.connect();
 
