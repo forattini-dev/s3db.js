@@ -33,7 +33,7 @@ import { resourceTemplates, listResources, readResource } from './resources.js';
 import { prompts, getPrompt } from './prompts.js';
 import type { TransportArgs } from './types/index.js';
 
-config({ quiet: true });
+config({ path: join(process.cwd(), '.env'), quiet: true });
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);

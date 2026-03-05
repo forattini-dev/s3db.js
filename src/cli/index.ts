@@ -124,6 +124,10 @@ const cli = createCLI({
       description: 'Start the S3DB MCP (Model Context Protocol) server',
       aliases: ['server'],
       options: {
+        cwd: {
+          type: 'string',
+          description: 'Working directory for MCP process (defaults to current directory)',
+        },
         port: {
           short: 'p',
           type: 'number',
@@ -194,11 +198,11 @@ const cli = createCLI({
             args.push(`--port=${opts.port}`);
           }
 
-          const packageRoot = path.resolve(path.dirname(entrypointPath), '..');
+          const workingDirectory = path.resolve(opts.cwd || process.cwd());
           const child = spawn('npx', ['tsx', entrypointPath, ...args], {
             stdio: isStdio ? ['inherit', 'inherit', 'inherit'] : 'inherit',
             env: process.env,
-            cwd: packageRoot
+            cwd: workingDirectory
           });
 
           child.on('close', (code) => process.exit(code ?? 0));

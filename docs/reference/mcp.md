@@ -21,9 +21,43 @@
 
 ## ⚡ TL;DR
 
+### `.env` local + `cwd` (important)
+The MCP command now loads variables from `.env` in the directory defined by the runtime `cwd`.
+
+- `npx -y s3db-mcp --transport=http` reads `.env` from where you run this command.
+- `s3db mcp --cwd /full/path/to/project --transport=http` runs MCP from that path and reads `/full/path/to/project/.env`.
+
+```bash
+# Example: prepare local env and run
+cd /workspace/my-service
+cat > .env << 'EOF'
+S3DB_CONNECTION_STRING=s3://ACCESS_KEY:SECRET_KEY@bucket/databases/myapp
+MCP_TRANSPORT=http
+MCP_SERVER_PORT=17500
+EOF
+npx -y s3db-mcp --transport=http
+```
+
 **Quick Start - 3 Steps:**
 ```bash
-# 1. Start MCP server (local)
+# 1. Create/prepare `.env` in the directory where you will run MCP
+mkdir -p .s3db-local
+cat > .s3db-local/.env << 'EOF'
+S3DB_CONNECTION_STRING=s3://ACCESS_KEY:SECRET_KEY@bucket/databases/myapp
+MCP_TRANSPORT=http
+MCP_SERVER_PORT=17500
+EOF
+
+# 2. Start MCP server from that directory (or point --cwd in `s3db mcp`)
+cd .s3db-local
+npx -y s3db-mcp
+
+# 3. Or from another directory using the `s3db` CLI:
+# s3db mcp --cwd .s3db-local --transport=http
+```
+
+# Quick run from directory containing `.env` (local)
+cd .s3db-local
 npx -y s3db-mcp
 
 # 2. Or start with HTTP (remote)
@@ -248,6 +282,13 @@ In Claude Desktop, test with these commands:
 ```bash
 # Streamable HTTP transport (remote clients) - Default port: 17500
 npx -y s3db-mcp --transport=http
+
+# 2b) Load env automatically from the current working directory
+cd /workspace/my-service
+npx -y s3db-mcp --transport=http
+
+# 2c) Use `s3db mcp` with explicit cwd (when launching from another folder)
+s3db mcp --cwd /workspace/my-service --transport=http
 
 # STDIO transport (local clients, default)
 npx -y s3db-mcp
@@ -685,6 +726,9 @@ AWS_REGION=us-east-1
 # Basic usage
 npx -y s3db-mcp [OPTIONS]
 
+# Start MCP from a specific working directory when using the `s3db` CLI:
+s3db mcp --cwd /path/to/project --transport=http
+
 # Transport selection
 npx -y s3db-mcp --transport=http      # Web clients (default)
 npx -y s3db-mcp --transport=stdio    # CLI/pipe communication
@@ -707,6 +751,17 @@ S3DB_VERBOSE=true \
 NODE_ENV=development \
 npx -y s3db-mcp --transport=stdio
 ```
+
+### `.env` Loading Rules (MCP)
+
+From now on, MCP loads environment variables from:
+1. OS environment
+2. `.env` in the **current working directory**
+
+That means:
+- `npx -y s3db-mcp --transport=http` uses `.env` from where you run the command.
+- `s3db mcp --cwd /path/to/project` runs MCP from that folder and loads `/path/to/project/.env`.
+- CLI inline variables (`S3DB_CONNECTION_STRING=... npx ...`) still have priority when passed directly.
 
 ### 🔍 Configuration Validation
 
