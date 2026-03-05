@@ -5,7 +5,13 @@ import type { S3db } from '../../src/index.js';
 export const queryTools = [
   {
     name: 'resourceQuery',
-    description: 'Query documents with filters (e.g., {status: "active", age: {$gt: 18}}). O(n) scan without partitions — define partitions on frequently queried fields for O(1) performance.',
+    description: `Filter documents by field values. O(n) scan — for frequently queried fields, define partitions instead for O(1).
+
+Exact match: { status: "active" }
+Comparison: { age: { $gt: 18 } }, { price: { $lte: 100 } }
+Multiple: { status: "active", role: "admin" }
+
+For partition-based filtering (O(1)), use resourceList with partition + partitionValues instead.`,
     inputSchema: {
       type: 'object',
       properties: {
@@ -15,16 +21,16 @@ export const queryTools = [
         },
         filters: {
           type: 'object',
-          description: 'Query filters (e.g., {status: "active", age: {$gt: 18}})'
+          description: 'Filter object. Exact match: { field: "value" }. Operators: $gt, $gte, $lt, $lte, $ne, $in'
         },
         limit: {
           type: 'number',
-          description: 'Maximum number of results',
+          description: 'Max results (default: 100)',
           default: 100
         },
         offset: {
           type: 'number',
-          description: 'Number of results to skip',
+          description: 'Skip N results',
           default: 0
         }
       },

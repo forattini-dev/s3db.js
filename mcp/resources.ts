@@ -81,6 +81,12 @@ export const resourceTemplates: MCPResourceTemplate[] = [
     description: 'Behavior documentation: body-overflow, body-only, truncate-data, enforce-limits, user-managed',
     mimeType: 'text/markdown',
   },
+  {
+    uriTemplate: 's3db://resource/{name}',
+    name: 'Database Resource',
+    description: 'Live resource inspection: schema, attributes, partitions, behavior, configuration, and S3 paths. Requires active database connection.',
+    mimeType: 'text/markdown',
+  },
 ];
 
 // =============================================================================
@@ -139,7 +145,7 @@ function parseResourceUri(uri: string): ParsedUri | null {
 // Resource Handlers
 // =============================================================================
 
-export function readResource(uri: string): MCPResourceContent | null {
+export function readResource(uri: string, database?: any): MCPResourceContent | null {
   const parsed = parseResourceUri(uri);
   if (!parsed) return null;
 
@@ -196,6 +202,10 @@ export function readResource(uri: string): MCPResourceContent | null {
 
       case 'behavior':
         text = generateBehaviorDoc(name);
+        break;
+
+      case 'resource':
+        text = generateResourceDoc(name, database);
         break;
 
       default:
@@ -291,7 +301,7 @@ const user = await users.get('user-id');
 | Behavior reference | \`s3db://behavior/{name}\` (body-overflow, body-only, enforce-limits) |
 | Quick reference card | \`s3db://quick-reference\` |
 | API signatures | \`s3db://api-summary\` |
-| Search docs | \`s3dbSearchCoreDocs\` / \`s3dbSearchPluginDocs\` tools |
+| Search docs | \`s3dbSearchDocs\` tool |
 
 ## Decision Guide
 
@@ -1192,6 +1202,94 @@ ${behavior.useCase}
 ## Comparison with Other Behaviors
 
 ${behaviors.filter(b => b.name !== behavior.name).map(b => `- **${b.name}**: ${b.useCase}`).join('\n')}
+`;
+}
+
+// =============================================================================
+// Resource Inspection (live database)
+// =============================================================================
+
+function generateResourceDoc(name: string, database?: any): string {
+  if (!database || !database.isConnected()) {
+    return `# Resource: ${name}\n\nDatabase not connected. Set S3DB_CONNECTION_STRING env var for auto-connect, or use \`dbConnect\` tool.`;
+  }
+
+  const resource = database.resources?.[name];
+  if (!resource) {
+    const available = Object.keys(database.resources || {});
+    return `# Resource: ${name}\n\nResource not found. Available resources: ${available.length > 0 ? available.join(', ') : '(none)'}`;
+  }
+
+  const attributes = resource.attributes || {};
+  const partitions = resource.config?.partitions || {};
+  const behavior = resource.behavior || 'user-managed';
+  const version = resource.version || 'v1';
+
+  const attrLines = Object.entries(attributes).map(([field, def]) => {
+    const type = typeof def === 'string' ? def : (typeof def === 'object' && def !== null ? JSON.stringify(def) : String(def));
+    return `| \`${field}\` | \`${type}\` |`;
+  });
+
+  const partitionLines = Object.entries(partitions).map(([pName, pDef]: [string, any]) => {
+    const fields = pDef?.fields ? Object.entries(pDef.fields).map(([f, r]) => `${f} (${r})`).join(', ') : '';
+    return `| \`${pName}\` | ${fields} |`;
+  });
+
+  const config = resource.config || {};
+
+  return `# Resource: ${name}
+
+## Schema
+
+| Field | Type |
+|-------|------|
+${attrLines.join('\n')}
+
+## Configuration
+
+| Property | Value |
+|----------|-------|
+| **Behavior** | \`${behavior}\` |
+| **Version** | \`${version}\` |
+| **Timestamps** | \`${config.timestamps || false}\` |
+| **Paranoid** | \`${config.paranoid !== undefined ? config.paranoid : true}\` |
+| **Strict Validation** | \`${resource.strictValidation || false}\` |
+| **Auto Decrypt** | \`${config.autoDecrypt !== undefined ? config.autoDecrypt : true}\` |
+| **Async Partitions** | \`${config.asyncPartitions !== undefined ? config.asyncPartitions : true}\` |
+
+${partitionLines.length > 0 ? `## Partitions
+
+| Partition | Fields |
+|-----------|--------|
+${partitionLines.join('\n')}
+` : '## Partitions\n\nNo partitions defined.'}
+
+## S3 Paths
+
+- **Data prefix**: \`${database.keyPrefix || ''}resource=${name}/data/\`
+- **Partition prefix**: \`${database.keyPrefix || ''}resource=${name}/partition=\`
+
+## Usage Examples
+
+\`\`\`javascript
+// Get by ID
+const item = await ${name}.get('some-id');
+
+// Insert
+const created = await ${name}.insert({ ${Object.keys(attributes).slice(0, 3).map(k => `${k}: ...`).join(', ')} });
+
+// List
+const items = await ${name}.list({ limit: 100 });
+
+// Query
+const results = await ${name}.query({ ${Object.keys(attributes)[0] || 'field'}: 'value' });
+${partitionLines.length > 0 ? `
+// Partition query (O(1))
+const partitioned = await ${name}.list({
+  partition: '${Object.keys(partitions)[0]}',
+  partitionValues: { ${Object.keys((Object.values(partitions)[0] as any)?.fields || {})[0] || 'field'}: 'value' }
+});` : ''}
+\`\`\`
 `;
 }
 

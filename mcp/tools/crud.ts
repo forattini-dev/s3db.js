@@ -50,7 +50,7 @@ export const crudTools = [
   },
   {
     name: 'resourceGet',
-    description: 'Get a document by ID from a resource',
+    description: 'Get a single document by its ID. O(1) operation. Optionally provide partition info for even faster access in partitioned resources.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -198,7 +198,12 @@ export const crudTools = [
   },
   {
     name: 'resourceList',
-    description: 'List documents (O(n) scan without partitions). For large datasets, provide partition + partitionValues for O(1) lookup. For paginated access, prefer resourcePage with cursor.',
+    description: `List documents from a resource. Without partitions this is an O(n) scan — for large datasets, always use partition + partitionValues for O(1) lookup.
+
+Example without partition: resourceList({ resourceName: "users", limit: 50 })
+Example with partition: resourceList({ resourceName: "orders", partition: "by-status", partitionValues: { status: "pending" }, limit: 20 })
+
+For paginated access on large datasets, prefer resourcePage (cursor-based). Use s3db://resource/{name} to discover available partitions.`,
     inputSchema: {
       type: 'object',
       properties: {
@@ -208,21 +213,21 @@ export const crudTools = [
         },
         limit: {
           type: 'number',
-          description: 'Maximum number of documents to return',
+          description: 'Max documents to return (default: 100)',
           default: 100
         },
         offset: {
           type: 'number',
-          description: 'Number of documents to skip',
+          description: 'Skip N documents (slow on large datasets — prefer resourcePage with cursor)',
           default: 0
         },
         partition: {
           type: 'string',
-          description: 'Partition name to filter by'
+          description: 'Partition name (e.g. "by-status", "by-userId"). See s3db://resource/{name} for available partitions.'
         },
         partitionValues: {
           type: 'object',
-          description: 'Partition values for filtering'
+          description: 'Values for the partition fields (e.g. { status: "active" } or { userId: "daniel@tetis.io" })'
         }
       },
       required: ['resourceName']
@@ -254,7 +259,10 @@ export const crudTools = [
   },
   {
     name: 'resourceCount',
-    description: 'Count documents in a resource',
+    description: `Count documents. Without partition: counts all documents. With partition: counts only matching subset (O(1)).
+
+Example: resourceCount({ resourceName: "orders" }) — total count
+Example: resourceCount({ resourceName: "orders", partition: "by-status", partitionValues: { status: "pending" } }) — count pending orders`,
     inputSchema: {
       type: 'object',
       properties: {
@@ -264,11 +272,11 @@ export const crudTools = [
         },
         partition: {
           type: 'string',
-          description: 'Partition name to filter by'
+          description: 'Partition name for filtered count'
         },
         partitionValues: {
           type: 'object',
-          description: 'Partition values for filtering'
+          description: 'Partition field values'
         }
       },
       required: ['resourceName']
@@ -308,7 +316,19 @@ export const crudTools = [
   },
   {
     name: 'resourcePage',
-    description: 'Paginate documents using cursor-based or page-number pagination. Use cursor for sequential access or page for random access. Returns nextCursor for cursor-based navigation.',
+    description: `Paginate documents with cursor or page number. Best for large datasets.
+
+Cursor-based (sequential, recommended):
+  Page 1: resourcePage({ resourceName: "users", size: 10 })
+  Page 2: resourcePage({ resourceName: "users", size: 10, cursor: "<nextCursor from previous result>" })
+
+Page-number (random access):
+  resourcePage({ resourceName: "users", size: 10, page: 3 })
+
+With partition (O(1)):
+  resourcePage({ resourceName: "orders", size: 10, partition: "by-status", partitionValues: { status: "pending" } })
+
+Returns: { data, nextCursor, totalCount, hasMore, page, totalPages }. Use skipCount: true to skip totalCount for faster queries.`,
     inputSchema: {
       type: 'object',
       properties: {
@@ -323,23 +343,23 @@ export const crudTools = [
         },
         cursor: {
           type: 'string',
-          description: 'Cursor from previous page result (null/omit for first page)'
+          description: 'Cursor from previous result (omit for first page)'
         },
         page: {
           type: 'number',
-          description: 'Page number (1-based) for page-number pagination'
+          description: 'Page number (1-based). Use cursor OR page, not both.'
         },
         partition: {
           type: 'string',
-          description: 'Partition name to filter by'
+          description: 'Partition name for O(1) filtered pagination'
         },
         partitionValues: {
           type: 'object',
-          description: 'Partition values for filtering'
+          description: 'Partition field values (e.g. { status: "active" })'
         },
         skipCount: {
           type: 'boolean',
-          description: 'Skip total count for faster queries',
+          description: 'Skip totalCount calculation (faster)',
           default: false
         }
       },

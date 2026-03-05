@@ -284,21 +284,18 @@ async function listTopics(type: 'core' | 'plugins'): Promise<any> {
 
 export const docsSearchTools = [
   {
-    name: 's3dbSearchCoreDocs',
-    description: `Search s3db.js CORE documentation using fuzzy search.
-Core docs include: getting started, database/resource API, schema validation,
-CRUD operations, partitioning, behaviors, encoding, encryption, streaming, and CLI.
-Use this for questions about the main s3db.js functionality.`,
+    name: 's3dbSearchDocs',
+    description: `Search all s3db.js documentation (core + plugins) using fuzzy search. Covers: resource API, schema validation, CRUD, partitioning, behaviors, encoding, encryption, CLI, and all plugins (Cache, Audit, TTL, API, Vector, Graph, etc).`,
     inputSchema: {
       type: 'object',
       properties: {
         query: {
           type: 'string',
-          description: 'Search query (e.g., "how do partitions work", "create resource with validation")',
+          description: 'Search query (e.g., "how do partitions work", "cache plugin config", "create resource")',
         },
         limit: {
           type: 'number',
-          description: 'Maximum results to return (default: 5)',
+          description: 'Max results (default: 5)',
           default: 5,
         },
       },
@@ -306,23 +303,25 @@ Use this for questions about the main s3db.js functionality.`,
     },
   },
   {
-    name: 's3dbSearchPluginDocs',
-    description: `Search s3db.js PLUGIN documentation using fuzzy search.
-Plugin docs include: CachePlugin, AuditPlugin, ReplicatorPlugin, GeoPlugin,
-MetricsPlugin, TTLPlugin, BackupPlugin, QueuePlugin, ApiPlugin, and more.
-Use this for questions about specific plugins and their configuration.`,
+    name: 's3dbSearchCoreDocs',
+    description: `Search s3db.js CORE documentation using fuzzy search.`,
     inputSchema: {
       type: 'object',
       properties: {
-        query: {
-          type: 'string',
-          description: 'Search query (e.g., "cache plugin configuration", "how to use geo plugin")',
-        },
-        limit: {
-          type: 'number',
-          description: 'Maximum results to return (default: 5)',
-          default: 5,
-        },
+        query: { type: 'string', description: 'Search query' },
+        limit: { type: 'number', default: 5 },
+      },
+      required: ['query'],
+    },
+  },
+  {
+    name: 's3dbSearchPluginDocs',
+    description: `Search s3db.js PLUGIN documentation using fuzzy search.`,
+    inputSchema: {
+      type: 'object',
+      properties: {
+        query: { type: 'string', description: 'Search query' },
+        limit: { type: 'number', default: 5 },
       },
       required: ['query'],
     },
@@ -330,25 +329,44 @@ Use this for questions about specific plugins and their configuration.`,
   {
     name: 's3dbListCoreTopics',
     description: 'List all available topics in s3db.js CORE documentation',
-    inputSchema: {
-      type: 'object',
-      properties: {},
-      required: [],
-    },
+    inputSchema: { type: 'object', properties: {}, required: [] },
   },
   {
     name: 's3dbListPluginTopics',
     description: 'List all available topics in s3db.js PLUGIN documentation',
-    inputSchema: {
-      type: 'object',
-      properties: {},
-      required: [],
-    },
+    inputSchema: { type: 'object', properties: {}, required: [] },
   },
 ];
 
 export function createDocsSearchHandlers(server: S3dbMCPServer) {
   return {
+    async s3dbSearchDocs(args: S3dbSearchDocsArgs): Promise<any> {
+      const { query, limit = 5 } = args;
+      // Search both core and plugin docs, merge and sort by score
+      const [coreResults, pluginResults] = await Promise.all([
+        searchDocs('core', query, limit),
+        searchDocs('plugins', query, limit),
+      ]);
+
+      const allResults = [
+        ...(coreResults.results || []).map((r: any) => ({ ...r, source: 'core' })),
+        ...(pluginResults.results || []).map((r: any) => ({ ...r, source: 'plugin' })),
+      ].sort((a, b) => b.score - a.score).slice(0, limit);
+
+      return {
+        success: true,
+        query,
+        resultCount: allResults.length,
+        totalDocs: (coreResults.totalDocs || 0) + (pluginResults.totalDocs || 0),
+        results: allResults.map(r => ({
+          ...r,
+          fullContent: r.content?.length > 3000
+            ? r.content.slice(0, 3000) + '\n\n... (truncated)'
+            : r.content,
+        })),
+      };
+    },
+
     async s3dbSearchCoreDocs(args: S3dbSearchDocsArgs): Promise<any> {
       const { query, limit = 5 } = args;
       return searchDocs('core', query, limit);

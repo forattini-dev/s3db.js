@@ -257,7 +257,6 @@ export function createDebuggingHandlers(server: S3dbMCPServer) {
       const resource = server.getResource(database, resourceName);
 
       try {
-        // Build S3 key
         const key = `${database.keyPrefix}resource=${resourceName}/id=${id}.json`;
 
         const response = await (database.client as any).getObject({
@@ -268,20 +267,25 @@ export function createDebuggingHandlers(server: S3dbMCPServer) {
         const body = await response.Body.transformToString();
         const bodyData = body ? JSON.parse(body) : null;
 
+        const unmapped = await resource.get(id);
+
         return {
           success: true,
-          s3Object: {
-            key,
-            bucket: database.bucket,
-            metadata: response.Metadata || {},
-            contentLength: response.ContentLength,
-            lastModified: response.LastModified,
-            etag: response.ETag,
-            contentType: response.ContentType
-          },
-          data: {
-            metadata: response.Metadata,
-            body: bodyData
+          unmapped,
+          raw: {
+            s3Object: {
+              key,
+              bucket: database.bucket,
+              metadata: response.Metadata || {},
+              contentLength: response.ContentLength,
+              lastModified: response.LastModified,
+              etag: response.ETag,
+              contentType: response.ContentType
+            },
+            data: {
+              metadata: response.Metadata,
+              body: bodyData
+            }
           }
         };
       } catch (error: any) {

@@ -5,7 +5,13 @@ import type { S3db } from '../../src/index.js';
 export const resourceManagementTools = [
   {
     name: 'dbCreateResource',
-    description: 'Create a resource (collection/table). Key decisions: behavior (body-overflow default, handles 2KB S3 metadata limit), partitions (define on queried fields for O(1) lookups), timestamps (auto createdAt/updatedAt). Read s3db://best-practices for guidance.',
+    description: `Create a new resource (like a table/collection). Key options:
+- attributes: schema definition using fastest-validator syntax (e.g. { name: "string|required", age: "number", active: "bool|default:true" })
+- behavior: "body-overflow" (default, auto-handles 2KB S3 metadata limit), "body-only" (large docs), "enforce-limits" (strict)
+- partitions: define on fields you query by for O(1) lookups (e.g. { "by-status": { fields: { status: "string" } } })
+- timestamps: true for auto createdAt/updatedAt
+
+Read s3db://best-practices for detailed guidance.`,
     inputSchema: {
       type: 'object',
       properties: {
@@ -43,7 +49,7 @@ export const resourceManagementTools = [
   },
   {
     name: 'dbListResources',
-    description: 'List all resources in the database',
+    description: 'List all resources (tables/collections) in the connected database. Shows name, schema, behavior, and partition info for each resource. Use s3db://resource/{name} for detailed inspection.',
     inputSchema: {
       type: 'object',
       properties: {},

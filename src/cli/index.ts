@@ -126,8 +126,8 @@ const cli = createCLI({
         port: {
           short: 'p',
           type: 'number',
-          default: 8000,
-          description: 'Port for SSE transport'
+          default: 17500,
+          description: 'Port for HTTP transport'
         },
         host: {
           short: 'h',
@@ -139,31 +139,32 @@ const cli = createCLI({
           short: 't',
           type: 'string',
           default: 'stdio',
-          choices: ['stdio', 'sse'],
+          choices: ['stdio', 'http'],
           description: 'Transport type'
         }
       },
       handler: async (result) => {
         const opts = result.options as any;
+        const isStdio = !opts.transport || opts.transport === 'stdio';
+        const log = (...args: unknown[]) => process.stderr.write(args.join(' ') + '\n');
         let connectionString = opts.connection;
 
         if (!connectionString) {
-          console.log(cyan('ℹ️  Auto-detecting connection string...'));
+          log('Auto-detecting connection string...');
           connectionString = await detectConnectionString();
         }
 
         if (connectionString) {
-          console.log(green('✅ Connection string detected'));
+          log('Connection string detected');
           process.env.S3DB_CONNECTION_STRING = connectionString;
         } else {
-          console.log(yellow('⚠️  No connection string found. Server will start without auto-connection.'));
+          log('No connection string found. Server will start without auto-connection.');
         }
 
         try {
           const { spawn } = await import('child_process');
           const { existsSync } = await import('fs');
 
-          // Find the MCP entrypoint
           const possiblePaths = [
             path.resolve(__dirname, '../../mcp/entrypoint.ts'),
             path.resolve(__dirname, '../../../mcp/entrypoint.ts'),
@@ -181,7 +182,6 @@ const cli = createCLI({
             throw new Error('Could not find MCP server entrypoint.');
           }
 
-          // Build command args
           const args: string[] = [];
           if (opts.transport && opts.transport !== 'stdio') {
             args.push(`--transport=${opts.transport}`);
@@ -193,25 +193,22 @@ const cli = createCLI({
             args.push(`--port=${opts.port}`);
           }
 
-          // Run the MCP entrypoint with tsx
-          // Set cwd to package root so dependencies are resolved correctly (important for npx)
           const packageRoot = path.resolve(path.dirname(entrypointPath), '..');
           const child = spawn('npx', ['tsx', entrypointPath, ...args], {
-            stdio: 'inherit',
+            stdio: isStdio ? ['inherit', 'inherit', 'inherit'] : 'inherit',
             env: process.env,
             cwd: packageRoot
           });
 
           child.on('close', (code) => process.exit(code ?? 0));
           child.on('error', (err) => {
-            console.error(red(`Failed to start MCP server: ${err.message}`));
+            log(`Failed to start MCP server: ${err.message}`);
             process.exit(1);
           });
 
-          // Keep the process running
           await new Promise(() => {});
         } catch (error: any) {
-          console.error(red(`Failed to start MCP server: ${error.message}`));
+          log(`Failed to start MCP server: ${error.message}`);
           process.exit(1);
         }
       }

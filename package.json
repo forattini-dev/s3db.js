@@ -10,7 +10,7 @@
   "bin": {
     "s3db.js": "./bin/cli.js",
     "s3db": "./bin/cli.js",
-    "s3db-mcp": "./mcp/entrypoint.ts"
+    "s3db-mcp": "./bin/mcp.js"
   },
   "repository": {
     "type": "git",

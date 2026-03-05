@@ -14,7 +14,8 @@ import { S3db, CachePlugin, CostsPlugin } from '../src/index.js';
 import { FilesystemCache } from '../src/plugins/cache/filesystem-cache.class.js';
 import { config } from 'dotenv';
 import { fileURLToPath } from 'url';
-import { dirname } from 'path';
+import { dirname, join } from 'path';
+import { readFileSync } from 'fs';
 import express from 'express';
 
 import { createConnectionHandlers, connectionTools } from './tools/connection.js';
@@ -41,51 +42,59 @@ let database: S3db | null = null;
 
 // Server configuration
 const SERVER_NAME = 's3db-mcp';
-const SERVER_VERSION = '1.0.0';
+const SERVER_VERSION = (() => {
+  try {
+    const pkg = JSON.parse(readFileSync(join(__dirname, '..', 'package.json'), 'utf-8'));
+    return pkg.version;
+  } catch {
+    return '0.0.0';
+  }
+})();
 
-const SERVER_INSTRUCTIONS = `s3db.js — S3-based document database with ORM-like interface. Turns AWS S3 (or MinIO) into a queryable database with schema validation, partitions, encryption, and 26+ plugins.
+const SERVER_INSTRUCTIONS = `s3db.js v${SERVER_VERSION} — S3-based document database. Turns AWS S3 (or MinIO) into a queryable database.
 
-## Workflow
-1. \`dbConnect\` with a connection string (MUST call first)
-2. \`dbCreateResource\` to define collections with schema + behavior + partitions
-3. CRUD: \`resourceInsert\`, \`resourceGet\`, \`resourceUpdate\`, \`resourceDelete\`, etc.
+Auto-connects on startup via S3DB_CONNECTION_STRING env var. All resources are restored — just start using tools.
 
-## Key Constraints
-- **2KB metadata limit**: S3 allows only 2KB of user-defined metadata per object. Choose a behavior to handle this:
-  - \`body-overflow\` (default): small data in metadata, large overflows to body
-  - \`body-only\`: always store in body (large documents)
-  - \`enforce-limits\`: reject data >2KB (strict validation)
-  - \`truncate-data\`: accept data loss (logs, previews)
-- **No indexes**: S3 has no native indexing. Without partitions, queries scan ALL objects O(n). Define partitions on queried fields for O(1) lookups.
-- **Atomic insert**: \`insert()\` uses \`ifNoneMatch\` — no duplicate ID race conditions.
+## Tools (all you need)
 
-## Performance Tips
-- \`patch()\` is 40-60% faster than \`update()\` (HEAD+COPY vs GET+PUT) — use for partial updates
-- \`replace()\` is 30-40% faster than \`update()\` (PUT only) — use for full replacement
-- \`page()\` with cursor for pagination, not \`list()\` with offset
-- Define partitions on fields you filter by (\`status\`, \`type\`, \`userId\`, etc.)
+**Read:** resourceGet (by ID), resourceList (browse/filter), resourcePage (paginate), resourceQuery (filter by values), resourceCount
+**Write:** resourceInsert, resourceUpdate, resourceDelete
+**Admin:** dbListResources, dbCreateResource, dbConnect (only if not auto-connected), dbStatus
+**Docs:** s3dbSearchDocs (search all documentation)
 
-## Learning Resources
-- Read \`s3db://overview\` for full capabilities and plugin list
-- Read \`s3db://best-practices\` for behavior selection, partitions, update methods, caching
-- Read \`s3db://plugin/{name}\` for detailed plugin docs (cache, api, audit, ttl, vector, etc.)
-- Read \`s3db://guide/{topic}\` for guides (getting-started, performance, testing, security)
-- Use \`s3dbSearchCoreDocs\` / \`s3dbSearchPluginDocs\` to search documentation
+## Partitions (critical for performance)
 
-## Plugins (26+)
-**Core**: CachePlugin, CostsPlugin, TTLPlugin, MetricsPlugin, AuditPlugin
-**Data**: VectorPlugin, FullTextPlugin, GraphPlugin, StateMachinePlugin, RelationPlugin, TreePlugin
-**Integration**: ApiPlugin, ReplicatorPlugin, WebSocketPlugin, SMTPPlugin, IdentityPlugin
-**Utility**: BackupPlugin, S3QueuePlugin, SchedulerPlugin, QueueConsumerPlugin, ImporterPlugin
-**Specialized**: SpiderPlugin, PuppeteerPlugin, ReconPlugin, CloudInventoryPlugin, KubernetesInventoryPlugin, TfStatePlugin
+Partitions turn O(n) scans into O(1) lookups. Most read tools accept \`partition\` + \`partitionValues\` params.
 
-## Connection Strings
-\`\`\`
-s3://KEY:SECRET@bucket?region=us-east-1     # AWS S3
-http://KEY:SECRET@localhost:9000/bucket      # MinIO
-memory://bucket/path                         # Testing (MemoryClient)
-file:///tmp/s3db                             # Testing (FileSystemClient)
-\`\`\`
+Example: resource "orders" has partition "by-status" on field "status".
+- \`resourceList({ resourceName: "orders", partition: "by-status", partitionValues: { status: "pending" } })\` — O(1)
+- \`resourceList({ resourceName: "orders" })\` — O(n) full scan
+
+Use \`s3db://resource/{name}\` to see which partitions a resource has.
+
+## Pagination
+
+- \`resourcePage\` with cursor: best for sequential navigation. Returns \`nextCursor\`.
+- \`resourcePage\` with page number: for random access (page=1, page=5).
+- \`resourceList\` with limit/offset: simple browsing, but offset is slow on large datasets.
+
+## Docs (s3db:// resources)
+
+- \`s3db://resource/{name}\` — live schema, partitions, behavior, usage examples
+- \`s3db://overview\` — full capabilities overview
+- \`s3db://best-practices\` — behaviors, partitions, performance guide
+- \`s3db://plugin/{name}\` — plugin docs (cache, api, audit, ttl, vector, etc.)
+- \`s3db://guide/{topic}\` — guides (getting-started, performance, testing, security)
+- \`s3db://field-type/{type}\` — field type reference (string, secret, embedding, ip4)
+
+## Prompts (ask for help)
+
+- \`create_resource\` — generate resource definition with schema, partitions, behavior
+- \`setup_plugin\` — configure any plugin with best practices
+- \`create_partition_strategy\` — design partitions for your query patterns
+- \`explain_behavior\` / \`explain_partitions\` — learn core concepts
+- \`debug_query_performance\` / \`optimize_costs\` — troubleshoot issues
+- \`migrate_from_mongodb\` / \`migrate_from_dynamodb\` / \`migrate_from_prisma\` — migration guides
 `;
 
 export class S3dbMCPServer {
@@ -116,20 +125,28 @@ export class S3dbMCPServer {
   }
 
   setupToolHandlers(): Record<string, Function> {
-    // List available tools
+    // List available tools — keep it simple: only essential tools are advertised.
+    // All handlers remain registered so advanced tools still work if called directly.
     this.server.setRequestHandler(ListToolsRequestSchema, async () => {
+      const essentialCrud = crudTools.filter(t =>
+        ['resourceGet', 'resourceList', 'resourcePage', 'resourceCount',
+         'resourceInsert', 'resourceInsertMany', 'resourceUpdate', 'resourceDelete'].includes(t.name)
+      );
+      const essentialQuery = queryTools.filter(t => t.name === 'resourceQuery');
+      const essentialConnection = connectionTools.filter(t =>
+        ['dbConnect', 'dbStatus'].includes(t.name)
+      );
+      const essentialDocs = docsSearchTools.filter(t =>
+        ['s3dbSearchDocs'].includes(t.name)
+      );
+
       return {
         tools: [
-          ...docsSearchTools,
-          ...connectionTools,
+          ...essentialCrud,
+          ...essentialQuery,
           ...resourceManagementTools,
-          ...crudTools,
-          ...debuggingTools,
-          ...queryTools,
-          ...partitionTools,
-          ...bulkTools,
-          ...exportImportTools,
-          ...statsTools,
+          ...essentialConnection,
+          ...(essentialDocs.length > 0 ? essentialDocs : docsSearchTools.slice(0, 2)),
         ]
       };
     });
@@ -220,7 +237,7 @@ export class S3dbMCPServer {
     this.server.setRequestHandler(ReadResourceRequestSchema, async (request) => {
       const { uri } = request.params;
 
-      const content = readResource(uri);
+      const content = readResource(uri, database);
       if (!content) {
         throw new Error(`Resource not found: ${uri}`);
       }
@@ -330,6 +347,23 @@ export class S3dbMCPServer {
       }
     });
 
+    // Streamable HTTP: GET for SSE streaming (stateless — not supported, return 405)
+    app.get('/mcp', (req, res) => {
+      res.status(405).json({
+        jsonrpc: '2.0',
+        error: {
+          code: -32000,
+          message: 'SSE streaming not supported in stateless mode. Use POST /mcp for JSON responses.'
+        },
+        id: null
+      });
+    });
+
+    // Streamable HTTP: DELETE for session cleanup (stateless — no-op)
+    app.delete('/mcp', (req, res) => {
+      res.status(200).json({ ok: true });
+    });
+
     // Health check endpoint
     app.get('/health', (req, res) => {
       const healthStatus = {
@@ -367,7 +401,7 @@ export class S3dbMCPServer {
   // Helper methods for tool handlers
   ensureConnected(db: S3db): void {
     if (!db || !db.isConnected()) {
-      throw new Error('Database not connected. Use dbConnect tool first.');
+      throw new Error('Database not connected. Set S3DB_CONNECTION_STRING env var for auto-connect, or use dbConnect tool.');
     }
   }
 
@@ -486,6 +520,10 @@ export function parseArgs(): TransportArgs {
 // Main execution function
 export async function startServer(args?: TransportArgs): Promise<void> {
   const finalArgs = args || parseArgs();
+  const isStdio = !finalArgs.transport || finalArgs.transport === 'stdio';
+  const log = isStdio
+    ? (...args: unknown[]) => process.stderr.write(args.join(' ') + '\n')
+    : console.log;
 
   // Set environment variables from arguments
   if (finalArgs.transport) process.env.MCP_TRANSPORT = finalArgs.transport;
@@ -497,22 +535,45 @@ export async function startServer(args?: TransportArgs): Promise<void> {
   // Preload search indexes for faster first query
   await preloadSearch();
 
+  // Auto-connect if connection string is available
+  const connectionString = process.env.S3DB_CONNECTION_STRING || process.env.S3_CONNECTION_STRING;
+  if (connectionString) {
+    try {
+      const plugins = [];
+      plugins.push(CostsPlugin);
+      plugins.push(new CachePlugin({ driver: 'memory', includePartitions: true, memoryOptions: { maxSize: 1000, ttl: 300000 } }));
+
+      database = new S3db({
+        connectionString,
+        passphrase: process.env.S3DB_PASSPHRASE || 'secret',
+        plugins
+      });
+      await database.connect();
+
+      const resourceCount = Object.keys(database.resources || {}).length;
+      log(`Auto-connected to ${database.bucket} (${resourceCount} resources restored)`);
+    } catch (err: any) {
+      log(`Auto-connect failed: ${err.message}. Use dbConnect tool manually.`);
+      database = null;
+    }
+  }
+
   // Handle graceful shutdown
   const shutdown = async () => {
-    console.log('\nShutting down S3DB MCP Server...');
+    log('Shutting down S3DB MCP Server...');
     if (database && database.isConnected()) {
       await database.disconnect();
     }
     process.exit(0);
   };
-  
+
   process.on('SIGINT', shutdown);
   process.on('SIGTERM', shutdown);
 
-  console.log(`S3DB MCP Server v${SERVER_VERSION} started`);
-  console.log(`Transport: ${finalArgs.transport}`);
+  log(`S3DB MCP Server v${SERVER_VERSION} started`);
+  log(`Transport: ${finalArgs.transport || 'stdio'}`);
   if (finalArgs.transport === 'http') {
-    console.log(`URL: http://${finalArgs.host}:${finalArgs.port}/mcp`);
+    log(`URL: http://${finalArgs.host}:${finalArgs.port}/mcp`);
   }
 }
 

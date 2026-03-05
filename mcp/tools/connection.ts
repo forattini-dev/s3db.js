@@ -6,7 +6,7 @@ import type { FilesystemCache } from '../../src/plugins/cache/filesystem-cache.c
 export const connectionTools = [
   {
     name: 'dbConnect',
-    description: 'Connect to S3DB database (MUST call first before any other operation). Connection string formats: s3://key:secret@bucket (AWS S3), http://key:secret@host:9000/bucket (MinIO), memory://bucket (testing), file:///path (testing). Auto-enables CostsPlugin and CachePlugin.',
+    description: 'Connect to S3DB database manually. Usually NOT needed — the server auto-connects via S3DB_CONNECTION_STRING env var. Use only to connect to a different database or if auto-connect is not configured. Formats: s3://key:secret@bucket (AWS S3), http://key:secret@host:9000/bucket (MinIO), memory://bucket (testing), file:///path (testing).',
     inputSchema: {
       type: 'object',
       properties: {
