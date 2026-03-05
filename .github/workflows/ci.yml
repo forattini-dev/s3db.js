@@ -23,9 +23,7 @@ jobs:
         uses: actions/checkout@v6
 
       - name: Setup pnpm
-        uses: pnpm/action-setup@v4
-        with:
-          version: 9
+        run: corepack prepare pnpm@9 --activate
 
       - name: Setup Node.js
         uses: actions/setup-node@v6
@@ -109,9 +107,7 @@ jobs:
         uses: actions/checkout@v6
 
       - name: Setup pnpm
-        uses: pnpm/action-setup@v4
-        with:
-          version: 9
+        run: corepack prepare pnpm@9 --activate
 
       - name: Setup Node.js
         uses: actions/setup-node@v6
@@ -156,6 +152,7 @@ jobs:
     permissions:
       contents: write
       packages: write
+      id-token: write
 
     steps:
       - name: Check if version bump commit
@@ -177,9 +174,7 @@ jobs:
 
       - name: Setup pnpm
         if: steps.check.outputs.skip != 'true'
-        uses: pnpm/action-setup@v4
-        with:
-          version: 9
+        run: corepack prepare pnpm@9 --activate
 
       - name: Setup Node.js (NPM Registry)
         if: steps.check.outputs.skip != 'true'
@@ -212,7 +207,7 @@ jobs:
 
       - name: Publish to NPM (Next)
         if: steps.check.outputs.skip != 'true'
-        run: pnpm publish --tag next --no-git-checks
+        run: pnpm publish --tag next --no-git-checks --provenance
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
@@ -284,6 +279,7 @@ jobs:
     permissions:
       contents: write
       packages: write
+      id-token: write
 
     steps:
       - name: Checkout
@@ -292,9 +288,7 @@ jobs:
           fetch-depth: 0
 
       - name: Setup pnpm
-        uses: pnpm/action-setup@v4
-        with:
-          version: 9
+        run: corepack prepare pnpm@9 --activate
 
       - name: Setup Node.js (NPM Registry)
         uses: actions/setup-node@v6
@@ -310,7 +304,7 @@ jobs:
         run: pnpm run build
 
       - name: Publish to NPM (Stable)
-        run: pnpm publish --no-git-checks
+        run: pnpm publish --no-git-checks --provenance
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
