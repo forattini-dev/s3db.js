@@ -512,6 +512,71 @@ The interactive docs UI at `/docs` uses the USD format internally. Both formats 
 
 ---
 
+## 🤖 Exposing Your API as an MCP Server
+
+Since the API Plugin generates a standard **OpenAPI 3.1** spec, you can instantly turn your API into an MCP (Model Context Protocol) server using [`dynamic-openapi-mcp`](https://www.npmjs.com/package/dynamic-openapi-mcp). This allows AI agents (Claude, Cursor, etc.) to interact with your resources through natural language.
+
+### Quick Setup
+
+1. Save the OpenAPI spec from your running API:
+
+```bash
+curl http://localhost:3000/openapi.json -o specs/api.yaml
+```
+
+2. Add the MCP server to your client config (e.g. `claude_desktop_config.json`):
+
+```json
+{
+  "mcpServers": {
+    "my-api": {
+      "command": "npx",
+      "args": ["dynamic-openapi-mcp", "-s", "./specs/api.yaml"],
+      "env": {
+        "OPENAPI_API_KEY": "your-api-key"
+      }
+    }
+  }
+}
+```
+
+That's it. The AI agent can now list resources, query records, create entries, and more — all through the auto-generated OpenAPI spec.
+
+### With Authentication
+
+If your API uses JWT auth, pass the token via the environment:
+
+```json
+{
+  "mcpServers": {
+    "my-api": {
+      "command": "npx",
+      "args": ["dynamic-openapi-mcp", "-s", "./specs/api.yaml"],
+      "env": {
+        "OPENAPI_API_KEY": "Bearer eyJhbGciOiJIUzI1NiIs..."
+      }
+    }
+  }
+}
+```
+
+### Live Spec (No File Needed)
+
+You can also point directly to your running API:
+
+```json
+{
+  "mcpServers": {
+    "my-api": {
+      "command": "npx",
+      "args": ["dynamic-openapi-mcp", "-s", "http://localhost:3000/openapi.json"]
+    }
+  }
+}
+```
+
+---
+
 ## 🔗 Related Guides
 
 - **[API Plugin README](./README.md)** - Main plugin documentation
