@@ -21,10 +21,10 @@ Model Context Protocol server for AI tool integration.
 
 ```bash
 # For Claude Desktop / local tools
-s3db-mcp --transport=stdio
+s3db mcp --transport=stdio
 
 # For HTTP/SSE clients
-s3db-mcp --transport=http --port=17500
+s3db mcp --transport=http --port=17500
 ```
 
 ### [Connection Strings](connection-strings.md)

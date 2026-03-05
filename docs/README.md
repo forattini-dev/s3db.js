@@ -2178,10 +2178,10 @@ S3DB includes a powerful MCP server with **28 specialized tools** for database o
 # Claude CLI (one command)
 claude mcp add s3db \
   --transport stdio \
-  -- npx -y s3db.js s3db-mcp --transport=stdio
+  -- npx -y s3db.js mcp --transport=stdio
 
 # Standalone HTTP server
-npx s3db.js s3db-mcp --transport=sse
+npx s3db.js mcp --transport=sse
 ```
 
 #### Features
@@ -2262,8 +2262,8 @@ s3db stats
 s3db stats users
 
 # MCP Server
-s3db s3db-mcp --transport=stdio
-s3db s3db-mcp --transport=sse --port=17500
+s3db mcp --transport=stdio
+s3db mcp --transport=sse --port=17500
 ```
 
 ### Environment Variables

@@ -8,8 +8,7 @@
   "license": "UNLICENSED",
   "bin": {
     "s3db.js": "./bin/cli.js",
-    "s3db": "./bin/cli.js",
-    "s3db-mcp": "./bin/mcp.js"
+    "s3db": "./bin/cli.js"
   },
   "repository": {
     "type": "git",
