@@ -16,7 +16,7 @@ const validationAttributes = {
 const buildValidator = () =>
   new ResourceValidator({
     attributes: validationAttributes,
-    passphrase: 'test-passphrase'
+    security: { passphrase: 'test-passphrase' }
   });
 
 describe('ResourceValidator.validate', () => {
