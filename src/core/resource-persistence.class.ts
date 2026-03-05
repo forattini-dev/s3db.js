@@ -275,6 +275,12 @@ export class ResourcePersistence {
     return typeof value === 'string' && isPasswordHash(value);
   }
 
+  private _getMetadataField(metadata: Record<string, string>, fieldName: string): string | undefined {
+    const mappedField = (this.schema as any).map?.[fieldName] || fieldName;
+    const storedValue = metadata[mappedField];
+    return typeof storedValue === 'string' ? storedValue : undefined;
+  }
+
   private _isKnownCoreError(error: unknown): error is Error {
     return (
       error instanceof InvalidResourceItem ||
@@ -889,9 +895,12 @@ export class ResourcePersistence {
     const completeRecord = completeData as Record<string, unknown>;
     const attrs = attributes as Record<string, unknown>;
     const preservedFields: Record<string, unknown> = {};
+    const [okStoredMeta, , storedMetadata] = await tryFn(() => this.client.headObject(this.resource.getResourceKey(id)));
+    const metadata = okStoredMeta && storedMetadata ? storedMetadata.Metadata || {} : {};
+
     for (const pf of passwordFields) {
       if (!(pf in attrs) && pf in completeRecord) {
-        preservedFields[pf] = completeRecord[pf];
+        preservedFields[pf] = this._getMetadataField(metadata, pf) ?? completeRecord[pf];
       } else if (pf in attrs && this._isStoredPasswordHash(attrs[pf])) {
         preservedFields[pf] = attrs[pf];
       }
@@ -900,7 +909,7 @@ export class ResourcePersistence {
     for (const sf of secretFields) {
       if (sf in completeRecord) {
         if (!(sf in attrs) || attrs[sf] === completeRecord[sf]) {
-          preservedFields[sf] = completeRecord[sf];
+          preservedFields[sf] = this._getMetadataField(metadata, sf) ?? completeRecord[sf];
         }
       }
     }
@@ -1173,18 +1182,19 @@ export class ResourcePersistence {
     const secretFields = this._getSecretFields();
     const preservedFields: Record<string, unknown> = {};
     const attrs = fields as Record<string, unknown>;
+
     for (const pf of passwordFields) {
       if (pf in attrs && this._isStoredPasswordHash(attrs[pf])) {
         preservedFields[pf] = attrs[pf];
       } else if (!(pf in fields) && pf in mergedData) {
-        preservedFields[pf] = mergedData[pf];
+        preservedFields[pf] = this._getMetadataField(currentMetadata, pf) ?? mergedData[pf];
       }
     }
 
     for (const sf of secretFields) {
       if (sf in mergedData) {
         if (!(sf in fields) || fields[sf] === mergedData[sf]) {
-          preservedFields[sf] = mergedData[sf];
+          preservedFields[sf] = this._getMetadataField(currentMetadata, sf) ?? mergedData[sf];
         }
       }
     }

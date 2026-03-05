@@ -22,6 +22,8 @@ describe('API Plugin - Security Contracts', () => {
           id: 'string|optional',
           email: 'string|required|email',
           password: 'password|required',
+          apiSecret: 'secret|optional',
+          apiKey: 'string|optional',
           role: 'string|optional',
           scopes: 'array|items:string|optional',
           active: 'boolean|default:true',
@@ -102,7 +104,15 @@ describe('API Plugin - Security Contracts', () => {
         throw new Error(`Registration failed: ${JSON.stringify(registerBody)}`);
       }
 
-      registeredUserId = registerBody.data.id;
+      const registeredUser = registerBody.data?.user || registerBody.data;
+      registeredUserId = registeredUser?.id;
+      if (!registeredUserId) {
+        throw new Error(`Registration response missing user id: ${JSON.stringify(registerBody)}`);
+      }
+      const authResource = db.resources[authResourceName];
+      await authResource.update(registeredUserId, {
+        apiSecret: 'api-secret-token'
+      });
 
       const loginResponse = await fetch(`http://127.0.0.1:${port}/auth/login`, {
         method: 'POST',
@@ -169,9 +179,13 @@ describe('API Plugin - Security Contracts', () => {
       expect(body.data.data).toBe('ultra secret');
     });
 
-    it('does not rehash password when login updates lastLoginAt', async () => {
+    it('does not rehash password or re-encrypt apiSecret when login updates lastLoginAt', async () => {
       const authResource = db.resources[authResourceName];
       expect(registeredUserId).toBeDefined();
+      const resourceSchema = authResource.schema as Record<string, any>;
+      const mappedPasswordField = (resourceSchema.map?.password as string | undefined) || 'password';
+      const mappedSecretField = (resourceSchema.map?.apiSecret as string | undefined) || 'apiSecret';
+      const mappedLastLoginField = (resourceSchema.map?.lastLoginAt as string | undefined) || 'lastLoginAt';
 
       await authResource.update(registeredUserId, {
         lastLoginAt: '2024-01-01T00:00:00.000Z'
@@ -179,6 +193,12 @@ describe('API Plugin - Security Contracts', () => {
 
       const beforeLogin = await authResource.get(registeredUserId);
       const beforePassword = beforeLogin.password;
+      const beforeMetadata = await db.client.headObject(authResource.getResourceKey(registeredUserId));
+      const beforeStoredPassword = beforeMetadata.Metadata?.[mappedPasswordField];
+      const beforeStoredSecret = beforeMetadata.Metadata?.[mappedSecretField];
+      const beforeStoredLastLogin = beforeMetadata.Metadata?.[mappedLastLoginField];
+      expect(beforeStoredPassword).toBeDefined();
+      expect(beforeStoredSecret).toBeDefined();
 
       const loginResponse = await fetch(`http://127.0.0.1:${port}/auth/login`, {
         method: 'POST',
@@ -192,9 +212,51 @@ describe('API Plugin - Security Contracts', () => {
       expect(loginResponse.status).toBe(200);
 
       const afterLogin = await authResource.get(registeredUserId);
+      const afterMetadata = await db.client.headObject(authResource.getResourceKey(registeredUserId));
+      const afterStoredPassword = afterMetadata.Metadata?.[mappedPasswordField];
+      const afterStoredSecret = afterMetadata.Metadata?.[mappedSecretField];
+      const afterStoredLastLogin = afterMetadata.Metadata?.[mappedLastLoginField];
+
       expect(afterLogin.password).toBe(beforePassword);
       expect(await verifyPassword(registeredPassword, afterLogin.password)).toBe(true);
       expect(beforeLogin.lastLoginAt).not.toBe(afterLogin.lastLoginAt);
+      expect(afterStoredPassword).toBe(beforeStoredPassword);
+      expect(afterStoredSecret).toBe(beforeStoredSecret);
+      expect(afterStoredLastLogin).not.toBe(beforeStoredLastLogin);
+    });
+
+    it('does not rehash password or re-encrypt apiSecret when regenerating apiKey', async () => {
+      const authResource = db.resources[authResourceName];
+      const resourceSchema = authResource.schema as Record<string, any>;
+      const mappedPasswordField = (resourceSchema.map?.password as string | undefined) || 'password';
+      const mappedSecretField = (resourceSchema.map?.apiSecret as string | undefined) || 'apiSecret';
+      const mappedApiKeyField = (resourceSchema.map?.apiKey as string | undefined) || 'apiKey';
+
+      const beforeMetadata = await db.client.headObject(authResource.getResourceKey(registeredUserId));
+      const beforeStoredPassword = beforeMetadata.Metadata?.[mappedPasswordField];
+      const beforeStoredSecret = beforeMetadata.Metadata?.[mappedSecretField];
+      const beforeStoredApiKey = beforeMetadata.Metadata?.[mappedApiKeyField];
+      expect(beforeStoredPassword).toBeDefined();
+      expect(beforeStoredSecret).toBeDefined();
+
+      const response = await fetch(`http://127.0.0.1:${port}/auth/api-key/regenerate`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${validToken}`,
+          'Content-Type': 'application/json'
+        }
+      });
+      expect(response.status).toBe(200);
+
+      const afterMetadata = await db.client.headObject(authResource.getResourceKey(registeredUserId));
+      const afterStoredPassword = afterMetadata.Metadata?.[mappedPasswordField];
+      const afterStoredSecret = afterMetadata.Metadata?.[mappedSecretField];
+      const afterStoredApiKey = afterMetadata.Metadata?.[mappedApiKeyField];
+
+      expect(afterStoredPassword).toBe(beforeStoredPassword);
+      expect(afterStoredSecret).toBe(beforeStoredSecret);
+      expect(afterStoredApiKey).toBeDefined();
+      expect(afterStoredApiKey).not.toBe(beforeStoredApiKey);
     });
 
     it('keeps public resources accessible without auth', async () => {

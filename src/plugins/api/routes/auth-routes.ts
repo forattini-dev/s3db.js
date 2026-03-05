@@ -617,6 +617,10 @@ export function createAuthRoutes(authResource: AuthResource, config: AuthRoutesC
     return c.json(response, response._status as ContentfulStatusCode);
   }));
 
+  if (authMiddleware) {
+    app.use('/api-key/regenerate', authMiddleware);
+  }
+
   app.post('/api-key/regenerate', asyncHandler(async (c: Context) => {
     const user = c.get('user') as AuthUser | undefined;
 

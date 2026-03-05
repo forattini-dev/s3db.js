@@ -299,6 +299,61 @@ describe('Resource - Password Type with bcrypt hashing', () => {
     await dbWithPassphrase.disconnect();
   });
 
+  test('should keep stored secret and password stable on patch() with autoDecrypt enabled', async () => {
+    const dbWithPassphrase = createDatabaseForTest('suite=resources-password-secret-autodecrypt-patch', {
+      security: {
+        passphrase: 'test-passphrase',
+        bcrypt: { rounds: 12 }
+      }
+    });
+
+    const secureResource = await dbWithPassphrase.createResource({
+      name: 'accounts_with_secret',
+      attributes: {
+        email: 'string|required|email',
+        password: 'password|required|min:8',
+        apiKey: 'secret|required'
+      },
+      behavior: 'body-overflow',
+      timestamps: true
+    });
+
+    const seed = await secureResource.insert({
+      email: 'secret@example.com',
+      password: 'OriginalPassword123',
+      apiKey: 'api-secret-key-123'
+    });
+
+    const resourceSchema = secureResource.schema as Record<string, any>;
+    const mappedPasswordField = (resourceSchema.map?.password as string | undefined) || 'password';
+    const mappedSecretField = (resourceSchema.map?.apiKey as string | undefined) || 'apiKey';
+    const resourceKey = secureResource.getResourceKey(seed.id);
+
+    const beforeMetadata = await dbWithPassphrase.client.headObject(resourceKey);
+    const beforePassword = beforeMetadata.Metadata?.[mappedPasswordField];
+    const beforeSecret = beforeMetadata.Metadata?.[mappedSecretField];
+
+    expect(beforePassword).toBeDefined();
+    expect(beforeSecret).toBeDefined();
+
+    await secureResource.patch(seed.id, {
+      email: 'patched@example.com'
+    });
+
+    const afterMetadata = await dbWithPassphrase.client.headObject(resourceKey);
+    const afterPassword = afterMetadata.Metadata?.[mappedPasswordField];
+    const afterSecret = afterMetadata.Metadata?.[mappedSecretField];
+
+    expect(afterPassword).toBe(beforePassword);
+    expect(afterSecret).toBe(beforeSecret);
+
+    const afterRecord = await secureResource.get(seed.id);
+    expect(afterRecord.email).toBe('patched@example.com');
+    expect(await verifyPassword('OriginalPassword123', afterRecord.password)).toBe(true);
+
+    await dbWithPassphrase.disconnect();
+  });
+
   test('should not rehash/re-encrypt when update or patch payload includes stored password and secret', async () => {
     const dbWithPassphrase = createDatabaseForTest('suite=resources/password-secret-update-stored-values', {
       security: {
