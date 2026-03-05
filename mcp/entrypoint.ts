@@ -18,6 +18,7 @@ import { dirname, join } from 'path';
 import { readFileSync } from 'fs';
 import express from 'express';
 
+import { resolveConfig } from './config.js';
 import { createConnectionHandlers, connectionTools } from './tools/connection.js';
 import { createResourceManagementHandlers, resourceManagementTools } from './tools/resources.js';
 import { createCrudHandlers, crudTools } from './tools/crud.js';
@@ -604,39 +605,52 @@ export async function startServer(args?: TransportArgs): Promise<void> {
   // Preload search indexes for faster first query
   await preloadSearch();
 
+  // Resolve config: defaults < config file < env vars
+  const mcpConfig = resolveConfig();
+
   // Auto-connect if connection string is available
-  const connectionString = process.env.S3DB_CONNECTION_STRING || process.env.S3_CONNECTION_STRING;
-  if (connectionString) {
+  if (mcpConfig.connectionString) {
     try {
       const plugins = [];
-      plugins.push(CostsPlugin);
-      plugins.push(new CachePlugin({ driver: 'memory', includePartitions: true, memoryOptions: { maxSize: 1000, ttl: 300000 } }));
 
-      const security: Record<string, unknown> = {
-        passphrase: process.env.S3DB_PASSPHRASE || 'secret',
-      };
-
-      if (process.env.S3DB_PEPPER) {
-        security.pepper = process.env.S3DB_PEPPER;
+      if (mcpConfig.costs?.enabled !== false) {
+        plugins.push(CostsPlugin);
       }
 
-      const bcryptRounds = process.env.S3DB_BCRYPT_ROUNDS ? parseInt(process.env.S3DB_BCRYPT_ROUNDS, 10) : undefined;
-      if (bcryptRounds && bcryptRounds >= 12) {
-        security.bcrypt = { rounds: bcryptRounds };
-      }
-
-      if (process.env.S3DB_ARGON2 === 'true' || process.env.S3DB_ARGON2_MEMORY_COST) {
-        security.argon2 = {
-          ...(process.env.S3DB_ARGON2_MEMORY_COST ? { memoryCost: parseInt(process.env.S3DB_ARGON2_MEMORY_COST, 10) } : {}),
-          ...(process.env.S3DB_ARGON2_TIME_COST ? { timeCost: parseInt(process.env.S3DB_ARGON2_TIME_COST, 10) } : {}),
-          ...(process.env.S3DB_ARGON2_PARALLELISM ? { parallelism: parseInt(process.env.S3DB_ARGON2_PARALLELISM, 10) } : {}),
-        };
+      if (mcpConfig.cache?.enabled !== false) {
+        const cacheConf = mcpConfig.cache || {};
+        if (cacheConf.driver === 'filesystem') {
+          plugins.push(new CachePlugin({
+            includePartitions: true,
+            driver: new FilesystemCache({
+              directory: cacheConf.directory || './cache',
+              prefix: cacheConf.prefix || 's3db',
+              ttl: cacheConf.ttl || 300000,
+              enableCompression: true,
+              enableCleanup: true,
+              cleanupInterval: 300000,
+              createDirectory: true,
+            }),
+          }));
+        } else {
+          plugins.push(new CachePlugin({
+            driver: 'memory',
+            includePartitions: true,
+            memoryOptions: {
+              maxSize: cacheConf.maxSize || 1000,
+              ttl: cacheConf.ttl || 300000,
+            },
+          }));
+        }
       }
 
       database = new S3db({
-        connectionString,
-        security,
-        plugins
+        connectionString: mcpConfig.connectionString,
+        verbose: mcpConfig.verbose,
+        parallelism: mcpConfig.parallelism,
+        security: mcpConfig.security,
+        versioningEnabled: mcpConfig.versioningEnabled,
+        plugins,
       });
       await database.connect();
 

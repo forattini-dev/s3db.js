@@ -656,13 +656,13 @@ MCP_TRANSPORT=http
 S3DB_CONNECTION_STRING=s3://prod-data-bucket/databases/main
 S3DB_VERBOSE=false
 S3DB_PARALLELISM=20
-S3DB_PASSPHRASE=${SECRET_PASSPHRASE}
-S3DB_PEPPER=${SECRET_PEPPER}
-S3DB_BCRYPT_ROUNDS=14
-# S3DB_ARGON2=true
-# S3DB_ARGON2_MEMORY_COST=65536
-# S3DB_ARGON2_TIME_COST=3
-# S3DB_ARGON2_PARALLELISM=4
+S3DB_SECURITY_PASSPHRASE=${SECRET_PASSPHRASE}
+S3DB_SECURITY_PEPPER=${SECRET_PEPPER}
+S3DB_SECURITY_BCRYPT_ROUNDS=14
+# S3DB_SECURITY_ARGON2=true
+# S3DB_SECURITY_ARGON2_MEMORY_COST=65536
+# S3DB_SECURITY_ARGON2_TIME_COST=3
+# S3DB_SECURITY_ARGON2_PARALLELISM=4
 S3DB_VERSIONING_ENABLED=true
 
 # Cache
@@ -2040,14 +2040,17 @@ await agent.callTool('dbClearCache', { resourceName: 'users' });
 
 ### **Environment Variables**
 ```bash
-# Security
-S3DB_PASSPHRASE=your-passphrase   # Encryption key for secret fields
-S3DB_PEPPER=your-pepper           # Appended to passwords before hashing
-S3DB_BCRYPT_ROUNDS=12             # Bcrypt rounds (min 12, max 31)
-S3DB_ARGON2=true                  # Enable argon2id for password fields
-S3DB_ARGON2_MEMORY_COST=65536     # Memory in KiB (power of 2)
-S3DB_ARGON2_TIME_COST=3           # Iterations
-S3DB_ARGON2_PARALLELISM=4         # Threads
+# Security (maps to security.* in config)
+S3DB_SECURITY_PASSPHRASE=your-passphrase   # Encryption key for secret fields
+S3DB_SECURITY_PEPPER=your-pepper           # Appended to passwords before hashing
+S3DB_SECURITY_BCRYPT_ROUNDS=12             # Bcrypt rounds (min 12, max 31)
+S3DB_SECURITY_ARGON2=true                  # Enable argon2id for password fields
+S3DB_SECURITY_ARGON2_MEMORY_COST=65536     # Memory in KiB (power of 2)
+S3DB_SECURITY_ARGON2_TIME_COST=3           # Iterations
+S3DB_SECURITY_ARGON2_PARALLELISM=4         # Threads
+
+# Config file (alternative to env vars)
+S3DB_CONFIG=./s3db.config.json             # Path to JSON config file
 
 # Cache
 S3DB_CACHE_ENABLED=true           # Enable/disable cache

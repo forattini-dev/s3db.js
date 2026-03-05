@@ -2,6 +2,7 @@ import type { S3dbMCPServer } from '../entrypoint.js';
 import type { DbConnectArgs } from '../types/index.js';
 import type { S3db, CachePlugin, CostsPlugin } from '../../src/index.js';
 import type { FilesystemCache } from '../../src/plugins/cache/filesystem-cache.class.js';
+import { resolveConfig } from '../config.js';
 
 export const connectionTools = [
   {
@@ -135,99 +136,74 @@ export const connectionTools = [
 export function createConnectionHandlers(server: S3dbMCPServer) {
   return {
     async dbConnect(args: DbConnectArgs, database: S3db | null, injected: { S3db: typeof S3db; CachePlugin: typeof CachePlugin; CostsPlugin: typeof CostsPlugin; FilesystemCache: typeof FilesystemCache }): Promise<any> {
-      const {
-        connectionString,
-        verbose = false,
-        parallelism = 10,
-        security: securityArg,
-        versioningEnabled = false,
-        enableCache = true,
-        enableCosts = true,
-        cacheDriver = 'memory',
-        cacheMaxSize = 1000,
-        cacheTtl = 300000,
-        cacheDirectory = './cache',
-        cachePrefix = 'cache'
-      } = args;
-
-      // Build security config: tool args override env vars
-      const security: Record<string, unknown> = {
-        passphrase: securityArg?.passphrase || process.env.S3DB_PASSPHRASE || 'secret',
-      };
-      const pepper = securityArg?.pepper || process.env.S3DB_PEPPER;
-      if (pepper) security.pepper = pepper;
-
-      const bcryptRounds = securityArg?.bcrypt?.rounds
-        || (process.env.S3DB_BCRYPT_ROUNDS ? parseInt(process.env.S3DB_BCRYPT_ROUNDS, 10) : undefined);
-      if (bcryptRounds && bcryptRounds >= 12) {
-        security.bcrypt = { rounds: bcryptRounds };
-      }
-
-      if (securityArg?.argon2 || process.env.S3DB_ARGON2 === 'true' || process.env.S3DB_ARGON2_MEMORY_COST) {
-        security.argon2 = {
-          ...(securityArg?.argon2 || {}),
-          ...(process.env.S3DB_ARGON2_MEMORY_COST && !securityArg?.argon2?.memoryCost ? { memoryCost: parseInt(process.env.S3DB_ARGON2_MEMORY_COST, 10) } : {}),
-          ...(process.env.S3DB_ARGON2_TIME_COST && !securityArg?.argon2?.timeCost ? { timeCost: parseInt(process.env.S3DB_ARGON2_TIME_COST, 10) } : {}),
-          ...(process.env.S3DB_ARGON2_PARALLELISM && !securityArg?.argon2?.parallelism ? { parallelism: parseInt(process.env.S3DB_ARGON2_PARALLELISM, 10) } : {}),
-        };
-      }
-
       if (database && database.isConnected()) {
         return { success: false, message: 'Database is already connected' };
       }
 
-      const plugins = [];
+      // Resolve config: defaults < config file < env vars < tool args
+      const toolOverrides: Record<string, unknown> = {};
+      if (args.connectionString) toolOverrides.connectionString = args.connectionString;
+      if (args.verbose !== undefined) toolOverrides.verbose = args.verbose;
+      if (args.parallelism !== undefined) toolOverrides.parallelism = args.parallelism;
+      if (args.versioningEnabled !== undefined) toolOverrides.versioningEnabled = args.versioningEnabled;
+      if (args.security) toolOverrides.security = args.security;
+      if (args.enableCache !== undefined) toolOverrides.cache = { ...(toolOverrides.cache as object || {}), enabled: args.enableCache };
+      if (args.enableCosts !== undefined) toolOverrides.costs = { enabled: args.enableCosts };
+      if (args.cacheDriver) (toolOverrides.cache as Record<string, unknown>) = { ...(toolOverrides.cache as object || {}), driver: args.cacheDriver };
+      if (args.cacheMaxSize) (toolOverrides.cache as Record<string, unknown>) = { ...(toolOverrides.cache as object || {}), maxSize: args.cacheMaxSize };
+      if (args.cacheTtl) (toolOverrides.cache as Record<string, unknown>) = { ...(toolOverrides.cache as object || {}), ttl: args.cacheTtl };
+      if (args.cacheDirectory) (toolOverrides.cache as Record<string, unknown>) = { ...(toolOverrides.cache as object || {}), directory: args.cacheDirectory };
+      if (args.cachePrefix) (toolOverrides.cache as Record<string, unknown>) = { ...(toolOverrides.cache as object || {}), prefix: args.cachePrefix };
 
-      // Costs plugin
-      const costsEnabled = enableCosts !== false && process.env.S3DB_COSTS_ENABLED !== 'false';
-      if (costsEnabled) {
+      const config = resolveConfig(toolOverrides);
+
+      if (!config.connectionString) {
+        return { success: false, message: 'connectionString is required' };
+      }
+
+      const plugins = [];
+      const cacheConf = config.cache || {};
+      const costsConf = config.costs || {};
+
+      if (costsConf.enabled !== false) {
         plugins.push(injected.CostsPlugin);
       }
 
-      // Cache plugin
-      const cacheEnabled = enableCache !== false && process.env.S3DB_CACHE_ENABLED !== 'false';
-
-      if (cacheEnabled) {
-        const cacheMaxSizeEnv = process.env.S3DB_CACHE_MAX_SIZE ? parseInt(process.env.S3DB_CACHE_MAX_SIZE) : cacheMaxSize;
-        const cacheTtlEnv = process.env.S3DB_CACHE_TTL ? parseInt(process.env.S3DB_CACHE_TTL) : cacheTtl;
-        const cacheDriverEnv = process.env.S3DB_CACHE_DRIVER || cacheDriver;
-        const cacheDirectoryEnv = process.env.S3DB_CACHE_DIRECTORY || cacheDirectory;
-        const cachePrefixEnv = process.env.S3DB_CACHE_PREFIX || cachePrefix;
-
-        let cacheConfig: any = {
-          includePartitions: true
-        };
-
-        if (cacheDriverEnv === 'filesystem') {
-          cacheConfig.driver = new injected.FilesystemCache({
-            directory: cacheDirectoryEnv,
-            prefix: cachePrefixEnv,
-            ttl: cacheTtlEnv,
-            enableCompression: true,
-            enableStats: verbose,
-            enableCleanup: true,
-            cleanupInterval: 300000,
-            createDirectory: true
-          });
+      if (cacheConf.enabled !== false) {
+        if (cacheConf.driver === 'filesystem') {
+          plugins.push(new injected.CachePlugin({
+            includePartitions: true,
+            driver: new injected.FilesystemCache({
+              directory: cacheConf.directory || './cache',
+              prefix: cacheConf.prefix || 's3db',
+              ttl: cacheConf.ttl || 300000,
+              enableCompression: true,
+              enableStats: config.verbose,
+              enableCleanup: true,
+              cleanupInterval: 300000,
+              createDirectory: true,
+            }),
+          }));
         } else {
-          cacheConfig.driver = 'memory';
-          cacheConfig.memoryOptions = {
-            maxSize: cacheMaxSizeEnv,
-            ttl: cacheTtlEnv,
-            enableStats: verbose
-          };
+          plugins.push(new injected.CachePlugin({
+            driver: 'memory',
+            includePartitions: true,
+            memoryOptions: {
+              maxSize: cacheConf.maxSize || 1000,
+              ttl: cacheConf.ttl || 300000,
+              enableStats: config.verbose,
+            },
+          }));
         }
-
-        plugins.push(new injected.CachePlugin(cacheConfig));
       }
 
       const newDatabase = new injected.S3db({
-        connectionString,
-        verbose,
-        parallelism,
-        security,
-        versioningEnabled,
-        plugins
+        connectionString: config.connectionString,
+        verbose: config.verbose,
+        parallelism: config.parallelism,
+        security: config.security,
+        versioningEnabled: config.versioningEnabled,
+        plugins,
       });
 
       await newDatabase.connect();
@@ -243,14 +219,11 @@ export function createConnectionHandlers(server: S3dbMCPServer) {
           version: newDatabase.s3dbVersion,
           resourceCount: Object.keys(newDatabase.resources || {}).length,
           plugins: {
-            costs: costsEnabled,
-            cache: cacheEnabled,
-            cacheDriver: cacheEnabled ? cacheDriverEnv : null,
-            cacheDirectory: cacheEnabled && cacheDriverEnv === 'filesystem' ? cacheDirectoryEnv : null,
-            cacheMaxSize: cacheEnabled && cacheDriverEnv === 'memory' ? cacheMaxSizeEnv : null,
-            cacheTtl: cacheEnabled ? cacheTtlEnv : null
-          }
-        }
+            costs: costsConf.enabled !== false,
+            cache: cacheConf.enabled !== false,
+            cacheDriver: cacheConf.enabled !== false ? (cacheConf.driver || 'memory') : null,
+          },
+        },
       };
     },
 
