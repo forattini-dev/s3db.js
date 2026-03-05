@@ -7,6 +7,7 @@ import { calculateTotalSize, calculateEffectiveLimit } from '../concerns/calcula
 import { mapAwsError, InvalidResourceItem, ResourceError, ValidationError } from '../errors.js';
 import type { StringRecord } from '../types/common.types.js';
 import type { IdGeneratorConfig } from './resource-id-generator.class.js';
+import { isPasswordHash } from '../concerns/password-hashing.js';
 
 export interface ResourceData extends StringRecord {
   id?: string;
@@ -246,6 +247,32 @@ export class ResourcePersistence {
         return false;
       })
       .map(([name]) => name);
+  }
+
+  private _getSecretFields(): string[] {
+    const attrs = (this.schema as any).attributes || {};
+    return Object.entries(attrs)
+      .filter(([, def]) => {
+        if (typeof def === 'string') {
+          const type = def.split(/[|:]/)[0];
+          return type === 'secret' || type === 'secretAny' || type === 'secretNumber';
+        }
+
+        if (typeof def === 'object' && def !== null) {
+          const typeValue = (def as Record<string, unknown>).type;
+          if (typeof typeValue !== 'string') return false;
+
+          const type = typeValue.split(/[|:]/)[0];
+          return type === 'secret' || type === 'secretAny' || type === 'secretNumber';
+        }
+
+        return false;
+      })
+      .map(([name]) => name);
+  }
+
+  private _isStoredPasswordHash(value: unknown): boolean {
+    return typeof value === 'string' && isPasswordHash(value);
   }
 
   private _isKnownCoreError(error: unknown): error is Error {
@@ -858,12 +885,23 @@ export class ResourcePersistence {
     const completeData = { ...originalData, ...preProcessedData, id };
 
     const passwordFields = this._getPasswordFields();
-    const preservedPasswords: Record<string, unknown> = {};
+    const secretFields = this._getSecretFields();
     const completeRecord = completeData as Record<string, unknown>;
+    const attrs = attributes as Record<string, unknown>;
+    const preservedFields: Record<string, unknown> = {};
     for (const pf of passwordFields) {
-      if (!(pf in attributes) && pf in completeRecord) {
-        preservedPasswords[pf] = completeRecord[pf];
-        delete completeRecord[pf];
+      if (!(pf in attrs) && pf in completeRecord) {
+        preservedFields[pf] = completeRecord[pf];
+      } else if (pf in attrs && this._isStoredPasswordHash(attrs[pf])) {
+        preservedFields[pf] = attrs[pf];
+      }
+    }
+
+    for (const sf of secretFields) {
+      if (sf in completeRecord) {
+        if (!(sf in attrs) || attrs[sf] === completeRecord[sf]) {
+          preservedFields[sf] = completeRecord[sf];
+        }
       }
     }
 
@@ -878,8 +916,8 @@ export class ResourcePersistence {
       });
     }
 
-    Object.assign(completeData, preservedPasswords);
-    if (data) Object.assign(data, preservedPasswords);
+    Object.assign(completeData, preservedFields);
+    if (data) Object.assign(data, preservedFields);
 
     const earlyBehaviorImpl = getBehavior(this.behavior) as Behavior;
     const tempMappedData = await this.schema.mapper({ ...originalData, ...preProcessedData });
@@ -1132,11 +1170,22 @@ export class ResourcePersistence {
     mergedData = sanitizeDeep(mergedData) as ResourceData;
 
     const passwordFields = this._getPasswordFields();
-    const preservedPasswords: Record<string, unknown> = {};
+    const secretFields = this._getSecretFields();
+    const preservedFields: Record<string, unknown> = {};
+    const attrs = fields as Record<string, unknown>;
     for (const pf of passwordFields) {
-      if (!(pf in fields) && pf in mergedData) {
-        preservedPasswords[pf] = mergedData[pf];
-        delete mergedData[pf];
+      if (pf in attrs && this._isStoredPasswordHash(attrs[pf])) {
+        preservedFields[pf] = attrs[pf];
+      } else if (!(pf in fields) && pf in mergedData) {
+        preservedFields[pf] = mergedData[pf];
+      }
+    }
+
+    for (const sf of secretFields) {
+      if (sf in mergedData) {
+        if (!(sf in fields) || fields[sf] === mergedData[sf]) {
+          preservedFields[sf] = mergedData[sf];
+        }
       }
     }
 
@@ -1147,7 +1196,7 @@ export class ResourcePersistence {
       });
     }
 
-    Object.assign(mergedData, preservedPasswords);
+    Object.assign(mergedData, preservedFields);
 
     const newMetadata = await this.schema.mapper(mergedData);
     newMetadata._v = String(this.version);

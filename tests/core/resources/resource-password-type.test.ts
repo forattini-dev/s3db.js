@@ -226,4 +226,123 @@ describe('Resource - Password Type with bcrypt hashing', () => {
     const isValid = await verifyPassword('SecurePassword123', user.password);
     expect(isValid).toBe(true);
   });
+
+  test('should not rehash existing password and not re-encrypt existing secret on update()', async () => {
+    const dbWithPassphrase = createDatabaseForTest('suite=resources/password-secret-patch-update', {
+      security: {
+        passphrase: 'test-passphrase',
+        bcrypt: { rounds: 12 }
+      }
+    });
+
+    const secureResource = await dbWithPassphrase.createResource({
+      name: 'accounts_with_secret',
+      attributes: {
+        email: 'string|required|email',
+        password: 'password|required|min:8',
+        apiKey: 'secret|required'
+      },
+      autoDecrypt: false
+    });
+
+    const seed = await secureResource.insert({
+      email: 'secret@example.com',
+      password: 'OriginalPassword123',
+      apiKey: 'api-secret-key-123'
+    });
+
+    const beforeUpdate = await secureResource.get(seed.id);
+    const updated = await secureResource.update(seed.id, {
+      email: 'updated@example.com'
+    });
+
+    expect(updated.password).toBe(beforeUpdate.password);
+    expect(updated.apiKey).toBe(beforeUpdate.apiKey);
+    expect(await verifyPassword('OriginalPassword123', updated.password)).toBe(true);
+
+    await dbWithPassphrase.disconnect();
+  });
+
+  test('should not rehash existing password and re-encrypt existing secret on patch()', async () => {
+    const dbWithPassphrase = createDatabaseForTest('suite=resources/password-secret-patch-update', {
+      security: {
+        passphrase: 'test-passphrase',
+        bcrypt: { rounds: 12 }
+      }
+    });
+
+    const secureResource = await dbWithPassphrase.createResource({
+      name: 'accounts_with_secret',
+      attributes: {
+        email: 'string|required|email',
+        password: 'password|required|min:8',
+        apiKey: 'secret|required'
+      },
+      autoDecrypt: false
+    });
+
+    const seed = await secureResource.insert({
+      email: 'secret@example.com',
+      password: 'OriginalPassword123',
+      apiKey: 'api-secret-key-123'
+    });
+
+    const beforePatch = await secureResource.get(seed.id);
+    const afterPatch = await secureResource.patch(seed.id, {
+      email: 'patched@example.com'
+    });
+
+    expect(afterPatch.password).toBe(beforePatch.password);
+    expect(afterPatch.apiKey).toBe(beforePatch.apiKey);
+    expect(await verifyPassword('OriginalPassword123', afterPatch.password)).toBe(true);
+
+    await dbWithPassphrase.disconnect();
+  });
+
+  test('should not rehash/re-encrypt when update or patch payload includes stored password and secret', async () => {
+    const dbWithPassphrase = createDatabaseForTest('suite=resources/password-secret-update-stored-values', {
+      security: {
+        passphrase: 'test-passphrase',
+        bcrypt: { rounds: 12 }
+      }
+    });
+
+    const secureResource = await dbWithPassphrase.createResource({
+      name: 'accounts_with_secret',
+      attributes: {
+        email: 'string|required|email',
+        password: 'password|required|min:8',
+        apiKey: 'secret|required'
+      },
+      autoDecrypt: false
+    });
+
+    const seed = await secureResource.insert({
+      email: 'secret@example.com',
+      password: 'OriginalPassword123',
+      apiKey: 'api-secret-key-123'
+    });
+
+    const current = await secureResource.get(seed.id);
+
+    const updatedWithStored = await secureResource.update(seed.id, {
+      ...current,
+      email: 'with-stored-values@example.com'
+    });
+
+    expect(updatedWithStored.password).toBe(current.password);
+    expect(updatedWithStored.apiKey).toBe(current.apiKey);
+    expect(await verifyPassword('OriginalPassword123', updatedWithStored.password)).toBe(true);
+
+    const patchedWithStored = await secureResource.patch(seed.id, {
+      ...current,
+      email: 'with-stored-values-patch@example.com'
+    });
+
+    expect(patchedWithStored.password).toBe(current.password);
+    expect(patchedWithStored.apiKey).toBe(current.apiKey);
+    expect(await verifyPassword('OriginalPassword123', patchedWithStored.password)).toBe(true);
+
+    await dbWithPassphrase.disconnect();
+  });
 });

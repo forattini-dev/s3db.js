@@ -379,7 +379,12 @@ export const SchemaActions = {
 
   encrypt: async (value: unknown, { security }: ActionContext): Promise<unknown> => {
     if (value === null || value === undefined) return value;
-    const [ok, , res] = await tryFn(() => encrypt(value as string, security?.passphrase!));
+    const secretValue = String(value);
+    if (security?.passphrase) {
+      const [okDecrypt] = await tryFn(() => decrypt(secretValue, security.passphrase!));
+      if (okDecrypt) return value;
+    }
+    const [ok, , res] = await tryFn(() => encrypt(secretValue, security?.passphrase!));
     return ok ? res : value;
   },
 

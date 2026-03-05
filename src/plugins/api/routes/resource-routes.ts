@@ -61,6 +61,12 @@ export interface ResourceLike {
   getFromPartition(options: { id: string; partitionName: string; partitionValues: unknown }): Promise<Record<string, unknown> | null>;
   insert(data: Record<string, unknown>, options?: { user?: unknown; request?: unknown }): Promise<Record<string, unknown>>;
   update(id: string, data: Record<string, unknown>, options?: { user?: unknown; request?: unknown }): Promise<Record<string, unknown>>;
+  patch(id: string, data: Record<string, unknown>, options?: {
+    user?: unknown;
+    request?: unknown;
+    partition?: string;
+    partitionValues?: Record<string, unknown>;
+  }): Promise<Record<string, unknown>>;
   delete(id: string): Promise<void>;
   count(options?: { partition?: string | null; partitionValues?: Record<string, unknown> }): Promise<number>;
   applyPartitionRule?(value: unknown, rule: string): string;
@@ -1291,8 +1297,7 @@ export function createResourceRoutes(resource: ResourceLike, _version: string, c
         }
       }
 
-      const merged = { ...existing, ...data, id };
-      const updated = await resource.update(id, merged, {
+      const updated = await resource.patch(id, data, {
         user: c.get('user'),
         request: c.req
       });

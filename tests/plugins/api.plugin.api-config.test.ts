@@ -9,6 +9,7 @@
 
 import { ApiPlugin } from '../../src/plugins/api/index.js';
 import { createMemoryDatabaseForTest } from '../config.js';
+import { verifyPassword } from '../../src/concerns/password-hashing.js';
 
 async function waitForServer(port, maxAttempts = 100) {
   for (let attempt = 0; attempt < maxAttempts; attempt++) {
@@ -321,6 +322,67 @@ describe('API Plugin - resource.$schema.api configuration', () => {
       expect(body.success).toBe(true);
       expect(body.data.email).toBe('updated@test.com');
       expect(body.data.apiKey).toBeUndefined();
+    });
+
+    it('does not rehash password or re-encrypt secret when patching another field', async () => {
+      const resource = await db.createResource({
+        name: 'accounts_with_secret',
+        attributes: {
+          id: 'string|optional',
+          email: 'string|required|email',
+          password: 'password|required|min:8',
+          apiKey: 'secret|required'
+        },
+        behavior: 'body-overflow',
+        timestamps: true,
+        autoDecrypt: false,
+        security: {
+          passphrase: 'test-passphrase',
+          bcrypt: { rounds: 12 }
+        },
+        api: {
+          protected: ['password', 'apiKey']
+        }
+      });
+
+      const account = await resource.insert({
+        id: 'acc-sec-1',
+        email: 'test@example.com',
+        password: 'OriginalPassword123',
+        apiKey: 'api-secret-key-123'
+      });
+
+      const before = await resource.get(account.id);
+
+      apiPlugin = new ApiPlugin({
+        logLevel: 'silent',
+        port,
+        host: '127.0.0.1',
+        docs: { enabled: false },
+        logging: { enabled: false },
+        resources: ['accounts_with_secret']
+      });
+
+      await db.usePlugin(apiPlugin);
+      await waitForServer(port);
+
+      const response = await fetch(`http://127.0.0.1:${port}/accounts_with_secret/${account.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: 'updated@example.com' })
+      });
+
+      expect(response.status).toBe(200);
+
+      const body = await response.json();
+      expect(body.success).toBe(true);
+      expect(body.data.apiKey).toBeUndefined();
+      expect(body.data.password).toBeUndefined();
+
+      const after = await resource.get(account.id);
+      expect(after.password).toBe(before.password);
+      expect(after.apiKey).toBe(before.apiKey);
+      expect(await verifyPassword('OriginalPassword123', after.password)).toBe(true);
     });
   });
 

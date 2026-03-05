@@ -2,8 +2,14 @@ import { merge, isString } from 'lodash-es';
 import * as FastestValidatorModule from 'fastest-validator';
 import type { ValidationRuleObject, ValidatorConstructorOptions } from 'fastest-validator';
 
-import { encrypt } from './concerns/crypto.js';
-import { hashPassword, compactHash, type PasswordAlgorithm, type SecurityConfig } from './concerns/password-hashing.js';
+import { decrypt, encrypt } from './concerns/crypto.js';
+import {
+  compactHash,
+  hashPassword,
+  isPasswordHash,
+  type PasswordAlgorithm,
+  type SecurityConfig
+} from './concerns/password-hashing.js';
 import tryFn, { tryFnSync } from './concerns/try-fn.js';
 import { ValidationError } from './errors.js';
 
@@ -31,6 +37,15 @@ async function secretHandler(
   _schema: unknown,
   field: string
 ): Promise<unknown> {
+  const secretValue = String(actual);
+
+  if (this.security?.passphrase) {
+    const [okDecrypt] = await tryFn(() => decrypt(secretValue, this.security.passphrase!));
+    if (okDecrypt) {
+      return actual;
+    }
+  }
+
   if (!this.security?.passphrase) {
     errors.push(new ValidationError('Missing configuration for secrets encryption.', {
       actual,
@@ -41,7 +56,7 @@ async function secretHandler(
     return actual;
   }
 
-  const [ok, err, res] = await tryFn(() => encrypt(String(actual), this.security.passphrase!));
+  const [ok, err, res] = await tryFn(() => encrypt(secretValue, this.security.passphrase!));
   if (ok) return res;
   errors.push(new ValidationError('Problem encrypting secret.', {
     actual,
@@ -62,6 +77,10 @@ function createPasswordHandler(algorithm: PasswordAlgorithm = 'bcrypt') {
     field: string
   ): Promise<unknown> {
     const strValue = String(actual);
+
+    if (isPasswordHash(strValue)) {
+      return actual;
+    }
 
     const [okHash, errHash, hash] = await tryFn(() => hashPassword(strValue, {
       rounds: this.security?.bcrypt?.rounds ?? 12,
