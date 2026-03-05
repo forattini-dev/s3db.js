@@ -26,12 +26,15 @@ export const connectionTools = [
         },
         security: {
           type: 'object',
-          description: 'Security configuration (passphrase for encryption, bcrypt rounds, etc.)',
+          description: 'Security config. Also configurable via env vars: S3DB_PASSPHRASE, S3DB_PEPPER, S3DB_BCRYPT_ROUNDS, S3DB_ARGON2=true, S3DB_ARGON2_MEMORY_COST, S3DB_ARGON2_TIME_COST, S3DB_ARGON2_PARALLELISM.',
           properties: {
             passphrase: {
               type: 'string',
-              description: 'Passphrase for encryption',
-              default: 'secret'
+              description: 'Passphrase for secret field encryption (AES-256-GCM)'
+            },
+            pepper: {
+              type: 'string',
+              description: 'Pepper appended to passwords before hashing'
             },
             bcrypt: {
               type: 'object',
@@ -39,13 +42,30 @@ export const connectionTools = [
               properties: {
                 rounds: {
                   type: 'number',
-                  description: 'Number of bcrypt rounds',
-                  default: 10
+                  description: 'Number of bcrypt rounds (min 12, max 31)',
+                  default: 12
+                }
+              }
+            },
+            argon2: {
+              type: 'object',
+              description: 'Argon2id configuration (memory-hard, GPU-resistant)',
+              properties: {
+                memoryCost: {
+                  type: 'number',
+                  description: 'Memory cost in KiB (must be power of 2, default 65536 = 64MB)'
+                },
+                timeCost: {
+                  type: 'number',
+                  description: 'Number of iterations (default 3)'
+                },
+                parallelism: {
+                  type: 'number',
+                  description: 'Degree of parallelism (default 4)'
                 }
               }
             }
-          },
-          default: { passphrase: 'secret' }
+          }
         },
         versioningEnabled: {
           type: 'boolean',
@@ -119,7 +139,7 @@ export function createConnectionHandlers(server: S3dbMCPServer) {
         connectionString,
         verbose = false,
         parallelism = 10,
-        security = { passphrase: 'secret' },
+        security: securityArg,
         versioningEnabled = false,
         enableCache = true,
         enableCosts = true,
@@ -129,6 +149,28 @@ export function createConnectionHandlers(server: S3dbMCPServer) {
         cacheDirectory = './cache',
         cachePrefix = 'cache'
       } = args;
+
+      // Build security config: tool args override env vars
+      const security: Record<string, unknown> = {
+        passphrase: securityArg?.passphrase || process.env.S3DB_PASSPHRASE || 'secret',
+      };
+      const pepper = securityArg?.pepper || process.env.S3DB_PEPPER;
+      if (pepper) security.pepper = pepper;
+
+      const bcryptRounds = securityArg?.bcrypt?.rounds
+        || (process.env.S3DB_BCRYPT_ROUNDS ? parseInt(process.env.S3DB_BCRYPT_ROUNDS, 10) : undefined);
+      if (bcryptRounds && bcryptRounds >= 12) {
+        security.bcrypt = { rounds: bcryptRounds };
+      }
+
+      if (securityArg?.argon2 || process.env.S3DB_ARGON2 === 'true' || process.env.S3DB_ARGON2_MEMORY_COST) {
+        security.argon2 = {
+          ...(securityArg?.argon2 || {}),
+          ...(process.env.S3DB_ARGON2_MEMORY_COST && !securityArg?.argon2?.memoryCost ? { memoryCost: parseInt(process.env.S3DB_ARGON2_MEMORY_COST, 10) } : {}),
+          ...(process.env.S3DB_ARGON2_TIME_COST && !securityArg?.argon2?.timeCost ? { timeCost: parseInt(process.env.S3DB_ARGON2_TIME_COST, 10) } : {}),
+          ...(process.env.S3DB_ARGON2_PARALLELISM && !securityArg?.argon2?.parallelism ? { parallelism: parseInt(process.env.S3DB_ARGON2_PARALLELISM, 10) } : {}),
+        };
+      }
 
       if (database && database.isConnected()) {
         return { success: false, message: 'Database is already connected' };

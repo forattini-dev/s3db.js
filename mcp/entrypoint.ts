@@ -612,11 +612,30 @@ export async function startServer(args?: TransportArgs): Promise<void> {
       plugins.push(CostsPlugin);
       plugins.push(new CachePlugin({ driver: 'memory', includePartitions: true, memoryOptions: { maxSize: 1000, ttl: 300000 } }));
 
+      const security: Record<string, unknown> = {
+        passphrase: process.env.S3DB_PASSPHRASE || 'secret',
+      };
+
+      if (process.env.S3DB_PEPPER) {
+        security.pepper = process.env.S3DB_PEPPER;
+      }
+
+      const bcryptRounds = process.env.S3DB_BCRYPT_ROUNDS ? parseInt(process.env.S3DB_BCRYPT_ROUNDS, 10) : undefined;
+      if (bcryptRounds && bcryptRounds >= 12) {
+        security.bcrypt = { rounds: bcryptRounds };
+      }
+
+      if (process.env.S3DB_ARGON2 === 'true' || process.env.S3DB_ARGON2_MEMORY_COST) {
+        security.argon2 = {
+          ...(process.env.S3DB_ARGON2_MEMORY_COST ? { memoryCost: parseInt(process.env.S3DB_ARGON2_MEMORY_COST, 10) } : {}),
+          ...(process.env.S3DB_ARGON2_TIME_COST ? { timeCost: parseInt(process.env.S3DB_ARGON2_TIME_COST, 10) } : {}),
+          ...(process.env.S3DB_ARGON2_PARALLELISM ? { parallelism: parseInt(process.env.S3DB_ARGON2_PARALLELISM, 10) } : {}),
+        };
+      }
+
       database = new S3db({
         connectionString,
-        security: {
-          passphrase: process.env.S3DB_PASSPHRASE || 'secret',
-        },
+        security,
         plugins
       });
       await database.connect();
