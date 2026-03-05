@@ -160,7 +160,7 @@ const pluginCatalog = {
 };
 
 const fieldTypes = {
-  count: 30,
+  count: 31,
   types: [
     { name: 'string', encoding: 'utf8', compression: 'none', example: "'string|required'" },
     { name: 'number', encoding: 'numeric', compression: 'none', example: "'number|min:0'" },
@@ -171,6 +171,7 @@ const fieldTypes = {
     { name: 'uuid', encoding: 'utf8', compression: 'none', example: "'uuid'" },
     { name: 'object', encoding: 'JSON', compression: 'optional', example: "{ nested: 'string' }" },
     { name: 'array', encoding: 'JSON', compression: 'optional', example: "{ type: 'array', items: 'string' }" },
+    { name: 'password', encoding: 'bcrypt/argon2id', compression: 'one-way hash', example: "'password|required|min:8'" },
     { name: 'secret', encoding: 'AES-256-GCM', compression: 'encrypted', example: "'secret'" },
     { name: 'embedding:N', encoding: 'float32', compression: '77% (quantized)', example: "'embedding:1536'" },
     { name: 'ip4', encoding: 'uint32', compression: '44%', example: "'ip4'" },

@@ -466,11 +466,19 @@ export const fieldTypes: FieldTypeDoc[] = [
     validators: ['required', 'version'],
   },
   {
+    name: 'password',
+    syntax: "'password' | 'password:bcrypt' | 'password:argon2id'",
+    compression: 'One-way hash (compact base62)',
+    description: 'One-way hashed password field. Auto-hashes on insert/update, use verifyPassword() to verify. Defaults to bcrypt (56 chars compact). Use password:argon2id for GPU-resistant argon2id (~76 chars compact). Configure via database/resource security config.',
+    examples: ["password: 'password|required|min:8'", "secret: 'password:argon2id|required'", "pin: 'password:bcrypt|required'"],
+    validators: ['required', 'min', 'max'],
+  },
+  {
     name: 'secret',
     syntax: "'secret'",
     compression: 'AES-256-GCM encrypted',
-    description: 'Encrypted field using database passphrase. Automatically encrypted at rest.',
-    examples: ["password: 'secret'", "apiKey: 'secret'"],
+    description: 'Reversible encrypted field using database passphrase. Automatically encrypted at rest, decrypted on read. Use for API keys, tokens, sensitive data. For user passwords, use the password type instead.',
+    examples: ["apiKey: 'secret'", "token: 'secret|required'"],
     validators: ['required'],
   },
   {
