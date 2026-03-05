@@ -131,20 +131,6 @@ function resolvePasswordSecurity(database: unknown): SecurityConfig | undefined 
     return candidate as SecurityConfig;
   }
 
-  const hasSecurityShape = 'passphrase' in database
-    || 'pepper' in database
-    || 'bcrypt' in database
-    || 'argon2' in database;
-
-  if (hasSecurityShape) {
-    return database as SecurityConfig;
-  }
-
-  const fallback = (database as { database?: unknown }).database;
-  if (fallback) {
-    return resolvePasswordSecurity(fallback);
-  }
-
   return undefined;
 }
 

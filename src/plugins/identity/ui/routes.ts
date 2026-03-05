@@ -275,7 +275,8 @@ function resolvePasswordPepper(database: unknown): string | undefined {
     return undefined;
   }
 
-  const candidatePepper = (database as { pepper?: unknown }).pepper;
+  const security = (database as { security?: { pepper?: unknown } }).security;
+  const candidatePepper = security?.pepper;
   return typeof candidatePepper === 'string' && candidatePepper.length > 0
     ? candidatePepper
     : undefined;

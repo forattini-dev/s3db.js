@@ -134,7 +134,7 @@ export interface DbGetRawArgs {
 export interface S3dbSearchDocsArgs {
   query: string;
   limit?: number;
-  maxResults?: number; // Legacy
+  maxResults?: number;
 }
 
 export interface S3dbListTopicsArgs {} // For list topics

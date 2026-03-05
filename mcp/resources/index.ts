@@ -160,38 +160,51 @@ const pluginCatalog = {
 };
 
 const fieldTypes = {
-  count: 31,
+  count: 28,
   types: [
+    // Primitives
     { name: 'string', encoding: 'utf8', compression: 'none', example: "'string|required'" },
-    { name: 'number', encoding: 'numeric', compression: 'none', example: "'number|min:0'" },
-    { name: 'boolean', encoding: 'bit', compression: 'none', example: "'boolean|default:true'" },
+    { name: 'number', encoding: 'base62', compression: '~40%', example: "'number|min:0'" },
+    { name: 'boolean', encoding: '"1"/"0"', compression: '50%+', example: "'boolean|default:true'" },
     { name: 'date', encoding: 'ISO8601', compression: 'none', example: "'date'" },
-    { name: 'email', encoding: 'utf8', compression: 'none', example: "'email'" },
+    { name: 'email', encoding: 'utf8', compression: 'none', example: "'email|required'" },
     { name: 'url', encoding: 'utf8', compression: 'none', example: "'url'" },
     { name: 'uuid', encoding: 'utf8', compression: 'none', example: "'uuid'" },
-    { name: 'object', encoding: 'JSON', compression: 'optional', example: "{ nested: 'string' }" },
-    { name: 'array', encoding: 'JSON', compression: 'optional', example: "{ type: 'array', items: 'string' }" },
-    { name: 'password', encoding: 'bcrypt/argon2id', compression: 'one-way hash', example: "'password|required|min:8'" },
-    { name: 'secret', encoding: 'AES-256-GCM', compression: 'encrypted', example: "'secret'" },
-    { name: 'embedding:N', encoding: 'float32', compression: '77% (quantized)', example: "'embedding:1536'" },
-    { name: 'ip4', encoding: 'uint32', compression: '44%', example: "'ip4'" },
-    { name: 'ip6', encoding: 'uint128', compression: '47%', example: "'ip6'" },
-    { name: 'cidr', encoding: 'binary', compression: '40-50%', example: "'cidr'" },
-    { name: 'mac', encoding: 'uint48', compression: '65%', example: "'mac'" },
-    { name: 'port', encoding: 'uint16', compression: '60%', example: "'port'" },
-    { name: 'timestamp', encoding: 'uint64', compression: '40%', example: "'timestamp'" },
-    { name: 'duration', encoding: 'ms', compression: 'none', example: "'duration'" },
-    { name: 'json', encoding: 'JSON', compression: 'gzip', example: "'json'" },
-    { name: 'binary', encoding: 'base64', compression: 'optional', example: "'binary'" },
-    { name: 'enum', encoding: 'index', compression: '90%', example: "{ type: 'enum', values: ['a','b','c'] }" },
-    { name: 'any', encoding: 'JSON', compression: 'none', example: "'any'" },
-    { name: 'custom', encoding: 'user-defined', compression: 'user-defined', example: "{ type: 'custom', ... }" }
+    // Security
+    { name: 'password', encoding: 'bcrypt/argon2id', compression: 'one-way hash (56-76 chars)', example: "'password|required|min:8'" },
+    { name: 'secret', encoding: 'AES-256-GCM', compression: 'encrypted (reversible)', example: "'secret'" },
+    // Network
+    { name: 'ip4', encoding: 'uint32→base62', compression: '44%', example: "'ip4'" },
+    { name: 'ip6', encoding: 'uint128→base62', compression: '47%', example: "'ip6'" },
+    // Numeric specializations
+    { name: 'money', encoding: 'fixed-point→base62', compression: '~40%', example: "'money' or 'money:4'" },
+    { name: 'crypto', encoding: 'fixed-point→base62', compression: '~40%', example: "'crypto' or 'crypto:18'" },
+    { name: 'decimal', encoding: 'fixed-point→base62', compression: '~40%', example: "'decimal:2'" },
+    // Geo
+    { name: 'geo:lat', encoding: 'base62', compression: '~40%', example: "'geo:lat' or 'geo:lat:8'" },
+    { name: 'geo:lon', encoding: 'base62', compression: '~40%', example: "'geo:lon' or 'geo:lon:8'" },
+    { name: 'geo:point', encoding: 'base62 pair', compression: '~50%', example: "'geo:point'" },
+    // Binary
+    { name: 'buffer', encoding: 'base64', compression: 'none', example: "'buffer'" },
+    { name: 'bits', encoding: 'bit-packed→base62', compression: '~83%', example: "'bits:32'" },
+    // ML/AI
+    { name: 'embedding:N', encoding: 'float32→uint8', compression: '77%', example: "'embedding:1536'" },
+    // Structured
+    { name: 'object', encoding: 'JSON', compression: 'none', example: "{ nested: 'string' }" },
+    { name: 'array', encoding: 'JSON/base62', compression: 'varies', example: "{ type: 'array', items: 'string' }" },
+    { name: 'json', encoding: 'JSON', compression: 'none', example: "'json'" },
+    { name: 'enum', encoding: 'string', compression: 'none', example: "'string|enum:a,b,c'" },
+    { name: 'any', encoding: 'as-is', compression: 'none', example: "'any'" },
   ],
   specialFeatures: {
-    secret: 'Automatic AES-256-GCM encryption with key derivation',
-    embedding: '77% compression via quantization, preserves 99.9% accuracy',
-    ip4: 'Stored as 32-bit integer, 44% smaller than string representation',
-    ip6: 'Stored as 128-bit binary, 47% smaller than string representation'
+    password: 'One-way hash (bcrypt default, argon2id optional). Auto-hashes on write, verifyPassword() to check.',
+    secret: 'AES-256-GCM encryption with PBKDF2 key derivation. Auto-encrypt on write, auto-decrypt on read.',
+    embedding: '77% compression via quantization, preserves 99.9% cosine similarity accuracy.',
+    money: 'Fixed-point storage avoids floating-point errors. Default 2 decimals, crypto defaults to 8.',
+    'geo:point': 'Stores lat+lon as single base62 string. Accepts [lat,lon] array or {lat,lon} object.',
+    bits: 'Pack 32 boolean flags into 6 base62 chars. Ideal for permissions/feature flags.',
+    ip4: '32-bit integer in base62. 15 chars → 8 chars.',
+    ip6: '128-bit binary in base62. 39 chars → ~21 chars.',
   }
 };
 

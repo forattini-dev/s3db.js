@@ -49,14 +49,22 @@ Modules in `src/core/`: ResourcePersistence, ResourceQuery, ResourcePartitions, 
 
 | Type | Example | Notes |
 |------|---------|-------|
-| `string` | `name: 'string\|required'` | Basic |
-| `number` | `age: 'number\|min:0'` | Integer/float |
-| `boolean`/`bool` | `active: 'bool\|default:true'` | Stored as `1`/`0` |
-| `password` | `password: 'password\|required\|min:8'` | One-way hash (bcrypt/argon2id) |
-| `secret` | `apiKey: 'secret'` | AES-256-GCM encrypted (reversible) |
-| `embedding:N` | `vector: 'embedding:1536'` | 77% compression |
+| `string` | `name: 'string\|required'` | Basic string |
+| `number` | `age: 'number\|min:0'` | Base62 encoded, integer/float |
+| `boolean` | `active: 'bool\|default:true'` | Stored as `1`/`0` |
+| `date` | `createdAt: 'date'` | ISO 8601 |
+| `email` | `email: 'email\|required'` | RFC validation |
+| `password` | `pw: 'password\|required\|min:8'` | One-way hash (bcrypt/argon2id) |
+| `secret` | `apiKey: 'secret'` | AES-256-GCM (reversible) |
+| `money` | `price: 'money'` | Fixed-point, 2 decimals default |
+| `crypto` | `btc: 'crypto'` | Fixed-point, 8 decimals default |
+| `decimal` | `temp: 'decimal:1'` | Fixed-point, N decimals |
+| `geo:lat/lon/point` | `loc: 'geo:point'` | Base62 compressed coords |
 | `ip4`/`ip6` | `ip: 'ip4'` | 44-47% compression |
+| `bits` | `flags: 'bits:32'` | Packed boolean flags |
+| `embedding:N` | `vec: 'embedding:1536'` | 77% compression |
 | `object` | `{ bio: 'string' }` | Auto-detected nested |
+| `json` | `data: 'json'` | Arbitrary JSON |
 
 ### Plugins
 
