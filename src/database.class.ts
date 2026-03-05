@@ -1,4 +1,5 @@
 import tryFn, { tryFnSync } from './concerns/try-fn.js';
+import type { SecurityConfig } from './concerns/password-hashing.js';
 import { S3Client } from './clients/s3-client.class.js';
 import { MemoryClient } from './clients/memory-client.class.js';
 import { FileSystemClient } from './clients/filesystem-client.class.js';
@@ -85,8 +86,7 @@ export interface DatabaseOptions {
   clientOptions?: ClientOptions;
   plugins?: PluginConstructor[];
   cache?: CacheConfig | boolean;
-  passphrase?: string;
-  bcryptRounds?: number;
+  security?: SecurityConfig;
   versioningEnabled?: boolean;
   strictValidation?: boolean;
   strictHooks?: boolean;
@@ -118,8 +118,7 @@ export class Database extends SafeEventEmitter {
   public pluginRegistry: StringRecord<Plugin>;
   public plugins: StringRecord<Plugin>;
   public cache: CacheConfig | boolean | undefined;
-  public passphrase: string;
-  public bcryptRounds: number;
+  public security: SecurityConfig;
   public versioningEnabled: boolean;
   public strictValidation: boolean;
   public strictHooks: boolean;
@@ -235,8 +234,7 @@ export class Database extends SafeEventEmitter {
     this.pluginRegistry = {};
     this.plugins = this.pluginRegistry;
     this.cache = options.cache;
-    this.passphrase = options.passphrase ?? 'secret';
-    this.bcryptRounds = options.bcryptRounds ?? 10;
+    this.security = options.security ?? { passphrase: 'secret', bcrypt: { rounds: 12 } };
     this.versioningEnabled = options.versioningEnabled ?? false;
     this.strictValidation = (options.strictValidation ?? true) !== false;
     this.strictHooks = options.strictHooks ?? false;

@@ -3,7 +3,7 @@ import * as FastestValidatorModule from 'fastest-validator';
 import type { ValidationRuleObject, ValidatorConstructorOptions } from 'fastest-validator';
 
 import { encrypt } from './concerns/crypto.js';
-import { hashPassword, compactHash } from './concerns/password-hashing.js';
+import { hashPassword, compactHash, type PasswordAlgorithm, type SecurityConfig } from './concerns/password-hashing.js';
 import tryFn, { tryFnSync } from './concerns/try-fn.js';
 import { ValidationError } from './errors.js';
 
@@ -11,15 +11,13 @@ const FastestValidator = FastestValidatorModule.default as unknown as new (opts?
 
 export interface ValidatorOptions {
   options?: Record<string, unknown>;
-  passphrase?: string;
-  bcryptRounds?: number;
+  security?: SecurityConfig;
   autoEncrypt?: boolean;
   autoHash?: boolean;
 }
 
 interface ValidatorContext {
-  passphrase?: string;
-  bcryptRounds?: number;
+  security: SecurityConfig;
   autoEncrypt?: boolean;
   autoHash?: boolean;
 }
@@ -33,7 +31,7 @@ async function secretHandler(
   _schema: unknown,
   field: string
 ): Promise<unknown> {
-  if (!this.passphrase) {
+  if (!this.security?.passphrase) {
     errors.push(new ValidationError('Missing configuration for secrets encryption.', {
       actual,
       field,
@@ -43,7 +41,7 @@ async function secretHandler(
     return actual;
   }
 
-  const [ok, err, res] = await tryFn(() => encrypt(String(actual), this.passphrase!));
+  const [ok, err, res] = await tryFn(() => encrypt(String(actual), this.security.passphrase!));
   if (ok) return res;
   errors.push(new ValidationError('Problem encrypting secret.', {
     actual,
@@ -55,48 +53,47 @@ async function secretHandler(
   return actual;
 }
 
-async function passwordHandler(
-  this: ValidatorContext,
-  actual: unknown,
-  errors: ValidationErrors,
-  _schema: unknown,
-  field: string
-): Promise<unknown> {
-  if (!this.bcryptRounds) {
-    errors.push(new ValidationError('Missing bcrypt rounds configuration.', {
-      actual,
-      field,
-      type: 'bcryptRoundsMissing',
-      suggestion: 'Provide bcryptRounds in database configuration.'
-    }));
-    return actual;
-  }
+function createPasswordHandler(algorithm: PasswordAlgorithm = 'bcrypt') {
+  return async function passwordHandler(
+    this: ValidatorContext,
+    actual: unknown,
+    errors: ValidationErrors,
+    _schema: unknown,
+    field: string
+  ): Promise<unknown> {
+    const strValue = String(actual);
 
-  const [okHash, errHash, hash] = await tryFn(() => hashPassword(String(actual), this.bcryptRounds!));
-  if (!okHash) {
-    errors.push(new ValidationError('Problem hashing password.', {
-      actual,
-      field,
-      type: 'passwordHashingProblem',
-      error: errHash,
-      suggestion: 'Check the bcryptRounds configuration and password value.'
+    const [okHash, errHash, hash] = await tryFn(() => hashPassword(strValue, {
+      rounds: this.security?.bcrypt?.rounds ?? 12,
+      algorithm,
+      pepper: this.security?.pepper,
+      argon2: this.security?.argon2,
     }));
-    return actual;
-  }
+    if (!okHash) {
+      errors.push(new ValidationError('Problem hashing password.', {
+        actual,
+        field,
+        type: 'passwordHashingProblem',
+        error: errHash,
+        suggestion: `Check the password value and ${algorithm} configuration.`
+      }));
+      return actual;
+    }
 
-  const [okCompact, errCompact, compacted] = tryFnSync(() => compactHash(hash));
-  if (!okCompact) {
-    errors.push(new ValidationError('Problem compacting password hash.', {
-      actual,
-      field,
-      type: 'hashCompactionProblem',
-      error: errCompact,
-      suggestion: 'Bcrypt hash format may be invalid.'
-    }));
-    return hash;
-  }
+    const [okCompact, errCompact, compacted] = tryFnSync(() => compactHash(hash));
+    if (!okCompact) {
+      errors.push(new ValidationError('Problem compacting password hash.', {
+        actual,
+        field,
+        type: 'hashCompactionProblem',
+        error: errCompact,
+        suggestion: 'Hash format may be invalid.'
+      }));
+      return hash;
+    }
 
-  return compacted;
+    return compacted;
+  };
 }
 
 function jsonHandler(
@@ -113,15 +110,13 @@ function jsonHandler(
 }
 
 export class Validator extends FastestValidator {
-  passphrase?: string;
-  bcryptRounds: number;
+  security: SecurityConfig;
   autoEncrypt: boolean;
   autoHash: boolean;
 
   constructor({
     options,
-    passphrase,
-    bcryptRounds = 10,
+    security = {},
     autoEncrypt = true,
     autoHash = true
   }: ValidatorOptions = {}) {
@@ -151,8 +146,7 @@ export class Validator extends FastestValidator {
       },
     }, options));
 
-    this.passphrase = passphrase;
-    this.bcryptRounds = bcryptRounds;
+    this.security = security;
     this.autoEncrypt = autoEncrypt;
     this.autoHash = autoHash;
 
@@ -175,13 +169,27 @@ export class Validator extends FastestValidator {
       custom: this.autoEncrypt ? secretHandler : undefined,
     } as ValidationRuleObject);
 
+    const passwordMessages = {
+      string: "The '{field}' field must be a string.",
+      stringMin: "This password '{field}' field length must be at least {expected} long.",
+    };
+
     this.alias('password', {
       type: 'string',
-      custom: this.autoHash ? passwordHandler : undefined,
-      messages: {
-        string: "The '{field}' field must be a string.",
-        stringMin: "This password '{field}' field length must be at least {expected} long.",
-      },
+      custom: this.autoHash ? createPasswordHandler('bcrypt') : undefined,
+      messages: passwordMessages,
+    } as ValidationRuleObject);
+
+    this.alias('password:bcrypt', {
+      type: 'string',
+      custom: this.autoHash ? createPasswordHandler('bcrypt') : undefined,
+      messages: passwordMessages,
+    } as ValidationRuleObject);
+
+    this.alias('password:argon2id', {
+      type: 'string',
+      custom: this.autoHash ? createPasswordHandler('argon2id') : undefined,
+      messages: passwordMessages,
     } as ValidationRuleObject);
 
     this.alias('json', {

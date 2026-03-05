@@ -3,7 +3,22 @@ export * from './binary.js';
 export * from './calculator.js';
 export * from './crypto.js';
 export * from './ip.js';
-export * from './password-hashing.js';
+export {
+  type PasswordAlgorithm,
+  type BcryptConfig,
+  type Argon2Config,
+  type SecurityConfig as PasswordSecurityConfig,
+  type HashPasswordOptions,
+  hashPasswordSync,
+  hashPassword,
+  verifyPassword,
+  detectAlgorithm,
+  isArgon2Hash,
+  isBcryptHash,
+  isPasswordHash,
+  compactHash,
+  expandHash,
+} from './password-hashing.js';
 export * from './id.js';
 export * from './try-fn.js';
 export * from './money.js';

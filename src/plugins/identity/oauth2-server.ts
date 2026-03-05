@@ -39,6 +39,7 @@ export interface OAuth2ServerOptions {
   idTokenExpiry?: string;
   refreshTokenExpiry?: string;
   authCodeExpiry?: string;
+  passwordPepper?: string;
 }
 
 export interface KeyResource {
@@ -231,6 +232,7 @@ export class OAuth2Server {
   private keyManager: KeyManager;
   private identityPlugin: IdentityPluginInstance | null;
   private logger: Logger;
+  private passwordPepper?: string;
 
   constructor(options: OAuth2ServerOptions) {
     const {
@@ -290,6 +292,7 @@ export class OAuth2Server {
     this.idTokenExpiry = idTokenExpiry;
     this.refreshTokenExpiry = refreshTokenExpiry;
     this.authCodeExpiry = authCodeExpiry;
+    this.passwordPepper = options.passwordPepper;
 
     this.keyManager = new KeyManager(keyResource);
     this.identityPlugin = null;
@@ -1083,7 +1086,7 @@ export class OAuth2Server {
 
       if (this._isHashedSecret(storedSecret)) {
         try {
-          const okHash = await verifyPassword(clientSecret, storedSecret);
+          const okHash = await verifyPassword(clientSecret, storedSecret, this.passwordPepper);
           if (okHash) {
             secretMatches = true;
             break;
@@ -1376,9 +1379,18 @@ export class OAuth2Server {
       }
 
       const user = users[0]!;
+      const storedPassword = user.password || '';
+      if (!storedPassword || typeof storedPassword !== 'string') {
+        return res.status(401).json({
+          error: 'access_denied',
+          error_description: 'Invalid credentials'
+        });
+      }
 
       const [okVerify, errVerify, isValid] = await tryFn(() =>
-        verifyPassword(password, user.password!)
+        this._isHashedSecret(storedPassword)
+          ? verifyPassword(password, storedPassword, this.passwordPepper)
+          : Promise.resolve(constantTimeEqual(password, storedPassword))
       );
 
       if (!okVerify) {

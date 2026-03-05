@@ -1,3 +1,4 @@
+import type { SecurityConfig } from './concerns/password-hashing.js';
 import { join } from 'path';
 import { createHash } from 'crypto';
 import jsonStableStringify from 'json-stable-stringify';
@@ -81,8 +82,7 @@ export interface ResourceConfig {
   version?: string;
   attributes?: AttributesSchema;
   behavior?: BehaviorType;
-  passphrase?: string;
-  bcryptRounds?: number;
+  security?: SecurityConfig;
   observers?: Database[];
   cache?: boolean;
   autoEncrypt?: boolean;
@@ -288,8 +288,7 @@ export class Resource extends AsyncEventEmitter implements Disposable {
   public behavior: BehaviorType;
   private _resourceAsyncEvents: boolean;
   public observers: Database[];
-  public passphrase: string;
-  public bcryptRounds: number;
+  public security: SecurityConfig;
   public versioningEnabled: boolean;
   public strictValidation: boolean;
   public asyncEvents: boolean;
@@ -313,8 +312,7 @@ export class Resource extends AsyncEventEmitter implements Disposable {
   private _schemaCompiled: boolean;
   private _pendingSchemaConfig: {
     attributes: AttributesSchema;
-    passphrase: string;
-    bcryptRounds: number;
+    security: SecurityConfig;
     version: number;
     allNestedObjectsOptional: boolean;
     autoEncrypt: boolean;
@@ -356,8 +354,7 @@ export class Resource extends AsyncEventEmitter implements Disposable {
       version = '1',
       attributes = {},
       behavior = DEFAULT_BEHAVIOR,
-      passphrase = 'secret',
-      bcryptRounds = 10,
+      security,
       observers = [],
       cache = false,
       autoEncrypt = true,
@@ -397,8 +394,7 @@ export class Resource extends AsyncEventEmitter implements Disposable {
 
     this.behavior = behavior as BehaviorType;
     this.observers = observers as Database[];
-    this.passphrase = passphrase ?? 'secret';
-    this.bcryptRounds = bcryptRounds;
+    this.security = security ?? { passphrase: 'secret', bcrypt: { rounds: 12 } };
     this.versioningEnabled = versioningEnabled;
     this.strictValidation = strictValidation;
 
@@ -449,8 +445,7 @@ export class Resource extends AsyncEventEmitter implements Disposable {
     if (lazySchema) {
       this._pendingSchemaConfig = {
         attributes,
-        passphrase: this.passphrase,
-        bcryptRounds: this.bcryptRounds,
+        security: this.security,
         version: parsedVersion,
         allNestedObjectsOptional,
         autoEncrypt,
@@ -465,8 +460,7 @@ export class Resource extends AsyncEventEmitter implements Disposable {
         attributes,
         strictValidation,
         allNestedObjectsOptional,
-        passphrase: this.passphrase,
-        bcryptRounds: this.bcryptRounds,
+        security: this.security,
         autoEncrypt,
         autoDecrypt
       });
@@ -474,8 +468,7 @@ export class Resource extends AsyncEventEmitter implements Disposable {
       this.schema = new Schema({
         name,
         attributes,
-        passphrase,
-        bcryptRounds,
+        security: this.security,
         version: parsedVersion,
         options: {
           allNestedObjectsOptional,
@@ -614,8 +607,7 @@ export class Resource extends AsyncEventEmitter implements Disposable {
       attributes: cfg.attributes,
       strictValidation: cfg.strictValidation,
       allNestedObjectsOptional: cfg.allNestedObjectsOptional,
-      passphrase: cfg.passphrase,
-      bcryptRounds: cfg.bcryptRounds,
+      security: cfg.security,
       autoEncrypt: cfg.autoEncrypt,
       autoDecrypt: cfg.autoDecrypt
     });
@@ -623,8 +615,7 @@ export class Resource extends AsyncEventEmitter implements Disposable {
     this.schema = new Schema({
       name: this.name,
       attributes: cfg.attributes,
-      passphrase: cfg.passphrase,
-      bcryptRounds: cfg.bcryptRounds,
+      security: cfg.security,
       version: cfg.version,
       options: {
         allNestedObjectsOptional: cfg.allNestedObjectsOptional,
@@ -738,8 +729,7 @@ export class Resource extends AsyncEventEmitter implements Disposable {
       this.schema = new Schema({
         name: this.name,
         attributes: this.attributes,
-        passphrase: this.passphrase,
-        bcryptRounds: this.bcryptRounds,
+        security: this.security,
         version: parsedVersion,
         options: {
           autoEncrypt: this.config.autoEncrypt,

@@ -1,12 +1,13 @@
 /**
  * Password Management - Validation and Generation
  *
- * Uses S3DB native 'password' type for one-way bcrypt hashing.
- * Passwords are hashed automatically on insert/update using bcrypt.
+ * Uses S3DB native 'password' field aliases for one-way hashing.
+ * Passwords are hashed automatically on insert/update using the database security config
+ * (bcrypt by default, or argon2id when configured).
  * Provides password strength validation according to policy.
  */
 
-import { verifyPassword as bcryptVerify } from '../../../concerns/password-hashing.js';
+import { verifyPassword as verifyPasswordWithPepper } from '#src/plugins/shared/password-verification.js';
 
 export interface PasswordPolicy {
   minLength?: number;
@@ -31,8 +32,12 @@ const DEFAULT_PASSWORD_POLICY: Required<PasswordPolicy> = {
   requireSymbols: false
 };
 
-export async function verifyPassword(plaintext: string, storedHash: string): Promise<boolean> {
-  return await bcryptVerify(plaintext, storedHash);
+export async function verifyPassword(
+  plaintext: string,
+  storedHash: string,
+  pepper?: string
+): Promise<boolean> {
+  return await verifyPasswordWithPepper(plaintext, storedHash, { pepper });
 }
 
 export function validatePassword(password: string, policy: PasswordPolicy = {}): PasswordValidationResult {

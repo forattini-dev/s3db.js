@@ -13,7 +13,7 @@ import {
 } from "lodash-es";
 
 import { encrypt, decrypt } from "./concerns/crypto.js";
-import { hashPassword, compactHash } from "./concerns/password-hashing.js";
+import { hashPassword, compactHash, type SecurityConfig } from "./concerns/password-hashing.js";
 import { ValidatorManager } from "./validator.class.js";
 import { tryFn, tryFnSync } from "./concerns/try-fn.js";
 import { SchemaError } from "./errors.js";
@@ -82,8 +82,7 @@ export interface SchemaConstructorArgs {
   pluginMap?: AttributeMapping;
   name: string;
   attributes?: SchemaAttributes;
-  passphrase?: string;
-  bcryptRounds?: number;
+  security?: SecurityConfig;
   version?: number;
   options?: SchemaOptions;
   _pluginAttributeMetadata?: PluginAttributeMetadata;
@@ -106,8 +105,8 @@ export interface SchemaExport {
 }
 
 export interface ActionContext {
-  passphrase?: string;
-  bcryptRounds?: number;
+  security?: SecurityConfig;
+  passwordAlgorithm?: import('./concerns/password-hashing.js').PasswordAlgorithm;
   separator?: string;
   precision?: number;
   decimals?: number;
@@ -378,24 +377,30 @@ function generatePluginMappingFromRegistry(
 export const SchemaActions = {
   trim: (value: unknown): unknown => value == null ? value : String(value).trim(),
 
-  encrypt: async (value: unknown, { passphrase }: ActionContext): Promise<unknown> => {
+  encrypt: async (value: unknown, { security }: ActionContext): Promise<unknown> => {
     if (value === null || value === undefined) return value;
-    const [ok, , res] = await tryFn(() => encrypt(value as string, passphrase!));
+    const [ok, , res] = await tryFn(() => encrypt(value as string, security?.passphrase!));
     return ok ? res : value;
   },
 
-  decrypt: async (value: unknown, { passphrase }: ActionContext): Promise<unknown> => {
+  decrypt: async (value: unknown, { security }: ActionContext): Promise<unknown> => {
     if (value === null || value === undefined) return value;
-    const [ok, , raw] = await tryFn<string>(() => decrypt(value as string, passphrase!) as Promise<string>);
+    const [ok, , raw] = await tryFn<string>(() => decrypt(value as string, security?.passphrase!) as Promise<string>);
     if (!ok) return value;
     if (raw === 'null') return null;
     if (raw === 'undefined') return undefined;
     return raw;
   },
 
-  hashPassword: async (value: unknown, { bcryptRounds = 10 }: ActionContext): Promise<unknown> => {
+  hashPassword: async (value: unknown, { security, passwordAlgorithm }: ActionContext): Promise<unknown> => {
     if (value === null || value === undefined) return value;
-    const [okHash, , hash] = await tryFn<string>(() => hashPassword(String(value), bcryptRounds) as Promise<string>);
+    const rounds = security?.bcrypt?.rounds ?? 12;
+    const [okHash, , hash] = await tryFn<string>(() => hashPassword(String(value), {
+      rounds,
+      algorithm: passwordAlgorithm,
+      pepper: security?.pepper,
+      argon2: security?.argon2,
+    }));
     if (!okHash) return value;
     const [okCompact, , compacted] = tryFnSync(() => compactHash(hash!));
     return okCompact ? compacted : hash;
@@ -841,8 +846,7 @@ export class Schema {
   name: string;
   version: number;
   attributes: SchemaAttributes;
-  passphrase: string;
-  bcryptRounds: number;
+  security: SecurityConfig;
   options: SchemaOptions;
   allNestedObjectsOptional: boolean;
   _pluginAttributeMetadata: PluginAttributeMetadata;
@@ -866,8 +870,7 @@ export class Schema {
       pluginMap,
       name,
       attributes,
-      passphrase,
-      bcryptRounds,
+      security,
       version = 1,
       options = {},
       _pluginAttributeMetadata,
@@ -879,8 +882,7 @@ export class Schema {
     this.name = name;
     this.version = version;
     this.attributes = attributes || {};
-    this.passphrase = passphrase ?? "secret";
-    this.bcryptRounds = bcryptRounds ?? 10;
+    this.security = security ?? { passphrase: 'secret', bcrypt: { rounds: 12 } };
     this.options = merge({}, this.defaultOptions(), options);
     this.allNestedObjectsOptional = this.options.allNestedObjectsOptional ?? false;
 
@@ -890,8 +892,7 @@ export class Schema {
     const processedAttributes = this.preprocessAttributesForValidation(this.attributes);
 
     this._schemaFingerprint = generateSchemaFingerprint(processedAttributes, {
-      passphrase: this.passphrase,
-      bcryptRounds: this.bcryptRounds,
+      security: this.security,
       allNestedObjectsOptional: this.allNestedObjectsOptional
     });
 
@@ -902,8 +903,7 @@ export class Schema {
     } else {
       this.validator = new ValidatorManager({
         autoEncrypt: false,
-        passphrase: this.passphrase,
-        bcryptRounds: this.bcryptRounds
+        security: this.security
       }).compile(merge(
         { $$async: true, $$strict: false },
         processedAttributes,
@@ -1274,7 +1274,7 @@ export class Schema {
         continue;
       }
 
-      if (defStr.includes("password") || defType === 'password') {
+      if (defStr.includes("password") || defType === 'password' || defType === 'password:bcrypt' || defType === 'password:argon2id') {
         continue;
       }
 
@@ -1508,8 +1508,7 @@ export class Schema {
         const actionFn = (SchemaActions as Record<string, ((value: unknown, ctx: ActionContext) => unknown | Promise<unknown>) | undefined>)[actionName];
         if (value !== undefined && typeof actionFn === 'function') {
           set(cloned, attribute, await actionFn(value, {
-            passphrase: this.passphrase,
-            bcryptRounds: this.bcryptRounds,
+            security: this.security,
             separator: this.options.arraySeparator,
             ...actionParams
           }));
@@ -1614,8 +1613,7 @@ export class Schema {
           const actionFn = (SchemaActions as Record<string, (value: unknown, ctx: ActionContext) => unknown | Promise<unknown>>)[actionName];
           if (typeof actionFn === 'function') {
             parsedValue = await actionFn(parsedValue, {
-              passphrase: this.passphrase,
-              bcryptRounds: this.bcryptRounds,
+              security: this.security,
               separator: this.options.arraySeparator,
               ...actionParams
             });
@@ -1779,7 +1777,7 @@ export class Schema {
         }
         processed[key] = value;
       } else if (typeof value === 'object' && value !== null && !Array.isArray(value)) {
-        const validatorTypes = ['string', 'number', 'boolean', 'bool', 'any', 'object', 'array', 'date', 'email', 'url', 'uuid', 'enum', 'custom', 'ip4', 'ip6', 'buffer', 'bits', 'money', 'crypto', 'decimal', 'geo:lat', 'geo:lon', 'geo:point', 'geo-lat', 'geo-lon', 'geo-point', 'secret', 'password', 'embedding'];
+        const validatorTypes = ['string', 'number', 'boolean', 'bool', 'any', 'object', 'array', 'date', 'email', 'url', 'uuid', 'enum', 'custom', 'ip4', 'ip6', 'buffer', 'bits', 'money', 'crypto', 'decimal', 'geo:lat', 'geo:lon', 'geo:point', 'geo-lat', 'geo-lon', 'geo-point', 'secret', 'password', 'password:bcrypt', 'password:argon2id', 'embedding'];
         const typeValue = (value as Record<string, unknown>).type as string | undefined;
         const isValidValidatorType = typeof typeValue === 'string' &&
           !typeValue.includes('|') &&

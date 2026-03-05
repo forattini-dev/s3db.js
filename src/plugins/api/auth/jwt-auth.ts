@@ -7,7 +7,7 @@ import { unauthorized } from '../utils/response-formatter.js';
 import { getCookie } from '#src/plugins/shared/http-runtime.js';
 import { LRUCache } from '../concerns/lru-cache.js';
 import { JWTResourceManager } from './resource-manager.js';
-import { verifyPassword as comparePassword } from '../../../concerns/password-hashing.js';
+import { verifyPassword } from '#src/plugins/shared/password-verification.js';
 
 const logger = createLogger({ name: 'JwtAuth', level: 'info' });
 const tokenCache = new LRUCache<JWTPayload>({ max: 1000, ttl: 60000 });
@@ -462,7 +462,8 @@ export async function jwtLogin(
   authResource: ResourceLike,
   username: string,
   password: string,
-  config: JWTConfig = {}
+  config: JWTConfig = {},
+  pepper?: string
 ): Promise<LoginResult> {
   const {
     secret,
@@ -495,7 +496,7 @@ export async function jwtLogin(
       return { success: false, error: 'Invalid credentials' };
     }
 
-    const isValid = await comparePassword(password, storedPassword);
+    const isValid = await verifyPassword(password, storedPassword, { pepper });
     if (!isValid) {
       return { success: false, error: 'Invalid credentials' };
     }

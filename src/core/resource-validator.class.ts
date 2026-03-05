@@ -1,4 +1,5 @@
 import { cloneDeep, merge } from 'lodash-es';
+import type { SecurityConfig } from '../concerns/password-hashing.js';
 import { ValidatorManager } from '../validator.class.js';
 import type { StringRecord } from '../types/common.types.js';
 
@@ -27,8 +28,7 @@ export interface ResourceValidatorConfig {
   attributes?: AttributesSchema;
   strictValidation?: boolean;
   allNestedObjectsOptional?: boolean;
-  passphrase?: string;
-  bcryptRounds?: number;
+  security?: SecurityConfig;
   autoEncrypt?: boolean;
   autoDecrypt?: boolean;
 }
@@ -59,8 +59,7 @@ export class ResourceValidator {
   attributes: AttributesSchema;
   strictValidation: boolean;
   allNestedObjectsOptional: boolean;
-  passphrase?: string;
-  bcryptRounds?: number;
+  security: SecurityConfig;
   autoEncrypt: boolean;
   autoDecrypt: boolean;
   validatorManager: InstanceType<typeof ValidatorManager>;
@@ -70,15 +69,13 @@ export class ResourceValidator {
     this.attributes = config.attributes || {};
     this.strictValidation = config.strictValidation !== false;
     this.allNestedObjectsOptional = config.allNestedObjectsOptional || false;
-    this.passphrase = config.passphrase;
-    this.bcryptRounds = config.bcryptRounds;
+    this.security = config.security ?? {};
     this.autoEncrypt = config.autoEncrypt !== false;
     this.autoDecrypt = config.autoDecrypt !== false;
 
     this.validatorManager = new ValidatorManager({
       autoEncrypt: this.autoEncrypt,
-      passphrase: this.passphrase,
-      bcryptRounds: this.bcryptRounds
+      security: this.security
     });
 
     this.compileValidator();
@@ -251,7 +248,7 @@ export class ResourceValidator {
         const validatorTypes = [
           'string', 'number', 'boolean', 'any', 'object', 'array', 'date', 'email', 'url', 'uuid',
           'enum', 'custom', 'ip4', 'ip6', 'buffer', 'bits', 'money', 'crypto', 'decimal',
-          'geo:lat', 'geo:lon', 'geo:point', 'geo-lat', 'geo-lon', 'geo-point', 'secret', 'password', 'embedding'
+          'geo:lat', 'geo:lon', 'geo:point', 'geo-lat', 'geo-lon', 'geo-point', 'secret', 'password', 'password:bcrypt', 'password:argon2id', 'embedding'
         ];
         const objValue = value as ValidatorConfig;
         const typeValue = objValue.type;

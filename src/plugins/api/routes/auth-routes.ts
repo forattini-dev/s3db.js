@@ -1,4 +1,4 @@
-import { timingSafeEqual } from 'crypto';
+import { timingSafeEqual } from 'node:crypto';
 import { HttpApp } from '#src/plugins/shared/http-runtime.js';
 import type { Context, MiddlewareHandler } from '#src/plugins/shared/http-runtime.js';
 import type { ContentfulStatusCode } from '#src/plugins/shared/http-runtime.js';
@@ -6,10 +6,12 @@ import { asyncHandler } from '../utils/error-handler.js';
 import * as formatter from '../utils/response-formatter.js';
 import { createToken, createRefreshToken, verifyRefreshToken } from '../auth/jwt-auth.js';
 import { generateApiKey } from '../auth/api-key-auth.js';
-import { hashPassword, isBcryptHash, verifyPassword } from '../../../concerns/password-hashing.js';
+import { compactHash, hashPassword, isPasswordHash, type SecurityConfig } from '../../../concerns/password-hashing.js';
+import { verifyPassword } from '#src/plugins/shared/password-verification.js';
 
 export interface AuthResource {
   name: string;
+  security?: SecurityConfig;
   schema?: {
     attributes?: Record<string, unknown>;
   };
@@ -29,17 +31,6 @@ export interface AuthUser {
   apiKey?: string;
   lastLoginAt?: string;
   [key: string]: unknown;
-}
-
-function secureStringEquals(a: string, b: string): boolean {
-  const left = Buffer.from(a);
-  const right = Buffer.from(b);
-  const maxLength = Math.max(left.length, right.length);
-  const leftPadded = Buffer.alloc(maxLength);
-  const rightPadded = Buffer.alloc(maxLength);
-  left.copy(leftPadded);
-  right.copy(rightPadded);
-  return timingSafeEqual(leftPadded, rightPadded);
 }
 
 export interface RegistrationConfig {
@@ -88,6 +79,106 @@ interface ThrottleResult {
   retryAfter?: number;
 }
 
+async function verifyStoredSecret(candidate: string, storedSecret: string, pepper?: string): Promise<boolean> {
+  return verifyPassword(candidate, storedSecret, { pepper });
+}
+
+function constantTimeEqual(a: string, b: string): boolean {
+  const left = Buffer.from(a);
+  const right = Buffer.from(b);
+  const maxLength = Math.max(left.length, right.length);
+  const leftPadded = Buffer.alloc(maxLength);
+  const rightPadded = Buffer.alloc(maxLength);
+  left.copy(leftPadded);
+  right.copy(rightPadded);
+
+  return timingSafeEqual(leftPadded, rightPadded) && left.length === right.length;
+}
+
+async function verifyClientSecret(candidate: string, storedSecret: string, pepper?: string): Promise<boolean> {
+  if (!storedSecret) {
+    return false;
+  }
+
+  if (isPasswordHash(storedSecret)) {
+    return verifyStoredSecret(candidate, storedSecret, pepper);
+  }
+
+  return constantTimeEqual(candidate, storedSecret);
+}
+
+function isPasswordAttributeType(passwordAttribute: unknown): boolean {
+  const passwordType = typeof passwordAttribute === 'string'
+    ? passwordAttribute
+    : (passwordAttribute as { type?: unknown })?.type;
+
+  if (typeof passwordType !== 'string') {
+    return false;
+  }
+
+  return passwordType === 'password'
+    || passwordType.startsWith('password:')
+    || passwordType.startsWith('password|');
+}
+
+function resolvePasswordSecurity(database: unknown): SecurityConfig | undefined {
+  if (!database || typeof database !== 'object') {
+    return undefined;
+  }
+
+  const candidate = (database as { security?: unknown }).security;
+  if (candidate && typeof candidate === 'object') {
+    return candidate as SecurityConfig;
+  }
+
+  const hasSecurityShape = 'passphrase' in database
+    || 'pepper' in database
+    || 'bcrypt' in database
+    || 'argon2' in database;
+
+  if (hasSecurityShape) {
+    return database as SecurityConfig;
+  }
+
+  const fallback = (database as { database?: unknown }).database;
+  if (fallback) {
+    return resolvePasswordSecurity(fallback);
+  }
+
+  return undefined;
+}
+
+function resolvePasswordPepper(database: unknown): string | undefined {
+  const security = resolvePasswordSecurity(database);
+  const candidatePepper = security?.pepper;
+  return typeof candidatePepper === 'string' && candidatePepper.length > 0
+    ? candidatePepper
+    : undefined;
+}
+
+async function hashPasswordForStorage(
+  password: string,
+  database: unknown,
+  passwordPepper: string | undefined
+): Promise<string> {
+  const security = resolvePasswordSecurity(database);
+  const rounds = security?.bcrypt?.rounds ?? 12;
+  const algorithm = security?.argon2 ? 'argon2id' : 'bcrypt';
+
+  const hashed = await hashPassword(password, {
+    rounds,
+    algorithm,
+    pepper: passwordPepper,
+    argon2: security?.argon2,
+  });
+
+  try {
+    return compactHash(hashed);
+  } catch {
+    return hashed;
+  }
+}
+
 interface HttpRawRequest {
   raw?: {
     socket?: {
@@ -110,6 +201,8 @@ export function createAuthRoutes(authResource: AuthResource, config: AuthRoutesC
     loginThrottle = {},
     clientCredentials = {}
   } = config;
+  const passwordPepper = resolvePasswordPepper(authResource);
+  const passwordSecurity = resolvePasswordSecurity(authResource);
 
   if (authMiddleware) {
     app.use('/me', authMiddleware);
@@ -128,9 +221,7 @@ export function createAuthRoutes(authResource: AuthResource, config: AuthRoutesC
 
   const schemaAttributes = authResource.schema?.attributes || {};
   const passwordAttribute = schemaAttributes?.[passwordField];
-  const isPasswordType = typeof passwordAttribute === 'string'
-    ? passwordAttribute.includes('password')
-    : (passwordAttribute as { type?: string })?.type === 'password';
+  const isPasswordType = isPasswordAttributeType(passwordAttribute);
 
   const allowedRegistrationFields = new Set([usernameField, passwordField]);
   for (const field of registrationConfig.allowedFields) {
@@ -298,7 +389,7 @@ export function createAuthRoutes(authResource: AuthResource, config: AuthRoutesC
         if (isPasswordType) {
           userData[passwordField] = password;
         } else {
-          userData[passwordField] = await hashPassword(password);
+          userData[passwordField] = await hashPasswordForStorage(password, passwordSecurity, passwordPepper);
         }
       }
 
@@ -410,21 +501,7 @@ export function createAuthRoutes(authResource: AuthResource, config: AuthRoutesC
         return c.json(response, response._status as ContentfulStatusCode);
       }
 
-      if (isBcryptHash(storedPassword)) {
-        isValid = await verifyPassword(password, storedPassword);
-      } else {
-        if (typeof password !== 'string') {
-          const response = formatter.unauthorized('Invalid credentials');
-          return c.json(response, response._status as ContentfulStatusCode);
-        }
-
-        if (typeof storedPassword !== 'string') {
-          const response = formatter.unauthorized('Invalid credentials');
-          return c.json(response, response._status as ContentfulStatusCode);
-        }
-
-        isValid = secureStringEquals(password, storedPassword);
-      }
+      isValid = await verifyStoredSecret(password, storedPassword, passwordPepper);
 
       if (!isValid) {
         const throttleResult = registerFailedAttempt(throttleRecord, now);
@@ -618,16 +695,8 @@ export function createAuthRoutes(authResource: AuthResource, config: AuthRoutesC
         const candidate = byApiKey[0]!;
         const storedSecret = (candidate as Record<string, unknown>)[passwordField] as string | undefined;
 
-        if (storedSecret) {
-          let secretValid = false;
-          if (isBcryptHash(storedSecret)) {
-            secretValid = await verifyPassword(clientSecret, storedSecret);
-          } else {
-            secretValid = secureStringEquals(clientSecret, storedSecret);
-          }
-          if (secretValid) {
+        if (storedSecret && await verifyClientSecret(clientSecret, storedSecret, passwordPepper)) {
             serviceUser = candidate;
-          }
         }
       }
 
@@ -637,16 +706,8 @@ export function createAuthRoutes(authResource: AuthResource, config: AuthRoutesC
           const candidate = byUsername[0]!;
           const storedSecret = (candidate as Record<string, unknown>)[passwordField] as string | undefined;
 
-          if (storedSecret) {
-            let secretValid = false;
-            if (isBcryptHash(storedSecret)) {
-              secretValid = await verifyPassword(clientSecret, storedSecret);
-            } else {
-              secretValid = secureStringEquals(clientSecret, storedSecret);
-            }
-            if (secretValid) {
+          if (storedSecret && await verifyClientSecret(clientSecret, storedSecret, passwordPepper)) {
               serviceUser = candidate;
-            }
           }
         }
       }

@@ -234,6 +234,20 @@ export class ResourcePersistence {
   get versioningEnabled(): boolean { return this.resource.versioningEnabled; }
   get observers(): Observer[] { return this.resource.observers; }
 
+  private _getPasswordFields(): string[] {
+    const attrs = (this.schema as any).attributes || {};
+    return Object.entries(attrs)
+      .filter(([, def]) => {
+        if (typeof def === 'string') return def === 'password' || def.startsWith('password|') || def.startsWith('password:');
+        if (typeof def === 'object' && def !== null) {
+          const type = (def as Record<string, unknown>).type;
+          return typeof type === 'string' && (type === 'password' || type.startsWith('password:'));
+        }
+        return false;
+      })
+      .map(([name]) => name);
+  }
+
   private _isKnownCoreError(error: unknown): error is Error {
     return (
       error instanceof InvalidResourceItem ||
@@ -843,6 +857,16 @@ export class ResourcePersistence {
     const preProcessedData = sanitizeDeep(await this.resource.executeHooks('beforeUpdate', mergedData)) as ResourceData;
     const completeData = { ...originalData, ...preProcessedData, id };
 
+    const passwordFields = this._getPasswordFields();
+    const preservedPasswords: Record<string, unknown> = {};
+    const completeRecord = completeData as Record<string, unknown>;
+    for (const pf of passwordFields) {
+      if (!(pf in attributes) && pf in completeRecord) {
+        preservedPasswords[pf] = completeRecord[pf];
+        delete completeRecord[pf];
+      }
+    }
+
     const { isValid, errors, data } = await this.resource.validate(completeData, { includeId: true });
     if (!isValid) {
       throw new InvalidResourceItem({
@@ -853,6 +877,9 @@ export class ResourcePersistence {
         message: 'validation: ' + ((errors && errors.length) ? JSON.stringify(errors) : 'unknown')
       });
     }
+
+    Object.assign(completeData, preservedPasswords);
+    if (data) Object.assign(data, preservedPasswords);
 
     const earlyBehaviorImpl = getBehavior(this.behavior) as Behavior;
     const tempMappedData = await this.schema.mapper({ ...originalData, ...preProcessedData });
@@ -1104,12 +1131,23 @@ export class ResourcePersistence {
 
     mergedData = sanitizeDeep(mergedData) as ResourceData;
 
+    const passwordFields = this._getPasswordFields();
+    const preservedPasswords: Record<string, unknown> = {};
+    for (const pf of passwordFields) {
+      if (!(pf in fields) && pf in mergedData) {
+        preservedPasswords[pf] = mergedData[pf];
+        delete mergedData[pf];
+      }
+    }
+
     const { isValid, errors } = await this.validator.validate(mergedData);
     if (!isValid) {
       throw new ValidationError('Validation failed during patch', {
         validation: errors
       });
     }
+
+    Object.assign(mergedData, preservedPasswords);
 
     const newMetadata = await this.schema.mapper(mergedData);
     newMetadata._v = String(this.version);

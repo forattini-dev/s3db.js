@@ -4,11 +4,23 @@ import type { ContentfulStatusCode } from '#src/plugins/shared/http-runtime.js';
 import type { DatabaseLike } from './resource-manager.js';
 import { unauthorized } from '../utils/response-formatter.js';
 import { createLogger } from '../../../concerns/logger.js';
-import { isBcryptHash, verifyPassword } from '../../../concerns/password-hashing.js';
+import { verifyPassword } from '#src/plugins/shared/password-verification.js';
 import { getCookie } from '#src/plugins/shared/http-runtime.js';
 import { BasicAuthResourceManager } from './resource-manager.js';
 
 const logger = createLogger({ name: 'BasicAuth', level: 'info' });
+
+function resolvePasswordPepper(database: unknown): string | undefined {
+  if (!database || typeof database !== 'object') {
+    return undefined;
+  }
+
+  const security = (database as { security?: { pepper?: unknown } }).security;
+  const candidatePepper = security?.pepper;
+  return typeof candidatePepper === 'string' && candidatePepper.length > 0
+    ? candidatePepper
+    : undefined;
+}
 
 export interface BasicCredentials {
   username: string;
@@ -53,20 +65,12 @@ function secureStringEquals(a: string, b: string): boolean {
   return timingSafeEqual(leftPadded, rightPadded);
 }
 
-async function verifyAdminPassword(candidate: string, expected: string): Promise<boolean> {
+async function verifyAdminPassword(candidate: string, expected: string, pepper?: string): Promise<boolean> {
   if (!expected) {
     return false;
   }
 
-  if (isBcryptHash(expected)) {
-    return verifyPassword(candidate, expected);
-  }
-
-  if (!candidate) {
-    return false;
-  }
-
-  return secureStringEquals(candidate, expected);
+  return verifyPassword(candidate, expected, { pepper });
 }
 
 export function parseBasicAuth(authHeader: string | null | undefined): BasicCredentials | null {
@@ -104,6 +108,7 @@ export async function createBasicAuthHandler(
 
   const manager = new BasicAuthResourceManager(database, 'basic', config as unknown as ConstructorParameters<typeof BasicAuthResourceManager>[2]);
   const authResource = await manager.getOrCreateResource();
+  const passwordPepper = resolvePasswordPepper(authResource.database);
 
   logger.debug(`Basic Auth driver initialized with resource: ${authResource.name}, usernameField: ${usernameField}`);
 
@@ -149,7 +154,7 @@ export async function createBasicAuthHandler(
 
     if (adminUser && adminUser.enabled === true) {
       const usernameMatches = secureStringEquals(username, adminUser.username || '');
-      const passwordMatches = await verifyAdminPassword(password, adminUser.password || '');
+      const passwordMatches = await verifyAdminPassword(password, adminUser.password || '', passwordPepper);
       if (usernameMatches && passwordMatches) {
         c.set('user', {
           id: 'root',
@@ -181,7 +186,8 @@ export async function createBasicAuthHandler(
         return c.json(response, (response as { _status: number })._status as ContentfulStatusCode);
       }
 
-      const isValid = await verifyPassword(password, storedPassword);
+      let isValid = false;
+      isValid = await verifyPassword(password, storedPassword, { pepper: passwordPepper });
       if (!isValid) {
         c.header('WWW-Authenticate', `Basic realm="${realm}"`);
         const response = unauthorized('Invalid credentials');

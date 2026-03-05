@@ -1,3 +1,5 @@
+import type { SecurityConfig } from '../concerns/password-hashing.js';
+import { merge } from 'lodash-es';
 import Resource from '../resource.class.js';
 import { ResourceNotFound, SchemaError } from '../errors.js';
 import type { BehaviorType } from '../behaviors/types.js';
@@ -39,8 +41,7 @@ export interface CreateResourceConfig {
   asyncEvents?: boolean;
   asyncPartitions?: boolean;
   strictValidation?: boolean;
-  passphrase?: string;
-  bcryptRounds?: number;
+  security?: SecurityConfig;
   idGenerator?: ((data?: unknown) => string) | number | string;
   idSize?: number;
   map?: StringRecord<string>;
@@ -94,8 +95,7 @@ export class DatabaseResources {
       partitions,
       client: db.client,
       version: existingResource.version,
-      passphrase: db.passphrase,
-      bcryptRounds: db.bcryptRounds,
+      security: db.security,
       versioningEnabled: db.versioningEnabled
     });
 
@@ -165,8 +165,7 @@ export class DatabaseResources {
       version: config.version !== undefined ? config.version : version,
       attributes,
       behavior,
-      passphrase: config.passphrase !== undefined ? config.passphrase : db.passphrase,
-      bcryptRounds: config.bcryptRounds !== undefined ? config.bcryptRounds : db.bcryptRounds,
+      security: config.security ? merge({}, db.security, config.security) : db.security,
       observers: [db as any],
       cache: config.cache !== undefined ? config.cache : db.cache as boolean,
       timestamps: config.timestamps !== undefined ? config.timestamps : false,

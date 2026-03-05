@@ -5,6 +5,8 @@
  * exported to users. Users should only interact with IdentityPluginOptions.
  */
 
+import type { Argon2Config } from '../../concerns/password-hashing.js';
+
 export interface IdentityCorsConfig {
   enabled: boolean;
   origin: string | string[];
@@ -68,6 +70,7 @@ export interface PasswordPolicyConfig {
   requireNumbers: boolean;
   requireSymbols: boolean;
   bcryptRounds: number;
+  argon2?: Argon2Config;
 }
 
 export interface RegistrationConfig {

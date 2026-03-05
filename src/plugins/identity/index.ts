@@ -41,7 +41,11 @@ import {
   mergeResourceConfig
 } from './concerns/resource-schemas.js';
 import { verifyPassword } from './concerns/password.js';
-import { hashPassword } from '../../concerns/password-hashing.js';
+import {
+  compactHash,
+  hashPassword,
+  type SecurityConfig as DatabasePasswordSecurityConfig
+} from '../../concerns/password-hashing.js';
 import { createBuiltInAuthDrivers } from './drivers/index.js';
 import { AuthDriver, type AuthenticateResult, type AuthDriverContext } from './drivers/auth-driver.interface.js';
 import { idGenerator } from '../../concerns/id.js';
@@ -293,7 +297,7 @@ export class IdentityPlugin extends Plugin {
         requireLowercase: options.passwordPolicy?.requireLowercase !== false,
         requireNumbers: options.passwordPolicy?.requireNumbers !== false,
         requireSymbols: options.passwordPolicy?.requireSymbols || false,
-        bcryptRounds: options.passwordPolicy?.bcryptRounds || 10
+        bcryptRounds: options.passwordPolicy?.bcryptRounds || 12
       },
 
       registration: {
@@ -941,7 +945,8 @@ export class IdentityPlugin extends Plugin {
       accessTokenExpiry: this.config.accessTokenExpiry,
       idTokenExpiry: this.config.idTokenExpiry,
       refreshTokenExpiry: this.config.refreshTokenExpiry,
-      authCodeExpiry: this.config.authCodeExpiry
+      authCodeExpiry: this.config.authCodeExpiry,
+      passwordPepper: this.database?.security?.pepper
     });
 
     await this.oauth2Server.initialize();
@@ -1119,6 +1124,13 @@ export class IdentityPlugin extends Plugin {
       return;
     }
     const disableBuiltIns = this._isPlainObject(driverConfig) && (driverConfig as AuthDriversConfig).disableBuiltIns === true;
+    const databaseSecurity = this.database?.security as DatabasePasswordSecurityConfig | undefined;
+    const databasePepper = typeof this.database?.security?.pepper === 'string'
+      ? this.database.security.pepper
+      : undefined;
+    const databaseArgon2 = databaseSecurity?.argon2;
+    const databaseRounds = databaseSecurity?.bcrypt?.rounds ?? 12;
+    const databaseHashAlgorithm = databaseArgon2 ? 'argon2id' : 'bcrypt';
 
     const context: AuthDriverContext = {
       database: this.database,
@@ -1130,8 +1142,22 @@ export class IdentityPlugin extends Plugin {
       },
       helpers: {
         password: {
-          hash: hashPassword,
-          verify: verifyPassword
+          hash: async (password: string): Promise<string> => {
+            const hash = await hashPassword(password, {
+              rounds: databaseRounds,
+              algorithm: databaseHashAlgorithm,
+              pepper: databasePepper,
+              argon2: databaseArgon2
+            });
+
+            try {
+              return compactHash(hash);
+            } catch {
+              return hash;
+            }
+          },
+          verify: (password: string, hash: string): Promise<boolean> =>
+            verifyPassword(password, hash, databasePepper)
         }
       }
     };

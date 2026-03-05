@@ -1,4 +1,5 @@
 import { createHash } from 'crypto';
+import type { SecurityConfig } from './password-hashing.js';
 
 export interface CachedValidator {
   validator: unknown;
@@ -8,8 +9,7 @@ export interface CachedValidator {
 }
 
 export interface ValidatorOptions {
-  passphrase?: string;
-  bcryptRounds?: number;
+  security?: SecurityConfig;
   allNestedObjectsOptional?: boolean;
 }
 
@@ -94,8 +94,7 @@ export function getValidatorCachePolicy(): ValidatorCachePolicy {
 export function generateSchemaFingerprint(attributes: Record<string, unknown>, options: ValidatorOptions = {}): string {
   const normalized = {
     attributes: JSON.stringify(attributes, Object.keys(attributes).sort()),
-    passphrase: options.passphrase || 'secret',
-    bcryptRounds: options.bcryptRounds || 10,
+    security: options.security ? JSON.stringify(options.security) : '',
     allNestedObjectsOptional: options.allNestedObjectsOptional ?? false
   };
 

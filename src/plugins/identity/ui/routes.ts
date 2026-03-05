@@ -252,6 +252,7 @@ export interface IdentityPlugin {
   passwordResetTokensResource: Resource<PasswordResetToken>;
   sessionsResource: Resource<Session>;
   emailService?: EmailService;
+  database?: { pepper?: string };
   auditPlugin?: AuditPlugin;
   rateLimiters?: { login?: RateLimiter };
   logger?: { info: (...args: unknown[]) => void; error: (...args: unknown[]) => void };
@@ -269,6 +270,17 @@ function getPageComponent(
   return customPages[pageName] || defaultPage;
 }
 
+function resolvePasswordPepper(database: unknown): string | undefined {
+  if (!database || typeof database !== 'object') {
+    return undefined;
+  }
+
+  const candidatePepper = (database as { pepper?: unknown }).pepper;
+  return typeof candidatePepper === 'string' && candidatePepper.length > 0
+    ? candidatePepper
+    : undefined;
+}
+
 export function registerUIRoutes(app: HttpApp, plugin: IdentityPlugin): void {
   const { sessionManager, usersResource, config, failbanManager } = plugin;
   const sessionManagerCasted = sessionManager as unknown as SessionManagerClass;
@@ -278,6 +290,7 @@ export function registerUIRoutes(app: HttpApp, plugin: IdentityPlugin): void {
   const userAttributes = plugin.config?.resources?.users?.mergedConfig?.attributes || {};
   const supportsStatusField = Object.prototype.hasOwnProperty.call(userAttributes, 'status');
   const keyManager = plugin.oauth2Server?.keyManager || null;
+  const passwordPepper = resolvePasswordPepper(plugin.database);
 
   const createMfaChallengeToken = (user: UserRecord, rememberFlag: string): string | null => {
     if (!keyManager) {
@@ -1307,7 +1320,7 @@ export function registerUIRoutes(app: HttpApp, plugin: IdentityPlugin): void {
       }
 
       const [okVerify, , isValid] = await tryFn(() =>
-        verifyPassword(current_password, userData.password)
+        verifyPassword(current_password, userData.password, passwordPepper)
       );
 
       if (!okVerify || !isValid) {
@@ -1572,7 +1585,7 @@ export function registerUIRoutes(app: HttpApp, plugin: IdentityPlugin): void {
         return c.redirect(`/profile?error=${encodeURIComponent('Failed to load profile')}`);
       }
 
-      const isValidPassword = await verifyPassword(password, userData.password);
+      const isValidPassword = await verifyPassword(password, userData.password, passwordPepper);
       if (!isValidPassword) {
         return c.redirect(`/profile?error=${encodeURIComponent('Invalid password')}`);
       }

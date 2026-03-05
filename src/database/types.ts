@@ -1,3 +1,4 @@
+import type { SecurityConfig } from '../concerns/password-hashing.js';
 import type { Client } from '../clients/types.js';
 import type { BehaviorType } from '../behaviors/types.js';
 import type { LogLevel, StringRecord as CommonStringRecord, EventHandler } from '../types/common.types.js';
@@ -176,8 +177,7 @@ export interface DatabaseRef {
   savedMetadata: SavedMetadata | null;
   _resourcesMap: StringRecord<Resource>;
   resources: StringRecord<Resource>;
-  passphrase: string;
-  bcryptRounds: number;
+  security: SecurityConfig;
   versioningEnabled: boolean;
   strictValidation: boolean;
   strictHooks: boolean;
