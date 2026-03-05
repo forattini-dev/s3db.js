@@ -89,12 +89,25 @@ export function createResourceManagementHandlers(server: S3dbMCPServer) {
     async dbListResources(args: {}, database: S3db): Promise<any> {
       server.ensureConnected(database);
 
-      const resourceList = await database.listResources();
+      const summary = Object.values(database.resources || {}).map((r: any) => {
+        const partitions = r.config?.partitions || {};
+        const attrs = r.attributes || {};
+        return {
+          name: r.name,
+          behavior: r.behavior,
+          attributeCount: Object.keys(attrs).length,
+          attributes: Object.keys(attrs),
+          partitions: Object.keys(partitions),
+          timestamps: r.config?.timestamps || false,
+          paranoid: r.config?.paranoid !== undefined ? r.config.paranoid : true,
+        };
+      });
 
       return {
         success: true,
-        resources: resourceList,
-        count: resourceList.length
+        resources: summary,
+        count: summary.length,
+        hint: 'Use s3db://resource/{name} for full schema, partition details, and usage examples.'
       };
     }
   };

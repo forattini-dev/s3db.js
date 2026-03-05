@@ -185,13 +185,17 @@ export class S3dbMCPServer {
           delete result.clearDatabase;
         }
 
+        let text = JSON.stringify(result, null, 2);
+
+        // Safety guard: truncate responses that would exceed MCP token limits (~200KB)
+        const MAX_RESPONSE_SIZE = 200_000;
+        if (text.length > MAX_RESPONSE_SIZE) {
+          const truncated = this.truncateResult(result, MAX_RESPONSE_SIZE);
+          text = JSON.stringify(truncated, null, 2);
+        }
+
         return {
-          content: [
-            {
-              type: 'text',
-              text: JSON.stringify(result, null, 2)
-            }
-          ]
+          content: [{ type: 'text', text }]
         };
 
       } catch (error: any) {
@@ -413,6 +417,71 @@ export class S3dbMCPServer {
     }
 
     return db.resources[resourceName];
+  }
+
+  truncateResult(result: any, maxSize: number): any {
+    // If result has a data array, truncate the array until it fits
+    if (result && Array.isArray(result.data) && result.data.length > 0) {
+      const withoutData = { ...result, data: [] };
+      const overhead = JSON.stringify(withoutData, null, 2).length + 100;
+      const budget = maxSize - overhead;
+
+      const truncatedData: any[] = [];
+      let currentSize = 0;
+      for (const item of result.data) {
+        const itemSize = JSON.stringify(item).length + 10;
+        if (currentSize + itemSize > budget) break;
+        truncatedData.push(item);
+        currentSize += itemSize;
+      }
+
+      return {
+        ...result,
+        data: truncatedData,
+        count: truncatedData.length,
+        _truncated: {
+          original: result.data.length,
+          returned: truncatedData.length,
+          reason: `Response exceeded ${Math.round(maxSize / 1000)}KB limit. Use pagination (resourcePage) or add partition filters to reduce result size.`
+        }
+      };
+    }
+
+    // If result has a resources array, same logic
+    if (result && Array.isArray(result.resources) && result.resources.length > 0) {
+      const withoutResources = { ...result, resources: [] };
+      const overhead = JSON.stringify(withoutResources, null, 2).length + 100;
+      const budget = maxSize - overhead;
+
+      const truncated: any[] = [];
+      let currentSize = 0;
+      for (const item of result.resources) {
+        const itemSize = JSON.stringify(item).length + 10;
+        if (currentSize + itemSize > budget) break;
+        truncated.push(item);
+        currentSize += itemSize;
+      }
+
+      return {
+        ...result,
+        resources: truncated,
+        count: truncated.length,
+        _truncated: {
+          original: result.resources.length,
+          returned: truncated.length,
+          reason: `Response exceeded ${Math.round(maxSize / 1000)}KB limit.`
+        }
+      };
+    }
+
+    // Fallback: just stringify and hard-cut
+    const text = JSON.stringify(result, null, 2);
+    return {
+      _truncated: {
+        reason: `Response exceeded ${Math.round(maxSize / 1000)}KB limit (${Math.round(text.length / 1000)}KB). Use pagination or filters to reduce result size.`
+      },
+      preview: text.slice(0, maxSize - 500)
+    };
   }
 
   _extractPartitionInfo(resource: any, data: any): Record<string, any> | null {

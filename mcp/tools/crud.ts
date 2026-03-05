@@ -617,13 +617,23 @@ export function createCrudHandlers(server: S3dbMCPServer) {
       const { resourceName } = args;
 
       const resource = server.getResource(database, resourceName);
+
+      // Safety: check count first, refuse if too large for MCP
+      const totalCount = await resource.count();
+      if (totalCount > 500) {
+        return {
+          success: false,
+          error: `Resource has ${totalCount} documents — too large for getAll via MCP. Use resourcePage({ resourceName: "${resourceName}", size: 50 }) for paginated access, or resourceList with partition filters.`,
+          totalCount,
+        };
+      }
+
       const result = await resource.getAll();
 
       return {
         success: true,
         data: result,
         count: result.length,
-        warning: result.length > 1000 ? 'Large dataset returned. Consider using resourceList with pagination.' : undefined
       };
     },
 
