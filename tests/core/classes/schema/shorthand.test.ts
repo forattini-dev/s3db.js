@@ -8,7 +8,7 @@ describe('Schema Class - Comprehensive Shorthand Notation Validation', () => {
     schema = new Schema({
       name: 'shorthand-test-schema',
       attributes: {},
-      passphrase: 'test-passphrase'
+      security: { passphrase: 'test-passphrase' }
     });
   });
 
@@ -23,7 +23,7 @@ describe('Schema Class - Comprehensive Shorthand Notation Validation', () => {
           hexValue: 'string|hex:true',
           code: 'string|length:6'
         },
-        passphrase: 'test-passphrase'
+        security: { passphrase: 'test-passphrase' }
       });
 
       // Test valid data
@@ -77,7 +77,7 @@ describe('Schema Class - Comprehensive Shorthand Notation Validation', () => {
           alphanumField: 'string|min:5|max:15|alphanum:true',
           alphadashField: 'string|min:3|max:25|alphadash:true'
         },
-        passphrase: 'test-passphrase'
+        security: { passphrase: 'test-passphrase' }
       });
 
       // Test valid combinations (sanitization doesn't happen during validation)
@@ -124,7 +124,7 @@ describe('Schema Class - Comprehensive Shorthand Notation Validation', () => {
           singleLineField: 'string|min:1|max:50|singleLine:true',
           multiFormatField: 'string|min:8|max:20|alphanum:true|empty:false'
         },
-        passphrase: 'test-passphrase'
+        security: { passphrase: 'test-passphrase' }
       });
 
       // Test valid format data (no trimming during validation)
@@ -162,7 +162,7 @@ describe('Schema Class - Comprehensive Shorthand Notation Validation', () => {
           rating: 'number|equal:5',
           amount: 'number'
         },
-        passphrase: 'test-passphrase'
+        security: { passphrase: 'test-passphrase' }
       });
 
       // Test valid data
@@ -211,7 +211,7 @@ describe('Schema Class - Comprehensive Shorthand Notation Validation', () => {
           naturalNumber: 'number|integer:true|positive:true',
           probability: 'number|min:0|max:1'
         },
-        passphrase: 'test-passphrase'
+        security: { passphrase: 'test-passphrase' }
       });
 
       // Test valid specialized numbers
@@ -250,7 +250,7 @@ describe('Schema Class - Comprehensive Shorthand Notation Validation', () => {
           flags: 'array|items:boolean',
           emails: 'array|items:email'
         },
-        passphrase: 'test-passphrase'
+        security: { passphrase: 'test-passphrase' }
       });
 
       // Test valid arrays
@@ -288,7 +288,7 @@ describe('Schema Class - Comprehensive Shorthand Notation Validation', () => {
           constrainedStrings: 'array|items:string',
           uniqueNumbers: 'array|items:number'
         },
-        passphrase: 'test-passphrase'
+        security: { passphrase: 'test-passphrase' }
       });
 
       // Test valid complex arrays
@@ -323,7 +323,7 @@ describe('Schema Class - Comprehensive Shorthand Notation Validation', () => {
           matrix2D: 'array|items:array',
           stringGrid: 'array|items:array'
         },
-        passphrase: 'test-passphrase'
+        security: { passphrase: 'test-passphrase' }
       });
 
       // Test valid multi-dimensional arrays (basic array validation only)
@@ -356,7 +356,7 @@ describe('Schema Class - Comprehensive Shorthand Notation Validation', () => {
           converted: 'boolean',
           required: 'boolean|required'
         },
-        passphrase: 'test-passphrase'
+        security: { passphrase: 'test-passphrase' }
       });
 
       // Test valid boolean data (no conversion during validation)
@@ -393,7 +393,7 @@ describe('Schema Class - Comprehensive Shorthand Notation Validation', () => {
           convertedDate: 'date',
           optionalDate: 'date|optional:true'
         },
-        passphrase: 'test-passphrase'
+        security: { passphrase: 'test-passphrase' }
       });
 
       // Test valid date data (no conversion during validation)
@@ -437,7 +437,7 @@ describe('Schema Class - Comprehensive Shorthand Notation Validation', () => {
             age: 'number|min:0'
           }
         },
-        passphrase: 'test-passphrase'
+        security: { passphrase: 'test-passphrase' }
       });
 
       // Test valid nested data
@@ -491,7 +491,7 @@ describe('Schema Class - Comprehensive Shorthand Notation Validation', () => {
             }
           }
         },
-        passphrase: 'test-passphrase'
+        security: { passphrase: 'test-passphrase' }
       });
 
       // Test valid deep nesting
@@ -554,7 +554,7 @@ describe('Schema Class - Comprehensive Shorthand Notation Validation', () => {
           scores: 'array|items:number',
           metadata: 'json|optional:true'
         },
-        passphrase: 'test-passphrase'
+        security: { passphrase: 'test-passphrase' }
       });
 
       // Test valid complex data

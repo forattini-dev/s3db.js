@@ -149,7 +149,7 @@ describe('Schema Unit Tests', () => {
         });
 
         expect(schema).toBeDefined();
-        expect(schema.passphrase).toBe('test-passphrase');
+        expect(schema.security.passphrase).toBe('test-passphrase');
       });
     });
 
