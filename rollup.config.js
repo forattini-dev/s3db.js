@@ -39,6 +39,19 @@ function versionReplacement() {
   };
 }
 
+function preserveNativeDynamicImports() {
+  const nativeModules = ['argon2', 'bcrypt'];
+  return {
+    name: 'preserve-native-dynamic-imports',
+    resolveId(source) {
+      if (nativeModules.includes(source)) {
+        return { id: source, external: true };
+      }
+      return null;
+    }
+  };
+}
+
 function cleanupLegacyArtifacts() {
   return {
     name: 'cleanup-legacy-cjs-artifact',
@@ -54,6 +67,7 @@ function cleanupLegacyArtifacts() {
 }
 
 const sharedPlugins = [
+  preserveNativeDynamicImports(),
   jsToTsResolver(),
   commonjs(),
   resolve({
@@ -140,7 +154,7 @@ const allPeerDependencies = [
   'user-agents', 'ghost-cursor', 'merge-deep',
 
   // Other plugins
-  'amqplib', 'bcrypt', 'enquirer', 'node-cron', 'nodemailer', 'ws',
+  'amqplib', 'argon2', 'bcrypt', 'enquirer', 'node-cron', 'nodemailer', 'ws',
   'mailparser', 'smtp-server', 'handlebars', 'pino-http', 'uuid', 'flat',
   '@tensorflow/tfjs-node', '@tensorflow/tfjs-core', '@tensorflow/tfjs-layers',
   '@xenova/transformers', '@supercharge/promise-pool', '@kubernetes/client-node'
