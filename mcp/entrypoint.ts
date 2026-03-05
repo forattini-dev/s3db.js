@@ -85,6 +85,7 @@ Use \`s3db://resource/{name}\` to see which partitions a resource has.
 - \`s3db://overview\` — full capabilities overview
 - \`s3db://best-practices\` — behaviors, partitions, performance guide
 - \`s3db://plugin/{name}\` — plugin docs (cache, api, audit, ttl, vector, etc.)
+- \`s3db://core/security\` — **security config reference** (passphrase, pepper, bcrypt, argon2, passwords)
 - \`s3db://guide/{topic}\` — guides (getting-started, performance, testing, security)
 - \`s3db://field-type/{type}\` — field type reference (string, password, secret, embedding, ip4)
 

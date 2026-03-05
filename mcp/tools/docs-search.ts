@@ -286,7 +286,7 @@ async function listTopics(type: 'core' | 'plugins'): Promise<any> {
 export const docsSearchTools = [
   {
     name: 's3dbSearchDocs',
-    description: `Search all s3db.js documentation (core + plugins) using fuzzy search. Covers: resource API, schema validation, CRUD, partitioning, behaviors, encoding, encryption, CLI, and all plugins (Cache, Audit, TTL, API, Vector, Graph, etc).`,
+    description: `Search all s3db.js documentation (core + plugins) using fuzzy search. Covers: resource API, schema validation, CRUD, partitioning, behaviors, encoding, encryption, security config (passphrase, pepper, bcrypt, argon2, password hashing), CLI, and all plugins (Cache, Audit, TTL, API, Vector, Graph, etc). TIP: For security/password/encryption topics, read s3db://core/security directly instead of searching.`,
     inputSchema: {
       type: 'object',
       properties: {

@@ -36,7 +36,7 @@ export const resourceTemplates: MCPResourceTemplate[] = [
   {
     uriTemplate: 's3db://core/{topic}',
     name: 'Core Documentation',
-    description: 'Core s3db.js concepts: database, schema, resource, behaviors, partitions, encryption, streaming, events',
+    description: 'Core s3db.js concepts: database, schema, resource, behaviors, partitions, encryption, security, streaming, events',
     mimeType: 'text/markdown',
   },
   {
@@ -237,7 +237,7 @@ Transform AWS S3 into a powerful document database with ORM-like interface.
 - **30+ field types**: With automatic encoding/compression
 - **5 behavior strategies**: Handle the 2KB metadata limit
 - **Partitioning**: O(1) queries instead of O(n) scans
-- **Built-in encryption**: AES-256-GCM for secret fields
+- **Built-in encryption**: AES-256-GCM for secret fields, bcrypt/argon2id for passwords
 - **26+ plugins**: Cache, API, Audit, TTL, Vector, Geo, etc.
 
 ## Core API
@@ -268,7 +268,12 @@ file:///tmp/s3db                             # FileSystemClient (testing)
 import { Database } from 's3db.js';
 
 const db = new Database({
-  connectionString: 's3://KEY:SECRET@my-bucket?region=us-east-1'
+  connectionString: 's3://KEY:SECRET@my-bucket?region=us-east-1',
+  security: {                           // optional
+    passphrase: process.env.ENCRYPTION_KEY,  // for secret fields
+    pepper: process.env.PASSWORD_PEPPER,      // for password hashing
+    bcrypt: { rounds: 12 },                   // password:bcrypt config
+  },
 });
 
 await db.connect();
@@ -294,6 +299,7 @@ const user = await users.get('user-id');
 
 | What you need | Resource |
 |---------------|----------|
+| Security config (encryption, passwords, bcrypt, argon2) | \`s3db://core/security\` |
 | Best practices & decision guides | \`s3db://best-practices\` |
 | Plugin documentation (full README) | \`s3db://plugin/{name}\` (e.g., \`s3db://plugin/cache\`) |
 | Usage guides | \`s3db://guide/{topic}\` (getting-started, performance, testing, security) |
@@ -364,10 +370,25 @@ function generateQuickReference(): string {
 import { Database } from 's3db.js';
 
 const db = new Database({
-  connectionString: 's3://KEY:SECRET@bucket?region=us-east-1'
+  connectionString: 's3://KEY:SECRET@bucket?region=us-east-1',
+  security: {                                    // optional
+    passphrase: process.env.ENCRYPTION_KEY,      // for \`secret\` fields
+    pepper: process.env.PASSWORD_PEPPER,          // for password hashing
+    bcrypt: { rounds: 12 },                       // bcrypt config
+    // argon2: { memoryCost: 65536, timeCost: 3 } // for password:argon2id
+  },
 });
 await db.connect();
 \`\`\`
+
+## Security (see \`s3db://core/security\` for full reference)
+
+| Config | Purpose | Used By |
+|--------|---------|---------|
+| \`security.passphrase\` | AES-256-GCM encryption key | \`secret\` fields |
+| \`security.pepper\` | Extra entropy before hashing | \`password\` fields |
+| \`security.bcrypt.rounds\` | Cost factor (default 12) | \`password\`, \`password:bcrypt\` |
+| \`security.argon2.*\` | Memory-hard hash config | \`password:argon2id\` |
 
 ## Resource Creation
 
@@ -438,7 +459,8 @@ const active = await users.listPartition('byStatus', { status: 'active' }); // F
 | string | \`'string|required|min:3'\` |
 | number | \`'number|min:0|max:100'\` |
 | email | \`'email|required'\` |
-| secret | \`'secret'\` (encrypted) |
+| password | \`'password|required|min:8'\` (one-way hash) |
+| secret | \`'secret'\` (encrypted, reversible) |
 | embedding | \`'embedding:1536'\` (77% compression) |
 | ip4/ip6 | \`'ip4'\` (44% compression) |
 | object | \`{ nested: 'string' }\` |
@@ -746,12 +768,17 @@ function readCoreDoc(topic: string): string {
     streaming: 'core/streaming.md',
     events: 'core/events.md',
     hooks: 'core/events.md',
+    security: '__generated__',
   };
 
   const filePath = topicMap[topic];
   if (!filePath) {
     const availableTopics = Object.keys(topicMap).join(', ');
     return `# Core: ${topic}\n\nTopic not found. Available topics: ${availableTopics}`;
+  }
+
+  if (filePath === '__generated__') {
+    return generateCoreFallback(topic);
   }
 
   try {
@@ -767,16 +794,27 @@ function generateCoreFallback(topic: string): string {
 
 The Database class is the main entry point for s3db.js.
 
-## Connection
+## Constructor Options
 
 \`\`\`javascript
 import { Database } from 's3db.js';
 
 const db = new Database({
   connectionString: 's3://KEY:SECRET@bucket?region=us-east-1',
-  security: {
-    passphrase: 'encryption-key',  // optional, for secret fields
+  verbose: false,              // Enable debug logging
+  parallelism: 10,             // Max parallel S3 operations
+  versioningEnabled: false,    // Enable resource versioning
+  security: {                  // See s3db://core/security for full reference
+    passphrase: 'string',      // AES-256-GCM key for \`secret\` fields
+    pepper: 'string',          // Extra entropy for password hashing
+    bcrypt: { rounds: 12 },    // Bcrypt cost factor (min 12, max 31)
+    argon2: {                  // Argon2id config (GPU-resistant)
+      memoryCost: 65536,       // Memory in KiB (power of 2)
+      timeCost: 3,             // Iterations
+      parallelism: 4,          // Threads
+    },
   },
+  plugins: [],                 // Array of plugin instances
 });
 
 await db.connect();
@@ -790,6 +828,12 @@ const users = await db.createResource({
   attributes: {
     email: 'email|required',
     name: 'string',
+    password: 'password|required|min:8',  // auto-hashed via security config
+    apiKey: 'secret',                      // auto-encrypted via security.passphrase
+  },
+  behavior: 'body-overflow',
+  partitions: {
+    byEmail: { fields: { email: 'string' } },
   },
 });
 \`\`\`
@@ -801,6 +845,11 @@ import { CachePlugin } from 's3db.js';
 
 db.use(new CachePlugin({ driver: 'memory' }));
 \`\`\`
+
+## Related
+
+- \`s3db://core/security\` — Full security configuration reference
+- \`s3db://best-practices\` — Behaviors, partitions, performance guide
 `,
     behaviors: `# Behaviors
 
@@ -858,6 +907,144 @@ const orders = await db.createResource({
 const pending = await orders.listPartition('byStatus', { status: 'pending' });
 const customerOrders = await orders.listPartition('byCustomer', { customerId: 'cust-123' });
 \`\`\`
+`,
+  };
+
+    security: `# Security Configuration
+
+All security options are consolidated under the \`security\` sub-object in the Database constructor (or per-resource override).
+
+## SecurityConfig Interface
+
+\`\`\`typescript
+interface SecurityConfig {
+  passphrase?: string;    // AES-256-GCM encryption key for \`secret\` fields
+  pepper?: string;        // Extra string appended to passwords before hashing
+  bcrypt?: {
+    rounds?: number;      // Cost factor (min 12, max 31, default 12)
+  };
+  argon2?: {
+    memoryCost?: number;  // Memory in KiB (must be power of 2, default 65536 = 64MB)
+    timeCost?: number;    // Iterations (default 3)
+    parallelism?: number; // Threads (default 4)
+  };
+}
+\`\`\`
+
+## Usage in Database Constructor
+
+\`\`\`javascript
+import { Database } from 's3db.js';
+
+const db = new Database({
+  connectionString: 's3://KEY:SECRET@bucket',
+  security: {
+    passphrase: process.env.ENCRYPTION_KEY,  // for \`secret\` field encryption
+    pepper: process.env.PASSWORD_PEPPER,      // for password hashing
+    bcrypt: { rounds: 12 },                   // bcrypt cost factor
+    argon2: {                                 // argon2id config (if using password:argon2id)
+      memoryCost: 65536,
+      timeCost: 3,
+      parallelism: 4,
+    },
+  },
+});
+\`\`\`
+
+## Per-Resource Override
+
+Resources can partially override the database security config via deep merge:
+
+\`\`\`javascript
+const users = await db.createResource({
+  name: 'users',
+  attributes: {
+    email: 'email|required',
+    password: 'password:argon2id|required|min:8',
+    apiKey: 'secret',
+  },
+  security: {
+    // Overrides only argon2 config; inherits passphrase, pepper, bcrypt from database
+    argon2: { memoryCost: 131072 },
+  },
+});
+\`\`\`
+
+## Field Types That Use Security Config
+
+| Field Type | Uses | Config Key |
+|------------|------|------------|
+| \`secret\` | AES-256-GCM encryption (reversible) | \`security.passphrase\` |
+| \`password\` | Bcrypt hash (one-way, default) | \`security.pepper\`, \`security.bcrypt.rounds\` |
+| \`password:bcrypt\` | Explicit bcrypt hash | \`security.pepper\`, \`security.bcrypt.rounds\` |
+| \`password:argon2id\` | Argon2id hash (GPU-resistant) | \`security.pepper\`, \`security.argon2.*\` |
+
+## How Each Config Key Works
+
+### passphrase
+Encryption key for \`secret\` fields. Used with PBKDF2 to derive an AES-256-GCM key.
+- Auto-encrypts on write, auto-decrypts on read
+- Required if any field uses the \`secret\` type
+- Default: \`'secret'\` (change in production!)
+
+### pepper
+Extra string appended to passwords before hashing. Adds a server-side secret that isn't stored in the database.
+- Applied to both \`password\` and \`password:argon2id\` types
+- If set, \`verifyPassword()\` also needs the same pepper
+
+### bcrypt
+Controls bcrypt hashing for \`password\` and \`password:bcrypt\` fields.
+- \`rounds\`: Cost factor (default 12). Each +1 doubles computation time.
+- Hashes stored in compact base62 format (56 chars instead of standard 60)
+
+### argon2
+Controls argon2id hashing for \`password:argon2id\` fields. Memory-hard, GPU-resistant.
+- \`memoryCost\`: Memory in KiB (default 65536 = 64MB). Must be power of 2.
+- \`timeCost\`: Number of iterations (default 3)
+- \`parallelism\`: Degree of parallelism (default 4)
+- Hashes stored in compact base62 format (~76 chars instead of standard 97)
+- Requires \`argon2\` npm package as peer dependency
+
+## Verifying Passwords
+
+\`\`\`javascript
+import { verifyPassword } from 's3db.js';
+
+const user = await users.get(userId);
+const isValid = await verifyPassword('user-input', user.password);
+\`\`\`
+
+## MCP Server Configuration
+
+Via environment variables:
+\`\`\`
+S3DB_SECURITY_PASSPHRASE=your-encryption-key
+S3DB_SECURITY_PEPPER=your-pepper
+S3DB_SECURITY_BCRYPT_ROUNDS=12
+S3DB_SECURITY_ARGON2=true
+S3DB_SECURITY_ARGON2_MEMORY_COST=65536
+S3DB_SECURITY_ARGON2_TIME_COST=3
+S3DB_SECURITY_ARGON2_PARALLELISM=4
+\`\`\`
+
+Or via config file (\`s3db.config.json\`):
+\`\`\`json
+{
+  "security": {
+    "passphrase": "your-encryption-key",
+    "pepper": "your-pepper",
+    "bcrypt": { "rounds": 12 },
+    "argon2": { "memoryCost": 65536, "timeCost": 3, "parallelism": 4 }
+  }
+}
+\`\`\`
+
+## Related Resources
+
+- \`s3db://core/encryption\` — AES-256-GCM encryption details for \`secret\` fields
+- \`s3db://field-type/password\` — Password field type reference
+- \`s3db://field-type/secret\` — Secret field type reference
+- \`s3db://guide/security\` — Security best practices guide
 `,
   };
 

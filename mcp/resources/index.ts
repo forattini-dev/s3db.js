@@ -78,6 +78,11 @@ const coreDocsContent = {
       summary: 'AES-256-GCM encryption for sensitive fields using "secret" type'
     },
     {
+      name: 'Security',
+      path: 'core/security (generated)',
+      summary: 'Security configuration: passphrase, pepper, bcrypt, argon2id, password hashing, SecurityConfig interface'
+    },
+    {
       name: 'Streaming',
       path: 'core/streaming.md',
       summary: 'Memory-efficient streaming API for large datasets'
