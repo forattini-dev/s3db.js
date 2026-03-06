@@ -195,6 +195,7 @@ export interface DatabaseRef {
   keyPrefix: string;
 
   emit: (event: string, data?: unknown) => void | Promise<void>;
+  ensureClientInitialized?: () => Promise<void>;
   isConnected: () => boolean;
   getChildLogger: (name: string, bindings?: Record<string, unknown>) => Logger;
   generateDefinitionHash: (definition: ResourceExport, behavior?: BehaviorType) => string;

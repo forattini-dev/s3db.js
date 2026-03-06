@@ -1,11 +1,7 @@
 import tryFn, { tryFnSync } from './concerns/try-fn.js';
 import { getVersion } from './version.js';
 import type { SecurityConfig } from './concerns/password-hashing.js';
-import { S3Client } from './clients/s3-client.class.js';
-import { MemoryClient } from './clients/memory-client.class.js';
-import { FileSystemClient } from './clients/filesystem-client.class.js';
 import { ConnectionString } from './connection-string.class.js';
-import Resource from './resource.class.js';
 import { idGenerator } from './concerns/id.js';
 import { ProcessManager } from './concerns/process-manager.js';
 import { SafeEventEmitter } from './concerns/safe-event-emitter.js';
@@ -23,6 +19,7 @@ import { DatabaseConnection } from './database/database-connection.class.js';
 import type { Client } from './clients/types.js';
 import type { BehaviorType } from './behaviors/types.js';
 import type { LogLevel, StringRecord } from './types/common.types.js';
+import type Resource from './resource.class.js';
 import type { ResourceExport } from './resource.class.js';
 import type { PartitionsConfig } from './core/resource-query.class.js';
 import type { AttributesSchema } from './core/resource-validator.class.js';
@@ -139,6 +136,8 @@ export class Database extends SafeEventEmitter {
 
   private _parallelism: number;
   private _childLoggerLevels: StringRecord<LogLevel>;
+  private _clientFactory: (() => Promise<Client>) | null;
+  private _clientInitialization: Promise<void> | null;
 
   private _hooksModule: DatabaseHooks;
   private _coordinatorsModule: DatabaseCoordinators;
@@ -216,6 +215,8 @@ export class Database extends SafeEventEmitter {
     }
 
     this._childLoggerLevels = options.loggerOptions?.childLevels || {};
+    this._clientFactory = null;
+    this._clientInitialization = null;
 
     this.executorPool = this._normalizeOperationsPool(executorPoolConfig, this._parallelism);
     if (options?.taskExecutorMonitoring) {
@@ -315,77 +316,119 @@ export class Database extends SafeEventEmitter {
       }
     }
 
-    if (!options.client && connectionString) {
+    if (options.client) {
+      this.client = options.client;
+    } else if (connectionString) {
       try {
         const url = new URL(connectionString);
         if (url.protocol === 'memory:') {
-          const bucketHost = url.hostname || 'test-bucket';
-          const [okBucket, , decodedBucket] = tryFnSync(() => decodeURIComponent(bucketHost));
-          const bucket = okBucket ? decodedBucket : bucketHost;
-          const rawPrefix = url.pathname ? url.pathname.substring(1) : '';
-          const [okPrefix, , decodedPrefix] = tryFnSync(() => decodeURIComponent(rawPrefix));
-          const keyPrefix = okPrefix ? decodedPrefix : rawPrefix;
+          this._clientFactory = async () => {
+            const { MemoryClient } = await import('./clients/memory-client.class.js');
+            const bucketHost = url.hostname || 'test-bucket';
+            const [okBucket, , decodedBucket] = tryFnSync(() => decodeURIComponent(bucketHost));
+            const bucket = okBucket ? decodedBucket : bucketHost;
+            const rawPrefix = url.pathname ? url.pathname.substring(1) : '';
+            const [okPrefix, , decodedPrefix] = tryFnSync(() => decodeURIComponent(rawPrefix));
+            const keyPrefix = okPrefix ? decodedPrefix : rawPrefix;
 
-          const memoryOptions = this._applyTaskExecutorMonitoring(this._deepMerge({
-            bucket,
-            keyPrefix,
-            logLevel: this.logger.level,
-          }, mergedClientOptions as any) as any);
-          this.client = new MemoryClient(memoryOptions) as Client;
+            const memoryOptions = this._applyTaskExecutorMonitoring(this._deepMerge({
+              bucket,
+              keyPrefix,
+              logLevel: this.logger.level,
+            }, mergedClientOptions as any) as any);
+            return new MemoryClient(memoryOptions) as Client;
+          };
         } else if (url.protocol === 'file:') {
-          const filesystemOptions = this._applyTaskExecutorMonitoring(this._deepMerge({
-            basePath: (connStr as any)?.basePath,
-            bucket: (connStr as any)?.bucket,
-            keyPrefix: (connStr as any)?.keyPrefix,
-            logLevel: this.logger.level,
-          }, mergedClientOptions as any) as any);
-          this.client = new FileSystemClient(filesystemOptions) as Client;
+          this._clientFactory = async () => {
+            const { FileSystemClient } = await import('./clients/filesystem-client.class.js');
+            const filesystemOptions = this._applyTaskExecutorMonitoring(this._deepMerge({
+              basePath: (connStr as any)?.basePath,
+              bucket: (connStr as any)?.bucket,
+              keyPrefix: (connStr as any)?.keyPrefix,
+              logLevel: this.logger.level,
+            }, mergedClientOptions as any) as any);
+            return new FileSystemClient(filesystemOptions) as Client;
+          };
         } else {
+          this._clientFactory = async () => {
+            const { S3Client } = await import('./clients/s3-client.class.js');
+            const s3ClientOptions = this._deepMerge({
+              logLevel: this.logger.level,
+              logger: this.getChildLogger('S3Client'),
+              connectionString: connectionString,
+            }, mergedClientOptions as any) as any;
+            s3ClientOptions.executorPool = this._deepMerge(
+              (s3ClientOptions as any).executorPool || {},
+              this.executorPool
+            );
+            return new S3Client(s3ClientOptions) as unknown as Client;
+          };
+        }
+      } catch {
+        this._clientFactory = async () => {
+          const { S3Client } = await import('./clients/s3-client.class.js');
           const s3ClientOptions = this._deepMerge({
             logLevel: this.logger.level,
             logger: this.getChildLogger('S3Client'),
             connectionString: connectionString,
           }, mergedClientOptions as any) as any;
-          s3ClientOptions.executorPool = this._deepMerge(
+          (s3ClientOptions as any).executorPool = this._deepMerge(
             (s3ClientOptions as any).executorPool || {},
             this.executorPool
           );
-          this.client = new S3Client(s3ClientOptions) as unknown as Client;
-        }
-      } catch {
+          return new S3Client(s3ClientOptions) as unknown as Client;
+        };
+      }
+    } else {
+      this._clientFactory = async () => {
+        const { S3Client } = await import('./clients/s3-client.class.js');
         const s3ClientOptions = this._deepMerge({
           logLevel: this.logger.level,
           logger: this.getChildLogger('S3Client'),
-          connectionString: connectionString,
         }, mergedClientOptions as any) as any;
         (s3ClientOptions as any).executorPool = this._deepMerge(
           (s3ClientOptions as any).executorPool || {},
           this.executorPool
         );
-        this.client = new S3Client(s3ClientOptions) as unknown as Client;
-      }
-    } else if (!options.client) {
-      const s3ClientOptions = this._deepMerge({
-        logLevel: this.logger.level,
-        logger: this.getChildLogger('S3Client'),
-      }, mergedClientOptions as any) as any;
-      (s3ClientOptions as any).executorPool = this._deepMerge(
-        (s3ClientOptions as any).executorPool || {},
-        this.executorPool
-      );
-      this.client = new S3Client(s3ClientOptions) as unknown as Client;
-    } else {
-      this.client = options.client;
+        return new S3Client(s3ClientOptions) as unknown as Client;
+      };
     }
 
-    const resolvedConnectionString = connectionString || this._inferConnectionStringFromClient(this.client);
+    const resolvedConnectionString = connectionString || (this.client ? this._inferConnectionStringFromClient(this.client) : undefined);
     this.connectionString = resolvedConnectionString;
     if (!this.databaseOptions.connectionString && resolvedConnectionString) {
       this.databaseOptions.connectionString = resolvedConnectionString;
     }
 
-    this.bucket = (this.client as any).bucket || '';
-    this.keyPrefix = (this.client as any).keyPrefix || '';
+    this.bucket = (this.client as any)?.bucket || connStr?.bucket || 's3db';
+    this.keyPrefix = (this.client as any)?.keyPrefix || connStr?.keyPrefix || '';
+  }
+
+  async ensureClientInitialized(): Promise<void> {
+    if (this.client) {
+      return;
+    }
+
+    if (this._clientInitialization) {
+      await this._clientInitialization;
+      return;
+    }
+
+    if (!this._clientFactory) {
+      throw new Error('Database client is not configured');
+    }
+
+    this._clientInitialization = (async () => {
+      this.client = await this._clientFactory!();
+      this.bucket = (this.client as any)?.bucket || this.bucket || 's3db';
+      this.keyPrefix = (this.client as any)?.keyPrefix || this.keyPrefix || '';
+    })();
+
+    try {
+      await this._clientInitialization;
+    } finally {
+      this._clientInitialization = null;
+    }
   }
 
   get parallelism(): number {
@@ -660,10 +703,12 @@ export class Database extends SafeEventEmitter {
       return (client as any).connectionString;
     }
 
-    if (client instanceof MemoryClient) {
-      const bucket = encodeURIComponent((client as any).bucket || 's3db');
-      const encodedPrefix = (client as any).keyPrefix
-        ? (client as any).keyPrefix
+    const candidate = client as any;
+
+    if (candidate?.config?.endpoint === 'memory://' || candidate?.region === 'memory') {
+      const bucket = encodeURIComponent(candidate.bucket || 's3db');
+      const encodedPrefix = candidate.keyPrefix
+        ? candidate.keyPrefix
             .split('/')
             .filter(Boolean)
             .map((segment: string) => encodeURIComponent(segment))
@@ -673,9 +718,9 @@ export class Database extends SafeEventEmitter {
       return `memory://${bucket}${prefixPath}`;
     }
 
-    if (client instanceof FileSystemClient) {
-      if ((client as any).basePath) {
-        return `file://${encodeURI((client as any).basePath)}`;
+    if (typeof candidate?.basePath === 'string') {
+      if (candidate.basePath) {
+        return `file://${encodeURI(candidate.basePath)}`;
       }
     }
 

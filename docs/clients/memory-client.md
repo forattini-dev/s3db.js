@@ -35,8 +35,8 @@ const db = new Database({ client: new MemoryClient() });
 // ✅ With MemoryClient: In-memory tests
 const db = new Database({ client: new MemoryClient() });
 // - Zero dependencies
-// - 2600 tests take ~5 seconds (18x faster!)
-// - Each insert/read: <0.1ms (250-360x faster per operation)
+// - 2600 tests can complete in ~5 seconds in the documented benchmark setup
+// - Each insert/read can stay under 0.1ms in that same setup
 // - CI/CD just works
 ```
 
@@ -555,7 +555,7 @@ client.on('putObject', (error, params) => {
 
 ### Benchmark Results
 
-Compared to LocalStack on a MacBook Pro M1:
+Illustrative comparison from a MacBook Pro M1 benchmark setup:
 
 | Operation | LocalStack | MemoryClient | Speedup |
 |-----------|------------|--------------|---------|
@@ -563,6 +563,10 @@ Compared to LocalStack on a MacBook Pro M1:
 | Read 100 records | 1.8s | 0.005s | **360x** |
 | List 1000 records | 3.2s | 0.002s | **1600x** |
 | Full test suite (2600 tests) | ~90s | ~5s | **18x** |
+
+Treat these numbers as directional. Actual timings depend on Node.js version,
+test profile, hardware, and whether the suite is running with memory,
+filesystem, or S3-compatible backends.
 
 ### Memory Usage
 
@@ -618,7 +622,7 @@ it('should handle complex workflow', async () => {
 
 // .github/workflows/test.yml
 - name: Run Tests
-  run: pnpm test
+  run: pnpm run test
   # That's it! No LocalStack setup needed
 ```
 
@@ -818,7 +822,7 @@ Use production snapshots in CI without exposing credentials:
 //     curl -L https://fixtures.example.com/prod-snapshot.tar.gz | tar xz
 //
 // - name: Run tests
-//   run: pnpm test
+//   run: pnpm run test
 
 // In your test suite:
 import { Database, MemoryClient } from 's3db.js';
@@ -1760,10 +1764,10 @@ for (let i = 0; i < 100; i++) {
 4. **Run tests sequentially (not parallel):**
 ```bash
 # Parallel (high memory)
-pnpm test --maxWorkers=4
+pnpm run test -- --maxWorkers=4
 
 # Sequential (low memory)
-pnpm test --maxWorkers=1
+pnpm run test -- --maxWorkers=1
 ```
 
 ---

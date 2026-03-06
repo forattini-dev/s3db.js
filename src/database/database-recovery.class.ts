@@ -1,5 +1,4 @@
 import tryFn, { tryFnSync } from '../concerns/try-fn.js';
-import { streamToString } from '../stream/index.js';
 import type { DatabaseRef, SavedMetadata, ResourceMetadata, HookSummary, StringRecord } from './types.js';
 
 export class DatabaseRecovery {
@@ -242,6 +241,7 @@ export class DatabaseRecovery {
       const backupKey = `s3db.json.corrupted.${timestamp}.backup`;
 
       if (!content) {
+        const { streamToString } = await import('../stream/index.js');
         const [readOk, , readData] = await tryFn(async () => {
           const request = await this.database.client.getObject('s3db.json');
           return await streamToString((request as any)?.Body);

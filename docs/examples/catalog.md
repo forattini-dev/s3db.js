@@ -20,7 +20,7 @@ Need scenario-centric guidance? Read [use-cases.md](./use-cases.md). Looking for
   resource handles, and hooks.
 - `hooks/validate-domain.js` - Custom hook that validates e-mail domains against DNS or allow-lists before a
   resource is persisted.
-- `hooks/validate-domain.test.js` - Minimal Jest suite exercising the hook contract so you can copy the testing
+- `hooks/validate-domain.test.js` - Minimal Vitest suite exercising the hook contract so you can copy the testing
   pattern for your own hooks.
 - `recon-artifacts/` - Example JSON/LHR output produced by Recon modes (full scan, per-tool artifacts, namespace
   detection) to help you understand the expected shape of reports.

@@ -572,7 +572,7 @@ export async function handler(event) {
 describe('MyService', () => {
   it('should use plugin', async () => {
     const mockPlugin = {
-      doSomething: jest.fn().mockResolvedValue({ success: true })
+      doSomething: vi.fn().mockResolvedValue({ success: true })
     };
 
     const db = new Database({...});
@@ -633,7 +633,7 @@ await Promise.all(
 pnpm upgrade s3db.js
 
 // Test thoroughly
-pnpm test
+pnpm run test
 ```
 
 ---

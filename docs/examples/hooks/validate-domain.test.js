@@ -1,11 +1,10 @@
 /**
  * Unit Tests for validateDomain Hook
  *
- * Run with: node --test hooks/validate-domain.test.js
- * Or with vitest: vitest hooks/validate-domain.test.js
+ * Run with: pnpm exec vitest run docs/examples/hooks/validate-domain.test.js
  */
 
-import { describe, it, expect } from '@jest/globals';
+import { describe, it, expect } from 'vitest';
 import { validateDomain } from './validate-domain.js';
 
 describe('validateDomain', () => {

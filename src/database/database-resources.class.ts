@@ -1,8 +1,7 @@
 import type { SecurityConfig } from '../concerns/password-hashing.js';
-import { merge } from 'lodash-es';
-import Resource from '../resource.class.js';
 import { ResourceNotFound, SchemaError } from '../errors.js';
 import type { BehaviorType } from '../behaviors/types.js';
+import type Resource from '../resource.class.js';
 import type { ResourceExport } from '../resource.class.js';
 import type { HooksCollection } from '../core/resource-hooks.class.js';
 import type { PartitionsConfig } from '../core/resource-query.class.js';
@@ -62,6 +61,25 @@ export interface HashExistsResult {
   existingHash?: string;
 }
 
+function mergeSecurityConfig(base: SecurityConfig, override?: SecurityConfig): SecurityConfig {
+  if (!override) {
+    return base;
+  }
+
+  return {
+    ...base,
+    ...override,
+    bcrypt: {
+      ...(base.bcrypt || {}),
+      ...(override.bcrypt || {})
+    },
+    argon2: {
+      ...(base.argon2 || {}),
+      ...(override.argon2 || {})
+    }
+  };
+}
+
 export class DatabaseResources {
   constructor(
     private database: DatabaseRef,
@@ -88,18 +106,19 @@ export class DatabaseResources {
     const existingResource = db._resourcesMap[name];
     const existingHash = this.metadata.generateDefinitionHash(existingResource.export());
 
-    const mockResource = new Resource({
+    const newHash = this.metadata.generateDefinitionHash({
       name,
       attributes,
       behavior,
       partitions,
-      client: db.client,
-      version: existingResource.version,
-      security: db.security,
-      versioningEnabled: db.versioningEnabled
-    });
-
-    const newHash = this.metadata.generateDefinitionHash(mockResource.export());
+      hooks: {},
+      timestamps: false,
+      paranoid: true,
+      allNestedObjectsOptional: true,
+      autoDecrypt: true,
+      cache: false,
+      version: existingResource.version
+    } as ResourceExport);
 
     return {
       exists: true,
@@ -158,6 +177,7 @@ export class DatabaseResources {
 
     const existingMetadata = db.savedMetadata?.resources?.[name];
     const version = existingMetadata?.currentVersion || 'v1';
+    const { default: Resource } = await import('../resource.class.js');
 
     const resource = new Resource({
       name,
@@ -165,7 +185,7 @@ export class DatabaseResources {
       version: config.version !== undefined ? config.version : version,
       attributes,
       behavior,
-      security: config.security ? merge({}, db.security, config.security) : db.security,
+      security: mergeSecurityConfig(db.security, config.security),
       observers: [db as any],
       cache: config.cache !== undefined ? config.cache : db.cache as boolean,
       timestamps: config.timestamps !== undefined ? config.timestamps : false,

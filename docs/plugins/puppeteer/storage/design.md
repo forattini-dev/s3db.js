@@ -610,7 +610,7 @@ await page.close();
 
 ```javascript
 // In tests, can be mocked:
-plugin.storageManager.captureStorage = jest.fn().mockResolvedValue({
+plugin.storageManager.captureStorage = vi.fn().mockResolvedValue({
   localStorage: { test: 'value' },
   indexedDB: {},
   sessionStorage: {}
@@ -621,4 +621,3 @@ new PuppeteerPlugin({
   storage: { enabled: false }
 })
 ```
-

@@ -1,7 +1,4 @@
-import { TasksPool } from '../tasks/tasks-pool.class.js';
-import Resource from '../resource.class.js';
 import tryFn, { tryFnSync } from '../concerns/try-fn.js';
-import { streamToString } from '../stream/index.js';
 import { bumpProcessMaxListeners } from '../concerns/process-max-listeners.js';
 import type { DatabaseRef, SavedMetadata } from './types.js';
 import type { DatabaseMetadata } from './database-metadata.class.js';
@@ -47,6 +44,10 @@ export class DatabaseConnection {
 
     this.registerExitListener();
 
+    if (typeof db.ensureClientInitialized === 'function') {
+      await db.ensureClientInitialized();
+    }
+
     await this.plugins.startPlugins();
 
     let metadata: SavedMetadata | null = null;
@@ -54,6 +55,7 @@ export class DatabaseConnection {
     const healingLog: string[] = [];
 
     if (await db.client.exists('s3db.json')) {
+      const { streamToString } = await import('../stream/index.js');
       const [ok] = await tryFn(async () => {
         const request = await db.client.getObject('s3db.json');
         const rawContent = await streamToString((request as any)?.Body);
@@ -102,6 +104,7 @@ export class DatabaseConnection {
     const definitionChanges = this.metadata.detectDefinitionChanges(metadata!);
 
     let registryUploadNeeded = false;
+    const { default: Resource } = await import('../resource.class.js');
 
     for (const [name, resourceMetadata] of Object.entries(metadata!.resources || {})) {
       const currentVersion = resourceMetadata.currentVersion || 'v1';
@@ -188,6 +191,7 @@ export class DatabaseConnection {
       await this.coordinators.stopAll();
 
       if (db.pluginList && db.pluginList.length > 0) {
+        const { TasksPool } = await import('../tasks/tasks-pool.class.js');
         for (const plugin of db.pluginList) {
           if (plugin && typeof (plugin as any).removeAllListeners === 'function') {
             (plugin as any).removeAllListeners();

@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 import { execFileSync } from 'node:child_process';
-import { existsSync, mkdirSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -11,9 +11,9 @@ const artifactsDir = join(root, '.artifacts');
 const smokeDir = join(root, '.tmp', 'package-smoke');
 const pnpmCommand = process.platform === 'win32' ? 'pnpm.cmd' : 'pnpm';
 const nodeCommand = process.execPath;
-const packageName = process.env.PACKAGE_SMOKE_NAME || 's3db.js';
+const requestedPackageName = process.env.PACKAGE_SMOKE_NAME;
 
-function getPackageNodeModulesPath() {
+function getPackageNodeModulesPath(packageName) {
   return join(smokeDir, 'node_modules', ...packageName.split('/'));
 }
 
@@ -23,20 +23,31 @@ function ensureTarballPath() {
     return resolve(provided);
   }
 
-  execFileSync(nodeCommand, [join(root, 'scripts', 'create-package-tarball.js')], {
+  const stdout = execFileSync(nodeCommand, [join(root, 'scripts', 'create-package-tarball.js')], {
     cwd: root,
-    stdio: 'inherit'
-  });
+    encoding: 'utf-8'
+  }).trim();
 
-  const tarball = readdirSync(artifactsDir)
-    .filter(file => file.endsWith('.tgz'))
-    .sort()[0];
-
-  if (!tarball) {
+  if (!stdout) {
     throw new Error('No package tarball available for smoke check');
   }
 
-  return join(artifactsDir, tarball);
+  return resolve(stdout.split('\n').filter(Boolean).at(-1));
+}
+
+function detectInstalledPackageName() {
+  if (requestedPackageName) {
+    return requestedPackageName;
+  }
+
+  const smokePackageJson = JSON.parse(readFileSync(join(smokeDir, 'package.json'), 'utf-8'));
+  const dependencyNames = Object.keys(smokePackageJson.dependencies || {});
+
+  if (dependencyNames.length !== 1) {
+    throw new Error(`Expected exactly one installed smoke dependency, found ${dependencyNames.length}`);
+  }
+
+  return dependencyNames[0];
 }
 
 const tarballPath = ensureTarballPath();
@@ -54,6 +65,8 @@ execFileSync(pnpmCommand, ['add', '--ignore-workspace', tarballPath], {
   cwd: smokeDir,
   stdio: 'inherit'
 });
+
+const packageName = detectInstalledPackageName();
 
 writeFileSync(join(smokeDir, 'smoke.mjs'), `
 import { existsSync } from 'node:fs';
@@ -76,7 +89,7 @@ execFileSync(nodeCommand, ['smoke.mjs'], {
   stdio: 'inherit'
 });
 
-execFileSync(nodeCommand, [join(getPackageNodeModulesPath(), 'bin', 'cli.js'), '--help'], {
+execFileSync(nodeCommand, [join(getPackageNodeModulesPath(packageName), 'bin', 'cli.js'), '--help'], {
   cwd: smokeDir,
   stdio: 'inherit'
 });

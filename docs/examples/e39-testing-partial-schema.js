@@ -127,8 +127,8 @@ async function testWithPartialSchema() {
   console.log('\n' + '='.repeat(60) + '\n');
 }
 
-async function testJestPattern() {
-  console.log('=== Test 3: Jest/Vitest Testing Pattern ===\n');
+async function testVitestPattern() {
+  console.log('=== Test 3: Vitest Testing Pattern ===\n');
 
   console.log('Example test structure for plugin testing:\n');
 
@@ -208,7 +208,7 @@ async function main() {
 
   await testWithFullSchema();
   await testWithPartialSchema();
-  await testJestPattern();
+  await testVitestPattern();
 
   console.log('Key Takeaways:');
   console.log('  1. strictValidation: true  → Production (enforces all rules)');

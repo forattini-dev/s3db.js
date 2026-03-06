@@ -572,7 +572,7 @@ import {
   describe,
   test,
   beforeEach,
-  afterEach } from '@jest/globals';
+  afterEach } from 'vitest';
 import { S3db
 } from 's3db.js';
 
@@ -608,7 +608,7 @@ describe('User Tests', () => {
 });
 ```
 
-**Performance Comparison:**
+**Illustrative Performance Comparison:**
 
 | Operation | LocalStack | MemoryClient | Speedup |
 |-----------|------------|--------------|---------|
@@ -616,7 +616,10 @@ describe('User Tests', () => {
 | Query 1000 records | ~5000ms | ~100ms | **50x faster** |
 | Full test suite | ~120s | ~2s | **60x faster** |
 
-📚 [**Full MemoryClient Documentation**](./docs/clients/memory-client.md)
+These numbers are workload-dependent and should be treated as directional, not
+as a current benchmark contract.
+
+📚 [**Full MemoryClient Documentation**](./docs/clients/memory-client.md) • [**Core Memory Benchmark**](./docs/benchmarks/core-memory.md)
 
 ---
 

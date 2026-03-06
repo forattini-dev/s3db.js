@@ -10,8 +10,17 @@ real S3-compatible storage as well as the new coverage expectations.
 - `pnpm run test:quick` – short memory-backed smoke tests (`TEST_FORCE_MEMORY_CLIENT=true`).
 - `pnpm run test:memory` – full memory-backed suite.
 - `pnpm run test:coverage` – enforces ≥90 % coverage and runs in-band.
+- `pnpm run benchmark:memory:core` – measures import, connect, and resource memory deltas in fresh Node processes.
+- `pnpm run benchmark:memory:core:assert` – enforces conservative memory budgets and validator-release checks.
 
 > **Tip:** O client de memória deve ser usado em perfis curtos de validação. O padrão de execução local é `filesystem` para evitar pressão de memória em loops longos.
+
+## Memory Regression Guardrail
+
+- The memory benchmark runs against `dist/` in fresh subprocesses with `--expose-gc` so import and lifecycle costs are not polluted by previous scenarios.
+- `benchmark:memory:core:assert` checks conservative budgets for `heapUsed` and `rss`, and also fails if validator cache references remain after `disconnect()`.
+- Override budgets in CI or locally with environment variables such as `S3DB_MEMORY_BUDGET_IMPORT_DATABASE_CLASS_RSS_MB=32`.
+- Change `S3DB_MEMORY_RESOURCE_COUNT` when you need a different resource cardinality for comparison runs.
 
 ## S3-Compatible Testing
 
@@ -30,7 +39,7 @@ real S3-compatible storage as well as the new coverage expectations.
 
 ### Required Environment Variables
 
-`tests/jest.setup.js` automatically loads `.env`, `.env.test.local`, and
+`tests/vitest.setup.ts` automatically loads `.env`, `.env.test.local`, and
 `tests/.env.test.local`. The harness will read the following variables:
 
 | Variable | Description |
@@ -64,8 +73,8 @@ directly.
 
 ## Coverage Requirements
 
-- Jest now enforces **≥90 %** statements, branches, functions, and lines across
-  the entire project (`coverageThreshold.global`).
+- Vitest now enforces **≥90 %** statements, branches, functions, and lines across
+  `src/**/*.ts` via the thresholds configured in `vitest.config.ts`.
 - `pnpm run test:coverage` collects coverage, runs tests in-band, and will fail
   if the threshold is not met. The command also runs in CI.
 - Coverage reports are written to `coverage/`. Open
@@ -85,8 +94,8 @@ directly.
 
 If a change cannot immediately meet the threshold, document the outstanding
 work in your proposal or PR description and secure approval before merging.
-Permanent exclusions belong in `jest.config.js`'s `collectCoverageFrom` /
-`coveragePathIgnorePatterns` with a comment explaining why.
+Permanent exclusions belong in `vitest.config.ts`'s coverage `include` /
+`exclude` lists with a comment explaining why.
 
 ## CI Notes
 

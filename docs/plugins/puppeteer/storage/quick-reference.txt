@@ -258,7 +258,7 @@ Integration Tests with PuppeteerPlugin:
   • Test storage disabled scenario
 
 Mock Strategy:
-  plugin.storageManager.captureStorage = jest.fn()
+  plugin.storageManager.captureStorage = vi.fn()
     .mockResolvedValue({
       localStorage: { test: 'value' },
       indexedDB: {},

@@ -13,9 +13,8 @@ import type {
   StringRecord
 } from './types.js';
 import type { SchemaRegistry, PluginSchemaRegistry } from '../schema.class.js';
-import { PluginStorage } from '../concerns/plugin-storage.js';
-import { S3Mutex, type LockResult } from '../plugins/concerns/s3-mutex.class.js';
-import { streamToString } from '../stream/index.js';
+import type { PluginStorage } from '../concerns/plugin-storage.js';
+import type { S3Mutex, LockResult } from '../plugins/concerns/s3-mutex.class.js';
 import tryFn from '../concerns/try-fn.js';
 
 export class DatabaseMetadata {
@@ -31,8 +30,9 @@ export class DatabaseMetadata {
     this._mutex = null;
   }
 
-  private _getPluginStorage(): PluginStorage {
+  private async _getPluginStorage(): Promise<PluginStorage> {
     if (!this._pluginStorage) {
+      const { PluginStorage } = await import('../concerns/plugin-storage.js');
       this._pluginStorage = new PluginStorage(
         this.database.client as any,
         's3db-core'
@@ -58,12 +58,16 @@ export class DatabaseMetadata {
     return connStr.length > 0;
   }
 
-  private _getMutex(): S3Mutex | null {
+  private async _getMutex(): Promise<S3Mutex | null> {
     if (!this._requiresDistributedLock()) {
       return null;
     }
     if (!this._mutex) {
-      this._mutex = new S3Mutex(this._getPluginStorage(), 'metadata');
+      const [{ S3Mutex }, storage] = await Promise.all([
+        import('../plugins/concerns/s3-mutex.class.js'),
+        this._getPluginStorage()
+      ]);
+      this._mutex = new S3Mutex(storage, 'metadata');
     }
     return this._mutex;
   }
@@ -161,6 +165,7 @@ export class DatabaseMetadata {
   }
 
   async _readFreshMetadata(): Promise<SavedMetadata | null> {
+    const { streamToString } = await import('../stream/index.js');
     const [ok, , response] = await tryFn(async () => {
       const request = await this.database.client.getObject('s3db.json');
       return streamToString((request as any)?.Body);
@@ -430,7 +435,7 @@ export class DatabaseMetadata {
   }
 
   async uploadMetadataFile(): Promise<void> {
-    const mutex = this._getMutex();
+    const mutex = await this._getMutex();
 
     if (!mutex) {
       await this._uploadMetadataWithoutLock();

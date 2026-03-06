@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -58,9 +58,16 @@ try {
   }
 }
 
-const tarball = readdirSync(artifactsDir)
-  .filter(file => file.endsWith('.tgz'))
-  .find(file => !beforePack.has(file));
+const tarballs = readdirSync(artifactsDir)
+  .filter(file => file.endsWith('.tgz'));
+
+const tarball = tarballs.find(file => !beforePack.has(file))
+  || tarballs
+    .map(file => ({
+      file,
+      modifiedAt: statSync(join(artifactsDir, file)).mtimeMs
+    }))
+    .sort((a, b) => b.modifiedAt - a.modifiedAt)[0]?.file;
 
 if (!tarball) {
   throw new Error('No package tarball was created');

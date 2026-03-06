@@ -297,7 +297,7 @@ export class Resource extends AsyncEventEmitter implements Disposable {
   public idGeneratorType: IdGeneratorConfig | undefined;
   public config: ResourceInternalConfig;
   public validator: ResourceValidator;
-  public schema: Schema;
+  public schema!: Schema;
   public $schema: Readonly<Omit<ResourceConfig, 'database' | 'observers' | 'client'>>;
   public hooks: HooksCollection;
   public attributes: AttributesSchema;
@@ -465,7 +465,7 @@ export class Resource extends AsyncEventEmitter implements Disposable {
         autoDecrypt
       });
 
-      this.schema = new Schema({
+      this._setSchema(new Schema({
         name,
         attributes,
         security: this.security,
@@ -477,9 +477,7 @@ export class Resource extends AsyncEventEmitter implements Disposable {
         },
         schemaRegistry: this._schemaRegistry,
         pluginSchemaRegistry: this._pluginSchemaRegistry
-      });
-      this._schemaRegistry = this.schema.getSchemaRegistry() || this._schemaRegistry;
-      this._pluginSchemaRegistry = this.schema.getPluginSchemaRegistry() || this._pluginSchemaRegistry;
+      }));
       this._schemaCompiled = true;
     }
 
@@ -591,6 +589,17 @@ export class Resource extends AsyncEventEmitter implements Disposable {
     this.idGenerator = this._idGenerator.getGenerator();
   }
 
+  private _setSchema(schema: Schema): void {
+    const previousSchema = this.schema;
+    if (previousSchema && previousSchema !== schema) {
+      previousSchema.dispose();
+    }
+
+    this.schema = schema;
+    this._schemaRegistry = this.schema.getSchemaRegistry() || this._schemaRegistry;
+    this._pluginSchemaRegistry = this.schema.getPluginSchemaRegistry() || this._pluginSchemaRegistry;
+  }
+
   private _ensureSchemaCompiled(): void {
     if (this._schemaCompiled) return;
     if (!this._pendingSchemaConfig) {
@@ -612,7 +621,7 @@ export class Resource extends AsyncEventEmitter implements Disposable {
       autoDecrypt: cfg.autoDecrypt
     });
 
-    this.schema = new Schema({
+    this._setSchema(new Schema({
       name: this.name,
       attributes: cfg.attributes,
       security: cfg.security,
@@ -624,10 +633,7 @@ export class Resource extends AsyncEventEmitter implements Disposable {
       },
       schemaRegistry: this._schemaRegistry,
       pluginSchemaRegistry: this._pluginSchemaRegistry
-    });
-
-    this._schemaRegistry = this.schema.getSchemaRegistry() || this._schemaRegistry;
-    this._pluginSchemaRegistry = this.schema.getPluginSchemaRegistry() || this._pluginSchemaRegistry;
+    }));
     this._schemaCompiled = true;
     this._pendingSchemaConfig = null;
 
@@ -726,7 +732,7 @@ export class Resource extends AsyncEventEmitter implements Disposable {
     if (!this._lazySchema) {
       const parsedVersion = parseInt(this.version.replace(/v/i, ''), 10) || 1;
 
-      this.schema = new Schema({
+      this._setSchema(new Schema({
         name: this.name,
         attributes: this.attributes,
         security: this.security,
@@ -739,9 +745,7 @@ export class Resource extends AsyncEventEmitter implements Disposable {
         map: map || this.map,
         schemaRegistry: this._schemaRegistry,
         pluginSchemaRegistry: this._pluginSchemaRegistry
-      });
-      this._schemaRegistry = this.schema.getSchemaRegistry() || this._schemaRegistry;
-      this._pluginSchemaRegistry = this.schema.getPluginSchemaRegistry() || this._pluginSchemaRegistry;
+      }));
 
       if (this.validator) {
         this.validator.updateSchema(this.attributes);

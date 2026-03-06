@@ -1,8 +1,14 @@
-import { isEmpty, isFunction } from 'lodash-es';
-import { TasksPool } from '../tasks/tasks-pool.class.js';
 import { DatabaseError } from '../errors.js';
 import type { DatabaseRef, Plugin, PluginConstructor, MemorySnapshot } from './types.js';
 import type { DatabaseCoordinators } from './database-coordinators.class.js';
+
+function hasPlugins(pluginList: unknown): pluginList is unknown[] {
+  return Array.isArray(pluginList) && pluginList.length > 0;
+}
+
+function isPluginConstructor(candidate: unknown): candidate is new (db: DatabaseRef) => Plugin {
+  return typeof candidate === 'function';
+}
 
 export class DatabasePlugins {
   constructor(
@@ -13,11 +19,11 @@ export class DatabasePlugins {
   async startPlugins(): Promise<void> {
     const db = this.database;
 
-    if (!isEmpty(db.pluginList)) {
+    if (hasPlugins(db.pluginList)) {
       const plugins: Plugin[] = [];
       for (const p of db.pluginList) {
         try {
-          const plugin = isFunction(p) ? new (p as new (db: DatabaseRef) => Plugin)(db) : p;
+          const plugin = isPluginConstructor(p) ? new p(db) : p;
           plugins.push(plugin as Plugin);
         } catch (error) {
           const pluginName = (p as any).name || (p as any).constructor?.name || 'Unknown';
@@ -30,6 +36,7 @@ export class DatabasePlugins {
       }
 
       const concurrency = Math.max(1, Number.isFinite(db.executorPool?.concurrency) ? db.executorPool.concurrency! : 5);
+      const { TasksPool } = await import('../tasks/tasks-pool.class.js');
 
       const installResult = await TasksPool.map(
         plugins,

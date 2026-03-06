@@ -215,7 +215,7 @@ await page.close();
 
 ### Mock Strategy
 ```javascript
-plugin.storageManager.captureStorage = jest.fn()
+plugin.storageManager.captureStorage = vi.fn()
   .mockResolvedValue({
     localStorage: { test: 'value' },
     indexedDB: {},

@@ -51,11 +51,11 @@
 
 ```javascript
 // ✅ SAFE - No real network calls
-jest.spyOn(dns, 'lookup').mockResolvedValue([
+vi.spyOn(dns, 'lookup').mockResolvedValue([
   { address: '127.0.0.1', family: 4 }
 ]);
 
-jest.spyOn(execPromise, 'default').mockResolvedValue({
+vi.spyOn(execPromise, 'default').mockResolvedValue({
   stdout: 'mocked output',
   stderr: ''
 });

@@ -19,6 +19,7 @@ docs/benchmarks/
 ├── README.md                           # This file
 ├── all-types-encoding.bench.js        # Complete type encoding benchmark (Strings, IP, Money, Decimal, Geo, Embeddings)
 ├── all-types-encoding.md              # Results and analysis
+├── core-memory.md                     # Core memory baseline, resource cost, and guardrail results
 ├── eventual-consistency.bench.js      # EventualConsistency plugin benchmark
 ├── eventual-consistency.md            # Results and analysis
 ├── base62.bench.js                    # Base62 encoding benchmark
@@ -39,13 +40,24 @@ docs/benchmarks/
   node --version  # Should be v22.x.x or higher
   ```
 
-### Run All Benchmarks
+### Run Supported Package Scripts
 
 ```bash
-pnpm run benchmarks
+# Core memory baseline and per-resource measurements
+pnpm run benchmark:memory:core
+
+# Core memory guardrail with budgets/assertions
+pnpm run benchmark:memory:core:assert
+
+# Partitions benchmark
+pnpm run benchmark:partitions
 ```
 
-### Run Specific Benchmark
+### Run Individual Benchmark Files
+
+There is no single `pnpm run benchmarks` aggregate command at the moment,
+because several benchmark files have different runtime requirements and optional
+dependencies.
 
 ```bash
 # Complete Type Encoding (Strings, IP, Money, Decimal, Geo, Embeddings)
@@ -73,6 +85,7 @@ node docs/benchmarks/vector-clustering.bench.js large   # 10,000 vectors
 | Benchmark | File | Description | Status |
 |-----------|------|-------------|--------|
 | **Complete Type Encoding** | `all-types-encoding.bench.js` | ALL optimized types: Strings, IP, Money, Decimal, Geo, Embeddings (0-77% compression) | ✅ Active |
+| **Core Memory** | `core-memory.md` | Baseline import/connect cost, per-resource memory, and validator leak guardrails | ✅ Active |
 | **EventualConsistency Plugin** | `eventual-consistency.bench.js` | Plugin performance with analytics and consolidation | ✅ Active |
 | **Base62 Encoding** | `base62.bench.js` | Base36 vs Base62 comparison | ✅ Active |
 | **Partitions Performance** | `partitions-matrix.js` | Partitions vs attributes performance matrix | ✅ Active |
