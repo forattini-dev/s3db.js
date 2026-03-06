@@ -702,7 +702,7 @@ export class StateMachinePlugin extends Plugin {
         if (!retryEnabled) {
           this.logger.error({ actionName, machineId, entityId, error: lastError.message }, `Action '${actionName}' failed: ${lastError.message}`);
           this.emit('plg:state-machine:action-error', { actionName, error: lastError.message, machineId, entityId });
-          return;
+          throw lastError;
         }
 
         const classification = ErrorClassifier.classify(error as Error, {
@@ -896,6 +896,96 @@ export class StateMachinePlugin extends Plugin {
     }
 
     machine.currentStates.set(entityId, toState);
+  }
+
+  private async _transitionToTargetState(
+    machineId: string,
+    entityId: string,
+    targetState: string,
+    event: string,
+    context: Record<string, unknown>
+  ): Promise<{ from: string; to: string }> {
+    const machine = this.machines.get(machineId);
+    if (!machine) {
+      throw new StateMachineError(`State machine '${machineId}' not found`, {
+        operation: 'target-state-transition',
+        machineId,
+        entityId,
+        targetState
+      });
+    }
+
+    if (!machine.config.states[targetState]) {
+      throw new StateMachineError(`Target state '${targetState}' is not defined in machine '${machineId}'`, {
+        operation: 'target-state-transition',
+        machineId,
+        entityId,
+        targetState
+      });
+    }
+
+    const lock = await this._acquireTransitionLock(machineId, entityId);
+
+    try {
+      const fromState = await this.getState(machineId, entityId);
+      if (fromState === targetState) {
+        return { from: fromState, to: targetState };
+      }
+
+      const fromStateConfig = machine.config.states[fromState];
+      if (fromStateConfig?.exit) {
+        await this._executeAction(fromStateConfig.exit, context, event, machineId, entityId);
+      }
+
+      await this._transition(machineId, entityId, fromState, targetState, event, context);
+
+      const targetStateConfig = machine.config.states[targetState];
+      if (targetStateConfig?.entry) {
+        await this._executeAction(targetStateConfig.entry, context, event, machineId, entityId);
+      }
+
+      return { from: fromState, to: targetState };
+    } finally {
+      await this._releaseTransitionLock(lock);
+    }
+  }
+
+  private async _syncResourceStateField(machineId: string, entityId: string, state: string): Promise<void> {
+    const machine = this.machines.get(machineId);
+    if (!machine) return;
+
+    const resourceConfig = machine.config;
+    if (!resourceConfig.resource || !resourceConfig.stateField) return;
+
+    let resource: Resource;
+    if (typeof resourceConfig.resource === 'string') {
+      resource = await this.database.getResource(resourceConfig.resource) as unknown as Resource;
+    } else {
+      resource = resourceConfig.resource as Resource;
+    }
+
+    if (!resource) return;
+
+    const [ok] = await tryFn(() =>
+      resource.patch(entityId, { [resourceConfig.stateField!]: state })
+    );
+
+    if (!ok) {
+      this.logger.warn({ machineId, entityId, state }, `Failed to update resource stateField for entity ${entityId}`);
+    }
+  }
+
+  private _wrapEventHandler(
+    handler: (...args: unknown[]) => unknown
+  ): (...args: unknown[]) => void {
+    return (...args: unknown[]) => {
+      const handlerPromise = Promise.resolve().then(() => handler(...args));
+      this._pendingEventHandlers.add(handlerPromise);
+
+      handlerPromise.finally(() => {
+        this._pendingEventHandlers.delete(handlerPromise);
+      });
+    };
   }
 
   private async _acquireTransitionLock(machineId: string, entityId: string): Promise<Lock | null> {
@@ -1327,6 +1417,8 @@ export class StateMachinePlugin extends Plugin {
 
         for (const entity of entities) {
           try {
+            const triggerContext = { ...entity.context, triggerName };
+
             if (trigger.condition) {
               const shouldTrigger = await trigger.condition(entity.context, entity.entityId);
               if (!shouldTrigger) continue;
@@ -1335,35 +1427,60 @@ export class StateMachinePlugin extends Plugin {
             if (trigger.maxTriggers !== undefined) {
               const triggerCount = entity.triggerCounts?.[triggerName] || 0;
               if (triggerCount >= trigger.maxTriggers) {
-                if (trigger.onMaxTriggersReached) {
-                  await this.send(machineId, entity.entityId, trigger.onMaxTriggersReached, entity.context);
+                if (triggerCount === trigger.maxTriggers && trigger.onMaxTriggersReached) {
+                  await this._incrementTriggerCount(machineId, entity.entityId, triggerName);
+                  await this.send(machineId, entity.entityId, trigger.onMaxTriggersReached, triggerContext);
                 }
                 continue;
               }
             }
 
-            const result = await this._executeAction(
-              trigger.action!,
-              entity.context,
-              'TRIGGER',
-              machineId,
-              entity.entityId
-            );
+            if (trigger.targetState) {
+              const transition = await this._transitionToTargetState(
+                machineId,
+                entity.entityId,
+                trigger.targetState,
+                'TRIGGER',
+                triggerContext
+              );
+
+              await this._syncResourceStateField(machineId, entity.entityId, trigger.targetState);
+
+              if (trigger.eventOnSuccess) {
+                await this.send(machineId, entity.entityId, trigger.eventOnSuccess, {
+                  ...triggerContext,
+                  triggerResult: transition
+                });
+              } else if (trigger.event) {
+                await this.send(machineId, entity.entityId, trigger.event, {
+                  ...triggerContext,
+                  triggerResult: transition
+                });
+              }
+            } else {
+              const result = await this._executeAction(
+                trigger.action!,
+                triggerContext,
+                'TRIGGER',
+                machineId,
+                entity.entityId
+              );
+
+              if (trigger.eventOnSuccess) {
+                await this.send(machineId, entity.entityId, trigger.eventOnSuccess, {
+                  ...triggerContext,
+                  triggerResult: result
+                });
+              } else if (trigger.event) {
+                await this.send(machineId, entity.entityId, trigger.event, {
+                  ...triggerContext,
+                  triggerResult: result
+                });
+              }
+            }
 
             await this._incrementTriggerCount(machineId, entity.entityId, triggerName);
             executedCount++;
-
-            if (trigger.eventOnSuccess) {
-              await this.send(machineId, entity.entityId, trigger.eventOnSuccess, {
-                ...entity.context,
-                triggerResult: result
-              });
-            } else if (trigger.event) {
-              await this.send(machineId, entity.entityId, trigger.event, {
-                ...entity.context,
-                triggerResult: result
-              });
-            }
 
             this.emit('plg:state-machine:trigger-executed', {
               machineId,
@@ -1406,25 +1523,69 @@ export class StateMachinePlugin extends Plugin {
             const now = new Date();
 
             if (now >= triggerDate) {
+              const triggerContext = { ...entity.context, triggerName };
+
+              if (trigger.condition) {
+                const shouldTrigger = await trigger.condition(entity.context, entity.entityId);
+                if (!shouldTrigger) continue;
+              }
+
               if (trigger.maxTriggers !== undefined) {
                 const triggerCount = entity.triggerCounts?.[triggerName] || 0;
                 if (triggerCount >= trigger.maxTriggers) {
-                  if (trigger.onMaxTriggersReached) {
-                    await this.send(machineId, entity.entityId, trigger.onMaxTriggersReached, entity.context);
+                  if (triggerCount === trigger.maxTriggers && trigger.onMaxTriggersReached) {
+                    await this._incrementTriggerCount(machineId, entity.entityId, triggerName);
+                    await this.send(machineId, entity.entityId, trigger.onMaxTriggersReached, triggerContext);
                   }
                   continue;
                 }
               }
 
-              const result = await this._executeAction(trigger.action!, entity.context, 'TRIGGER', machineId, entity.entityId);
-              await this._incrementTriggerCount(machineId, entity.entityId, triggerName);
+              if (trigger.targetState) {
+                const transition = await this._transitionToTargetState(
+                  machineId,
+                  entity.entityId,
+                  trigger.targetState,
+                  'TRIGGER',
+                  triggerContext
+                );
 
-              if (trigger.event) {
-                await this.send(machineId, entity.entityId, trigger.event, {
-                  ...entity.context,
-                  triggerResult: result
-                });
+                await this._syncResourceStateField(machineId, entity.entityId, trigger.targetState);
+
+                if (trigger.eventOnSuccess) {
+                  await this.send(machineId, entity.entityId, trigger.eventOnSuccess, {
+                    ...triggerContext,
+                    triggerResult: transition
+                  });
+                } else if (trigger.event) {
+                  await this.send(machineId, entity.entityId, trigger.event, {
+                    ...triggerContext,
+                    triggerResult: transition
+                  });
+                }
+              } else {
+                const result = await this._executeAction(
+                  trigger.action!,
+                  triggerContext,
+                  'TRIGGER',
+                  machineId,
+                  entity.entityId
+                );
+
+                if (trigger.eventOnSuccess) {
+                  await this.send(machineId, entity.entityId, trigger.eventOnSuccess, {
+                    ...triggerContext,
+                    triggerResult: result
+                  });
+                } else if (trigger.event) {
+                  await this.send(machineId, entity.entityId, trigger.event, {
+                    ...triggerContext,
+                    triggerResult: result
+                  });
+                }
               }
+
+              await this._incrementTriggerCount(machineId, entity.entityId, triggerName);
 
               this.emit('plg:state-machine:trigger-executed', {
                 machineId,
@@ -1457,39 +1618,83 @@ export class StateMachinePlugin extends Plugin {
 
         for (const entity of entities) {
           try {
+            const shouldTrigger = trigger.condition
+              ? await trigger.condition(entity.context, entity.entityId)
+              : true;
+
+            if (!shouldTrigger) {
+              continue;
+            }
+
             if (trigger.maxTriggers !== undefined) {
               const triggerCount = entity.triggerCounts?.[triggerName] || 0;
               if (triggerCount >= trigger.maxTriggers) {
-                if (trigger.onMaxTriggersReached) {
-                  await this.send(machineId, entity.entityId, trigger.onMaxTriggersReached, entity.context);
+                if (triggerCount === trigger.maxTriggers && trigger.onMaxTriggersReached) {
+                  await this._incrementTriggerCount(machineId, entity.entityId, triggerName);
+                  await this.send(machineId, entity.entityId, trigger.onMaxTriggersReached, {
+                    ...entity.context,
+                    triggerName
+                  });
                 }
                 continue;
               }
             }
 
-            const shouldTrigger = trigger.condition
-              ? await trigger.condition(entity.context, entity.entityId)
-              : true;
+            const triggerContext = { ...entity.context, triggerName };
 
-            if (shouldTrigger) {
-              const result = await this._executeAction(trigger.action!, entity.context, 'TRIGGER', machineId, entity.entityId);
-              await this._incrementTriggerCount(machineId, entity.entityId, triggerName);
+            if (trigger.targetState) {
+              const transition = await this._transitionToTargetState(
+                machineId,
+                entity.entityId,
+                trigger.targetState,
+                'TRIGGER',
+                triggerContext
+              );
 
-              if (trigger.event) {
+              await this._syncResourceStateField(machineId, entity.entityId, trigger.targetState);
+
+                if (trigger.eventOnSuccess) {
+                  await this.send(machineId, entity.entityId, trigger.eventOnSuccess, {
+                    ...triggerContext,
+                    triggerResult: transition
+                  });
+              } else if (trigger.event) {
                 await this.send(machineId, entity.entityId, trigger.event, {
-                  ...entity.context,
+                  ...triggerContext,
+                  triggerResult: transition
+                });
+              }
+            } else {
+              const result = await this._executeAction(
+                trigger.action!,
+                triggerContext,
+                'TRIGGER',
+                machineId,
+                entity.entityId
+              );
+
+              if (trigger.eventOnSuccess) {
+                await this.send(machineId, entity.entityId, trigger.eventOnSuccess, {
+                  ...triggerContext,
+                  triggerResult: result
+                });
+              } else if (trigger.event) {
+                await this.send(machineId, entity.entityId, trigger.event, {
+                  ...triggerContext,
                   triggerResult: result
                 });
               }
-
-              this.emit('plg:state-machine:trigger-executed', {
-                machineId,
-                entityId: entity.entityId,
-                state: stateName,
-                trigger: triggerName,
-                type: 'function'
-              });
             }
+
+            await this._incrementTriggerCount(machineId, entity.entityId, triggerName);
+
+            this.emit('plg:state-machine:trigger-executed', {
+              machineId,
+              entityId: entity.entityId,
+              state: stateName,
+              trigger: triggerName,
+              type: 'function'
+            });
           } catch (error) {
             this.logger.error({ triggerName, machineId, stateName, error: (error as Error).message }, `Function trigger '${triggerName}' failed: ${(error as Error).message}`);
           }
@@ -1520,11 +1725,24 @@ export class StateMachinePlugin extends Plugin {
 
       for (const entity of entities) {
         try {
-          let resolvedEventName: string;
-          if (typeof baseEventName === 'function') {
-            resolvedEventName = baseEventName(entity.context);
-          } else {
-            resolvedEventName = baseEventName;
+          if (trigger.condition) {
+            const shouldTrigger = await trigger.condition(entity.context, entity.entityId, eventData);
+            if (!shouldTrigger) continue;
+          }
+
+          if (trigger.maxTriggers !== undefined) {
+            const triggerCount = entity.triggerCounts?.[triggerName] || 0;
+            if (triggerCount >= trigger.maxTriggers) {
+              if (triggerCount === trigger.maxTriggers && trigger.onMaxTriggersReached) {
+                await this._incrementTriggerCount(machineId, entity.entityId, triggerName);
+                await this.send(machineId, entity.entityId, trigger.onMaxTriggersReached, {
+                  ...entity.context,
+                  eventData,
+                  triggerName
+                });
+              }
+              continue;
+            }
           }
 
           if (eventSource && typeof baseEventName === 'function') {
@@ -1534,74 +1752,23 @@ export class StateMachinePlugin extends Plugin {
             }
           }
 
-          if (trigger.condition) {
-            const shouldTrigger = await trigger.condition(entity.context, entity.entityId, eventData);
-            if (!shouldTrigger) continue;
-          }
-
-          if (trigger.maxTriggers !== undefined) {
-            const triggerCount = entity.triggerCounts?.[triggerName] || 0;
-            if (triggerCount >= trigger.maxTriggers) {
-              if (trigger.onMaxTriggersReached) {
-                await this.send(machineId, entity.entityId, trigger.onMaxTriggersReached, entity.context);
-              }
-              continue;
-            }
-          }
+          const triggerContext = { ...entity.context, eventData, triggerName };
 
           if (trigger.targetState) {
-            await this._transition(
+            const transition = await this._transitionToTargetState(
               machineId,
               entity.entityId,
-              stateName,
               trigger.targetState,
               'TRIGGER',
-              { ...entity.context, eventData, triggerName }
+              triggerContext
             );
 
-            const machine = this.machines.get(machineId)!;
-            const resourceConfig = machine.config;
-            if (resourceConfig.resource && resourceConfig.stateField) {
-              let resource: Resource;
-              if (typeof resourceConfig.resource === 'string') {
-                resource = await this.database.getResource(resourceConfig.resource) as unknown as Resource;
-              } else {
-                resource = resourceConfig.resource as Resource;
-              }
+            await this._syncResourceStateField(machineId, entity.entityId, trigger.targetState);
 
-              if (resource) {
-                const [ok] = await tryFn(() =>
-                  resource.patch(entity.entityId, { [resourceConfig.stateField!]: trigger.targetState })
-                );
-                if (!ok) {
-                  this.logger.warn({ machineId, entityId: entity.entityId }, `Failed to update resource stateField for entity ${entity.entityId}`);
-                }
-              }
-            }
-
-            const targetStateConfig = machine.config.states[trigger.targetState];
-            if (targetStateConfig?.entry) {
-              await this._executeAction(
-                targetStateConfig.entry,
-                { ...entity.context, eventData },
-                'TRIGGER',
-                machineId,
-                entity.entityId
-              );
-            }
-
-            this.emit('plg:state-machine:transition', {
-              machineId,
-              entityId: entity.entityId,
-              from: stateName,
-              to: trigger.targetState,
-              event: 'TRIGGER',
-              context: { ...entity.context, eventData, triggerName }
-            });
           } else if (trigger.action) {
             const result = await this._executeAction(
               trigger.action,
-              { ...entity.context, eventData },
+              triggerContext,
               'TRIGGER',
               machineId,
               entity.entityId
@@ -1609,9 +1776,8 @@ export class StateMachinePlugin extends Plugin {
 
             if (trigger.sendEvent) {
               await this.send(machineId, entity.entityId, trigger.sendEvent, {
-                ...entity.context,
-                triggerResult: result,
-                eventData
+                ...triggerContext,
+                triggerResult: result
               });
             }
           }
@@ -1634,33 +1800,19 @@ export class StateMachinePlugin extends Plugin {
     };
 
     const registerListener = (emitter: TriggerListenerRef['emitter'], eventName: string, handler: (...args: unknown[]) => unknown): void => {
-      emitter.on?.(eventName, handler);
+      const wrappedHandler = this._wrapEventHandler(handler);
+      emitter.on?.(eventName, wrappedHandler);
       this._triggerListeners.push({
         emitter,
         eventName,
-        handler
+        handler: wrappedHandler
       });
     };
 
     if (eventSource) {
       const baseEvent = typeof baseEventName === 'function' ? 'updated' : baseEventName;
 
-      const wrappedHandler = async (...args: unknown[]) => {
-        const handlerPromise = eventHandler(args[0]);
-
-        if (!this._pendingEventHandlers) {
-          this._pendingEventHandlers = new Set();
-        }
-        this._pendingEventHandlers.add(handlerPromise);
-
-        try {
-          await handlerPromise;
-        } finally {
-          this._pendingEventHandlers.delete(handlerPromise);
-        }
-      };
-
-      registerListener(eventSource as TriggerListenerRef['emitter'], baseEvent, wrappedHandler);
+      registerListener(eventSource as TriggerListenerRef['emitter'], baseEvent, eventHandler);
 
       this.logger.debug({ baseEvent, resourceName: eventSource.name, triggerName }, `Listening to resource event '${baseEvent}' from '${eventSource.name}' for trigger '${triggerName}' (async-safe)`);
     } else {
@@ -1678,7 +1830,6 @@ export class StateMachinePlugin extends Plugin {
       }
     }
   }
-
   private async _attachStateMachinesToResources(): Promise<void> {
     for (const [machineName, machineConfig] of Object.entries(this.config.stateMachines)) {
       const resourceConfig = this._getMachineConfig(machineConfig);

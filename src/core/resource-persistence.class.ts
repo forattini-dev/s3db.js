@@ -312,6 +312,38 @@ export class ResourcePersistence {
     });
   }
 
+  private _normalizeTimestampValue(value: unknown): unknown {
+    if (value instanceof String) {
+      return value.toString();
+    }
+
+    if (value instanceof Date && Number.isFinite(value.getTime())) {
+      return value.toISOString();
+    }
+
+    return value;
+  }
+
+  private _normalizeTimestampFields(data: StringRecord): void {
+    if (data.createdAt !== undefined) {
+      data.createdAt = this._normalizeTimestampValue(data.createdAt) as StringRecord[string];
+    }
+
+    if (data.updatedAt !== undefined) {
+      data.updatedAt = this._normalizeTimestampValue(data.updatedAt) as StringRecord[string];
+    }
+
+    const metadata = data.metadata as StringRecord | undefined;
+    if (metadata && typeof metadata === 'object' && !Array.isArray(metadata)) {
+      if (metadata.createdAt !== undefined) {
+        metadata.createdAt = this._normalizeTimestampValue(metadata.createdAt) as StringRecord[string];
+      }
+      if (metadata.updatedAt !== undefined) {
+        metadata.updatedAt = this._normalizeTimestampValue(metadata.updatedAt) as StringRecord[string];
+      }
+    }
+  }
+
   async insert({ id, ...attributes }: InsertParams): Promise<ResourceData> {
     this.logger.trace({ id, attributeKeys: Object.keys(attributes) }, 'insert called');
 
@@ -326,6 +358,7 @@ export class ResourcePersistence {
       : { ...attributesWithDefaults }) as ResourceData;
 
     const preProcessedData = sanitizeDeep(await this.resource.executeHooks('beforeInsert', completeData)) as ResourceData;
+    this._normalizeTimestampFields(preProcessedData);
 
     const extraProps = Object.keys(preProcessedData).filter(
       k => !(k in completeData) || preProcessedData[k] !== completeData[k]
@@ -889,6 +922,7 @@ export class ResourcePersistence {
 
     const preProcessedData = sanitizeDeep(await this.resource.executeHooks('beforeUpdate', mergedData)) as ResourceData;
     const completeData = { ...originalData, ...preProcessedData, id };
+    this._normalizeTimestampFields(completeData);
 
     const passwordFields = this._getPasswordFields();
     const secretFields = this._getSecretFields();
@@ -1177,6 +1211,7 @@ export class ResourcePersistence {
     }
 
     mergedData = sanitizeDeep(mergedData) as ResourceData;
+    this._normalizeTimestampFields(mergedData);
 
     const passwordFields = this._getPasswordFields();
     const secretFields = this._getSecretFields();
@@ -1274,6 +1309,7 @@ export class ResourcePersistence {
     }
 
     const completeData: ResourceData = sanitizeDeep({ id, ...attributesWithDefaults }) as ResourceData;
+    this._normalizeTimestampFields(completeData);
 
     const {
       errors,
@@ -1449,6 +1485,7 @@ export class ResourcePersistence {
 
     const preProcessedData = sanitizeDeep(await this.resource.executeHooks('beforeUpdate', mergedData)) as ResourceData;
     const completeData = { ...originalData, ...preProcessedData, id };
+    this._normalizeTimestampFields(completeData);
 
     const { isValid, errors, data } = await this.resource.validate(completeData, { includeId: true });
     if (!isValid) {
