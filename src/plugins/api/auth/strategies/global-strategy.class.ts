@@ -27,6 +27,7 @@ export class GlobalAuthStrategy extends BaseAuthStrategy {
       apiKey: driverConfigs.apiKey,
       basic: driverConfigs.basic,
       oauth2: driverConfigs.oauth2,
+      headerSecret: driverConfigs.headerSecret,
       oidc: this.oidcMiddleware || null,
       database: this.database,
       optional: true

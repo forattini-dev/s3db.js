@@ -1,15 +1,14 @@
 /**
  * Guards Live Example
  *
- * Exemplo funcional de guards com Hono (framework-agnostic).
+ * Exemplo funcional de guards com Raffel (framework-agnostic).
  * Mostra como usar guards declarativos para autorização automática.
  */
 
 import Database from '../../src/database.class.js';
-import { Hono } from 'hono';
-import { serve } from '@hono/node-server';
+import { HttpApp, serve } from '../../src/plugins/shared/http-runtime.js';
 import {
-  createHonoContext,
+  createRaffelContext,
   applyGuardsToList,
   applyGuardsToGet,
   applyGuardsToInsert,
@@ -130,11 +129,11 @@ async function setupDatabase() {
 }
 
 // ============================================================================
-// HONO API COM GUARDS
+// RAFFEL API COM GUARDS
 // ============================================================================
 
-async function createHonoAPI(ordersResource) {
-  const app = new Hono();
+async function createRaffelAPI(ordersResource) {
+  const app = new HttpApp();
 
   // ========================================
   // Fake auth middleware (simula OAuth2/OIDC)
@@ -164,7 +163,7 @@ async function createHonoAPI(ordersResource) {
   app.get('/orders', async (c) => {
     try {
       // 1. Create framework-agnostic context
-      const context = await createHonoContext(c);
+      const context = await createRaffelContext(c);
 
       // 2. Apply guards to list (executa guard + aplica partition)
       const options = await applyGuardsToList(ordersResource, context);
@@ -191,7 +190,7 @@ async function createHonoAPI(ordersResource) {
   app.get('/orders/:id', async (c) => {
     try {
       // 1. Create context
-      const context = await createHonoContext(c);
+      const context = await createRaffelContext(c);
 
       // 2. Get record
       const order = await ordersResource.get(c.req.param('id'));
@@ -215,7 +214,7 @@ async function createHonoAPI(ordersResource) {
   app.post('/orders', async (c) => {
     try {
       // 1. Create context
-      const context = await createHonoContext(c);
+      const context = await createRaffelContext(c);
 
       // 2. Get body
       const body = await c.req.json();
@@ -240,7 +239,7 @@ async function createHonoAPI(ordersResource) {
   app.patch('/orders/:id', async (c) => {
     try {
       // 1. Create context
-      const context = await createHonoContext(c);
+      const context = await createRaffelContext(c);
 
       // 2. Get current record
       const order = await ordersResource.get(c.req.param('id'));
@@ -266,7 +265,7 @@ async function createHonoAPI(ordersResource) {
   app.delete('/orders/:id', async (c) => {
     try {
       // 1. Create context
-      const context = await createHonoContext(c);
+      const context = await createRaffelContext(c);
 
       // 2. Get current record
       const order = await ordersResource.get(c.req.param('id'));
@@ -290,7 +289,7 @@ async function createHonoAPI(ordersResource) {
   // ========================================
   // Start server
   // ========================================
-  console.log('✅ Hono API rodando em http://localhost:3000\n');
+  console.log('✅ Raffel API rodando em http://localhost:3000\n');
 
   return new Promise((resolve) => {
     const server = serve({
@@ -459,8 +458,8 @@ async function main() {
   // Demo programático
   await demo(ordersResource);
 
-  // Hono API
-  const { server } = await createHonoAPI(ordersResource);
+  // Raffel API
+  const { server } = await createRaffelAPI(ordersResource);
 
   console.log('📖 Teste a API com curl:\n');
   console.log('# List orders (User1)');
@@ -496,4 +495,4 @@ if (import.meta.url === `file://${process.argv[1]}`) {
   main().catch(console.error);
 }
 
-export { setupDatabase, createExpressAPI, demo };
+export { setupDatabase, createRaffelAPI, demo };

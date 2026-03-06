@@ -64,7 +64,7 @@ chain.push(async (c, next) => {
   const ctx = new RouteContext(c, { db: this.db, resources: this.resources });
   c.set('ctx', ctx);
 
-  // Compatibility: inject db/database/resources directly on Hono context
+  // Inject db/database/resources directly on the request context
   c.db = this.db;
   c.database = this.db;
   c.resources = this.resources;
@@ -470,7 +470,7 @@ Economia: 8 segundos!
 ## ✅ Próximos Passos (Opcional)
 
 ### Para mrt-shortner
-1. Substituir rotas Hono por ApiApp
+1. Substituir rotas legadas por ApiApp
 2. Adicionar guards (isAuthenticated, isAdmin)
 3. Usar CRUD helper para recursos
 4. Montar documentação com mountDocs()

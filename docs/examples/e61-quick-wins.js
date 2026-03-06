@@ -246,29 +246,29 @@ console.log(`
 ╚══════════════════════════════════════════════════════════════════════╝
 
 📦 Plugin: api-plugin
-📊 Status: 0/3 dependencies satisfied
+📊 Status: 0/2 dependencies satisfied
 
 🔍 Dependency Status:
 ─────────────────────────────────────────────────────────────────────
-❌ Missing dependency: hono
-   Description: Ultra-light HTTP server framework
-   Required: ^4.0.0
-   Install: pnpm add hono
-
-❌ Missing dependency: @hono/node-server
-   Description: Node.js adapter for Hono
+❌ Missing dependency: raffel
+   Description: Native HTTP runtime used by the API plugin
    Required: ^1.0.0
-   Install: pnpm add @hono/node-server
+   Install: pnpm add raffel
+
+❌ Missing dependency: jose
+   Description: Token/JWT support for auth drivers
+   Required: ^5.0.0
+   Install: pnpm add jose
 
 🚀 Quick Fix - Install Missing Dependencies:
 ─────────────────────────────────────────────────────────────────────
 
   Option 1: Install individually
-    pnpm add hono
-    pnpm add @hono/node-server
+    pnpm add raffel
+    pnpm add jose
 
   Option 2: Install all at once
-    pnpm add hono @hono/node-server
+    pnpm add raffel jose
 
 📚 Documentation:
     https://github.com/forattini-dev/s3db.js/blob/main/docs/plugins/api.md

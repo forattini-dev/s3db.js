@@ -892,8 +892,16 @@ export class ApiServer {
       return null;
     }
 
+    const requiresAuthResource = (drivers || []).some((driver) => {
+      const value = String(driver?.driver || '').trim().toLowerCase();
+      return value !== 'oidc'
+        && value !== 'header-secret'
+        && value !== 'header_secret'
+        && value !== 'headersecret';
+    });
+
     const authResource = database?.resources?.[defaultResourceName || ''];
-    if (!authResource) {
+    if (requiresAuthResource && !authResource) {
       this.logger.error({ resource: defaultResourceName }, 'Auth resource not found for middleware');
       return null;
     }

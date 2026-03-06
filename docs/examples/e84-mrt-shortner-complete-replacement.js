@@ -671,7 +671,7 @@ async function main() {
   console.log('');
   console.log('  s3db.js API Plugin:');
   console.log('  - ~500 lines of config');
-  console.log('  - 2 core dependencies (Hono, jose)');
+  console.log('  - 2 core dependencies (Raffel, jose)');
   console.log('  - Automatic middleware');
   console.log('  - Built-in auth drivers');
   console.log('  - Integrated template engine');
@@ -687,7 +687,7 @@ async function main() {
   console.log('✅ Active Status Check (inactive users rejected)');
   console.log('✅ External API Integration (People API hooks)');
   console.log('✅ Template Engine Support (EJS for SSR)');
-  console.log('✅ Custom Routes (Hono-style handlers)');
+  console.log('✅ Custom Routes (request-context handlers)');
   console.log('✅ Public Routes (landing, health)');
   console.log('✅ OpenGraph Metadata (SEO + social sharing)');
   console.log('✅ Bot Trap (social share tracking)');

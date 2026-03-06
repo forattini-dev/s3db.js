@@ -6,7 +6,7 @@
  * Options:
  * - undefined (default): Shows beautiful splash screen with API info
  * - false: Disables root route entirely
- * - function: Custom Hono handler for root route
+ * - function: Custom request handler for root route
  *
  * Run: node docs/examples/e71-api-root-route-customization.js
  */
@@ -90,7 +90,7 @@ async function example3_customHandler() {
   const apiPlugin = new ApiPlugin({
     port: 3003,
     rootRoute: (c) => {
-      // Custom Hono handler
+      // Custom request handler
       return c.json({
         message: 'Welcome to my custom API!',
         version: '1.0.0',

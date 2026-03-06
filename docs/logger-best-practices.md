@@ -188,7 +188,7 @@ app.get('/my-route', async (c) => {
 });
 ```
 
-**Available**: In all Hono route handlers
+**Available**: In all request handlers
 **Bindings**: Includes request ID, method, path
 
 ---

@@ -577,7 +577,7 @@ Cache-Control: private, no-cache, no-store, must-revalidate
 **Solution:** Per-request context-based caching.
 
 ```javascript
-// Discovery called once per request, cached in Hono context
+// Discovery called once per request, cached in the request context
 // Thread-safe, no race conditions
 // Automatic - no configuration needed
 ```
@@ -2288,7 +2288,7 @@ class CustomSessionStore {
 
 **Complete Example:**
 ```javascript
-import { Hono } from 'hono';
+import { HttpApp } from 'raffel/http';
 import { RedisStore } from 's3db.js/src/plugins/api/concerns/session-store.js';
 import {
   registerBackchannelLogoutRoute,
@@ -2329,7 +2329,7 @@ const config = {
 };
 
 // 3. Register backchannel logout route
-const app = new Hono();
+const app = new HttpApp();
 registerBackchannelLogoutRoute(
   app,
   '/auth/backchannel-logout',

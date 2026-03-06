@@ -1,8 +1,8 @@
 # 🔐 Authentication Guide
 
-> **Complete guide to all authentication methods: JWT • Basic Auth • API Keys • OAuth2/OIDC**
+> **Complete guide to all authentication methods: JWT • Basic Auth • API Keys • Header Secret • OAuth2/OIDC**
 
-**Quick links:** [JWT](#jwt-authentication) • [Basic Auth](#basic-authentication) • [API Keys](#api-key-authentication) • [OIDC](#oidc--oauth2) • [Path-Based](#path-based-authentication)
+**Quick links:** [JWT](#jwt-authentication) • [Basic Auth](#basic-authentication) • [API Keys](#api-key-authentication) • [Header Secret](#header-secret-authentication) • [OIDC](#oidc--oauth2) • [Path-Based](#path-based-authentication)
 
 ---
 
@@ -15,6 +15,7 @@
 | **[JWT](#jwt-authentication)** | Mobile apps, SPAs, stateless APIs | 2 min | Low |
 | **[Basic Auth](#basic-authentication)** | CLI tools, scripts, internal APIs | 1 min | Very Low |
 | **[API Keys](#api-key-authentication)** | Third-party integrations, webhooks | 2 min | Low |
+| **[Header Secret](#header-secret-authentication)** | Admin apps, service-to-service traffic | 1 min | Very Low |
 | **[OIDC](#oidc--oauth2)** | SSO, Azure AD, Google, Keycloak | 5 min | Medium |
 
 ---
@@ -406,6 +407,81 @@ curl -X POST http://localhost:3000/auth/register \
 ```
 
 When the JWT driver is active, a token is returned immediately so the user is logged in after registration. Password must be at least 8 characters. If the username already exists, a `409 CONFLICT` is returned.
+
+---
+
+## Header Secret Authentication
+
+**Best for:** Admin apps, server-to-server calls, trusted internal traffic
+
+### Quick Start
+
+```javascript
+await db.usePlugin(new ApiPlugin({
+  auth: {
+    createResource: false,
+    drivers: [{
+      driver: 'header-secret',
+      config: {
+        headerName: 'x-admin-secret',
+        secret: process.env.ADMIN_SECRET,
+        role: 'admin',
+        roles: ['admin'],
+        scopes: ['admin:read'],
+        serviceAccount: {
+          clientId: 'admin-ui',
+          name: 'Admin UI'
+        }
+      }
+    }],
+    pathRules: [
+      { path: '/users/**', methods: ['header-secret'], required: true, roles: ['admin'] }
+    ]
+  }
+}));
+```
+
+### Configuration
+
+```javascript
+{
+  driver: 'header-secret',
+  config: {
+    headerName: 'x-admin-secret',     // Header to read
+    secret: process.env.ADMIN_SECRET, // Single shared secret
+    secrets: [],                      // Optional rotation window
+    role: 'admin',                    // Default role
+    roles: ['admin'],                 // Explicit role list
+    scopes: ['admin:read'],           // Optional scopes
+    subject: 'sa:admin-ui',           // Optional subject override
+    serviceAccount: {
+      clientId: 'admin-ui',
+      name: 'Admin UI'
+    }
+  }
+}
+```
+
+### Use It
+
+```bash
+curl \
+  -H "x-admin-secret: $ADMIN_SECRET" \
+  http://localhost:3000/users
+```
+
+The driver injects a service identity into the request context. In custom routes and guards, prefer `ctx.auth`:
+
+```javascript
+'GET /me': async (c, ctx) => {
+  ctx.auth.requireRole('admin');
+
+  return ctx.response.success({
+    actor: ctx.auth.user,
+    service: ctx.auth.serviceAccount
+  });
+}
+```
 
 ---
 

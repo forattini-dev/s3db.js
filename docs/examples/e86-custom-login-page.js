@@ -10,11 +10,21 @@
 
 import { Database } from '../../src/index.js';
 import { IdentityPlugin } from '../../src/plugins/identity/index.js';
-import { html } from 'hono/html';
 
 const db = new Database({
   connectionString: process.env.MRT_CONNECTION_STRING || 'http://minioadmin:minioadmin@localhost:9100/s3db-identity-demo'
 });
+
+function html(strings, ...values) {
+  let result = '';
+  for (let i = 0; i < strings.length; i++) {
+    result += strings[i] || '';
+    if (i < values.length) {
+      result += String(values[i] ?? '');
+    }
+  }
+  return result;
+}
 
 // ============================================================================
 // CUSTOM LOGIN PAGE

@@ -34,6 +34,7 @@ export class PathBasedAuthStrategy extends BaseAuthStrategy {
       apiKey: driverConfigs.apiKey,
       basic: driverConfigs.basic,
       oauth2: driverConfigs.oauth2,
+      headerSecret: driverConfigs.headerSecret,
       oidc: this.oidcMiddleware || null,
       database: this.database,
       optional: true
@@ -71,6 +72,7 @@ export class PathBasedAuthStrategy extends BaseAuthStrategy {
           apiKey: ruleConfigs.apiKey,
           basic: ruleConfigs.basic,
           oauth2: ruleConfigs.oauth2,
+          headerSecret: ruleConfigs.headerSecret,
           oidc: this.oidcMiddleware || null,
           database: this.database,
           optional: false

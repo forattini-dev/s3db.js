@@ -7,7 +7,7 @@ await db.usePlugin(new ApiPlugin({ port: 3000 }));
 // ✅ REST API + Auth + Docs + Metrics running
 ```
 
-**Instant features:** Auto-generated endpoints • JWT/OAuth2/OIDC auth • Row-level security • Rate limiting • Interactive docs (OpenAPI + USD) • Production metrics
+**Instant features:** Auto-generated endpoints • JWT/OAuth2/OIDC/Header Secret auth • Row-level security • Role-aware protected fields • Native resource views • Write policies per operation • Interactive docs (OpenAPI + USD) • Production metrics
 
 **Works with:** Any OIDC provider (IdentityPlugin, Keycloak, Azure AD, AWS Cognito, etc.)
 
@@ -65,6 +65,61 @@ auth: {
 **✨ Latest OIDC enhancements:** Auto token refresh • Continue URL • Provider quirks (Google/Azure/Auth0) • Cross-subdomain auth
 **[→ OIDC Quick Start](/plugins/api/guides/oidc.md)**
 
+### 4. Let an Admin App Call Native Routes Directly
+
+```javascript
+auth: {
+  createResource: false,
+  drivers: [{
+    driver: 'header-secret',
+    config: {
+      headerName: 'x-admin-secret',
+      secret: process.env.ADMIN_SECRET,
+      role: 'admin',
+      roles: ['admin'],
+      serviceAccount: { clientId: 'admin-ui', name: 'Admin UI' }
+    }
+  }],
+  pathRules: [
+    { path: '/users/**', methods: ['header-secret'], required: true, roles: ['admin'] }
+  ]
+}
+```
+
+That lets the admin app consume `/users`, `/devices`, `/usage_records`, and other native resource routes without custom auth wrappers.
+
+### 5. Model Resource Visibility and Mutability in One Place
+
+```javascript
+await db.createResource({
+  name: 'users',
+  attributes: { name: 'string', email: 'string', role: 'string', tokenHash: 'string' },
+  api: {
+    views: {
+      public: {
+        auto: true,
+        priority: 1,
+        fields: ['id', 'name']
+      },
+      admin: {
+        auto: true,
+        whenRole: ['admin'],
+        priority: 100,
+        fields: ['id', 'name', 'email', 'role', 'tokenHash']
+      }
+    },
+    write: {
+      patch: [
+        { whenRole: ['admin'], priority: 100, writable: ['name', 'email', 'role'] },
+        { whenRole: ['user'], priority: 10, writable: ['name', 'email'], readonly: ['role'] }
+      ]
+    }
+  }
+});
+```
+
+This keeps “who can see what” and “who can change what” attached to the resource instead of spread across handlers.
+
 ---
 
 ## 📚 Documentation
@@ -74,6 +129,7 @@ auth: {
 | Guide | Description | Read Time |
 |-------|-------------|-----------|
 | **[Authentication](/plugins/api/guides/authentication.md)** | JWT, OAuth2/OIDC, API Keys, Basic Auth | 10 min |
+| **[Resource Policies](/plugins/api/guides/resource-policies.md)** | Views, protected fields, per-operation mutability | 12 min |
 | **[Identity Integration](/plugins/api/guides/identity.md)** | Delegate auth to IdentityPlugin + remote metadata | 15 min |
 | **[Guards](/plugins/api/guides/guards.md)** | Row-level security, multi-tenancy, RBAC | 15 min |
 | **[Security](/plugins/api/guides/security.md)** | Failban, rate limiting, GeoIP blocking | 10 min |
@@ -87,6 +143,7 @@ auth: {
 | **[OpenAPI Docs](/plugins/api/guides/openapi.md)** | Customize docs UI, add descriptions | 10 min |
 | **[Routing](/plugins/api/reference/routing.md)** | Custom routes, precedence, path rules | 5 min |
 | **[Authorization Patterns](/plugins/api/guides/authorization-patterns.md)** | RBAC, ABAC, multi-tenancy patterns | 10 min |
+| **[Resource Policies](/plugins/api/guides/resource-policies.md)** | Model “who sees what” and “who can edit what” on the resource itself | 12 min |
 | **[Static Files](/plugins/api/guides/static-files.md)** | Serve SPAs, assets, filesystem/S3 drivers | 5 min |
 | **[Plugin Integrations](/plugins/api/guides/integrations.md)** | Expose AuditPlugin, Metrics, Cloud Inventory data | 5 min |
 
@@ -242,7 +299,7 @@ GET     /metrics         # Prometheus metrics
 
 **Required:**
 ```bash
-pnpm add s3db.js hono raffel jose
+pnpm add s3db.js jose
 ```
 
 **Optional (by feature):**
@@ -254,11 +311,13 @@ pnpm add openid-client
 pnpm add @maxmind/geoip2-node
 
 # Validation (custom routes)
-pnpm add zod @hono/zod-validator
+pnpm add zod
 
-# Rate limiting (custom routes)
-pnpm add hono-rate-limiter
+# Standalone Raffel apps / low-level runtime integrations
+pnpm add raffel
 ```
+
+**Runtime note:** `ApiPlugin` runs on `Raffel`, and the examples/helpers in this guide assume the native Raffel request context.
 
 ---
 
@@ -267,7 +326,7 @@ pnpm add hono-rate-limiter
 <details>
 <summary><strong>What makes this different from Express/Fastify?</strong></summary>
 
-**Built on Hono** (12x faster than Express), but gives you **instant REST APIs** from s3db.js resources. Zero boilerplate:
+**Built on Raffel**, but gives you **instant REST APIs** from s3db.js resources. Zero boilerplate:
 
 ```javascript
 // Traditional Express (100+ lines)
@@ -357,12 +416,12 @@ guard: {
 routes: {
   'GET /custom': async (c, ctx) => {
     const data = await ctx.resources.users.list();
-    return ctx.success({ data });
+    return ctx.response.success({ data });
   },
-  'POST /webhook': async (c) => {
-    const payload = await c.req.json();
+  'POST /webhook': async (c, ctx) => {
+    const payload = await ctx.request.body();
     // Process webhook...
-    return c.json({ received: true });
+    return ctx.response.json({ received: true });
   }
 }
 ```
@@ -396,7 +455,7 @@ static: [{
 - p99 latency: ~300-500ms
 - Handles 1000+ req/s per instance
 
-**Built on Hono:** 12x faster than Express, 3x faster than Fastify
+**Runtime profile:** Raffel-based request handling, cached docs generation, and partition-aware resource access paths.
 
 **[→ Performance benchmarks](/plugins/api/guides/deployment.md#performance-tuning)**
 </details>

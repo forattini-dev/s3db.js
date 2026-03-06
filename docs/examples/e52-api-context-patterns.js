@@ -213,7 +213,7 @@ async function main() {
   console.log('✅ Direct Injection API running on port 3002\n');
   console.log('Key Benefits:');
   console.log('  • Lightweight, minimal abstraction');
-  console.log('  • Direct Hono context usage');
+  console.log('  • Direct request context usage');
   console.log('  • Good for simple routes');
   console.log('  • No wrapper needed\n');
 

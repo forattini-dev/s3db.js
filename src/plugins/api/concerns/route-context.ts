@@ -49,6 +49,55 @@ export interface WithContextOptions {
   resource?: ResourceLike | null;
 }
 
+export interface RouteRequestApi {
+  readonly method: string;
+  readonly path: string;
+  readonly url: string | undefined;
+  readonly id: string | null;
+  raw: Context['req'];
+  param(name: string): string | undefined;
+  params(): Record<string, string>;
+  query(name: string): string | undefined;
+  queries(): Record<string, string>;
+  header(name: string): string | undefined;
+  headers(): Record<string, string>;
+  body<T = Record<string, unknown>>(): Promise<T>;
+  json<T = Record<string, unknown>>(): Promise<T>;
+  text(): Promise<string>;
+  formData(): Promise<FormData>;
+}
+
+export interface RouteResponseApi {
+  raw: Context['res'];
+  json(data: unknown, status?: number): Response;
+  success(data: unknown, status?: number): Response;
+  error(message: string | Error | null, status?: number, details?: unknown): Response;
+  notFound(message?: string): Response;
+  unauthorized(message?: string): Response;
+  forbidden(message?: string): Response;
+  html(htmlContent: string, status?: number): Response;
+  redirect(url: string, status?: number): Response;
+}
+
+export interface RouteAuthApi {
+  readonly user: UserInfo | null;
+  readonly session: Record<string, unknown> | null;
+  readonly sessionId: string | null;
+  readonly requestId: string | null;
+  readonly method: string | null;
+  readonly identity: Record<string, unknown> | null;
+  readonly serviceAccount: Record<string, unknown> | null;
+  readonly isAuthenticated: boolean;
+  readonly isServiceAccount: boolean;
+  hasRole(role: string): boolean;
+  hasScope(scope: string): boolean;
+  hasAnyScope(...scopes: string[]): boolean;
+  hasAllScopes(...scopes: string[]): boolean;
+  requireAuth(): void;
+  requireRole(role: string): void;
+  requireScope(scope: string): void;
+}
+
 export interface ErrorLike extends Error {
   code?: string;
   status?: number;
@@ -88,6 +137,18 @@ function getErrorStatus(error: ErrorLike): number {
   return 500;
 }
 
+function normalizeStringList(input: unknown): string[] {
+  if (!input) {
+    return [];
+  }
+
+  const values = Array.isArray(input) ? input : [input];
+  return values
+    .filter((value): value is string => typeof value === 'string')
+    .map((value) => value.trim())
+    .filter(Boolean);
+}
+
 export class RouteContext {
   c: Context;
   db: Database;
@@ -97,7 +158,13 @@ export class RouteContext {
   resources: Record<string, ResourceLike>;
   validator: ValidatorHelper;
   resource: ResourceLike | null;
+  request: RouteRequestApi;
+  response: RouteResponseApi;
+  auth: RouteAuthApi;
   private _partitionFilters: PartitionFilter[];
+  private _jsonBodyPromise: Promise<Record<string, unknown>> | null;
+  private _textBodyPromise: Promise<string> | null;
+  private _formDataPromise: Promise<FormData> | null;
 
   constructor(
     context: Context,
@@ -111,10 +178,16 @@ export class RouteContext {
     this._currentResource = resource;
     this.pluginRegistry = plugins;
     this._partitionFilters = [];
+    this._jsonBodyPromise = null;
+    this._textBodyPromise = null;
+    this._formDataPromise = null;
 
     this.resources = this._createResourcesProxy();
     this.validator = this._createValidator();
     this.resource = resource;
+    this.request = this._createRequestApi();
+    this.response = this._createResponseApi();
+    this.auth = this._createAuthApi();
   }
 
   private _createResourcesProxy(): Record<string, ResourceLike> {
@@ -195,7 +268,7 @@ export class RouteContext {
       },
 
       async validateBody(resourceName: string | null = null): Promise<ValidateBodyResult> {
-        const body = await ctx.c.req.json() as Record<string, unknown>;
+        const body = await ctx.body<Record<string, unknown>>();
 
         if (resourceName) {
           const result = this.validate(resourceName, body);
@@ -205,6 +278,92 @@ export class RouteContext {
           return { ...result, data: body };
         }
       }
+    };
+  }
+
+  private _createRequestApi(): RouteRequestApi {
+    const self = this;
+    return {
+      get method() {
+        return self.c.req.method;
+      },
+      get path() {
+        return self.c.req.path;
+      },
+      get url() {
+        return self.c.req.url;
+      },
+      get id() {
+        return self.requestId;
+      },
+      raw: this.c.req,
+      param: (name: string): string | undefined => this.param(name),
+      params: (): Record<string, string> => this.params(),
+      query: (name: string): string | undefined => this.query(name),
+      queries: (): Record<string, string> => this.queries(),
+      header: (name: string): string | undefined => this.header(name),
+      headers: (): Record<string, string> => {
+        const rawHeaders = this.c.req.raw?.headers;
+        return rawHeaders ? Object.fromEntries(rawHeaders.entries()) : {};
+      },
+      body: async <T = Record<string, unknown>>(): Promise<T> => await this.body<T>(),
+      json: async <T = Record<string, unknown>>(): Promise<T> => await this.body<T>(),
+      text: async (): Promise<string> => await this.text(),
+      formData: async (): Promise<FormData> => await this.formData()
+    };
+  }
+
+  private _createResponseApi(): RouteResponseApi {
+    return {
+      raw: this.c.res,
+      json: (data: unknown, status: number = 200): Response => this.json(data, status),
+      success: (data: unknown, status: number = 200): Response => this.success(data, status),
+      error: (message: string | Error | null, status: number = 400, details: unknown = null): Response => this.error(message, status, details),
+      notFound: (message: string = 'Not found'): Response => this.notFound(message),
+      unauthorized: (message: string = 'Unauthorized'): Response => this.unauthorized(message),
+      forbidden: (message: string = 'Forbidden'): Response => this.forbidden(message),
+      html: (htmlContent: string, status: number = 200): Response => this.html(htmlContent, status),
+      redirect: (url: string, status: number = 302): Response => this.redirect(url, status)
+    };
+  }
+
+  private _createAuthApi(): RouteAuthApi {
+    const self = this;
+    return {
+      get user() {
+        return self.user;
+      },
+      get session() {
+        return self.session;
+      },
+      get sessionId() {
+        return self.sessionId;
+      },
+      get requestId() {
+        return self.requestId;
+      },
+      get method() {
+        return self.authMethod;
+      },
+      get identity() {
+        return self.identity;
+      },
+      get serviceAccount() {
+        return self.serviceAccount;
+      },
+      get isAuthenticated() {
+        return self.isAuthenticated;
+      },
+      get isServiceAccount() {
+        return self.isServiceAccount;
+      },
+      hasRole: (role: string): boolean => this.hasRole(role),
+      hasScope: (scope: string): boolean => this.hasScope(scope),
+      hasAnyScope: (...scopes: string[]): boolean => this.hasAnyScope(...scopes),
+      hasAllScopes: (...scopes: string[]): boolean => this.hasAllScopes(...scopes),
+      requireAuth: (): void => this.requireAuth(),
+      requireRole: (role: string): void => this.requireRole(role),
+      requireScope: (scope: string): void => this.requireScope(scope)
     };
   }
 
@@ -228,16 +387,28 @@ export class RouteContext {
     return this.c.req.header(name);
   }
 
-  async body(): Promise<Record<string, unknown>> {
-    return await this.c.req.json();
+  async body<T = Record<string, unknown>>(): Promise<T> {
+    if (!this._jsonBodyPromise) {
+      this._jsonBodyPromise = this.c.req.json() as Promise<Record<string, unknown>>;
+    }
+
+    return await this._jsonBodyPromise as T;
   }
 
   async text(): Promise<string> {
-    return await this.c.req.text();
+    if (!this._textBodyPromise) {
+      this._textBodyPromise = this.c.req.text();
+    }
+
+    return await this._textBodyPromise;
   }
 
   async formData(): Promise<FormData> {
-    return await this.c.req.formData();
+    if (!this._formDataPromise) {
+      this._formDataPromise = this.c.req.formData();
+    }
+
+    return await this._formDataPromise;
   }
 
   json(data: unknown, status: number = 200): Response {
@@ -341,8 +512,49 @@ export class RouteContext {
     return (this.c.get('requestId') as string | null) || null;
   }
 
+  get authMethod(): string | null {
+    return (this.c.get('authMethod') as string | null) || null;
+  }
+
+  get identity(): Record<string, unknown> | null {
+    return (this.c.get('identity') as Record<string, unknown> | null) || null;
+  }
+
+  get serviceAccount(): Record<string, unknown> | null {
+    return (this.c.get('serviceAccount') as Record<string, unknown> | null) || null;
+  }
+
   get isAuthenticated(): boolean {
     return !!this.user;
+  }
+
+  get isServiceAccount(): boolean {
+    if (this.serviceAccount) {
+      return true;
+    }
+
+    const user = this.user;
+    if (!user) {
+      return false;
+    }
+
+    return user.token_use === 'service'
+      || user.token_type === 'service'
+      || !!user.service_account
+      || (typeof user.sub === 'string' && user.sub.startsWith('sa:'));
+  }
+
+  hasRole(role: string): boolean {
+    if (!this.user || typeof role !== 'string' || !role.trim()) {
+      return false;
+    }
+
+    const roles = [
+      ...normalizeStringList(this.user.role),
+      ...normalizeStringList(this.user.roles)
+    ];
+
+    return roles.includes(role);
   }
 
   hasScope(scope: string): boolean {
@@ -379,6 +591,17 @@ export class RouteContext {
       throw Object.assign(
         new Error('Authentication required'),
         { status: 401, code: 'UNAUTHORIZED' }
+      );
+    }
+  }
+
+  requireRole(role: string): void {
+    this.requireAuth();
+
+    if (!this.hasRole(role)) {
+      throw Object.assign(
+        new Error(`Role required: ${role}`),
+        { status: 403, code: 'FORBIDDEN' }
       );
     }
   }

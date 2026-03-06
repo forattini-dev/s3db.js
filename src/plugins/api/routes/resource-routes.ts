@@ -7,6 +7,7 @@ import type { Logger } from '../../../concerns/logger.js';
 import * as formatter from '../utils/response-formatter.js';
 import { guardMiddleware } from '../utils/guards.js';
 import type { GuardsConfig } from '../utils/guards.js';
+import { applyResponsePolicy, resolveRequestedView, resolveWritePolicy } from '../utils/resource-policy.js';
 import { generateRecordETag, validateIfMatch, validateIfNoneMatch } from '../utils/etag.js';
 import { ValidationError } from '../../../errors.js';
 import { createHash } from 'node:crypto';
@@ -677,7 +678,7 @@ export function createResourceRoutes(resource: ResourceLike, _version: string, c
     app.use('*', middleware);
   });
 
-  const RESERVED_API_KEYS = ['guard', 'protected', 'description'];
+  const RESERVED_API_KEYS = ['guard', 'protected', 'description', 'readonly', 'readOnly', 'writable', 'write', 'views'];
   if (resource.config?.api && typeof resource.config.api === 'object') {
     for (const [routeDef, handler] of Object.entries(resource.config.api)) {
       if (RESERVED_API_KEYS.includes(routeDef)) {
@@ -791,7 +792,18 @@ export function createResourceRoutes(resource: ResourceLike, _version: string, c
         return c.json(response, response._status as ContentfulStatusCode);
       }
 
-      const reservedKeys = ['limit', 'cursor', 'page', 'offset', 'partition', 'partitionValues', 'sort', 'populate'];
+      const viewName = typeof query.view === 'string' ? query.view : null;
+      const viewResolution = resolveRequestedView(apiConfig, viewName, c.get('user') as Record<string, unknown> | null | undefined);
+      if (!viewResolution.ok) {
+        const response = formatter.error(viewResolution.message, {
+          status: viewResolution.status,
+          code: viewResolution.code,
+          details: viewResolution.details || {}
+        });
+        return c.json(response, response._status as ContentfulStatusCode);
+      }
+
+      const reservedKeys = ['limit', 'cursor', 'page', 'offset', 'partition', 'partitionValues', 'sort', 'populate', 'view'];
       const queryFilters: Record<string, unknown> = {};
       for (const [key, value] of Object.entries(query)) {
         if (!reservedKeys.includes(key)) {
@@ -1026,7 +1038,12 @@ export function createResourceRoutes(resource: ResourceLike, _version: string, c
         await relationsPlugin.populate(resource, items, populateIncludes);
       }
 
-      const filteredItems = formatter.filterProtectedFields(items, protectedFields);
+      const filteredItems = applyResponsePolicy(
+        items,
+        { ...apiConfig, protected: protectedFields },
+        c.get('user') as Record<string, unknown> | null | undefined,
+        viewResolution.definition
+      );
 
       const response = formatter.list(filteredItems, {
         total: null,
@@ -1041,6 +1058,10 @@ export function createResourceRoutes(resource: ResourceLike, _version: string, c
         response.meta.partitionMode = partitionMode;
         response.meta.partition = effectivePartition;
         response.meta.partitionValues = effectivePartitionValues;
+      }
+
+      if (viewResolution.name) {
+        response.meta.view = viewResolution.name;
       }
 
       c.header('X-Pagination-Mode', 'cursor');
@@ -1085,6 +1106,16 @@ export function createResourceRoutes(resource: ResourceLike, _version: string, c
       const partition = query.partition;
       const partitionValues = parsePartitionValues(query.partitionValues);
       const populateValues = parsePopulateValues(query.populate);
+      const viewName = typeof query.view === 'string' ? query.view : null;
+      const viewResolution = resolveRequestedView(apiConfig, viewName, c.get('user') as Record<string, unknown> | null | undefined);
+      if (!viewResolution.ok) {
+        const response = formatter.error(viewResolution.message, {
+          status: viewResolution.status,
+          code: viewResolution.code,
+          details: viewResolution.details || {}
+        });
+        return c.json(response, response._status as ContentfulStatusCode);
+      }
       let populateIncludes: Record<string, unknown> | null = null;
 
       if (populateValues.length > 0) {
@@ -1131,9 +1162,17 @@ export function createResourceRoutes(resource: ResourceLike, _version: string, c
         return c.body(null, 304);
       }
 
-      const filteredItem = formatter.filterProtectedFields(item, protectedFields);
+      const filteredItem = applyResponsePolicy(
+        item,
+        { ...apiConfig, protected: protectedFields },
+        c.get('user') as Record<string, unknown> | null | undefined,
+        viewResolution.definition
+      );
 
       const response = formatter.success(filteredItem);
+      if (viewResolution.name) {
+        response.meta.view = viewResolution.name;
+      }
       return c.json(response, response._status as ContentfulStatusCode);
     });
 
@@ -1154,6 +1193,20 @@ export function createResourceRoutes(resource: ResourceLike, _version: string, c
   if (methods.includes('POST')) {
     const createHandler = asyncHandler(async (c: Context) => {
       const data = await c.req.json() as Record<string, unknown>;
+      const writePolicy = resolveWritePolicy(apiConfig, 'create', data, c.get('user') as Record<string, unknown> | null | undefined);
+      if (!writePolicy.ok) {
+        const response = formatter.error('One or more fields are not writable for this operation', {
+          status: 400,
+          code: 'FIELD_WRITE_NOT_ALLOWED',
+          details: {
+            operation: 'create',
+            rejectedFields: writePolicy.rejectedPaths,
+            readonlyFields: writePolicy.readonlyPaths,
+            writableFields: writePolicy.writablePaths
+          }
+        });
+        return c.json(response, response._status as ContentfulStatusCode);
+      }
 
       const item = await resource.insert(data, {
         user: c.get('user'),
@@ -1181,9 +1234,28 @@ export function createResourceRoutes(resource: ResourceLike, _version: string, c
         return c.body(null, 201);
       }
 
-      const filteredItem = formatter.filterProtectedFields(item, protectedFields);
+      const viewName = typeof c.req.query('view') === 'string' ? c.req.query('view') : null;
+      const viewResolution = resolveRequestedView(apiConfig, viewName, c.get('user') as Record<string, unknown> | null | undefined);
+      if (!viewResolution.ok) {
+        const response = formatter.error(viewResolution.message, {
+          status: viewResolution.status,
+          code: viewResolution.code,
+          details: viewResolution.details || {}
+        });
+        return c.json(response, response._status as ContentfulStatusCode);
+      }
+
+      const filteredItem = applyResponsePolicy(
+        item,
+        { ...apiConfig, protected: protectedFields },
+        c.get('user') as Record<string, unknown> | null | undefined,
+        viewResolution.definition
+      );
 
       const response = formatter.created(filteredItem, location);
+      if (viewResolution.name) {
+        response.meta.view = viewResolution.name;
+      }
       return c.json(response, response._status as ContentfulStatusCode);
     });
 
@@ -1207,6 +1279,20 @@ export function createResourceRoutes(resource: ResourceLike, _version: string, c
     const updateHandler = asyncHandler(async (c: Context) => {
       const id = c.req.param('id')!;
       const data = await c.req.json() as Record<string, unknown>;
+      const writePolicy = resolveWritePolicy(apiConfig, 'update', data, c.get('user') as Record<string, unknown> | null | undefined);
+      if (!writePolicy.ok) {
+        const response = formatter.error('One or more fields are not writable for this operation', {
+          status: 400,
+          code: 'FIELD_WRITE_NOT_ALLOWED',
+          details: {
+            operation: 'update',
+            rejectedFields: writePolicy.rejectedPaths,
+            readonlyFields: writePolicy.readonlyPaths,
+            writableFields: writePolicy.writablePaths
+          }
+        });
+        return c.json(response, response._status as ContentfulStatusCode);
+      }
 
       const existing = await resource.get(id);
       if (!existing) {
@@ -1254,9 +1340,28 @@ export function createResourceRoutes(resource: ResourceLike, _version: string, c
         return c.body(null, 200);
       }
 
-      const filteredUpdated = formatter.filterProtectedFields(updated, protectedFields);
+      const viewName = typeof c.req.query('view') === 'string' ? c.req.query('view') : null;
+      const viewResolution = resolveRequestedView(apiConfig, viewName, c.get('user') as Record<string, unknown> | null | undefined);
+      if (!viewResolution.ok) {
+        const response = formatter.error(viewResolution.message, {
+          status: viewResolution.status,
+          code: viewResolution.code,
+          details: viewResolution.details || {}
+        });
+        return c.json(response, response._status as ContentfulStatusCode);
+      }
+
+      const filteredUpdated = applyResponsePolicy(
+        updated,
+        { ...apiConfig, protected: protectedFields },
+        c.get('user') as Record<string, unknown> | null | undefined,
+        viewResolution.definition
+      );
 
       const response = formatter.success(filteredUpdated);
+      if (viewResolution.name) {
+        response.meta.view = viewResolution.name;
+      }
       return c.json(response, response._status as ContentfulStatusCode);
     });
 
@@ -1278,6 +1383,20 @@ export function createResourceRoutes(resource: ResourceLike, _version: string, c
     const patchHandler = asyncHandler(async (c: Context) => {
       const id = c.req.param('id')!;
       const data = await c.req.json() as Record<string, unknown>;
+      const writePolicy = resolveWritePolicy(apiConfig, 'patch', data, c.get('user') as Record<string, unknown> | null | undefined);
+      if (!writePolicy.ok) {
+        const response = formatter.error('One or more fields are not writable for this operation', {
+          status: 400,
+          code: 'FIELD_WRITE_NOT_ALLOWED',
+          details: {
+            operation: 'patch',
+            rejectedFields: writePolicy.rejectedPaths,
+            readonlyFields: writePolicy.readonlyPaths,
+            writableFields: writePolicy.writablePaths
+          }
+        });
+        return c.json(response, response._status as ContentfulStatusCode);
+      }
 
       const existing = await resource.get(id);
       if (!existing) {
@@ -1326,9 +1445,28 @@ export function createResourceRoutes(resource: ResourceLike, _version: string, c
         return c.body(null, 200);
       }
 
-      const filteredUpdated = formatter.filterProtectedFields(updated, protectedFields);
+      const viewName = typeof c.req.query('view') === 'string' ? c.req.query('view') : null;
+      const viewResolution = resolveRequestedView(apiConfig, viewName, c.get('user') as Record<string, unknown> | null | undefined);
+      if (!viewResolution.ok) {
+        const response = formatter.error(viewResolution.message, {
+          status: viewResolution.status,
+          code: viewResolution.code,
+          details: viewResolution.details || {}
+        });
+        return c.json(response, response._status as ContentfulStatusCode);
+      }
+
+      const filteredUpdated = applyResponsePolicy(
+        updated,
+        { ...apiConfig, protected: protectedFields },
+        c.get('user') as Record<string, unknown> | null | undefined,
+        viewResolution.definition
+      );
 
       const response = formatter.success(filteredUpdated);
+      if (viewResolution.name) {
+        response.meta.view = viewResolution.name;
+      }
       return c.json(response, response._status as ContentfulStatusCode);
     });
 

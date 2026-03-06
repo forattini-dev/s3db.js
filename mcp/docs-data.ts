@@ -46,7 +46,7 @@ export const plugins: PluginDoc[] = [
   {
     name: 'ApiPlugin',
     category: 'integration',
-    description: 'REST API with guards, OpenAPI docs, authentication drivers (JWT, Basic, OIDC). Built on Hono framework.',
+    description: 'REST API with guards, OpenAPI docs, authentication drivers (JWT, Basic, OIDC). Built on the Raffel runtime.',
     configOptions: [
       { name: 'port', type: 'number', required: false, default: '3000', description: 'Server port' },
       { name: 'prefix', type: 'string', required: false, default: "''", description: 'API prefix (e.g., /api/v1)' },
@@ -57,7 +57,7 @@ export const plugins: PluginDoc[] = [
     methods: [
       { name: 'start', signature: '() => Promise<void>', description: 'Start the API server' },
       { name: 'stop', signature: '() => Promise<void>', description: 'Stop the API server' },
-      { name: 'getHonoApp', signature: '() => Hono', description: 'Get underlying Hono instance for custom routes' },
+      { name: 'getApp', signature: '() => HttpApp | null', description: 'Get underlying Raffel app instance for custom routes' },
     ],
     examples: ['e47-api-plugin-basic.js', 'e49-api-plugin-complete.js', 'e100-api-demo-server.js'],
     relatedPlugins: ['CachePlugin', 'MetricsPlugin', 'AuditPlugin'],

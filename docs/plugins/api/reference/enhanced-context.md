@@ -254,7 +254,7 @@ routes: {
 
 ### Advanced Error Handling with `c.error()`
 
-The API plugin includes a powerful error helper that standardizes error responses across your API. It's available globally on the Hono context (`c`), not just in enhanced context.
+The API plugin includes a powerful error helper that standardizes error responses across your API. It's available globally on the request context (`c`), not just in enhanced context.
 
 #### Basic Usage
 
@@ -636,7 +636,7 @@ await db.usePlugin(new ApiPlugin({
 **Template engines supported**:
 - **EJS** - `<%= variable %>`, layouts, includes
 - **Pug** - `extends`, `block`, minimal syntax
-- **JSX** - React-like syntax (Hono native)
+- **JSX** - React-like syntax with the built-in renderer path
 
 **See examples**:
 - `docs/examples/e87-api-templates-ejs-pug.js` - EJS templates

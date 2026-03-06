@@ -14,6 +14,7 @@ export interface DriverConfigs {
   apiKey: Record<string, unknown>;
   basic: Record<string, unknown>;
   oauth2: Record<string, unknown>;
+  headerSecret: Record<string, unknown>;
 }
 
 export interface BaseAuthStrategyOptions {
@@ -29,6 +30,10 @@ function normalizeDriverName(driverName: string): string {
   const lowered = String(driverName || '').trim().toLowerCase();
   if (lowered === 'api-key' || lowered === 'api_key' || lowered === 'apikey') {
     return 'apiKey';
+  }
+
+  if (lowered === 'header-secret' || lowered === 'header_secret' || lowered === 'headersecret') {
+    return 'headerSecret';
   }
 
   return lowered;
@@ -59,7 +64,8 @@ export class BaseAuthStrategy {
       jwt: {},
       apiKey: {},
       basic: {},
-      oauth2: {}
+      oauth2: {},
+      headerSecret: {}
     };
 
     for (const driverDef of this.drivers) {
@@ -86,6 +92,8 @@ export class BaseAuthStrategy {
         configs.basic = driverConfig;
       } else if (driverName === 'oauth2') {
         configs.oauth2 = driverConfig;
+      } else if (driverName === 'headerSecret') {
+        configs.headerSecret = driverConfig;
       }
     }
 

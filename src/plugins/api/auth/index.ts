@@ -4,6 +4,7 @@ import { createJWTHandler, createToken, verifyToken, createRefreshToken, verifyR
 import { createApiKeyHandler, generateApiKey, type ApiKeyConfig } from './api-key-auth.js';
 import { createBasicAuthHandler, type BasicAuthConfig } from './basic-auth.js';
 import { createOAuth2Handler, type OAuth2Config } from './oauth2-auth.js';
+import { createHeaderSecretHandler, type HeaderSecretConfig } from './header-secret-auth.js';
 import { OIDCClient } from './oidc-client.js';
 import { unauthorized } from '../utils/response-formatter.js';
 import { getCookie } from '#src/plugins/shared/http-runtime.js';
@@ -18,6 +19,10 @@ function normalizeMethodName(method: string): string {
     return 'apiKey';
   }
 
+  if (lowered === 'header-secret' || lowered === 'header_secret' || lowered === 'headersecret') {
+    return 'headerSecret';
+  }
+
   return lowered;
 }
 
@@ -27,6 +32,7 @@ export interface AuthMiddlewareOptions {
   apiKey?: ApiKeyConfig;
   basic?: BasicAuthConfig;
   oauth2?: OAuth2Config;
+  headerSecret?: HeaderSecretConfig;
   oidc?: MiddlewareHandler | null;
   database: DatabaseLike;
   optional?: boolean;
@@ -46,6 +52,7 @@ export async function createAuthMiddleware(options: AuthMiddlewareOptions): Prom
     apiKey: apiKeyConfig = {},
     basic: basicConfig = {},
     oauth2: oauth2Config = {} as OAuth2Config,
+    headerSecret: headerSecretConfig = {},
     oidc: oidcMiddleware = null,
     database,
     optional = false,
@@ -101,6 +108,14 @@ export async function createAuthMiddleware(options: AuthMiddlewareOptions): Prom
           return await next();
         }
       }
+    });
+  }
+
+  if (normalizedMethods.includes('headerSecret')) {
+    const headerSecretHandler = await createHeaderSecretHandler(headerSecretConfig);
+    middlewares.push({
+      name: 'headerSecret',
+      middleware: headerSecretHandler as MiddlewareHandler
     });
   }
 
@@ -163,6 +178,11 @@ export async function createAuthMiddleware(options: AuthMiddlewareOptions): Prom
         return !!c.req.header('authorization');
       }
 
+      if (name === 'headerSecret') {
+        const headerName = headerSecretConfig.headerName || 'x-admin-secret';
+        return !!c.req.header(headerName);
+      }
+
       return false;
     };
 
@@ -221,7 +241,8 @@ export async function createAuthMiddleware(options: AuthMiddlewareOptions): Prom
   };
 }
 
-export { OIDCClient, createToken, verifyToken, createRefreshToken, verifyRefreshToken, jwtRefresh, generateApiKey, createOAuth2Handler };
+export { OIDCClient, createToken, verifyToken, createRefreshToken, verifyRefreshToken, jwtRefresh, generateApiKey, createOAuth2Handler, createHeaderSecretHandler };
+export type { HeaderSecretConfig } from './header-secret-auth.js';
 export { clearJWKSCache } from './oauth2-auth.js';
 
 export default {
@@ -229,6 +250,7 @@ export default {
   createJWTHandler,
   createApiKeyHandler,
   createBasicAuthHandler,
+  createHeaderSecretHandler,
   createOAuth2Handler,
   createToken,
   verifyToken,

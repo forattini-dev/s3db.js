@@ -65,7 +65,7 @@ describe('API Plugin - Error Helper Middleware', () => {
 
     await db.usePlugin(apiPlugin);
 
-    // Get Hono app instance to add test routes
+    // Get app instance to add test routes
     app = apiPlugin.getApp();
 
     // Test routes using c.error()

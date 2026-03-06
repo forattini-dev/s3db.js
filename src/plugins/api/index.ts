@@ -137,6 +137,16 @@ const BASE_USER_ATTRIBUTES: Record<string, string> = {
   metadata: 'json|optional'
 };
 
+function requiresManagedAuthResource(drivers: Array<{ driver?: string; type?: string }> = []): boolean {
+  return drivers.some((driver) => {
+    const value = String(driver?.driver || driver?.type || '').trim().toLowerCase();
+    return value !== 'oidc'
+      && value !== 'header-secret'
+      && value !== 'header_secret'
+      && value !== 'headersecret';
+  });
+}
+
 
 export class ApiPlugin extends Plugin {
   declare config: ApiPluginConfig;
@@ -353,7 +363,7 @@ export class ApiPlugin extends Plugin {
       throw err;
     }
 
-    const authEnabled = this.config.auth.drivers.length > 0;
+    const authEnabled = requiresManagedAuthResource(this.config.auth.drivers);
 
     if (authEnabled) {
       await this._createUsersResource();
@@ -631,6 +641,7 @@ export {
 } from './auth/index.js';
 
 export type { JWTConfig, JWTPayload, LoginResult, UserRecord } from './auth/jwt-auth.js';
+export type { HeaderSecretConfig } from './auth/header-secret-auth.js';
 export type { OAuth2Config, OAuth2User, OAuth2Handler } from './auth/oauth2-auth.js';
 export type { ClientCredentialsConfig, AuthRoutesConfig } from './routes/auth-routes.js';
 export * from './concerns/guards-helpers.js';

@@ -384,10 +384,10 @@ ctx.set('user', userData);     // Store data in context
 const user = ctx.get('user');  // Retrieve data
 ```
 
-### Raw Hono Context
+### Raw Request Context
 
 ```javascript
-ctx.raw     // Access raw Hono context if needed
+ctx.raw     // Access the underlying Raffel request context if needed
 ctx.c       // Alias for raw context
 ```
 

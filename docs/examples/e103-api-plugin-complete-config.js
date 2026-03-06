@@ -414,7 +414,7 @@ const apiPlugin = new APIPlugin({
 
   templates: {
     enabled: true,
-    engine: 'jsx',                         // jsx, hono, etc.
+    engine: 'jsx',                         // jsx, ejs, custom renderer, etc.
     dir: './templates'
   },
 

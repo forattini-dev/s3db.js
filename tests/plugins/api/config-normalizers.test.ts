@@ -54,6 +54,14 @@ describe('normalizeAuthConfig', () => {
       expect(result.driver).toBe('jwt');
     });
 
+    test('normalizes header secret aliases', () => {
+      const result = normalizeAuthConfig({
+        drivers: ['headerSecret', 'header-secret', 'header_secret']
+      });
+      expect(result.drivers).toHaveLength(1);
+      expect(result.drivers[0].driver).toBe('header-secret');
+    });
+
     test('handles object drivers with config', () => {
       const result = normalizeAuthConfig({
         drivers: [

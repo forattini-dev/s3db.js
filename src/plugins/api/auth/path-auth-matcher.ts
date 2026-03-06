@@ -35,6 +35,19 @@ export interface PathAuthOptions {
   authorizeRequest?: ((c: Context, rule: AuthRule) => Promise<boolean> | boolean) | null;
 }
 
+function normalizeAuthMethodName(value: string): string {
+  const lowered = String(value || '').trim().toLowerCase();
+  if (lowered === 'api-key' || lowered === 'api_key' || lowered === 'apikey') {
+    return 'apiKey';
+  }
+
+  if (lowered === 'header-secret' || lowered === 'header_secret' || lowered === 'headersecret') {
+    return 'headerSecret';
+  }
+
+  return lowered;
+}
+
 function calculateSpecificity(pattern: string): number {
   let score = 0;
 
@@ -144,8 +157,8 @@ export function createPathBasedAuthMiddleware(options: PathAuthOptions = {}): Mi
 
     const allowedMiddlewares: AuthMiddlewareEntry[] = rule.methods
       .map(methodName => ({
-        name: methodName,
-        middleware: authMiddlewares[methodName]
+        name: normalizeAuthMethodName(methodName),
+        middleware: authMiddlewares[normalizeAuthMethodName(methodName)]
       }))
       .filter((m): m is AuthMiddlewareEntry => !!m.middleware);
 

@@ -6,7 +6,7 @@
  *
  * Prerequisites:
  * ```bash
- * pnpm add hono @hono/node-server @hono/swagger-ui
+ * pnpm add s3db.js
  * ```
  *
  * Features demonstrated:

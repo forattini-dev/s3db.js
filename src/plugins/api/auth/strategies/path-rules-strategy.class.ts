@@ -5,6 +5,7 @@ import { createJWTHandler } from '../jwt-auth.js';
 import { createApiKeyHandler } from '../api-key-auth.js';
 import { createBasicAuthHandler } from '../basic-auth.js';
 import { createOAuth2Handler } from '../oauth2-auth.js';
+import { createHeaderSecretHandler, type HeaderSecretConfig } from '../header-secret-auth.js';
 
 interface AuthenticatedUser {
   role?: string | string[];
@@ -33,6 +34,10 @@ export class PathRulesAuthStrategy extends BaseAuthStrategy {
     const lowered = String(value || '').trim().toLowerCase();
     if (lowered === 'api-key' || lowered === 'api_key' || lowered === 'apikey') {
       return 'apiKey';
+    }
+
+    if (lowered === 'header-secret' || lowered === 'header_secret' || lowered === 'headersecret') {
+      return 'headerSecret';
     }
 
     return lowered;
@@ -207,6 +212,10 @@ export class PathRulesAuthStrategy extends BaseAuthStrategy {
             return await next();
           }
         };
+      }
+
+      if (driverType === 'headerSecret') {
+        authMiddlewares.headerSecret = await createHeaderSecretHandler(driverConfig as HeaderSecretConfig);
       }
     }
 

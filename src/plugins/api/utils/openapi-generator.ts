@@ -7,6 +7,9 @@ function normalizeDriverNameForAuth(driverName: string): string {
   if (lowered === 'api-key' || lowered === 'api_key' || lowered === 'apikey') {
     return 'apiKey';
   }
+  if (lowered === 'header-secret' || lowered === 'header_secret' || lowered === 'headersecret') {
+    return 'headerSecret';
+  }
   return String(driverName).trim();
 }
 
@@ -298,6 +301,7 @@ type SecurityResolver = (path: string) => Array<Record<string, string[]>> | null
 const DRIVER_SECURITY_MAP: Record<string, string> = {
   jwt: 'bearerAuth',
   apiKey: 'apiKeyAuth',
+  headerSecret: 'headerSecretAuth',
   basic: 'basicAuth',
   oauth2: 'oauth2Auth',
   oidc: 'oidcAuth'
@@ -825,6 +829,9 @@ export function generateResourcePaths(
     if (authMethods.includes('jwt')) security.push({ bearerAuth: [] });
     if (authMethods.some((method) => normalizeDriverNameForAuth(method) === 'apiKey')) {
       security.push({ apiKeyAuth: [] });
+    }
+    if (authMethods.some((method) => normalizeDriverNameForAuth(method) === 'headerSecret')) {
+      security.push({ headerSecretAuth: [] });
     }
     if (authMethods.includes('basic')) security.push({ basicAuth: [] });
     if (authMethods.includes('oidc')) security.push({ oidcAuth: [] });
@@ -1836,6 +1843,21 @@ For detailed information about each endpoint, see the sections below.`;
       in: 'header',
       name: headerName,
       description: securityDescription
+    };
+  }
+
+  const hasHeaderSecretAuth = driverNames.some((driverName) => normalizeDriverNameForAuth(driverName) === 'headerSecret');
+  const headerSecretDriver = driverEntries.find((driver) => (
+    normalizeDriverNameForAuth((driver?.driver || driver?.type || '')) === 'headerSecret'
+  ));
+
+  if (headerSecretDriver || hasHeaderSecretAuth) {
+    const headerName = headerSecretDriver?.config?.headerName || 'x-admin-secret';
+    spec.components.securitySchemes.headerSecretAuth = {
+      type: 'apiKey',
+      in: 'header',
+      name: headerName,
+      description: `Static header secret authentication for trusted internal services via ${headerName}.`
     };
   }
 

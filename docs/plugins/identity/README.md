@@ -47,7 +47,7 @@ await db.usePlugin(new IdentityPlugin({
 
 **Required:**
 ```bash
-pnpm install s3db.js hono @hono/node-server
+pnpm install s3db.js
 ```
 
 **Optional (by feature):**

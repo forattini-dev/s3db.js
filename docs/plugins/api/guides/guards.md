@@ -10,6 +10,8 @@
 
 **Guards** are declarative authorization rules defined directly in resource configuration. They enable **row-level security (RLS)**, **multi-tenancy**, and **ownership checks** with minimal code.
 
+If you also need to model response shape and field mutability on the resource, pair this guide with [Resource Policies](./resource-policies.md).
+
 > **⏱️ Guards in 30 Seconds**
 >
 > ```javascript
@@ -50,7 +52,7 @@
 > - ✅ **Impossible to bypass** - Guards run BEFORE resource operations
 > - ✅ **Auto-partition isolation** - O(1) queries, not O(n) scans
 > - ✅ **DRY** - Write once, works for ALL CRUD operations
-> - ✅ **Framework-agnostic** - Same code works with Hono, Express, Fastify
+> - ✅ **Framework-agnostic** - Same code works with Raffel, Express, Fastify
 
 ---
 
@@ -140,7 +142,7 @@ const ordersResource = await db.createResource({
 - ✅ **70+ lines → 20 lines** (DRY principle)
 - ✅ **Impossible to forget** protection (defined once, applied everywhere)
 - ✅ **O(1) Row-Level Security** via automatic partitions
-- ✅ **Framework-agnostic** (works with Hono, Express, Fastify)
+- ✅ **Framework-agnostic** (works with Raffel, Express, Fastify)
 - ✅ **Type-safe** authorization logic
 - ✅ **Centralized** security rules
 
@@ -386,31 +388,20 @@ await db.createResource({
 
 ## 🔌 Framework Integration
 
-**Hono (Recommended):**
+**Raffel / native runtime:**
 ```javascript
-import { createHonoContext, applyGuardsToList } from 's3db.js';
-import { Hono } from 'hono';
-
-const app = new Hono();
-
-// Auth middleware (populate c.set('user'))
-app.use('*', async (c, next) => {
-  const token = c.req.header('authorization')?.replace('Bearer ', '');
-  const user = verifyJWT(token);  // Your JWT verification
-  c.set('user', user);
-  await next();
-});
+import { createRaffelContext, applyGuardsToList, applyGuardsToInsert } from 's3db.js';
 
 // Routes with guards
 app.get('/orders', async (c) => {
-  const context = await createHonoContext(c);
+  const context = await createRaffelContext(c);
   const options = await applyGuardsToList(ordersResource, context);
   const orders = await ordersResource.list(options);
   return c.json({ orders });
 });
 
 app.post('/orders', async (c) => {
-  const context = await createHonoContext(c);
+  const context = await createRaffelContext(c);
   const body = await c.req.json();
   const data = await applyGuardsToInsert(ordersResource, context, body);
   const order = await ordersResource.insert(data);
@@ -513,7 +504,8 @@ Import from `s3db.js/concerns/guards-helpers`:
 
 ```javascript
 // Framework adapters
-createHonoContext(c)          // Hono → GuardContext
+createRaffelContext(c)        // Raffel/App context → GuardContext
+createAppContext(c)           // Generic alias → GuardContext
 createExpressContext(req)     // Express → GuardContext
 createFastifyContext(request) // Fastify → GuardContext
 
@@ -687,7 +679,7 @@ You learned:
 - ✅ **Multi-Tenancy** - Row-level security with O(1) partition isolation
 - ✅ **Ownership Checks** - Ensure users can only modify their own resources
 - ✅ **RBAC** - Role-based and scope-based authorization
-- ✅ **Framework Integration** - Works with Hono, Express, Fastify
+- ✅ **Framework Integration** - Works with Raffel, Express, Fastify
 
 **Next Steps:**
 1. Try the examples: [e66-guards-live.js](/examples/e66-guards-live.js) | [e65-guards-comparison.js](/examples/e65-guards-comparison.js)

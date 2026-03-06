@@ -273,14 +273,17 @@ Some features require additional dependencies to be installed manually:
 If you plan to use the API plugin, install these dependencies:
 
 ```bash
-# Core API dependencies (required)
-npm install hono
+# Core API runtime
+npm install s3db.js
 
 # HTTP logging (optional, recommended)
 npm install pino-http
 
 # Authentication (optional)
 npm install jose  # For JWT auth
+
+# Standalone Raffel integrations (optional)
+npm install raffel
 ```
 
 #### Replicator Dependencies

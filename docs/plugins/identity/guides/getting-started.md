@@ -33,13 +33,12 @@
 ### Step 1: Install Dependencies
 
 ```bash
-pnpm install s3db.js hono @hono/node-server
+pnpm install s3db.js
 ```
 
 **What you're installing:**
 - `s3db.js` - S3 document database with IdentityPlugin built-in
-- `hono` - Fast, lightweight web framework for OAuth2/OIDC endpoints
-- `@hono/node-server` - Node.js server adapter for Hono
+- `raffel` runtime support comes through the plugin internals; no extra HTTP framework install is required for the default setup
 
 ### Step 2: Create S3 Database Connection
 

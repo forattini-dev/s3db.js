@@ -197,6 +197,71 @@ describe('API Plugin - resource.$schema.api configuration', () => {
       expect(body.data.metadata.location).toBeUndefined();
     });
 
+    it('supports role-aware protected field rules', async () => {
+      const resource = await db.createResource({
+        name: 'members',
+        attributes: {
+          id: 'string|optional',
+          email: 'string|required',
+          tokenHash: 'string|optional',
+          internalNotes: 'string|optional'
+        },
+        behavior: 'body-overflow',
+        timestamps: true,
+        api: {
+          protected: [
+            'internalNotes',
+            { path: 'tokenHash', unlessRole: ['admin'] }
+          ]
+        }
+      });
+
+      await resource.insert({
+        id: 'member-1',
+        email: 'member@example.com',
+        tokenHash: 'tok-secret',
+        internalNotes: 'private'
+      });
+
+      apiPlugin = new ApiPlugin({
+        logLevel: 'silent',
+        port,
+        host: '127.0.0.1',
+        docs: { enabled: false },
+        logging: { enabled: false },
+        resources: {
+          members: {
+            customMiddleware: [async (c, next) => {
+              const role = c.req.raw.headers.get('x-role');
+              if (role) {
+                c.set('user', { role, roles: [role] });
+              }
+              await next();
+            }]
+          }
+        }
+      });
+
+      await db.usePlugin(apiPlugin);
+      await waitForServer(port);
+
+      const userResponse = await fetch(`http://127.0.0.1:${port}/members/member-1`);
+      const userBody = await userResponse.json();
+      expect(userResponse.status).toBe(200);
+      expect(userBody.data.email).toBe('member@example.com');
+      expect(userBody.data.tokenHash).toBeUndefined();
+      expect(userBody.data.internalNotes).toBeUndefined();
+
+      const adminResponse = await fetch(`http://127.0.0.1:${port}/members/member-1`, {
+        headers: { 'x-role': 'admin' }
+      });
+      const adminBody = await adminResponse.json();
+      expect(adminResponse.status).toBe(200);
+      expect(adminBody.data.email).toBe('member@example.com');
+      expect(adminBody.data.tokenHash).toBe('tok-secret');
+      expect(adminBody.data.internalNotes).toBeUndefined();
+    });
+
     it('filters protected fields from POST response', async () => {
       await db.createResource({
         name: 'logs',
@@ -383,6 +448,310 @@ describe('API Plugin - resource.$schema.api configuration', () => {
       expect(after.password).toBe(before.password);
       expect(after.apiKey).toBe(before.apiKey);
       expect(await verifyPassword('OriginalPassword123', after.password)).toBe(true);
+    });
+  });
+
+  describe('api.views', () => {
+    it('auto-selects the best matching view for the current actor', async () => {
+      const resource = await db.createResource({
+        name: 'directories',
+        attributes: {
+          id: 'string|optional',
+          name: 'string|required',
+          email: 'string|optional',
+          role: 'string|optional',
+          tokenHash: 'string|optional'
+        },
+        behavior: 'body-overflow',
+        timestamps: true,
+        api: {
+          views: {
+            public: {
+              auto: true,
+              priority: 1,
+              fields: ['id', 'name']
+            },
+            admin: {
+              auto: true,
+              whenRole: ['admin'],
+              priority: 100,
+              fields: ['id', 'name', 'email', 'role', 'tokenHash']
+            }
+          }
+        }
+      });
+
+      await resource.insert({
+        id: 'directory-1',
+        name: 'Directory',
+        email: 'directory@example.com',
+        role: 'user',
+        tokenHash: 'tok-visible-for-admin'
+      });
+
+      apiPlugin = new ApiPlugin({
+        logLevel: 'silent',
+        port,
+        host: '127.0.0.1',
+        docs: { enabled: false },
+        logging: { enabled: false },
+        resources: {
+          directories: {
+            customMiddleware: [async (c, next) => {
+              const role = c.req.raw.headers.get('x-role') || 'user';
+              c.set('user', { role, roles: [role], scopes: role === 'admin' ? ['admin'] : [] });
+              await next();
+            }]
+          }
+        }
+      });
+
+      await db.usePlugin(apiPlugin);
+      await waitForServer(port);
+
+      const publicResponse = await fetch(`http://127.0.0.1:${port}/directories/directory-1`);
+      const publicBody = await publicResponse.json();
+      expect(publicResponse.status).toBe(200);
+      expect(publicBody.meta.view).toBe('public');
+      expect(publicBody.data).toEqual({
+        id: 'directory-1',
+        name: 'Directory'
+      });
+
+      const adminResponse = await fetch(`http://127.0.0.1:${port}/directories/directory-1`, {
+        headers: { 'x-role': 'admin' }
+      });
+      const adminBody = await adminResponse.json();
+      expect(adminResponse.status).toBe(200);
+      expect(adminBody.meta.view).toBe('admin');
+      expect(adminBody.data).toEqual({
+        id: 'directory-1',
+        name: 'Directory',
+        email: 'directory@example.com',
+        role: 'user',
+        tokenHash: 'tok-visible-for-admin'
+      });
+    });
+
+    it('supports guarded resource views for native GET routes', async () => {
+      const resource = await db.createResource({
+        name: 'profiles',
+        attributes: {
+          id: 'string|optional',
+          email: 'string|required',
+          name: 'string|required',
+          role: 'string|optional',
+          tokenHash: 'string|optional'
+        },
+        behavior: 'body-overflow',
+        timestamps: true,
+        api: {
+          protected: [
+            { path: 'tokenHash', unlessRole: ['admin'] }
+          ],
+          views: {
+            admin: {
+              guard: ['admin'],
+              fields: ['id', 'email', 'name', 'role', 'tokenHash']
+            }
+          }
+        }
+      });
+
+      await resource.insert({
+        id: 'profile-1',
+        email: 'profile@example.com',
+        name: 'Profile',
+        role: 'user',
+        tokenHash: 'tok-admin'
+      });
+
+      apiPlugin = new ApiPlugin({
+        logLevel: 'silent',
+        port,
+        host: '127.0.0.1',
+        docs: { enabled: false },
+        logging: { enabled: false },
+        resources: {
+          profiles: {
+            customMiddleware: [async (c, next) => {
+              const role = c.req.raw.headers.get('x-role');
+              if (role) {
+                c.set('user', { role, roles: [role], scopes: role === 'admin' ? ['admin'] : [] });
+              }
+              await next();
+            }]
+          }
+        }
+      });
+
+      await db.usePlugin(apiPlugin);
+      await waitForServer(port);
+
+      const forbiddenResponse = await fetch(`http://127.0.0.1:${port}/profiles/profile-1?view=admin`);
+      const forbiddenBody = await forbiddenResponse.json();
+      expect(forbiddenResponse.status).toBe(403);
+      expect(forbiddenBody.error.code).toBe('VIEW_FORBIDDEN');
+
+      const adminResponse = await fetch(`http://127.0.0.1:${port}/profiles/profile-1?view=admin`, {
+        headers: { 'x-role': 'admin' }
+      });
+      const adminBody = await adminResponse.json();
+      expect(adminResponse.status).toBe(200);
+      expect(adminBody.meta.view).toBe('admin');
+      expect(adminBody.data).toEqual({
+        id: 'profile-1',
+        email: 'profile@example.com',
+        name: 'Profile',
+        role: 'user',
+        tokenHash: 'tok-admin'
+      });
+    });
+  });
+
+  describe('api.write', () => {
+    it('supports conditional write policies for different actors', async () => {
+      const resource = await db.createResource({
+        name: 'memberships',
+        attributes: {
+          id: 'string|optional',
+          phone: 'string|optional',
+          role: 'string|optional',
+          isActive: 'boolean|optional'
+        },
+        behavior: 'body-overflow',
+        timestamps: true,
+        api: {
+          write: {
+            patch: [
+              {
+                whenRole: ['admin'],
+                priority: 100,
+                writable: ['phone', 'role', 'isActive']
+              },
+              {
+                whenRole: ['user'],
+                priority: 10,
+                writable: ['phone'],
+                readonly: ['role', 'isActive']
+              }
+            ]
+          }
+        }
+      });
+
+      await resource.insert({
+        id: 'membership-1',
+        phone: '1111',
+        role: 'user',
+        isActive: true
+      });
+
+      apiPlugin = new ApiPlugin({
+        logLevel: 'silent',
+        port,
+        host: '127.0.0.1',
+        docs: { enabled: false },
+        logging: { enabled: false },
+        resources: {
+          memberships: {
+            customMiddleware: [async (c, next) => {
+              const role = c.req.raw.headers.get('x-role') || 'user';
+              c.set('user', { role, roles: [role] });
+              await next();
+            }]
+          }
+        }
+      });
+
+      await db.usePlugin(apiPlugin);
+      await waitForServer(port);
+
+      const userRejectedResponse = await fetch(`http://127.0.0.1:${port}/memberships/membership-1`, {
+        method: 'PATCH',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-role': 'user'
+        },
+        body: JSON.stringify({ role: 'admin' })
+      });
+      const userRejectedBody = await userRejectedResponse.json();
+      expect(userRejectedResponse.status).toBe(400);
+      expect(userRejectedBody.error.code).toBe('FIELD_WRITE_NOT_ALLOWED');
+      expect(userRejectedBody.error.details.rejectedFields).toContain('role');
+
+      const adminAllowedResponse = await fetch(`http://127.0.0.1:${port}/memberships/membership-1`, {
+        method: 'PATCH',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-role': 'admin'
+        },
+        body: JSON.stringify({ role: 'admin', isActive: false })
+      });
+      const adminAllowedBody = await adminAllowedResponse.json();
+      expect(adminAllowedResponse.status).toBe(200);
+      expect(adminAllowedBody.data.role).toBe('admin');
+      expect(adminAllowedBody.data.isActive).toBe(false);
+    });
+
+    it('rejects readonly fields on patch while allowing writable fields', async () => {
+      const resource = await db.createResource({
+        name: 'contacts',
+        attributes: {
+          id: 'string|optional',
+          phone: 'string|optional',
+          role: 'string|optional',
+          apiKey: 'string|optional'
+        },
+        behavior: 'body-overflow',
+        timestamps: true,
+        api: {
+          write: {
+            patch: {
+              readonly: ['role', 'apiKey']
+            }
+          }
+        }
+      });
+
+      await resource.insert({
+        id: 'contact-1',
+        phone: '1111',
+        role: 'user',
+        apiKey: 'secret'
+      });
+
+      apiPlugin = new ApiPlugin({
+        logLevel: 'silent',
+        port,
+        host: '127.0.0.1',
+        docs: { enabled: false },
+        logging: { enabled: false },
+        resources: ['contacts']
+      });
+
+      await db.usePlugin(apiPlugin);
+      await waitForServer(port);
+
+      const rejectedResponse = await fetch(`http://127.0.0.1:${port}/contacts/contact-1`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ role: 'admin' })
+      });
+      const rejectedBody = await rejectedResponse.json();
+      expect(rejectedResponse.status).toBe(400);
+      expect(rejectedBody.error.code).toBe('FIELD_WRITE_NOT_ALLOWED');
+      expect(rejectedBody.error.details.rejectedFields).toContain('role');
+
+      const allowedResponse = await fetch(`http://127.0.0.1:${port}/contacts/contact-1`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ phone: '2222' })
+      });
+      const allowedBody = await allowedResponse.json();
+      expect(allowedResponse.status).toBe(200);
+      expect(allowedBody.data.phone).toBe('2222');
+      expect(allowedBody.data.role).toBe('user');
     });
   });
 

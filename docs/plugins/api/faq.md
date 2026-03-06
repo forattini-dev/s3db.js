@@ -8,9 +8,9 @@ Quick links: [Getting Started](#getting-started) • [Auth](#authentication--aut
 
 ## Getting Started
 
-### What makes this different from Express/Fastify/Hono?
+### What makes this different from Express/Fastify/manual servers?
 
-**Built on Hono** (12x faster than Express), but gives you **instant REST APIs** from s3db.js resources. Zero boilerplate:
+**Built on Raffel**, but gives you **instant REST APIs** from s3db.js resources. Zero boilerplate:
 
 ```javascript
 // Traditional Express (100+ lines)
@@ -49,7 +49,7 @@ You get: Auto CRUD • Auth • Guards • Metrics • Docs • Security
 - p99 latency: ~300-500ms
 - Handles 1000+ req/s per instance
 
-**Built on Hono:** 12x faster than Express, 3x faster than Fastify
+**Runtime profile:** Raffel-based request handling, cached docs generation, and partition-aware resource access paths.
 
 **[→ Performance benchmarks](/plugins/api/guides/deployment.md#performance)**
 
@@ -221,6 +221,120 @@ guard: {
 
 ---
 
+### Can protected fields vary by role?
+
+Yes. `api.protected` accepts conditional rules, so you can hide a field for everyone except a role/scope:
+
+```javascript
+api: {
+  protected: [
+    'internalNotes',
+    { path: 'tokenHash', unlessRole: ['admin'] }
+  ]
+}
+```
+
+In this example, `internalNotes` is always hidden, while `tokenHash` stays visible for `admin`.
+
+---
+
+### Can I mark fields as readonly or mutable per operation?
+
+Yes. Use `api.write` to define per-operation write policy. You can keep it static or make it actor-aware:
+
+```javascript
+api: {
+  write: {
+    patch: [
+      {
+        whenRole: ['admin'],
+        priority: 100,
+        writable: ['phone', 'role', 'isActive']
+      },
+      {
+        whenRole: ['user'],
+        priority: 10,
+        writable: ['phone'],
+        readonly: ['role', 'isActive']
+      }
+    ]
+  }
+}
+```
+
+The native route rejects forbidden writes with `400 FIELD_WRITE_NOT_ALLOWED`.
+
+For the full model and precedence rules, read [Resource Policies](/plugins/api/guides/resource-policies.md).
+
+---
+
+### Can I authenticate server-to-server calls with a shared header secret?
+
+Yes. Use the native `header-secret` driver when an internal service or admin app should call the CRUD routes directly:
+
+```javascript
+auth: {
+  createResource: false,
+  drivers: [{
+    driver: 'header-secret',
+    config: {
+      headerName: 'x-admin-secret',
+      secret: process.env.ADMIN_SECRET,
+      role: 'admin',
+      roles: ['admin'],
+      scopes: ['admin:read'],
+      serviceAccount: {
+        clientId: 'admin-ui',
+        name: 'Admin UI'
+      }
+    }
+  }],
+  pathRules: [
+    { path: '/users/**', methods: ['header-secret'], required: true, roles: ['admin'] }
+  ]
+}
+```
+
+Successful requests get an injected service identity in `ctx.auth.user` / `ctx.auth.serviceAccount`, so native routes and guards can treat them like any other authenticated actor.
+
+---
+
+### Can I define admin projections or alternate views per resource?
+
+Yes. Use `api.views`. They can be explicit via `?view=<name>` or automatic based on the current actor:
+
+```javascript
+api: {
+  views: {
+    public: {
+      auto: true,
+      priority: 1,
+      fields: ['id', 'name']
+    },
+    admin: {
+      auto: true,
+      whenRole: ['admin'],
+      priority: 100,
+      fields: ['id', 'email', 'role', 'tokenHash']
+    }
+  }
+}
+```
+
+Then either call `/users?view=admin` / `/users/:id?view=admin`, or let the plugin choose the highest-priority matching auto view. Views compose well with `protected` rules.
+
+For full examples and the evaluation order, read [Resource Policies](/plugins/api/guides/resource-policies.md).
+
+---
+
+### Can custom routes share guards, protected fields, and metadata in one place?
+
+Partially. Resource-level custom routes already colocate well with the resource itself, but route-specific guard/projection metadata is still more manual than the CRUD surface.
+
+If you need per-route policy today, keep the route near the resource and apply authorization/projection logic explicitly in the handler.
+
+---
+
 ## OIDC & OAuth2
 
 ### Is implicit token refresh enabled by default?
@@ -324,30 +438,26 @@ config: {
 
 ### How do I add rate limiting to custom routes?
 
-Use `hono-rate-limiter`:
-
-```bash
-pnpm add hono-rate-limiter
-```
+Use the plugin's built-in `rateLimit.rules` and target the custom route path directly:
 
 ```javascript
-import { rateLimiter } from 'hono-rate-limiter';
-
-const limiter = rateLimiter({
-  windowMs: 15 * 60 * 1000,  // 15 minutes
-  limit: 5,                   // Max 5 requests
-  keyGenerator: (c) => c.req.header('x-forwarded-for') || 'unknown'
-});
-
-routes: {
-  'POST /newsletter': {
-    POST: [
-      limiter,  // Apply rate limiting
-      async (c, ctx) => {/*...*/}
+await db.usePlugin(new ApiPlugin({
+  rateLimit: {
+    enabled: true,
+    rules: [
+      { path: '/newsletter', key: 'ip', windowMs: 15 * 60 * 1000, maxRequests: 5 }
     ]
+  },
+  routes: {
+    'POST /newsletter': async (c) => {
+      const payload = await c.req.json();
+      return c.json({ queued: true, email: payload.email });
+    }
   }
-}
+}));
 ```
+
+If you need behavior the built-in limiter does not cover, add a custom middleware or implement the check inside the handler.
 
 **[→ Security guide](/plugins/api/guides/security.md#rate-limiting)**
 

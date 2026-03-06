@@ -43,7 +43,6 @@ declare module 'raffel/http' {
 export type Context<T extends Record<string, unknown> = Record<string, unknown>> = HttpContextInterface<T>;
 
 export { HttpApp };
-export { HttpApp as Hono };
 export type { HttpRequest, HttpContextInterface, HttpMiddleware as MiddlewareHandler, ContentfulStatusCode, TypedResponse };
 export type { HttpMiddleware };
 export type Next = () => Promise<void>;

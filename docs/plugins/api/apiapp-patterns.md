@@ -4,20 +4,20 @@ Complete guide for using the **ApiApp wrapper** in s3db.js API Plugin.
 
 ## Overview
 
-ApiApp wraps Hono with enhanced capabilities:
+ApiApp wraps the native Raffel-based app runtime with enhanced capabilities:
 - ✅ **Route metadata tracking** - Automatic OpenAPI generation
 - ✅ **Guard system** - Declarative authorization
 - ✅ **Middleware priority** - Guaranteed execution order
 - ✅ **Context injection** - `c.db`, `c.resources`, `c.success()`, `c.error()`
 - ✅ **Validation** - Fastest-validator with boot-time compilation
 - ✅ **Route grouping** - Prefix management
-- ✅ **Full Hono compatibility** - Zero breaking changes
+- ✅ **Native Raffel semantics** - Matches the runtime used by ApiPlugin
 
 ---
 
 ## Pattern 1: Basic Route with Metadata
 
-### Before (Vanilla Hono)
+### Before (Plain App)
 ```javascript
 app.get('/users', async (c) => {
   const users = await db.resources.users.list();
@@ -627,9 +627,9 @@ console.log('OpenAPI spec:', JSON.stringify(openAPISpec, null, 2));
 
 ## Migration Checklist
 
-To migrate existing Hono routes to ApiApp:
+To migrate existing legacy routes to ApiApp:
 
-- [ ] Replace `new Hono()` with `new ApiApp({ db, resources })`
+- [ ] Replace your plain app instance with `new ApiApp({ db, resources })`
 - [ ] Add `.describe({...})` before route registrations
 - [ ] Use `c.db` / `c.resources` instead of importing database
 - [ ] Use `c.success()` / `c.error()` for consistent responses

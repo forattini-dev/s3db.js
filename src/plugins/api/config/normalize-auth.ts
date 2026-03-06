@@ -57,6 +57,10 @@ function normalizeDriverName(name: string): string {
     return lowered;
   }
 
+  if (lowered === 'header-secret' || lowered === 'header_secret' || lowered === 'headersecret') {
+    return 'header-secret';
+  }
+
   return lowered;
 }
 

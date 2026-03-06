@@ -8,7 +8,7 @@
  * - Rate limit rules + logging filters + Prometheus metrics
  *
  * This is a generic blueprint for migrating Express stacks that had
- * Basic tokens + dashboard login into the ApiPlugin/Hono runtime.
+ * Basic tokens + dashboard login into the ApiPlugin/Raffel runtime.
  *
  * Usage:
  *   pnpm exec node docs/examples/e101-path-based-basic-oidc.js

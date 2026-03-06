@@ -69,7 +69,7 @@ export function createExpressContext(req: ExpressRequest): GuardContext {
   return context;
 }
 
-export async function createAppContext(c: AppContext): Promise<GuardContext> {
+export async function createRaffelContext(c: AppContext): Promise<GuardContext> {
   const context: GuardContext = {
     user: (c.get('user') as Record<string, unknown>) || {},
     params: c.req.param(),
@@ -88,6 +88,10 @@ export async function createAppContext(c: AppContext): Promise<GuardContext> {
   };
 
   return context;
+}
+
+export async function createAppContext(c: AppContext): Promise<GuardContext> {
+  return await createRaffelContext(c);
 }
 
 export function createFastifyContext(request: FastifyRequest): GuardContext {

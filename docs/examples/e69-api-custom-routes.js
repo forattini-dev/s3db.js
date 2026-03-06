@@ -5,10 +5,10 @@
  * inspired by Moleculer.js patterns.
  *
  * Custom routes are defined in the `api` field of the resource configuration
- * and receive the full Hono context.
+ * and receive the full request context.
  *
  * Requirements:
- * - pnpm add hono @hono/node-server @hono/swagger-ui
+ * - pnpm add s3db.js
  *
  * Run: node docs/examples/e69-api-custom-routes.js
  * Then test:

@@ -682,6 +682,47 @@ resources: {
 }
 ```
 
+### 2.1 Put Visibility And Mutability In `resource.api`
+
+When a resource is part of the public or admin API surface, keep response shape and mutability on the resource:
+
+```javascript
+await db.createResource({
+  name: 'users',
+  attributes: {
+    id: 'string|optional',
+    name: 'string|required',
+    email: 'string|required|email',
+    role: 'string|optional',
+    tokenHash: 'string|optional'
+  },
+  api: {
+    protected: [{ path: 'tokenHash', unlessRole: ['admin'] }],
+    views: {
+      public: {
+        auto: true,
+        priority: 1,
+        fields: ['id', 'name']
+      },
+      admin: {
+        auto: true,
+        whenRole: ['admin'],
+        priority: 100,
+        fields: ['id', 'name', 'email', 'role', 'tokenHash']
+      }
+    },
+    write: {
+      patch: [
+        { whenRole: ['admin'], priority: 100, writable: ['name', 'email', 'role'] },
+        { whenRole: ['user'], priority: 10, writable: ['name', 'email'], readonly: ['role'] }
+      ]
+    }
+  }
+});
+```
+
+See [Resource Policies](/plugins/api/guides/resource-policies.md) for the full reference and precedence rules.
+
 ### 3. Enable Production Features
 
 ```javascript

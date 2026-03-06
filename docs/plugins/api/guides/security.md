@@ -158,19 +158,26 @@ The plugin also applies per-driver rate limits automatically for each auth drive
 
 ### Custom Route Rate Limiting
 
-For additional per-route rate limiting in custom endpoints, use `hono-rate-limiter`:
+For custom endpoints, prefer the built-in `rateLimit.rules` and match the custom route path directly:
 
 ```js
-import { rateLimiter } from 'hono-rate-limiter';
-
-const limiter = rateLimiter({ windowMs: 60_000, limit: 60 });
-
 await db.usePlugin(new ApiPlugin({
+  rateLimit: {
+    enabled: true,
+    rules: [
+      { path: '/contact', key: 'ip', windowMs: 60_000, maxRequests: 60 }
+    ]
+  },
   routes: {
-    'POST /contact': [limiter, handler]
+    'POST /contact': async (c) => {
+      const payload = await c.req.json();
+      return c.json({ received: true, email: payload.email });
+    }
   }
 }));
 ```
+
+If you need a bespoke limiter strategy, add a custom middleware ahead of the route or enforce it inside the handler.
 
 ---
 
