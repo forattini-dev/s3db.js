@@ -1,19 +1,56 @@
 # Core Documentation
 
-The core of s3db.js provides the fundamental building blocks for using S3 as a document database.
+This section is the real center of s3db.js. It explains the database model, resources, schema system, storage behaviors, partitions, hooks, events, streaming, and the runtime internals that make the rest of the platform possible.
 
-## Overview
+**Navigation:** [← Introduction](/) | [Clients](/clients/README.md) | [Plugins](/plugins/README.md)
 
-s3db.js transforms AWS S3 (and compatible storage) into a powerful document database with:
+---
 
-- **Schema validation** using fastest-validator
-- **5 behavior strategies** for handling S3's 2KB metadata limit
-- **Partitioning** for O(1) queries instead of O(n) scans
-- **Field-level encryption** with AES-256-GCM
-- **Event system** with hooks for custom logic
-- **Streaming API** for large datasets
+## TLDR
 
-## Core Components
+- If you want to understand s3db.js, start with `Resource`, not plugins.
+- The three core ideas are: schema-driven resources, behavior strategies for the 2KB metadata limit, and partitions for O(1)-style access patterns.
+- Most day-to-day application work lives in four docs: [Database](./database.md), [Resource](./resource.md), [Schema](./schema.md), and [Partitions](./partitions.md).
+
+## Table of Contents
+
+- [What Makes Core Different](#what-makes-core-different)
+- [Start Here](#start-here)
+- [Core Components](#core-components)
+- [Resource Method Map](#resource-method-map)
+- [Common Learning Paths](#common-learning-paths)
+- [Internals](#internals)
+- [Quick Start](#quick-start)
+- [Next Steps](#next-steps)
+
+## What Makes Core Different
+
+s3db.js turns S3-compatible storage into a document database by combining:
+
+- **schema validation** using fastest-validator
+- **behavior strategies** for the 2KB metadata limit
+- **partitions** for O(1)-style access instead of O(n) scans
+- **field-level encryption** with AES-256-GCM
+- **hooks, middlewares, and events** for custom logic and observability
+- **streaming APIs** for large datasets and batch processing
+
+The plugin layer builds on top of this. If the core model is clear, the rest of the project gets much easier to reason about.
+
+## Start Here
+
+Use this order if you are new to the core:
+
+1. [Database](./database.md) to understand connection, resource registration, and plugin installation.
+2. [Resource](./resource.md) to learn the main abstraction and the CRUD/query surface.
+3. [Schema](./schema.md) to define fields, validation, custom types, and transformations.
+4. [Partitions](./partitions.md) to avoid expensive full scans.
+5. [Behaviors](./behaviors.md) to decide what happens when records exceed metadata limits.
+
+If you are already using resources in production, the most important advanced docs are:
+
+- [Events](./events.md)
+- [Streaming](./streaming.md)
+- [Encryption](./encryption.md)
 
 ### [Database](database.md)
 
@@ -45,6 +82,17 @@ const users = await db.createResource({
 
 await users.insert({ name: 'John', email: 'john@example.com', age: 30 });
 ```
+
+This is the most important doc in the entire core section because it brings together:
+
+- schema
+- behaviors
+- partitions
+- methods
+- hooks
+- middlewares
+- events
+- versioning
 
 ### [Schema](schema.md)
 
@@ -104,6 +152,8 @@ await db.createResource({
 const userOrders = await orders.listPartition('byUser', { userId: 'user123' });
 ```
 
+Read this earlier than most people think. Partition design is one of the biggest factors in whether a resource feels instant or expensive.
+
 ### [Events](events.md)
 
 React to database operations:
@@ -155,6 +205,53 @@ writer.write({ name: 'Alice', email: 'alice@example.com' });
 writer.end();
 ```
 
+## Resource Method Map
+
+If you are looking for “the main methods”, start here:
+
+| Goal | Primary Methods | Read |
+| --- | --- | --- |
+| Create and mutate one record | `insert`, `update`, `patch`, `replace`, `delete` | [Resource](./resource.md#resource-methods) |
+| Work in batches | `insertMany`, `getMany`, `deleteMany` | [Resource](./resource.md#resource-methods) |
+| Read collections | `list`, `listIds`, `count`, `page`, `query` | [Resource](./resource.md#resource-methods) |
+| Read by partition directly | `listPartition`, `getFromPartition` | [Partitions](./partitions.md) |
+| Add lifecycle logic | hooks, middlewares, events | [Resource](./resource.md#hooks-system), [Resource](./resource.md#middlewares), [Events](./events.md) |
+| Handle large payloads | `behavior`, binary content, streaming | [Behaviors](./behaviors.md), [Streaming](./streaming.md), [Resource](./resource.md#binary-content) |
+
+## Common Learning Paths
+
+### I just want normal CRUD
+
+Read:
+
+- [Database](./database.md)
+- [Resource](./resource.md)
+- [Schema](./schema.md)
+
+### I need fast query patterns
+
+Read:
+
+- [Partitions](./partitions.md)
+- [Resource](./resource.md#partitioning)
+- [Resource](./resource.md#resource-methods)
+
+### I need hooks, auditing, or custom logic
+
+Read:
+
+- [Resource](./resource.md#hooks-system)
+- [Resource](./resource.md#middlewares)
+- [Events](./events.md)
+
+### I store large or irregular documents
+
+Read:
+
+- [Behaviors](./behaviors.md)
+- [Resource](./resource.md#binary-content)
+- [Streaming](./streaming.md)
+
 ## Internals
 
 For contributors and advanced users:
@@ -205,5 +302,5 @@ await db.disconnect();
 ## Next Steps
 
 - [Getting Started Guide](/guides/getting-started.md) - Full tutorial
-- [Plugins](/plugins/) - Extend functionality
-- [Examples](/examples/) - 177 working examples
+- [Plugins](/plugins/README.md) - Extend functionality
+- [Examples](/examples/README.md) - Working examples across core and plugins

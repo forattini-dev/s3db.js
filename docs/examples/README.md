@@ -109,7 +109,7 @@ Each proposta is documented in more detail inside [use-cases.md](./use-cases.md)
 
 ## Related reading
 - [Plugin Docs Standard](/multi-file-plugin-docs-standard.md) - how plugin docs are structured.
-- [Logging](/logging.md) & [Logger Best Practices](/logger-best-practices.md) - tie into the
+- [Logging](/logging.md) & [Pino and Logging](/dependencies/pino.md) - tie into the
   observability samples.
 - [MCP Guide](/mcp.md) - background on the MCP server referenced by `e45-mcp-documentation-assistant.js`.
 - [Resources](/resources.md) & [Schema](/schema.md) - deep reference for building your own examples.

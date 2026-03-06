@@ -883,7 +883,7 @@ Possible causes:
 Solution:
 Ensure plugin has access to storage and key is valid.
 
-Docs: https://github.com/forattini-dev/s3db.js/blob/main/docs/plugins/README.md#plugin-storage
+Docs: https://github.com/forattini-dev/s3db.js/blob/main/docs/plugins/reference/plugin-storage.md
 `.trim();
     }
 

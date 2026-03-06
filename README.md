@@ -116,16 +116,16 @@
 
 ## 📚 Documentation Quick Links
 
-> **Core Concepts:** [Schema & Validation](./docs/core/schema.md) • [Schema Registry](./docs/core/schema.md#schema-registry-stable-attribute-mapping) • [Clients](./docs/clients/README.md) • [Fastest Validator](./docs/fastest-validator.md)
+> **Core Concepts:** [Schema & Validation](./docs/core/schema.md) • [Schema Registry](./docs/core/schema.md#schema-registry-stable-attribute-mapping) • [Clients](./docs/clients/README.md) • [Fastest Validator](./docs/dependencies/fastest-validator.md)
 
 > **Plugins:** [API Plugin](./docs/plugins/api/README.md) • [Identity Plugin](./docs/plugins/identity/README.md) • [All Plugins](#-plugins)
 
-> **Guides:** [Path-based Basic + OIDC Migration](./docs/guides/path-based-auth-migration.md)
+> **Guides:** [Path-based Basic + OIDC Example](./docs/examples/e101-path-based-basic-oidc.js)
 
 
 > **Integrations:** [MCP Server](./docs/mcp.md) • [Model Context Protocol](./docs/mcp.md)
 
-> **Advanced:** [Executor Pool Benchmark](./docs/benchmarks/executor-pool.md) • [Performance Tuning](./docs/benchmarks/) • [Migration Guides](./docs/examples/) • [TypeScript Support](./docs/typescript/)
+> **Advanced:** [Executor Pool Benchmark](./docs/benchmarks/executor-pool.md) • [Performance Tuning](./docs/benchmarks/README.md) • [Examples](./docs/examples/README.md) • [TypeScript Support](./docs/guides/typescript.md)
 
 ---
 
@@ -328,7 +328,7 @@ pnpm run install:dev:puppeteer    # Web scraping suite
 pnpm run install:dev:cloud        # AWS SDK clients
 ```
 
-See **[DEVELOPMENT.md](DEVELOPMENT.md)** for detailed setup instructions and dependency groups breakdown.
+See [docs/README.md](./docs/README.md) for the main documentation entrypoint and [package.json](./package.json) for the current dependency groups.
 
 ### 📘 TypeScript Support
 
@@ -616,7 +616,7 @@ describe('User Tests', () => {
 | Query 1000 records | ~5000ms | ~100ms | **50x faster** |
 | Full test suite | ~120s | ~2s | **60x faster** |
 
-📚 [**Full MemoryClient Documentation**](./src/clients/memory-client.md)
+📚 [**Full MemoryClient Documentation**](./docs/clients/memory-client.md)
 
 ---
 
@@ -1753,7 +1753,7 @@ orders.useMiddleware('updated', async (ctx, next) => {
 });
 ```
 
-**Complete documentation**: [**docs/resources.md**](./docs/resources.md)
+**Complete documentation**: [**docs/core/resource.md**](./docs/core/resource.md)
 
 ---
 
@@ -1896,11 +1896,11 @@ db.client.on('pool:taskError', (task, error) => {
 })
 ```
 
-See [src/concerns/operation-pool.js](./src/concerns/operation-pool.js) for event implementation details.
+See [docs/benchmarks/operation-pool.md](./docs/benchmarks/operation-pool.md) for the operation-pool benchmark discussion and implementation notes.
 
 ### Performance Comparison
 
-Benchmark results from comprehensive testing of 108 scenarios (see [docs/benchmarks/operation-pool.md](./docs/benchmarks/operation-pool.md) and [BENCHMARK-RESULTS-TABLE.md](./BENCHMARK-RESULTS-TABLE.md)):
+Benchmark results from comprehensive testing of 108 scenarios (see [docs/benchmarks/operation-pool.md](./docs/benchmarks/operation-pool.md) and the [benchmark index](./docs/benchmarks/README.md)):
 
 | Scale | Separate Pools | Promise.all | Shared Pool | Winner |
 |-------|----------------|------------|------------|--------|
@@ -1989,7 +1989,7 @@ Extend s3db.js with powerful plugins. All plugins are optional and can be instal
 
 ### ⚡ Performance
 
-[**CachePlugin**](./docs/plugins/cache.md) • [**TTLPlugin**](./docs/plugins/ttl/) • [**EventualConsistencyPlugin**](./docs/plugins/eventual-consistency.md) • [**MetricsPlugin**](./docs/plugins/metrics.md)
+[**CachePlugin**](./docs/plugins/cache/README.md) • [**TTLPlugin**](./docs/plugins/ttl/README.md) • [**EventualConsistencyPlugin**](./docs/plugins/eventual-consistency/README.md) • [**MetricsPlugin**](./docs/plugins/metrics/README.md)
 
 **CachePlugin** - Memory/S3/filesystem caching with compression and automatic invalidation.
 
@@ -2001,7 +2001,7 @@ Extend s3db.js with powerful plugins. All plugins are optional and can be instal
 
 ### 📊 Data & Replication
 
-[**ReplicatorPlugin**](./docs/plugins/replicator/) • [**ImporterPlugin**](./docs/plugins/importer.md) • [**BackupPlugin**](./docs/plugins/backup.md) • [**AuditPlugin**](./docs/plugins/audit.md)
+[**ReplicatorPlugin**](./docs/plugins/replicator/README.md) • [**ImporterPlugin**](./docs/plugins/importer/README.md) • [**BackupPlugin**](./docs/plugins/backup/README.md) • [**AuditPlugin**](./docs/plugins/audit/README.md)
 
 **ReplicatorPlugin** - Real-time replication to BigQuery, PostgreSQL, MySQL, Turso, PlanetScale, and SQS.
 
@@ -2013,13 +2013,13 @@ Extend s3db.js with powerful plugins. All plugins are optional and can be instal
 
 ### 🎮 Gaming & Esports
 
-[**TournamentPlugin**](./docs/plugins/tournament.md)
+[**TournamentPlugin**](./docs/plugins/tournament/README.md)
 
 **TournamentPlugin** - Complete tournament engine supporting Single/Double Elimination, Round Robin, Swiss, and League formats with automated bracket generation.
 
 ### 🔧 DevOps
 
-[**QueueConsumerPlugin**](./docs/plugins/queue-consumer.md) • [**SchedulerPlugin**](./docs/plugins/scheduler/) • [**TfstatePlugin**](./docs/plugins/tfstate.md) • [**CloudInventoryPlugin**](./docs/plugins/cloud-inventory.md) • [**CostsPlugin**](./docs/plugins/costs.md)
+[**QueueConsumerPlugin**](./docs/plugins/queue-consumer/README.md) • [**SchedulerPlugin**](./docs/plugins/scheduler/README.md) • [**TfstatePlugin**](./docs/plugins/tfstate/README.md) • [**CloudInventoryPlugin**](./docs/plugins/cloud-inventory/README.md) • [**CostsPlugin**](./docs/plugins/costs/README.md)
 
 **QueueConsumerPlugin** - Process RabbitMQ/SQS messages for event-driven architectures.
 
@@ -2033,7 +2033,7 @@ Extend s3db.js with powerful plugins. All plugins are optional and can be instal
 
 ### 🤖 ML/AI & Advanced Features
 
-[**MLPlugin**](./docs/plugins/ml-plugin/) • [**VectorPlugin**](./docs/plugins/vector/) • [**FullTextPlugin**](./docs/plugins/fulltext.md) • [**GeoPlugin**](./docs/plugins/geo.md)
+[**MLPlugin**](./docs/plugins/ml-plugin/README.md) • [**VectorPlugin**](./docs/plugins/vector/README.md) • [**FullTextPlugin**](./docs/plugins/fulltext/README.md) • [**GeoPlugin**](./docs/plugins/geo/README.md)
 
 **MLPlugin** - Machine learning model management and inference pipelines.
 
@@ -2051,7 +2051,7 @@ Extend s3db.js with powerful plugins. All plugins are optional and can be instal
 
 ### 🔗 Other Plugins
 
-[**RelationPlugin**](./docs/plugins/relation.md) • [**StateMachinePlugin**](./docs/plugins/state-machine/) • [**S3QueuePlugin**](./docs/plugins/s3-queue/)
+[**RelationPlugin**](./docs/plugins/relation/README.md) • [**StateMachinePlugin**](./docs/plugins/state-machine/README.md) • [**S3QueuePlugin**](./docs/plugins/s3-queue/README.md)
 
 **RelationPlugin** - ORM-like relationships with join optimization (10-100x faster queries).
 
@@ -2254,26 +2254,26 @@ S3DB_VERBOSE=false
 
 ### Core Documentation
 
-- [**Resources (Complete Guide)**](./docs/resources.md) - Everything about resources, schemas, behaviors, partitions, hooks, middlewares, events
-- [**Client Class**](./docs/client.md) - Low-level S3 operations and HTTP configuration
-- [**Schema Validation**](./docs/schema.md) - Comprehensive schema validation and field types
+- [**Resources (Complete Guide)**](./docs/core/resource.md) - Everything about resources, schemas, behaviors, partitions, hooks, middlewares, events
+- [**Clients**](./docs/clients/README.md) - Low-level S3 operations, HTTP configuration, and client selection
+- [**Schema Validation**](./docs/core/schema.md) - Comprehensive schema validation and field types
 - [**Plugins Overview**](./docs/plugins/README.md) - All available plugins and how to create custom ones
 
 ### Plugin Documentation
 
-- [Cache Plugin](./docs/plugins/cache.md)
-- [Costs Plugin](./docs/plugins/costs.md)
-- [Metrics Plugin](./docs/plugins/metrics.md)
-- [Audit Plugin](./docs/plugins/audit.md)
-- [TTL Plugin](./docs/plugins/ttl/)
-- [Relation Plugin](./docs/plugins/relation.md)
-- [Replicator Plugin](./docs/plugins/replicator/)
+- [Cache Plugin](./docs/plugins/cache/README.md)
+- [Costs Plugin](./docs/plugins/costs/README.md)
+- [Metrics Plugin](./docs/plugins/metrics/README.md)
+- [Audit Plugin](./docs/plugins/audit/README.md)
+- [TTL Plugin](./docs/plugins/ttl/README.md)
+- [Relation Plugin](./docs/plugins/relation/README.md)
+- [Replicator Plugin](./docs/plugins/replicator/README.md)
 
 ### MCP & Integrations
 
 - [MCP Server Guide](./docs/mcp.md) - Complete MCP documentation with all 28 tools
-- [NPX Setup Guide](./mcp/NPX_SETUP.md) - Use MCP with npx
-- [Claude CLI Setup](./mcp/CLAUDE_CLI_SETUP.md) - Detailed Claude CLI configuration
+- [MCP Server Guide](./docs/mcp.md) - Use MCP with stdio or SSE transports
+- [Claude CLI Example](./docs/mcp.md) - Claude CLI configuration and examples
 
 ### Benchmarks & Performance
 
@@ -2298,9 +2298,9 @@ Browse [**60+ examples**](./docs/examples/) covering:
 
 | Resource | Link |
 |----------|------|
-| Resource API | [docs/resources.md](./docs/resources.md) |
-| Client API | [docs/client.md](./docs/client.md) |
-| Schema Validation | [docs/schema.md](./docs/schema.md) |
+| Resource API | [docs/core/resource.md](./docs/core/resource.md) |
+| Client API | [docs/clients/README.md](./docs/clients/README.md) |
+| Schema Validation | [docs/core/schema.md](./docs/core/schema.md) |
 | Plugin API | [docs/plugins/README.md](./docs/plugins/README.md) |
 
 ---
@@ -2417,13 +2417,13 @@ s3db.js includes comprehensive benchmarks demonstrating real-world performance o
 
 ## 🤝 Contributing
 
-Contributions are welcome! Please read our [Contributing Guide](CONTRIBUTING.md) for details on our code of conduct and the process for submitting pull requests.
+Contributions are welcome. Use the [repository on GitHub](https://github.com/forattini-dev/s3db.js) to open issues or pull requests.
 
 ---
 
 ## 📄 License
 
-This project is licensed under the [Unlicense](LICENSE) - see the LICENSE file for details.
+This project is licensed under the [Unlicense](https://github.com/forattini-dev/s3db.js/blob/main/LICENSE).
 
 ---
 

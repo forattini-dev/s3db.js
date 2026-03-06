@@ -113,6 +113,22 @@ Both return standardized error responses, but with different capabilities:
 
 ---
 
+### Does the API plugin support bulk operations?
+
+Yes, but the native batch surface is currently specific.
+
+- native bulk create is supported through `resource.api.bulk.create`
+- it exposes `POST /:resource/bulk`
+- it still applies `guard.create`, `write.create`, `views`, and `protected`
+
+Native bulk delete is not exposed as a built-in API route in this runtime.
+
+If you need batch deletion over HTTP, use a custom route on top of `resource.deleteMany()` until the runtime grows a native delete counterpart.
+
+**[→ Resource API Reference](/plugins/api/reference/resource-api.md#bulk)**
+
+---
+
 ## Authentication & Authorization
 
 ### Can I use Azure AD / Google / Keycloak?

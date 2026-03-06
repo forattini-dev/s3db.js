@@ -13,6 +13,24 @@ await db.usePlugin(new ApiPlugin({ port: 3000 }));
 
 ---
 
+## TLDR
+
+- `ApiPlugin` gives you native CRUD routes, auth, docs, security middleware, and runtime observability with almost no boilerplate.
+- `resource.api` is the center of gravity for resource-level policy: `guard`, `views`, `protected`, `write`, and native `bulk.create`.
+- Native batch support currently means `POST /:resource/bulk` via `resource.api.bulk.create`.
+- There is no native `bulk delete` route documented or registered in this runtime yet; for bulk deletion, keep using resource methods or explicit custom routes.
+
+## Table of Contents
+
+- [Quick Start](#-quick-start)
+- [Documentation](#-documentation)
+- [Batch Operations](#-batch-operations)
+- [Common Use Cases](#-common-use-cases)
+- [Production Features](#-production-features)
+- [Installation](#-installation)
+- [FAQ](#-faq)
+- [What's Next](#-whats-next)
+
 ## ⚡ Quick Start
 
 ### 1. Basic API (30 seconds)
@@ -161,6 +179,13 @@ Need the exact keys, precedence, and custom-route shape for `resource.api`?
 | **[Enhanced Context](/plugins/api/reference/enhanced-context.md)** | Route context API reference |
 | **[FAQ](/plugins/api/faq.md)** | Common questions and troubleshooting |
 
+### Batch Operations
+
+| Topic | Description |
+|-------|-------------|
+| **[Resource Policies](/plugins/api/guides/resource-policies.md#apibulkcreate)** | How native batch create reuses `guard`, `write`, `views`, and `protected` |
+| **[Resource API Reference](/plugins/api/reference/resource-api.md#bulk)** | Exact `bulk.create` keys, request shapes, statuses, and limits |
+
 ### Examples
 
 | Example | Description |
@@ -170,6 +195,32 @@ Need the exact keys, precedence, and custom-route shape for `resource.api`?
 | [e101-path-based-basic-oidc.js](/examples/e101-path-based-basic-oidc.js) | Dual auth (Basic + OIDC) |
 
 ---
+
+## 📦 Batch Operations
+
+The API plugin currently exposes one native batch route on the resource surface:
+
+- `POST /:resource/bulk` through `resource.api.bulk.create`
+
+That route is resource-native, so it keeps the same policy model as single-record create:
+
+- `guard.create`
+- `write.create`
+- response shaping through `views`
+- field removal through `protected`
+
+Use it when the endpoint is still clearly about one resource and the client simply needs to submit many records in one request.
+
+Important:
+
+- native batch support currently covers create, not delete
+- if you need batch deletion over HTTP today, use a custom route or keep the operation in application code on top of `resource.deleteMany()`
+- if the endpoint orchestrates multiple resources or external systems, prefer a custom route instead of `resource.api.bulk.create`
+
+Read:
+
+- [Resource Policies](/plugins/api/guides/resource-policies.md#apibulkcreate)
+- [Resource API Reference](/plugins/api/reference/resource-api.md#bulk)
 
 ## 🎯 Common Use Cases
 

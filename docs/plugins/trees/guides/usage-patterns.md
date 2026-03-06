@@ -2,7 +2,11 @@
 
 > **In this guide:** Tree operations, querying, node-level API, and real-world examples.
 
-**Navigation:** [← Back to Tree Plugin](/plugins/trees/README.md) | [Configuration](/plugins/trees/guides/configuration.md)
+**Navigation:** [← Tree Plugin](/plugins/tree/README.md) | [Canonical Usage Patterns](/plugins/tree/guides/usage-patterns.md)
+
+`/plugins/trees/...` is a legacy alias. Use the canonical page instead:
+
+- [Tree Usage Patterns](/plugins/tree/guides/usage-patterns.md)
 
 ---
 

@@ -1,6 +1,32 @@
 # Encryption
 
-s3db.js provides field-level encryption using AES-256-GCM for sensitive data protection.
+This guide explains how s3db.js handles sensitive data at the field level. It covers reversible encryption for secrets, one-way hashing for passwords, and the security configuration that controls passphrases, peppers, bcrypt, and argon2id.
+
+**Navigation:** [← Core Concepts](/core/README.md) | [Schema & Validation](/core/schema.md) | [Resource](/core/resource.md)
+
+## TLDR
+
+- Use `secret` when your app must read the original value back later.
+- Use `password` when the original value must never be recoverable.
+- `passphrase` protects encrypted secret fields.
+- `pepper`, `bcrypt`, and `argon2` control password hashing policy.
+- Encryption and hashing are schema-level behaviors, not conventions you have to remember manually on every write.
+
+## Table of Contents
+
+- [Quick Start](#quick-start)
+- [Choose the Right Field Type](#choose-the-right-field-type)
+- [Passphrase Configuration](#passphrase-configuration)
+- [Password Hashing](#password-hashing)
+- [Pepper, bcrypt, and argon2id](#pepper-bcrypt-and-argon2id)
+- [Auto-Decryption](#auto-decryption)
+- [Crypto Functions](#crypto-functions)
+- [Security Best Practices](#security-best-practices)
+- [Key Rotation](#key-rotation)
+- [Encryption Errors](#encryption-errors)
+- [Storage Format](#storage-format)
+- [Browser Compatibility](#browser-compatibility)
+- [Example: Secure User Data](#example-secure-user-data)
 
 ## Quick Start
 
@@ -32,6 +58,15 @@ await users.insert({
 const user = await users.get('user123');
 console.log(user.password);  // "myPassword123" (decrypted)
 ```
+
+## Choose the Right Field Type
+
+| Need | Use | Why |
+| --- | --- | --- |
+| user passwords | `password` | one-way hashing |
+| API keys, refresh tokens, SSNs | `secret` | reversible encryption |
+| sensitive numeric values | `secretNumber` | reversible encryption |
+| sensitive structured config | `secretAny` | reversible encryption |
 
 ## The `secret` Field Type
 
@@ -170,6 +205,86 @@ const db = new Database({
 **When to use what:**
 - `password` type: Non-retrievable data (user passwords) - bcrypt or argon2id
 - `secret` type: Retrievable data (API keys, tokens, SSN)
+
+## Pepper, bcrypt, and argon2id
+
+Password hashing has a separate configuration surface from reversible encryption.
+
+### `pepper`
+
+`pepper` is extra secret material appended during password hashing. Unlike a per-record salt, it is an application-level secret you manage centrally.
+
+```javascript
+const db = new Database({
+  connectionString: '...',
+  security: {
+    pepper: process.env.S3DB_PEPPER
+  }
+});
+```
+
+Use a pepper when:
+
+- you already manage application secrets responsibly
+- login credentials are high-value
+- you want an extra barrier beyond per-record salts
+
+### `bcrypt`
+
+`bcrypt` is the default hashing algorithm for `password` fields.
+
+```javascript
+const db = new Database({
+  connectionString: '...',
+  security: {
+    bcrypt: { rounds: 12 }
+  }
+});
+```
+
+Higher `rounds` means stronger but slower hashing. For most systems, the tradeoff is about login latency and background migration cost, not just raw cryptographic taste.
+
+### `argon2id`
+
+Use `password:argon2id` when you want a memory-hard password hashing strategy.
+
+```javascript
+const db = new Database({
+  connectionString: '...',
+  security: {
+    argon2: {
+      memoryCost: 65536,
+      timeCost: 3,
+      parallelism: 4
+    }
+  }
+});
+```
+
+`argon2id` is a stronger default choice for many modern deployments, but it is also more operationally opinionated. Tune it based on your environment, expected authentication load, and the hardware profile of the systems doing the hashing.
+
+### Resource-level overrides
+
+Security settings can be overridden per resource and deep-merge with the database-level defaults:
+
+```javascript
+await db.createResource({
+  name: 'admins',
+  attributes: {
+    password: 'password:argon2id|required|min:14'
+  },
+  security: {
+    pepper: process.env.ADMINS_PEPPER,
+    argon2: {
+      memoryCost: 131072,
+      timeCost: 4,
+      parallelism: 4
+    }
+  }
+});
+```
+
+That is useful when one credential domain deserves stricter controls than the rest of the database.
 
 ## Security Best Practices
 

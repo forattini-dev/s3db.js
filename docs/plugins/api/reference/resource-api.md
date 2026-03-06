@@ -8,6 +8,24 @@
 
 ---
 
+## TLDR
+
+- `resource.api` is the canonical place to describe native API behavior for one resource.
+- It governs access (`guard`), response shaping (`views`, `protected`), mutability (`write`, `writable`, `readonly`), native batch create (`bulk.create`), and resource-level custom routes.
+- Native batch support in this runtime currently means bulk create only.
+
+## Table of Contents
+
+- [Overview](#overview)
+- [Full Shape](#full-shape)
+- [Native CRUD Coverage](#native-crud-coverage)
+- [Evaluation Order](#evaluation-order)
+- [Top-Level Keys](#top-level-keys)
+- [Bulk](#bulk)
+- [Resource-Level Custom Routes](#resource-level-custom-routes)
+- [Errors](#errors)
+- [Recommended Structure](#recommended-structure)
+
 ## Overview
 
 `resource.api` is where you attach API behavior directly to a resource.
@@ -443,6 +461,11 @@ api: {
 ## `bulk`
 
 Use `bulk` for native batch routes that still belong to the resource contract.
+
+Current runtime support:
+
+- `bulk.create`: supported
+- `bulk.delete`: not registered as a native route in this API runtime
 
 ### `bulk.create`
 

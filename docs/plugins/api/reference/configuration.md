@@ -775,7 +775,7 @@ middlewares: [
 
 ## 🚀 OIDC Enhancements
 
-The OIDC driver received significant enhancements. See **[OIDC Enhancements Guide](./oidc-enhancements.md)** for complete documentation.
+The OIDC driver received significant enhancements. See **[OIDC Guide](/plugins/api/guides/oidc.md)** for complete documentation.
 
 ### New OIDC Options
 

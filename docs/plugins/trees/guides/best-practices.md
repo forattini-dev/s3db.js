@@ -2,7 +2,11 @@
 
 > **In this guide:** Performance optimization, error handling, troubleshooting, and comprehensive FAQ.
 
-**Navigation:** [← Back to Tree Plugin](/plugins/trees/README.md) | [Configuration](/plugins/trees/guides/configuration.md)
+**Navigation:** [← Tree Plugin](/plugins/tree/README.md) | [Canonical Best Practices](/plugins/tree/guides/best-practices.md)
+
+`/plugins/trees/...` is a legacy alias. Use the canonical page instead:
+
+- [Tree Best Practices](/plugins/tree/guides/best-practices.md)
 
 ---
 

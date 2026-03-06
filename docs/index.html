@@ -26,6 +26,7 @@
 
   <!-- Custom Styles -->
   <link rel="stylesheet" href="./custom.css" />
+  <link rel="stylesheet" href="//cdn.jsdelivr.net/npm/docsify-sidebar-collapse/dist/sidebar.min.css" />
 
   <!-- Progress Bar -->
   <style>
@@ -176,20 +177,16 @@
       },
 
       executeScript: true,
-      sidebarDisplayLevel: 1,
+      sidebarDisplayLevel: 2,
+      longformDocs: {
+        enabled: true,
+        lineThreshold: 500,
+        tocMaxLevel: 3,
+        tocMaxItems: 40,
+        summaryScanLines: 40
+      },
 
       alias: {
-        // More specific sidebar aliases must come first.
-        // This lets complex sections (like the API plugin) own their local navigation
-        // while the rest of the site still falls back to the global sidebar.
-        '/plugins/api/_sidebar.md': '/plugins/api/_sidebar.md',
-        '/plugins/api/.*/_sidebar.md': '/plugins/api/_sidebar.md',
-        '/plugins/identity/_sidebar.md': '/plugins/identity/_sidebar.md',
-        '/plugins/identity/.*/_sidebar.md': '/plugins/identity/_sidebar.md',
-        '/plugins/recon/_sidebar.md': '/plugins/recon/_sidebar.md',
-        '/plugins/recon/.*/_sidebar.md': '/plugins/recon/_sidebar.md',
-        '/plugins/cloud-inventory/_sidebar.md': '/plugins/cloud-inventory/_sidebar.md',
-        '/plugins/cloud-inventory/.*/_sidebar.md': '/plugins/cloud-inventory/_sidebar.md',
         '/.*/_navbar.md': '/_navbar.md',
         '/.*/_sidebar.md': '/_sidebar.md'
       },
@@ -235,6 +232,7 @@
 
   <!-- Core Docsify -->
   <script src="//cdn.jsdelivr.net/npm/docsify@4"></script>
+  <script src="./docsify-plugin-longform.js"></script>
 
   <!-- Plugins -->
   <script src="//cdn.jsdelivr.net/npm/docsify/lib/plugins/search.min.js"></script>
@@ -243,7 +241,6 @@
   <script src="//cdn.jsdelivr.net/npm/docsify-tabs@1/dist/docsify-tabs.min.js"></script>
   <script src="//cdn.jsdelivr.net/npm/docsify-plugin-flexible-alerts"></script>
   <script src="//cdn.jsdelivr.net/npm/docsify/lib/plugins/zoom-image.min.js"></script>
-  <script src="//cdn.jsdelivr.net/npm/docsify/lib/plugins/emoji.min.js"></script>
   <script src="//cdn.jsdelivr.net/npm/docsify-count@latest/dist/countable.min.js"></script>
   <script src="//cdn.jsdelivr.net/npm/docsify-sidebar-collapse/dist/docsify-sidebar-collapse.min.js"></script>
 

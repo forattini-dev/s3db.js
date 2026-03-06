@@ -2,6 +2,29 @@
 
 Partitions enable O(1) lookups instead of O(n) full scans by organizing data into logical groups based on field values.
 
+**Navigation:** [← Core](/core/README.md) | [Resources](/core/resource.md)
+
+---
+
+## TLDR
+
+- Partitions are the indexing model of s3db.js.
+- If a query pattern matters for performance, it probably deserves a partition.
+- The most important partition-aware methods are `listPartition`, `getFromPartition`, `query`, `list`, `count`, and `page`.
+
+## Table of Contents
+
+- [Why Partitions?](#why-partitions)
+- [Basic Usage](#basic-usage)
+- [Which Methods Use Partitions](#which-methods-use-partitions)
+- [Storage Structure](#storage-structure)
+- [Partition Methods](#partition-methods)
+- [Async Partitions](#async-partitions)
+- [Multi-Field Partitions](#multi-field-partitions)
+- [Nested Field Partitions](#nested-field-partitions)
+- [Automatic Partition Updates](#automatic-partition-updates)
+- [Orphaned Partitions](#orphaned-partitions)
+
 ## Why Partitions?
 
 S3 doesn't have indexes. Without partitions, every query scans ALL objects:
@@ -13,6 +36,26 @@ await users.query({ status: 'active' });  // 10,000 users = 10,000 S3 LIST calls
 // With partitions: O(1) - direct lookup
 await users.listPartition('byStatus', { status: 'active' });  // ~1 S3 LIST call
 ```
+
+## Which Methods Use Partitions
+
+You do not need to think about partitions only in `listPartition()`.
+
+| Method | Partition-aware? | How |
+| --- | --- | --- |
+| `listPartition(name, values)` | Yes | Direct partition lookup |
+| `getFromPartition(name, values)` | Yes | Direct partition lookup for one record |
+| `query(filter, options)` | Yes | Can infer a matching partition from exact-match filters |
+| `list({ partition, partitionValues })` | Yes | Explicit partition scope |
+| `listIds({ partition, partitionValues })` | Yes | Explicit partition scope |
+| `count({ partition, partitionValues })` | Yes | Explicit partition scope |
+| `page({ partition, partitionValues })` | Yes | Cursor/page access inside one partition |
+
+The practical rule is simple:
+
+- use direct partition methods when you already know the partition you want
+- use `query()` when you want convenience and can tolerate planner fallback
+- use `page()` when you need scalable pagination inside a known scope
 
 ## Basic Usage
 
@@ -96,6 +139,28 @@ Rules used by the planner:
 
 When no matching partition can be inferred, `query()` falls back to full listing + filtering.
 
+### list / listIds / count / page with explicit partition scope
+
+```javascript
+const ids = await users.listIds({
+  partition: 'byStatus',
+  partitionValues: { status: 'active' }
+});
+
+const total = await users.count({
+  partition: 'byStatus',
+  partitionValues: { status: 'active' }
+});
+
+const page = await users.page({
+  partition: 'byStatus',
+  partitionValues: { status: 'active' },
+  size: 25
+});
+```
+
+This is often the clearest option when your application already knows the exact access path.
+
 ### getFromPartition
 
 Get a specific record from a partition:
@@ -132,6 +197,17 @@ const users = await db.createResource({
 **Trade-offs:**
 - Sync (default): Guaranteed consistency, slower writes
 - Async: Faster writes, eventual consistency for partition queries
+
+Use async partitions for:
+
+- analytics-style workloads
+- append-heavy event streams
+- high-write resources where a tiny indexing delay is acceptable
+
+Keep sync partitions for:
+
+- user-facing transactional lookups
+- resources where immediate read-after-write by partition matters
 
 ## Multi-Field Partitions
 
@@ -218,6 +294,14 @@ const resource = await db.getResource('users', { strictValidation: false });
 await resource.removeOrphanedPartitions();
 await db.uploadMetadataFile();
 ```
+
+## Design Checklist
+
+- start from query patterns, not from field names
+- prefer 1-3 high-value partitions over many speculative ones
+- use composite partitions for common multi-field filters
+- enable `asyncPartitions` only when eventual consistency is acceptable
+- revisit partition design when a resource becomes slow, not only when it becomes large
 
 ## Partition Hooks
 

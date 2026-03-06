@@ -2,7 +2,7 @@
 
 > **Strategies for managing data that exceeds the 2KB S3 User Metadata limit.**
 >
-> **Related:** [Resources](./resources.md) | [S3 Constraints](https://docs.aws.amazon.com/AmazonS3/latest/userguide/UsingMetadata.html)
+> **Related:** [Resources](./resource.md) | [S3 Constraints](https://docs.aws.amazon.com/AmazonS3/latest/userguide/UsingMetadata.html)
 
 ---
 

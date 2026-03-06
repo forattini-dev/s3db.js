@@ -8,6 +8,24 @@
 
 ---
 
+## TLDR
+
+- `resource.api` lets one resource own both its native route policy and its response shape.
+- Keep concerns separate: `guard` decides access, `views` shape payloads, `protected` removes sensitive fields, and `write` controls mutability.
+- Native batch support currently extends that same model to `api.bulk.create`.
+
+## Table of Contents
+
+- [Why This Exists](#why-this-exists)
+- [Mental Model](#mental-model)
+- [Evaluation Order](#evaluation-order)
+- [Start Simple](#start-simple)
+- [Patterns](#pattern-1-public-view--internal-view--hard-secrets)
+- [API Reference Notes](#reference)
+- [Bulk Create](#apibulkcreate)
+- [Troubleshooting](#troubleshooting)
+- [See Also](#see-also)
+
 ## Why This Exists
 
 When the API grows, the hardest part is not exposing CRUD. It is keeping policy close to the resource:
@@ -439,6 +457,11 @@ write: {
 ## `api.bulk.create`
 
 Use `api.bulk.create` when the endpoint is still about one resource, but the client needs to create many records in one request.
+
+Current runtime support is intentionally narrow:
+
+- native bulk create: yes
+- native bulk delete: no
 
 ```javascript
 api: {

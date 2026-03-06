@@ -2,7 +2,11 @@
 
 > **In this guide:** All configuration options, driver selection, resource schemas, and API reference.
 
-**Navigation:** [← Back to Tree Plugin](/plugins/trees/README.md)
+**Navigation:** [← Tree Plugin](/plugins/tree/README.md) | [Canonical Configuration Guide](/plugins/tree/guides/configuration.md)
+
+`/plugins/trees/...` is a legacy alias. Use the canonical page instead:
+
+- [Tree Configuration Guide](/plugins/tree/guides/configuration.md)
 
 ---
 

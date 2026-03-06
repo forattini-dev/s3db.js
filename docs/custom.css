@@ -18,6 +18,75 @@ section.cover.show {
   z-index: 999 !important;
 }
 
+/* Sidebar hierarchy */
+.sidebar-nav {
+  padding-right: 0.5rem;
+}
+
+.sidebar-nav > ul > li {
+  margin-bottom: 0.45rem;
+}
+
+.sidebar-nav li:has(> ul) > a,
+.sidebar-nav li:has(> ul) > p {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  padding: 0.45rem 0.7rem 0.45rem 0.9rem;
+  margin-left: -0.2rem;
+  border-radius: 10px;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+  background: rgba(255, 138, 0, 0.08);
+  border: 1px solid rgba(255, 138, 0, 0.12);
+}
+
+.sidebar-nav li:has(> ul) > p {
+  margin: 0 0 0.2rem;
+}
+
+.sidebar-nav li:has(> ul) > p strong {
+  font-weight: 700;
+}
+
+.sidebar-nav li:has(> ul) > ul {
+  margin-top: 0.3rem;
+  margin-left: 0.15rem;
+  padding-left: 1.15rem;
+  border-left: 1px solid rgba(255, 138, 0, 0.18);
+}
+
+.sidebar-nav li li:has(> ul) > a,
+.sidebar-nav li li:has(> ul) > p {
+  background: rgba(255, 255, 255, 0.03);
+  border-color: rgba(255, 255, 255, 0.08);
+  font-size: 0.96em;
+}
+
+.sidebar-nav li ul li a {
+  border-radius: 8px;
+  padding: 0.28rem 0.55rem 0.28rem 0.15rem;
+}
+
+.sidebar-nav ul:not(.app-sub-sidebar) > li:not(.file)::before {
+  left: -1.12rem !important;
+  top: 0.95rem !important;
+  width: 0.5rem !important;
+  height: 0.5rem !important;
+  border-right: 2px solid rgba(255, 138, 0, 0.85) !important;
+  border-bottom: 2px solid rgba(255, 138, 0, 0.85) !important;
+}
+
+.sidebar-nav .section-link,
+.sidebar-nav strong {
+  font-weight: 700;
+}
+
+.app-name-link img,
+.app-name-link svg {
+  display: block;
+}
+
 /* Custom Scrollbar */
 ::-webkit-scrollbar {
   width: 6px;
