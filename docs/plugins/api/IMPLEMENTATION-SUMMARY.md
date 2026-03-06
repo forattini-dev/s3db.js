@@ -469,7 +469,7 @@ Economia: 8 segundos!
 
 ## ✅ Próximos Passos (Opcional)
 
-### Para mrt-shortner
+### Para uma plataforma de redirecionamento
 1. Substituir rotas legadas por ApiApp
 2. Adicionar guards (isAuthenticated, isAdmin)
 3. Usar CRUD helper para recursos

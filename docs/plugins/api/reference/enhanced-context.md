@@ -711,7 +711,7 @@ await db.usePlugin(new ApiPlugin({
 
 ## 🎯 Complete Examples
 
-### Example 1: URL Shortener
+### Example 1: Redirect Service
 
 ```javascript
 routes: {

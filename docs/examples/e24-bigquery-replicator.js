@@ -45,26 +45,26 @@ async function main() {
           resources: {
             // Users: replicate all operations to users table
             users: [
-              { actions: ['insert', 'update', 'delete'], table: 'mrt-shortner__users' },
+              { actions: ['insert', 'update', 'delete'], table: 'link-platform__users' },
             ],
             
             // URLs: replicate only inserts to two different tables
             urls: [
-              { actions: ['insert'], table: 'mrt-shortner__urls' },
-              { actions: ['insert'], table: 'mrt-shortner__urls_v2' },
+              { actions: ['insert'], table: 'link-platform__urls' },
+              { actions: ['insert'], table: 'link-platform__urls_v2' },
             ],
             
             // Clicks: short form - just the table name (insert only)
-            clicks: 'mrt-shortner__clicks',
+            clicks: 'link-platform__clicks',
             
             // Views: short form
-            views: 'mrt-shortner__views',
+            views: 'link-platform__views',
             
             // Shares: short form
-            shares: 'mrt-shortner__shares',
+            shares: 'link-platform__shares',
             
             // Scans: short form
-            scans: 'mrt-shortner__scans',
+            scans: 'link-platform__scans',
           }
         }
       ],
@@ -254,13 +254,13 @@ async function main() {
 
   console.log('\n🎉 BigQuery Replicator Example Completed!');
   console.log('\n📋 Summary of what was replicated:');
-  console.log('- users: insert, update, delete → mrt-shortner__users');
-  console.log('- urls: insert → mrt-shortner__urls AND mrt-shortner__urls_v2');
-  console.log('- clicks: insert → mrt-shortner__clicks');
-  console.log('- views: insert → mrt-shortner__views');
-  console.log('- shares: insert → mrt-shortner__shares');
-  console.log('- scans: insert → mrt-shortner__scans');
-  console.log('- All operations logged to: mrt-shortner__replicator_log');
+  console.log('- users: insert, update, delete → link-platform__users');
+  console.log('- urls: insert → link-platform__urls AND link-platform__urls_v2');
+  console.log('- clicks: insert → link-platform__clicks');
+  console.log('- views: insert → link-platform__views');
+  console.log('- shares: insert → link-platform__shares');
+  console.log('- scans: insert → link-platform__scans');
+  console.log('- All operations logged to: link-platform__replicator_log');
 }
 
 // Error handling

@@ -159,7 +159,7 @@ Need scenario-centric guidance? Read [use-cases.md](./use-cases.md). Looking for
 - `e50-smtp-relay.js` - Uses four SMTP providers (SES, SendGrid, Mailgun, Postmark) with automatic retries and
   provider fallbacks.
 - `e51-eventual-consistency-url-shortener.js` - Showcase service using the eventual consistency plugin to serve
-  short URLs resiliently.
+  redirectable links resiliently.
 - `e51-incremental-ids.js` - Implements incremental IDs when you need ordered sequences instead of random GUIDs.
 - `e51-recon-full-scan.js` - Full-stack Recon scan that enumerates namespaces, resources, and behavior deltas.
 - `e51-smtp-server.js` - Embedded SMTP server for receiving mail locally during tests.
@@ -263,8 +263,8 @@ Need scenario-centric guidance? Read [use-cases.md](./use-cases.md). Looking for
 - `e82-oidc-web-app.js` - Front-end friendly example showing PKCE login flows and token refresh logic.
 - `e83-api-oidc-dual-auth.js` - API that supports both API keys and OIDC bearer tokens without duplicating logic.
 - `e83-path-based-auth.js` - Maps URL paths to auth strategies so you can mix and match protection levels.
-- `e84-mrt-shortner-complete-replacement.js` - Full platform example replacing the MRT shortener stack using
-  s3db.js end to end.
+- `e84-legacy-redirect-platform-replacement.js` - Full platform example replacing a legacy Express redirect platform
+  with s3db.js end to end.
 - `e84-static-files.js` - Serves static assets alongside the API plugin, useful for admin portals or docs.
 - `e85-api-path-based-auth.js` - Deep dive on enforcing auth using path parameters, ideal for multi-tenant APIs.
 - `e85-identity-whitelabel.js` - White-labeled identity UX with custom themes, logos, and domain mapping.

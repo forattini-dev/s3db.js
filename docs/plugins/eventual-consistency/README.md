@@ -21,11 +21,14 @@ await wallets.add('w1', 'balance', 100);  // Creates transaction and consolidate
 - Pre-calculated analytics (hour → day → week → month)
 - Optimized partitions (O(1) query by originalId + applied status)
 - Nested fields support with dot notation
+- Raw event history and chart-ready rollups from the same source of truth
+- Coordinator/ticket mode for distributed background consolidation
 
 **When to use:**
 - Balances/wallets (sync mode)
 - Counters/metrics (async mode)
 - Dashboards with pre-calculated analytics
+- Systems that need both current numeric value and auditable history
 
 **Access:**
 ```javascript
@@ -35,6 +38,7 @@ console.log(wallet.balance); // 100
 // Analytics
 const plugin = db.plugins.find(p => p instanceof EventualConsistencyPlugin);
 const stats = await plugin.getLastNDays('wallets', 'balance', 7);
+const history = await plugin.getRawEvents('wallets', 'balance', { recordId: 'w1' });
 ```
 
 ---
@@ -92,6 +96,8 @@ console.log(wallet.balance); // 50
 - Distributed locking (PluginStorage)
 - Cohort partitioning
 - Garbage collection
+- Ticket resources for coordinator mode
+- Raw event querying helpers
 
 ---
 
@@ -100,6 +106,7 @@ console.log(wallet.balance); // 50
 | Guide | Description |
 |-------|-------------|
 | [Configuration](/plugins/eventual-consistency/guides/configuration.md) | All options, consolidation, analytics, API reference |
+| [Analytics & History](/plugins/eventual-consistency/guides/analytics-history.md) | Analytics resources, raw history, chart queries, rollups, gap-filling |
 | [Usage Patterns](/plugins/eventual-consistency/guides/usage-patterns.md) | Wallets, counters, analytics, nested fields |
 | [Best Practices](/plugins/eventual-consistency/guides/best-practices.md) | Troubleshooting, events, FAQ |
 
@@ -112,11 +119,12 @@ console.log(wallet.balance); // 50
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
 | `resources` | Object | **Required** | Map of resource names to field arrays |
-| `consolidation.mode` | String | `'async'` | `'sync'` or `'async'` |
-| `consolidation.auto` | Boolean | `true` | Auto-consolidation |
-| `consolidation.interval` | Number | `300` | Interval in seconds |
-| `analytics.enabled` | Boolean | `false` | Enable analytics |
-| `analytics.periods` | Array | `['hour', 'day', 'month']` | Time periods |
+| `mode` | String | `'async'` | Consolidation mode (`'sync'` or `'async'`) |
+| `autoConsolidate` | Boolean | `true` | Auto-consolidation enabled |
+| `consolidationInterval` | Number | `60` | Interval in seconds |
+| `enableAnalytics` | Boolean | `false` | Enable analytics resource + rollups |
+| `enableCoordinator` | Boolean | `true` | Enable ticket/coordinator workflow |
+| `cohort.timezone` | String | `'UTC'` | Cohort bucketing timezone |
 
 ### Resource Methods
 
@@ -143,6 +151,20 @@ await plugin.getDayByHour('resource', 'field', '2025-10-09');
 await plugin.getWeekByDay('resource', 'field', '2025-W42');
 await plugin.getMonthByDay('resource', 'field', '2025-10');
 await plugin.getYearByMonth('resource', 'field', 2025);
+
+// Raw event history
+await plugin.getRawEvents('resource', 'field', {
+  recordId: 'abc123',
+  startDate: '2025-10-01',
+  endDate: '2025-10-31'
+});
+
+// Top records in a cohort
+await plugin.getTopRecords('resource', 'field', {
+  period: 'day',
+  date: '2025-10-09',
+  limit: 10
+});
 ```
 
 ### Sync vs Async Mode
@@ -157,6 +179,7 @@ await plugin.getYearByMonth('resource', 'field', 2025);
 For each tracked field:
 - `plg_{resource}_tx_{field}` - Transaction log
 - `plg_{resource}_an_{field}` - Analytics (if enabled)
+- `plg_{resource}_{field}_tickets` - Coordinator work queue (if enabled)
 
 ---
 
@@ -188,6 +211,11 @@ await wallets.consolidate('wallet-1', 'balance');
 Creates aggregations by period:
 - Metrics: count, sum, avg, min, max
 - Periods: hour, day, week, month
+- Plus record-level breakdowns and raw event history queries from the transaction log
+
+### 4. History and replay
+
+The transaction log remains the audit source of truth. Analytics are derived from applied transactions, and `recalculate()` can rebuild the consolidated value from history when needed.
 
 ---
 
@@ -201,6 +229,7 @@ Creates aggregations by period:
 
 ## See Also
 
+- [Analytics & History](/plugins/eventual-consistency/guides/analytics-history.md) - Raw events, cohorts, chart-ready queries, rollups
 - [Replicator Plugin](/plugins/replicator/README.md) - Replicate to other databases
 - [Audit Plugin](/plugins/audit/README.md) - Full audit trail
 - [Cache Plugin](/plugins/cache/README.md) - Cache consolidated values

@@ -7,7 +7,7 @@
  * - Access to resources, param(), query(), and all context helpers
  * - Row-level security for multi-tenant applications
  *
- * Use Case: URL shortener where users can only see/edit their own URLs
+ * Use Case: redirect service where users can only see/edit their own links
  *
  * Run: node docs/examples/e90-guards-with-partitions.js
  */

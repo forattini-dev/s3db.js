@@ -68,7 +68,7 @@ const attempts = await db.createResource({
 
 // Initialize OpenGraph Helper
 const ogHelper = new OpenGraphHelper({
-  siteName: 'URL Shortener',
+  siteName: 'Link Redirect Service',
   locale: 'pt_BR',
   twitterSite: '@example',
   defaultImage: '/static/default-og.png'

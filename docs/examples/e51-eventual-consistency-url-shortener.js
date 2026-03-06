@@ -1,15 +1,15 @@
 /**
- * EventualConsistencyPlugin - URL Shortener Example
+ * EventualConsistencyPlugin - Link Redirect Analytics Example
  *
  * Este exemplo demonstra o uso correto do plugin para um
- * sistema de URL shortener com contadores de clicks.
+ * sistema de redirecionamento de links com contadores de clicks.
  */
 
 import S3db from '../src/database.class.js';
 import { EventualConsistencyPlugin } from '../src/plugins/eventual-consistency/index.js';
 
 async function main() {
-  console.log('🚀 EventualConsistency Plugin - URL Shortener Example\n');
+  console.log('🚀 EventualConsistency Plugin - Link Redirect Analytics Example\n');
 
   // 1. Conectar ao banco
   const db = new S3db({

@@ -743,7 +743,7 @@ pathRules: [
 
 ## Common Patterns
 
-### URL Shortener (Dual Auth)
+### Redirect Service (Dual Auth)
 
 ```javascript
 auth: {

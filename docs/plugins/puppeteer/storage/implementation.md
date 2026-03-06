@@ -317,10 +317,10 @@ Possible future additions:
 
 ## References
 
-- S3DB Behavior Types: `/home/ff/work/martech/shortner/s3db.js/docs/behavior-types.md`
-- S3DB Partitioning: `/home/ff/work/martech/shortner/s3db.js/docs/partitions.md`
-- PuppeteerPlugin Main Docs: `/home/ff/work/martech/shortner/s3db.js/docs/plugins/puppeteer/`
-- NetworkMonitor Pattern: `/home/ff/work/martech/shortner/s3db.js/src/plugins/puppeteer/network-monitor.js`
+- S3DB Behavior Types: `/docs/core/behaviors.md`
+- S3DB Partitioning: `/docs/core/partitions.md`
+- PuppeteerPlugin Main Docs: `/docs/plugins/puppeteer/README.md`
+- NetworkMonitor Pattern: `/src/plugins/puppeteer/network-monitor.js`
 
 ---
 

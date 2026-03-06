@@ -1,7 +1,7 @@
 /**
- * URL Click Tracking with EventualConsistencyPlugin
+ * Link Click Tracking with EventualConsistencyPlugin
  *
- * Real-world example: URL shortener with click tracking
+ * Real-world example: redirect service with click tracking
  *
  * Demonstrates:
  * - Using hooks to automatically increment counters
@@ -233,7 +233,7 @@ async function main() {
   console.log('═'.repeat(70) + '\n');
 
   console.log(`
-// Your URL shortener redirect endpoint:
+// Your redirect endpoint:
 app.get('/:shortCode', async (req, res) => {
   const { shortCode } = req.params;
 
@@ -308,7 +308,7 @@ Key Takeaways:
    → Analytics pre-calculated for dashboards
 
 Perfect for:
-- URL shorteners
+- Redirect services
 - Link tracking
 - Ad click counting
 - API rate limiting

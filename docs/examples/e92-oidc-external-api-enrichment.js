@@ -7,7 +7,7 @@
  * Use Case: Fetch employee data from People API (HR system) when user
  * logs in via Azure AD/Entra ID for the first time.
  *
- * Pattern used by mrt-shortner to get costCenter, department, etc.
+ * Pattern used by internal apps to get costCenter, department, etc.
  *
  * Run: node docs/examples/e92-oidc-external-api-enrichment.js
  */
@@ -346,7 +346,7 @@ console.log('  - Add timeout to prevent slow logins');
 console.log('');
 
 console.log('📁 Real-World Usage:');
-console.log('  - mrt-shortner: Fetch costCenter from Stone People API');
+console.log('  - Redirect service: Fetch costCenter from Stone People API');
 console.log('  - Employee portals: Sync org chart data');
 console.log('  - B2B SaaS: Enrich with CRM data (Salesforce, HubSpot)');
 console.log('  - Internal tools: Fetch permissions from LDAP');

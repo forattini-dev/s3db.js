@@ -3,7 +3,7 @@
  *
  * Demonstrates OpenGraphHelper class for generating og: and twitter: meta tags.
  *
- * Use Case: URL shortener redirect pages with rich social media previews
+ * Use Case: redirect pages with rich social media previews
  *
  * Run: node docs/examples/e91-api-opengraph-helper.js
  */

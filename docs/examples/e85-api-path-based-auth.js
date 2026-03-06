@@ -11,7 +11,7 @@
  * - Per-path priority configuration
  * - Exact matches > Parameterized > Wildcards
  *
- * Use Case: mrt-shortner Architecture
+ * Use Case: Redirect platform architecture
  * - /app/** → ONLY OIDC (browser-based)
  * - /api/v1/** → Basic OR OIDC (Basic has priority)
  * - /health → Public

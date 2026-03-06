@@ -1,8 +1,15 @@
 # Configuration
 
-> **In this guide:** All configuration options, consolidation settings, analytics configuration, and advanced options.
+This guide documents the configuration surface of the current EventualConsistencyPlugin runtime. It covers the real top-level options used by the code today, the nested compatibility aliases that still work, and the settings that matter for analytics, coordinator mode, tickets, and retention.
 
-**Navigation:** [← Back to EventualConsistency Plugin](/plugins/eventual-consistency/README.md)
+**Navigation:** [← Back to EventualConsistency Plugin](/plugins/eventual-consistency/README.md) | [Analytics & History](/plugins/eventual-consistency/guides/analytics-history.md)
+
+## TLDR
+
+- `resources` is the only required option.
+- The runtime normalizes several top-level options such as `mode`, `autoConsolidate`, `consolidationInterval`, `enableAnalytics`, and `enableCoordinator`.
+- Nested aliases like `consolidation.mode` and `analytics.enabled` still work, but the top-level names are clearer as canonical documentation.
+- If you care about dashboards, history retention, or distributed workers, read the analytics/coordinator sections carefully.
 
 ---
 
@@ -10,19 +17,65 @@
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
-| `resources` | Object | **Required** | Map of resource names to array of field names to track |
-| `logLevel` | Boolean | `true` | Enable detailed logging |
+| `resources` | `Record<string, (string \| FieldConfig)[]>` or `ResourceConfig[]` | **Required** | Resource-to-field mapping |
+| `mode` | `sync \| async` | `'async'` | Consolidation mode |
+| `autoConsolidate` | Boolean | `true` | Enable automatic consolidation |
+| `consolidationInterval` | Number | `60` | Consolidation interval in seconds |
+| `consolidationWindow` | Number | `24` | Window in hours for pending transaction scans |
+| `transactionRetention` | Number | `7` | Retention days for transaction history |
+| `gcInterval` | Number | `3600` | Garbage collection interval in seconds |
+| `enableAnalytics` | Boolean | `false` | Enable analytics resources and rollups |
+| `enableCoordinator` | Boolean | `true` | Enable coordinator/ticket workflow |
 | `debug` | Boolean | `false` | Enable additional debug mode |
+| `logLevel` | String | inherited | Plugin log level |
 
 **Example:**
 ```javascript
 new EventualConsistencyPlugin({
   resources: {
     wallets: ['balance'],
-    users: ['points', 'credits']
-  }
+    users: [
+      'points',
+      { field: 'credits', initialValue: 100 }
+    ]
+  },
+  mode: 'sync',
+  autoConsolidate: true,
+  enableAnalytics: true
 })
 ```
+
+---
+
+## Resource Field Configuration
+
+Each field can be a string or a configuration object.
+
+```javascript
+new EventualConsistencyPlugin({
+  resources: {
+    wallets: [
+      'balance',
+      {
+        field: 'availableCredit',
+        initialValue: 0,
+        reducer: (current, incoming) => current + incoming,
+        cohort: {
+          timezone: 'America/Sao_Paulo'
+        }
+      }
+    ]
+  }
+});
+```
+
+| Field option | Description |
+| --- | --- |
+| `field` | Field name or canonical tracked field |
+| `fieldPath` | Optional nested path for dot-notation usage |
+| `initialValue` | Initial numeric baseline |
+| `reducer` | Custom reducer for consolidation |
+| `cohort` | Per-field cohort override |
 
 ---
 
@@ -30,24 +83,19 @@ new EventualConsistencyPlugin({
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
-| `consolidation.mode` | String | `'async'` | `'sync'` (immediate) or `'async'` (eventual) |
-| `consolidation.auto` | Boolean | `true` | Enable auto-consolidation |
-| `consolidation.interval` | Number | `300` | Auto-consolidation interval in seconds |
-| `consolidation.window` | Number | `24` | Consolidation window in hours |
-| `consolidation.concurrency` | Number | `5` | Number of parallel consolidations |
-| `consolidation.markAppliedConcurrency` | Number | `50` | Concurrency for marking transactions as applied |
+| `mode` | String | `'async'` | `'sync'` (immediate) or `'async'` (eventual) |
+| `autoConsolidate` | Boolean | `true` | Auto-consolidation |
+| `consolidationInterval` | Number | `60` | Auto-consolidation interval in seconds |
+| `consolidationWindow` | Number | `24` | Scan window in hours |
 
 **Example:**
 ```javascript
 new EventualConsistencyPlugin({
   resources: { wallets: ['balance'] },
-  consolidation: {
-    mode: 'sync',      // Immediate consolidation
-    auto: true,        // Auto-consolidate
-    interval: 300,     // Every 5 minutes
-    window: 24,        // Last 24 hours
-    concurrency: 10    // 10 parallel consolidations
-  }
+  mode: 'sync',
+  autoConsolidate: true,
+  consolidationInterval: 300,
+  consolidationWindow: 24
 })
 ```
 
@@ -56,56 +104,91 @@ new EventualConsistencyPlugin({
 ## Analytics Options
 
 | Parameter | Type | Default | Description |
-|-----------|------|---------|-------------|
-| `analytics.enabled` | Boolean | `false` | Enable pre-calculated analytics |
-| `analytics.periods` | Array | `['hour', 'day', 'month']` | Time periods: `'hour'`, `'day'`, `'week'`, `'month'` |
-| `analytics.metrics` | Array | `['count', 'sum', 'avg', 'min', 'max']` | Metrics to calculate |
+| --- | --- | --- | --- |
+| `enableAnalytics` | Boolean | `false` | Enable analytics resources |
+| `analyticsConfig.rollupStrategy` | `incremental \| full` | `'incremental'` | How higher periods are rolled up |
+| `analyticsConfig.retentionDays` | Number | `365` | Analytics retention horizon |
+| `cohort.timezone` | String | `'UTC'` | Cohort bucketing timezone |
+| `cohort.granularity` | `hour \| day \| week \| month` | `'hour'` | Default cohort granularity |
 
 **Example:**
 ```javascript
 new EventualConsistencyPlugin({
   resources: { wallets: ['balance'] },
-  analytics: {
-    enabled: true,
-    periods: ['hour', 'day', 'week', 'month'],
-    metrics: ['count', 'sum', 'avg', 'min', 'max']
+  enableAnalytics: true,
+  analyticsConfig: {
+    rollupStrategy: 'incremental',
+    retentionDays: 365
+  },
+  cohort: {
+    timezone: 'UTC'
+  }
+})
+```
+
+Read [Analytics & History](/plugins/eventual-consistency/guides/analytics-history.md) for the behavior of rollups, raw events, chart queries, and gap filling.
+
+---
+
+## Coordinator, Tickets, and Worker Options
+
+| Parameter | Type | Default | Description |
+| --- | --- | --- | --- |
+| `enableCoordinator` | Boolean | `true` | Enable distributed coordinator mode |
+| `ticketBatchSize` | Number | `100` | Number of records per ticket creation batch |
+| `ticketTTL` | Number | `300000` | Ticket TTL in milliseconds |
+| `workerClaimLimit` | Number | `1` | How many tickets a worker claims at once |
+| `ticketMaxRetries` | Number | `3` | Ticket retry attempts |
+| `ticketRetryDelayMs` | Number | `1000` | Delay before retry |
+| `ticketScanPageSize` | Number | `100` | Page size when scanning tickets |
+| `heartbeatInterval` | Number | `5000` | Coordinator heartbeat interval |
+| `heartbeatTTL` | Number | `3` | Coordinator heartbeat TTL multiplier |
+| `epochDuration` | Number | `300000` | Coordinator epoch duration |
+| `coordinatorWorkInterval` | Number | `60000` | Leader work interval |
+| `workerInterval` | Number | `10000` | Worker loop interval |
+
+**Example:**
+```javascript
+new EventualConsistencyPlugin({
+  resources: { wallets: ['balance'] },
+  enableCoordinator: true,
+  ticketBatchSize: 200,
+  workerClaimLimit: 2,
+  ticketMaxRetries: 5,
+  heartbeatInterval: 3000,
+  coordinator: {
+    ticketBatchSize: 200,
+    workerClaimLimit: 2
   }
 })
 ```
 
 ---
 
-## Advanced Options
+## Retention and Cleanup Options
 
 | Parameter | Type | Default | Description |
-|-----------|------|---------|-------------|
-| `locks.timeout` | Number | `300` | Lock timeout in seconds |
-| `garbageCollection.enabled` | Boolean | `true` | Enable garbage collection |
-| `garbageCollection.interval` | Number | `86400` | GC interval in seconds (24 hours) |
-| `garbageCollection.retention` | Number | `30` | Retention days for applied transactions |
-| `checkpoints.enabled` | Boolean | `true` | Enable checkpoints for recovery |
-| `checkpoints.strategy` | String | `'hourly'` | Checkpoint strategy |
-| `checkpoints.retention` | Number | `90` | Checkpoint retention in days |
-| `cohort.timezone` | String | `'UTC'` | Timezone for analytics |
+| --- | --- | --- | --- |
+| `transactionRetention` | Number | `7` | Days to retain old transaction history |
+| `gcInterval` | Number | `3600` | Garbage collection interval in seconds |
+| `analyticsConfig.retentionDays` | Number | `365` | Analytics retention horizon |
 
-**Example:**
-```javascript
-new EventualConsistencyPlugin({
-  resources: { wallets: ['balance'] },
-  locks: { timeout: 600 },
-  garbageCollection: {
-    enabled: true,
-    interval: 43200,   // 12 hours
-    retention: 60      // 60 days
-  },
-  checkpoints: {
-    enabled: true,
-    strategy: 'hourly',
-    retention: 180     // 180 days
-  },
-  cohort: { timezone: 'America/New_York' }
-})
-```
+These options influence how much history remains available for audit, replay, and dashboard backfills.
+
+---
+
+## Compatibility Aliases
+
+The current runtime still accepts some nested aliases. They are useful for backwards compatibility, but the top-level options above are the clearer source of truth.
+
+| Alias | Canonical option |
+| --- | --- |
+| `consolidation.mode` | `mode` |
+| `consolidation.auto` / `consolidation.autoConsolidate` | `autoConsolidate` |
+| `analytics.enabled` | `enableAnalytics` |
+| `coordinator.enableCoordinator` | `enableCoordinator` |
+| `coordinator.ticketBatchSize` | `ticketBatchSize` |
+| `coordinator.workerClaimLimit` | `workerClaimLimit` |
 
 ---
 
@@ -113,38 +196,49 @@ new EventualConsistencyPlugin({
 
 ```javascript
 const plugin = new EventualConsistencyPlugin({
-  // Required
   resources: {
     wallets: ['balance'],
-    users: ['points', 'credits']
+    urls: [
+      'clicks',
+      {
+        field: 'views',
+        initialValue: 0,
+        cohort: { timezone: 'America/Sao_Paulo' }
+      }
+    ]
   },
 
-  // Consolidation
-  consolidation: {
-    mode: 'async',
-    auto: true,
-    interval: 300,
-    window: 24,
-    concurrency: 5,
-    markAppliedConcurrency: 50
+  mode: 'async',
+  autoConsolidate: true,
+  consolidationInterval: 60,
+  consolidationWindow: 24,
+  transactionRetention: 14,
+  gcInterval: 3600,
+
+  enableAnalytics: true,
+  analyticsConfig: {
+    rollupStrategy: 'incremental',
+    retentionDays: 365
+  },
+  cohort: {
+    timezone: 'UTC',
+    granularity: 'hour'
   },
 
-  // Analytics
-  analytics: {
-    enabled: true,
-    periods: ['hour', 'day', 'week', 'month'],
-    metrics: ['count', 'sum', 'avg', 'min', 'max']
-  },
+  enableCoordinator: true,
+  ticketBatchSize: 100,
+  workerClaimLimit: 1,
+  ticketMaxRetries: 3,
+  ticketRetryDelayMs: 1000,
+  ticketScanPageSize: 100,
+  heartbeatInterval: 5000,
+  heartbeatTTL: 3,
+  epochDuration: 300000,
+  coordinatorWorkInterval: 60000,
+  workerInterval: 10000,
 
-  // Debug
   logLevel: 'debug',
-  debug: false,
-
-  // Advanced
-  locks: { timeout: 300 },
-  garbageCollection: { enabled: true, interval: 86400, retention: 30 },
-  checkpoints: { enabled: true, strategy: 'hourly', retention: 90 },
-  cohort: { timezone: 'UTC' }
+  debug: false
 });
 
 await db.usePlugin(plugin);
@@ -180,6 +274,11 @@ await resource.getConsolidatedValue(id, field, options)
 
 // Recalculate from scratch
 await resource.recalculate(id, field)
+
+// Analytics
+await plugin.getAnalytics('wallets', 'balance', { period: 'day', startDate: '2025-10-01', endDate: '2025-10-31' })
+await plugin.getRawEvents('wallets', 'balance', { recordId: 'w1' })
+await plugin.getTopRecords('wallets', 'balance', { period: 'day', date: '2025-10-09' })
 ```
 
 ---
@@ -192,9 +291,12 @@ For each field, the plugin creates:
    - Attributes: `id`, `originalId`, `field`, `value`, `operation`, `timestamp`, `cohortDate`, `cohortHour`, `cohortWeek`, `cohortMonth`, `applied`
    - Partitions: `byOriginalIdAndApplied` (optimized consolidation), `byHour`, `byDay`, `byWeek`, `byMonth`
 
-2. **Locks via PluginStorage** - Distributed locks with automatic TTL
+2. **`plg_{resource}_{field}_tickets`** - Coordinator ticket queue (if coordinator mode enabled)
 
-3. **`plg_{resource}_an_{field}`** - Analytics (if enabled)
+3. **Locks via PluginStorage** - Distributed locks with automatic TTL
+
+4. **`plg_{resource}_an_{field}`** - Analytics (if enabled)
+   - Partitions: `byPeriod`, `byPeriodCohort`, `byFieldPeriod`
    - Periods: `hour`, `day`, `week`, `month`
 
 ---
@@ -223,5 +325,6 @@ For each field, the plugin creates:
 
 ## See Also
 
+- [Analytics & History](/plugins/eventual-consistency/guides/analytics-history.md) - Rollups, raw events, chart queries, gap filling
 - [Usage Patterns](/plugins/eventual-consistency/guides/usage-patterns.md) - Examples and use cases
 - [Best Practices](/plugins/eventual-consistency/guides/best-practices.md) - Troubleshooting and FAQ

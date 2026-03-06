@@ -246,7 +246,7 @@ const projects = await db.createResource({
 **Key wins:** O(1) tenant isolation • Zero SQL • Impossible to leak data
 **[→ Full guide](/plugins/api/guides/guards.md#multi-tenancy)**
 
-### URL Shortener
+### Redirect Service
 
 ```javascript
 await db.usePlugin(new ApiPlugin({

@@ -6,7 +6,7 @@
  * - Path-based OIDC protection (/app/** requires OIDC, /api/** allows Basic)
  * - beforeCreateUser hook for external API integration (People API simulation)
  * - beforeUpdateUser hook for refreshing external data on login
- * - Complete mrt-shortner architecture replacement example
+ * - Complete legacy Express redirect-service replacement example
  */
 
 import { Database } from '../../src/database.class.js';
@@ -45,7 +45,7 @@ const mockPeopleAPI = {
   }
 };
 
-// Generate API token (similar to mrt-shortner)
+// Generate API token for the service integration flow
 function generateApiToken() {
   const env = process.env.NODE_ENV || 'local';
   const random = idGenerator({ size: 32 });
@@ -229,7 +229,7 @@ async function main() {
       }
     },
 
-    // Custom routes (like mrt-shortner dynamic controller)
+    // Custom routes similar to a legacy dynamic redirect controller
     routes: {
       // App page (OIDC only - protected by protectedPaths)
       'GET /app': async (c) => {
@@ -366,7 +366,7 @@ async function main() {
   console.log('Protected Paths: ["/app/**", "/dashboard/**"]');
   console.log('Public Paths: ["/health", "/api/**" with Basic Auth]');
 
-  console.log('\n💡 Tip: This architecture can replace mrt-shortner Express setup!');
+  console.log('\n💡 Tip: This architecture can replace a legacy Express redirect setup!');
   console.log('   - OIDC for /app (browser-based)');
   console.log('   - Basic Auth for /api (token-based)');
   console.log('   - External API integration via hooks');

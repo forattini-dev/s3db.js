@@ -2,7 +2,7 @@
 
 > **In this guide:** Examples for wallets, counters, analytics, and nested fields.
 
-**Navigation:** [← Back to EventualConsistency Plugin](/plugins/eventual-consistency/README.md) | [Configuration](/plugins/eventual-consistency/guides/configuration.md)
+**Navigation:** [← Back to EventualConsistency Plugin](/plugins/eventual-consistency/README.md) | [Configuration](/plugins/eventual-consistency/guides/configuration.md) | [Analytics & History](/plugins/eventual-consistency/guides/analytics-history.md)
 
 ---
 
@@ -69,7 +69,7 @@ console.log(user.remainingAttempts);   // 1
 
 ---
 
-## URL Shortener (Async Mode + Analytics)
+## Link Tracking Service (Async Mode + Analytics)
 
 For high-volume metrics with analytics dashboards:
 
@@ -108,6 +108,14 @@ clicks.addHook('afterInsert', async ({ record }) => {
 // Analytics
 const plugin = db.plugins.find(p => p instanceof EventualConsistencyPlugin);
 const stats = await plugin.getLastNDays('urls', 'clicks', 7);
+const topUrls = await plugin.getTopRecords('urls', 'clicks', {
+  period: 'day',
+  date: new Date().toISOString().substring(0, 10),
+  limit: 10
+});
+const rawHistory = await plugin.getRawEvents('urls', 'clicks', {
+  recordId: 'short-url-123'
+});
 ```
 
 ---
@@ -231,6 +239,13 @@ await plugin.getTopRecords('resource', 'field', {
   limit: 10,
   sortBy: 'transactionCount'  // or 'totalValue'
 });
+
+// Raw event history
+await plugin.getRawEvents('resource', 'field', {
+  recordId: 'abc123',
+  startDate: '2025-10-01',
+  endDate: '2025-10-31'
+});
 ```
 
 ### Gap Filling
@@ -300,4 +315,5 @@ All functions return data ready for charting:
 ## See Also
 
 - [Configuration](/plugins/eventual-consistency/guides/configuration.md) - All options and API reference
+- [Analytics & History](/plugins/eventual-consistency/guides/analytics-history.md) - Rollups, raw events, chart queries
 - [Best Practices](/plugins/eventual-consistency/guides/best-practices.md) - Troubleshooting and FAQ

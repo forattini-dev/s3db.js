@@ -44,7 +44,7 @@ find a runnable script, understand what it demonstrates, and why it matters.
 
 ### Eventual consistency, state machines & messaging
 - `e50-eventual-consistency-simple.js`, `e51-eventual-consistency-url-shortener.js`, `e52-eventual-consistency-analytics.js`,
-  `e53-eventual-consistency-url-tracking.js` - queue-backed workloads and reconciliation loops.
+  `e53-eventual-consistency-url-tracking.js` - queue-backed workloads, redirect analytics, and reconciliation loops.
 - `e51-state-machine-event-triggers.js`, `e52-state-machine-resource-api.js`, `e76-state-machine-sync-events.js` -
   workflow/state-machine orchestration.
 - `e50-smtp-relay.js`, `e51-smtp-server.js`, `e52-smtp-templates.js`, `e53-smtp-webhooks.js` - outbound notifications,

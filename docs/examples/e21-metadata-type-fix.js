@@ -31,7 +31,7 @@ async function main() {
 
   // Test data with various types that previously caused issues
   const testData = {
-    link: 'http://localhost:9001/browser/shortner',
+    link: 'http://localhost:9001/browser/redirects',
     getFingerprints: true, // boolean
     webpush: { 
       enabled: true, 

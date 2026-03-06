@@ -2,7 +2,7 @@
 
 > **In this guide:** Recommendations, troubleshooting, events, and FAQ.
 
-**Navigation:** [← Back to EventualConsistency Plugin](/plugins/eventual-consistency/README.md) | [Configuration](/plugins/eventual-consistency/guides/configuration.md)
+**Navigation:** [← Back to EventualConsistency Plugin](/plugins/eventual-consistency/README.md) | [Configuration](/plugins/eventual-consistency/guides/configuration.md) | [Analytics & History](/plugins/eventual-consistency/guides/analytics-history.md)
 
 ---
 
@@ -13,6 +13,7 @@
 - Use **sync mode** for critical data (money, inventory)
 - Use **async mode** for metrics and counters
 - Enable **analytics** for dashboards
+- Treat transaction retention and analytics retention as product decisions, not defaults you never revisit
 - Use **hooks** for auto-increment
 - Always **create the record first** before incrementing
 - Configure `asyncPartitions: true` on resource (70-100% faster)
@@ -83,8 +84,21 @@ await db.createResource({
 // Check configuration
 console.log(plugin.config.enableAnalytics);
 
+// Check analytics retention / rollups
+console.log(plugin.config.analyticsConfig);
+
 // Check resource created
 console.log(db.resources.plg_wallets_an_balance);
+```
+
+### Need to inspect full history instead of rollups
+
+```javascript
+const rawEvents = await plugin.getRawEvents('wallets', 'balance', {
+  recordId: 'w1'
+});
+
+console.log(rawEvents);
 ```
 
 ---
@@ -256,6 +270,13 @@ await users.add('user-123', 'profile.stats.totalPosts', 1);
 - Week analytics: ~52 records per year per field
 - Month analytics: ~12 records per year per field
 
+**Q: What if I need both the raw audit trail and dashboards?**
+**A:** That is exactly the intended model:
+- raw transactions live in `plg_{resource}_tx_{field}`
+- pre-aggregated dashboards live in `plg_{resource}_an_{field}`
+- `getRawEvents()` reads the first layer
+- `getAnalytics()` and the convenience helpers read the second
+
 ### For AI Agents
 
 **Q: What problem does this plugin solve?**
@@ -308,3 +329,4 @@ new EventualConsistencyPlugin({
 
 - [Configuration](/plugins/eventual-consistency/guides/configuration.md) - All options and API reference
 - [Usage Patterns](/plugins/eventual-consistency/guides/usage-patterns.md) - Examples and use cases
+- [Analytics & History](/plugins/eventual-consistency/guides/analytics-history.md) - Rollups, raw events, chart queries

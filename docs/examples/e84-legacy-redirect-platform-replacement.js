@@ -1,8 +1,8 @@
 /**
- * Example 84: Complete mrt-shortner Architecture Replacement
+ * Example 84: Complete Legacy Redirect Platform Replacement
  *
  * THIS IS IT! 🎉 This example demonstrates how the API Plugin can COMPLETELY
- * replace the mrt-shortner Express architecture with:
+ * replace a legacy Express redirect platform with:
  *
  * ✅ Dual Authentication (OIDC + Basic Auth with priority)
  * ✅ Admin Root User (bootstrap credentials)
@@ -59,7 +59,7 @@ const mockPeopleAPI = {
 };
 
 /**
- * Generate API token (mrt-shortner style)
+ * Generate API token for redirect-service clients
  */
 function generateApiToken() {
   const env = process.env.NODE_ENV || 'local';
@@ -91,10 +91,10 @@ async function setupTemplates() {
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title><%= title || 'URL Shortener' %></title>
+  <title><%= title || 'Link Redirect Service' %></title>
   <% if (ogTitle) { %>
   <meta property="og:title" content="<%= ogTitle %>">
-  <meta property="og:description" content="<%= ogDescription || 'Shorten your URLs easily' %>">
+  <meta property="og:description" content="<%= ogDescription || 'Create and manage redirectable links' %>">
   <meta property="og:image" content="<%= ogImage || '/static/default-logo.png' %>">
   <meta property="og:url" content="<%= ogUrl || _url %>">
   <% } %>
@@ -134,8 +134,8 @@ async function setupTemplates() {
 </html>`;
 
   // Landing page template
-  const landingTemplate = `<h1>🔗 URL Shortener</h1>
-<p>Welcome to the world's simplest URL shortener!</p>
+  const landingTemplate = `<h1>🔗 Link Redirect Service</h1>
+<p>Welcome to the link redirect platform.</p>
 <p>We have shortened <strong><%= urlCount %></strong> URLs so far.</p>
 
 <div style="margin-top: 30px;">
@@ -174,7 +174,7 @@ async function setupTemplates() {
 // ==================== MAIN EXAMPLE ====================
 
 async function main() {
-  console.log('Example 84: Complete mrt-shortner Replacement\\n');
+  console.log('Example 84: Complete Legacy Redirect Platform Replacement\\n');
 
   // 1. Setup templates
   await setupTemplates();
@@ -210,7 +210,7 @@ async function main() {
   });
   console.log('✅ Created users resource');
 
-  // 4. Create URLs resource (simplified mrt-shortner urls_v1)
+  // 4. Create URLs resource (simplified legacy redirects schema)
   const urls = await db.createResource({
     name: 'urls',
     attributes: {
@@ -331,7 +331,7 @@ async function main() {
           // Admin root user (bootstrap credentials)
           adminUser: {
             enabled: true,
-            username: process.env.MRT_ADMIN_USERNAME || 'admin@shortner.local',
+            username: process.env.MRT_ADMIN_USERNAME || 'admin@redirect.local',
             password: process.env.MRT_ADMIN_APITOKEN || 'admin-secret-token',
             scopes: ['admin']
           }
@@ -369,10 +369,10 @@ async function main() {
         const urlCount = await urls.count();
 
         return c.render('landing', {
-          title: 'URL Shortener - Home',
+          title: 'Link Redirect Service - Home',
           urlCount,
-          ogTitle: 'URL Shortener',
-          ogDescription: `We've shortened ${urlCount} URLs!`,
+          ogTitle: 'Link Redirect Service',
+          ogDescription: `We are managing ${urlCount} redirectable links.`,
           ogUrl: 'http://localhost:3104'
         });
       },
@@ -526,9 +526,9 @@ async function main() {
     docs: {
       enabled: true,
       ui: 'redoc',
-      title: 'URL Shortener API',
+      title: 'Link Redirect Service API',
       version: '1.0.0',
-      description: 'Complete mrt-shortner replacement built with s3db.js API Plugin'
+      description: 'Complete legacy redirect platform replacement built with s3db.js API Plugin'
     },
 
     cors: {
@@ -549,7 +549,7 @@ async function main() {
   console.log('📚 API Docs: http://localhost:3104/docs');
 
   // ==================== DEMO ====================
-  console.log('\\n--- Complete mrt-shortner Replacement Demo ---\\n');
+  console.log('\\n--- Complete Legacy Redirect Platform Replacement Demo ---\\n');
 
   // 1. Create test user (simulating OIDC login)
   console.log('1️⃣ Creating test user (simulating OIDC login)...');
@@ -590,7 +590,7 @@ async function main() {
 
   // 3. Test admin root user (Basic Auth)
   console.log('\\n3️⃣ Testing admin root user (Basic Auth)...');
-  const adminAuthHeader = Buffer.from('admin@shortner.local:admin-secret-token').toString('base64');
+  const adminAuthHeader = Buffer.from('admin@redirect.local:admin-secret-token').toString('base64');
   const adminResponse = await fetch('http://localhost:3104/api/v1/me', {
     headers: { 'Authorization': `Basic ${adminAuthHeader}` }
   });
@@ -661,7 +661,7 @@ async function main() {
   console.log('\\n--- ✅ ALL FEATURES DEMONSTRATED ---');
   console.log('\\n📊 Architecture Comparison:');
   console.log('');
-  console.log('  mrt-shortner (Express):');
+  console.log('  Legacy Express redirect platform:');
   console.log('  - ~2000 lines of code');
   console.log('  - 15+ dependencies');
   console.log('  - Manual middleware setup');
