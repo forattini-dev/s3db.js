@@ -1,0 +1,95 @@
+name: Quarantine Test Sweep
+
+on:
+  schedule:
+    - cron: '0 6 * * *'
+  workflow_dispatch:
+
+jobs:
+  quarantine:
+    name: Quarantine ${{ matrix.suite.name }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        suite:
+          - name: core-heavy
+            path: >-
+              tests/core/performance/
+              tests/core/functions/binary-efficiency.test.ts
+              tests/core/functions/bits-performance.test.ts
+              tests/core/functions/encoding-efficiency.test.ts
+              tests/core/functions/index-files.test.ts
+              tests/core/functions/metadata-encoding-exhaustive.test.ts
+              tests/core/functions/replicators.test.ts
+              tests/core/functions/special-characters.test.ts
+              tests/core/integration/all-types-exhaustive.test.ts
+              tests/core/resources/resource-password-type.test.ts
+              tests/core/lazy-schema.test.ts
+            timeout: 20
+            flags: '--no-file-parallelism'
+          - name: plugin-identity
+            path: >-
+              tests/plugins/identity/
+              tests/plugins/identity-*/
+            timeout: 15
+            flags: '--no-file-parallelism'
+          - name: plugin-api-quarantine
+            path: >-
+              tests/plugins/api/error-helper/
+              tests/plugins/api/compression/
+              tests/plugins/api/oidc-cookie/
+              tests/plugins/api/mountdocs/
+              tests/plugins/api/app.class.new/
+              tests/plugins/api/concerns-session-store.test.ts
+            timeout: 15
+            flags: '--no-file-parallelism'
+          - name: plugin-cache-quarantine
+            path: >-
+              tests/plugins/cache/memory/
+              tests/plugins/cache/partition-aware/
+              tests/plugins/cache/plugin-core-behaviour.test.ts
+            timeout: 15
+            flags: '--no-file-parallelism'
+          - name: plugin-misc-quarantine
+            path: >-
+              tests/plugins/geo/
+              tests/plugins/tournament/
+              tests/plugins/plugin-fulltext/
+              tests/plugins/plugin-audit/
+              tests/plugins/plugin-metrics/
+              tests/plugins/eventual-consistency-recalculate/
+              tests/plugins/eventual-consistency-race/
+            timeout: 15
+            flags: '--no-file-parallelism'
+          - name: plugin-root
+            path: tests/plugins
+            timeout: 10
+            flags: "--dir tests/plugins --ignore 'tests/plugins/*/'"
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup pnpm
+        run: corepack enable pnpm && corepack prepare pnpm@9 --activate
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: '20'
+          cache: 'pnpm'
+
+      - name: Install Dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build
+        run: pnpm run build
+
+      - name: Run Quarantine Suite
+        run: pnpm vitest run ${{ matrix.suite.path }} --reporter=verbose ${{ matrix.suite.flags }}
+        timeout-minutes: ${{ matrix.suite.timeout }}
+        env:
+          TEST_FORCE_MEMORY_CLIENT: 'false'
+          TEST_USE_FILESYSTEM_CLIENT: 'true'
+          NODE_OPTIONS: '--max-old-space-size=4096'

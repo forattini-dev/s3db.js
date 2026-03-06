@@ -13,7 +13,8 @@ const maxThreads = isMemoryMode
   ? 1
   : (isCI ? 2 : Math.min(4, Math.max(1, Math.floor(cpuCount / 2))));
 
-// Exclusions shared between core and plugins
+// Exclusions shared between core and plugins.
+// These suites are exercised separately by `.github/workflows/quarantine.yml`.
 const coreExclusions = [
   'node_modules/**',
   'tests/core/performance/**',

@@ -6,6 +6,7 @@
   "types": "./dist/index.d.ts",
   "author": "@stone/martech",
   "license": "UNLICENSED",
+  "packageManager": "pnpm@9.12.2",
   "bin": {
     "s3db.js": "./bin/cli.js",
     "s3db": "./bin/cli.js"
@@ -37,6 +38,9 @@
     "llm"
   ],
   "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
   "sideEffects": false,
   "imports": {
     "#mcp/*": "./mcp/*",
@@ -59,8 +63,8 @@
       "import": "./dist/concerns/typescript-generator.js"
     },
     "./concerns/guards-helpers": {
-      "types": "./dist/concerns/guards-helpers.d.ts",
-      "import": "./dist/concerns/guards-helpers.js"
+      "types": "./dist/plugins/api/concerns/guards-helpers.d.ts",
+      "import": "./dist/plugins/api/concerns/guards-helpers.js"
     },
     "./plugins/*": {
       "types": "./dist/plugins/*.d.ts",
@@ -75,7 +79,6 @@
   "files": [
     "dist/",
     "!dist/**/*.map",
-    "src/",
     "bin/",
     "mcp/",
     "!mcp/data/",
@@ -87,11 +90,14 @@
     "UNLICENSE"
   ],
   "scripts": {
-    "build": "tsc -p tsconfig.build.json && tsc-alias -p tsconfig.build.json && node scripts/inject-version.js",
+    "clean": "node scripts/clean-build.js",
+    "build": "pnpm run clean && tsc -p tsconfig.build.json && tsc-alias -p tsconfig.build.json && node scripts/inject-version.js",
     "typecheck": "tsc --noEmit",
     "build:cli": "node scripts/bundle-cli.js",
     "build:binary": "node scripts/build-sea.js",
     "dev": "tsc -p tsconfig.build.json --watch",
+    "pack:tarball": "node scripts/create-package-tarball.js",
+    "pack:smoke": "node scripts/pack-smoke-check.js",
     "prepublishOnly": "pnpm run build",
     "test": "pnpm run test:core",
     "test:fs": "pnpm run test:core && pnpm run test:plugins",
@@ -111,7 +117,7 @@
     "test:quick": "pnpm run test:memory:quick",
     "test:s3:core": "S3DB_LOG_LEVEL=warn TEST_FORCE_MEMORY_CLIENT=false TEST_USE_FILESYSTEM_CLIENT=false BUCKET_CONNECTION_STRING='http://minioadmin:minioadmin123@localhost:9100/s3db' node --max-old-space-size=4096 node_modules/vitest/vitest.mjs run tests/core/",
     "test:s3:plugins": "S3DB_LOG_LEVEL=warn TEST_FORCE_MEMORY_CLIENT=false TEST_USE_FILESYSTEM_CLIENT=false BUCKET_CONNECTION_STRING='http://minioadmin:minioadmin123@localhost:9100/s3db' node --max-old-space-size=4096 node_modules/vitest/vitest.mjs run tests/plugins/",
-    "test:ts": "tsc --noEmit --project tests/typescript/tsconfig.json",
+    "test:ts": "pnpm run typecheck",
     "test:coverage": "S3DB_LOG_LEVEL=warn TEST_FORCE_MEMORY_CLIENT=false TEST_USE_FILESYSTEM_CLIENT=true node --max-old-space-size=4096 node_modules/vitest/vitest.mjs run --coverage && pnpm run test:ts",
     "test:watch": "S3DB_LOG_LEVEL=warn TEST_FORCE_MEMORY_CLIENT=false TEST_USE_FILESYSTEM_CLIENT=true node --max-old-space-size=4096 node_modules/vitest/vitest.mjs",
     "test:ui": "S3DB_LOG_LEVEL=warn TEST_FORCE_MEMORY_CLIENT=false TEST_USE_FILESYSTEM_CLIENT=true node --max-old-space-size=4096 node_modules/vitest/vitest.mjs --ui",
@@ -119,7 +125,7 @@
     "benchmark:partitions": "node docs/benchmarks/partitions-matrix.js",
     "release:check": "./scripts/pre-release-check.sh",
     "validate:types": "pnpm run test:ts && echo 'TypeScript definitions are valid!'",
-    "test:ts:runtime": "tsx tests/typescript/types-runtime-simple.ts",
+    "test:ts:runtime": "node scripts/test-runtime-exports.js",
     "test:mcp": "tsx mcp/entrypoint.ts --help",
     "install:peers": "pnpm add -D @aws-sdk/client-acm @aws-sdk/client-api-gateway @aws-sdk/client-apigatewayv2 @aws-sdk/client-backup @aws-sdk/client-cloudfront @aws-sdk/client-cloudtrail @aws-sdk/client-cloudwatch @aws-sdk/client-cloudwatch-logs @aws-sdk/client-cognito-identity-provider @aws-sdk/client-config-service @aws-sdk/client-dynamodb @aws-sdk/client-ec2 @aws-sdk/client-ecr @aws-sdk/client-ecs @aws-sdk/client-efs @aws-sdk/client-eks @aws-sdk/client-elasticache @aws-sdk/client-elastic-load-balancing @aws-sdk/client-elastic-load-balancing-v2 @aws-sdk/client-eventbridge @aws-sdk/client-iam @aws-sdk/client-kinesis @aws-sdk/client-kms @aws-sdk/client-lambda @aws-sdk/client-rds @aws-sdk/client-route-53 @aws-sdk/client-secrets-manager @aws-sdk/client-sfn @aws-sdk/client-sns @aws-sdk/client-sqs @aws-sdk/client-ssm @aws-sdk/client-sts @aws-sdk/client-waf @aws-sdk/client-wafv2 @google-cloud/bigquery @libsql/client @planetscale/database @tensorflow/tfjs-node amqplib bcrypt express jose nodemailer pg",
     "install:peers:script": "./scripts/install-peer-deps.sh",

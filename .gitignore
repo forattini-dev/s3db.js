@@ -18,6 +18,7 @@ test-partition-cache/
 # Temporary directories
 tmp/
 .tmp/
+.artifacts/
 
 # Cloned tool repositories (recon dependencies)
 assetfinder/

@@ -10,7 +10,7 @@ on:
 
 jobs:
   # ============================================
-  # Stage 1: Build & Lint (runs once per Node version)
+  # Stage 1: Build (runs once per Node version)
   # ============================================
   build:
     name: Build (Node ${{ matrix.node-version }})
@@ -34,10 +34,6 @@ jobs:
 
       - name: Install Dependencies
         run: pnpm install --frozen-lockfile
-
-      - name: Lint
-        run: |
-          if npm run | grep -q "lint"; then pnpm run lint; fi
 
       - name: Build
         run: pnpm run build
@@ -131,20 +127,154 @@ jobs:
           TEST_USE_FILESYSTEM_CLIENT: 'true'
           NODE_OPTIONS: '--max-old-space-size=4096'
 
+  types:
+    name: Type Tests
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup pnpm
+        run: corepack enable pnpm && corepack prepare pnpm@9 --activate
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: '20'
+          cache: 'pnpm'
+
+      - name: Install Dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Run Type Tests
+        run: pnpm run test:ts
+
+  package:
+    name: Package Smoke
+    needs: [build, test, types]
+    runs-on: ubuntu-latest
+    outputs:
+      next_version: ${{ steps.meta.outputs.next_version }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup pnpm
+        run: corepack enable pnpm && corepack prepare pnpm@9 --activate
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: '20'
+          registry-url: 'https://registry.npmjs.org'
+          cache: 'pnpm'
+
+      - name: Install Dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Compute Package Metadata
+        id: meta
+        run: |
+          PACKAGE_VERSION=$(node -p "require('./package.json').version")
+          BASE_VERSION=$(echo "$PACKAGE_VERSION" | cut -d'-' -f1)
+          NEXT_VERSION="$BASE_VERSION-next.${GITHUB_SHA::7}"
+          echo "package_version=$PACKAGE_VERSION" >> $GITHUB_OUTPUT
+          echo "next_version=$NEXT_VERSION" >> $GITHUB_OUTPUT
+
+      - name: Build
+        run: pnpm run build
+
+      - name: Prepare Artifact Directory
+        run: rm -rf .artifacts && mkdir -p .artifacts
+
+      - name: Create Validation Tarball
+        run: node scripts/create-package-tarball.js
+
+      - name: Smoke Test Validation Tarball
+        run: node scripts/pack-smoke-check.js .artifacts/*.tgz
+
+      - name: Create Next NPM Tarball
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        env:
+          PACKAGE_TARBALL_VERSION: ${{ steps.meta.outputs.next_version }}
+        run: node scripts/create-package-tarball.js
+
+      - name: Smoke Test Next NPM Tarball
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        run: node scripts/pack-smoke-check.js .artifacts/s3db.js-${{ steps.meta.outputs.next_version }}.tgz
+
+      - name: Create Next GitHub Tarball
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        env:
+          PACKAGE_TARBALL_NAME: '@forattini-dev/s3db.js'
+          PACKAGE_TARBALL_VERSION: ${{ steps.meta.outputs.next_version }}
+          PACKAGE_TARBALL_REGISTRY: https://npm.pkg.github.com
+        run: node scripts/create-package-tarball.js
+
+      - name: Smoke Test Next GitHub Tarball
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        env:
+          PACKAGE_SMOKE_NAME: '@forattini-dev/s3db.js'
+        run: node scripts/pack-smoke-check.js .artifacts/forattini-dev-s3db.js-${{ steps.meta.outputs.next_version }}.tgz
+
+      - name: Upload Next Release Artifacts
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-next-packages
+          path: |
+            .artifacts/s3db.js-${{ steps.meta.outputs.next_version }}.tgz
+            .artifacts/forattini-dev-s3db.js-${{ steps.meta.outputs.next_version }}.tgz
+          if-no-files-found: error
+
+      - name: Validate Stable Tag Version
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          VERSION=${GITHUB_REF#refs/tags/v}
+          PACKAGE_VERSION=$(node -p "require('./package.json').version")
+          if [ "$VERSION" != "$PACKAGE_VERSION" ]; then
+            echo "Tag version ($VERSION) does not match package.json version ($PACKAGE_VERSION)"
+            exit 1
+          fi
+
+      - name: Create Stable GitHub Tarball
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          PACKAGE_TARBALL_NAME: '@forattini-dev/s3db.js'
+          PACKAGE_TARBALL_REGISTRY: https://npm.pkg.github.com
+        run: node scripts/create-package-tarball.js
+
+      - name: Smoke Test Stable GitHub Tarball
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          PACKAGE_SMOKE_NAME: '@forattini-dev/s3db.js'
+        run: node scripts/pack-smoke-check.js .artifacts/forattini-dev-s3db.js-${{ steps.meta.outputs.package_version }}.tgz
+
+      - name: Upload Stable Release Artifacts
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-stable-packages
+          path: |
+            .artifacts/s3db.js-${{ steps.meta.outputs.package_version }}.tgz
+            .artifacts/forattini-dev-s3db.js-${{ steps.meta.outputs.package_version }}.tgz
+          if-no-files-found: error
+
   # ============================================
   # Stage 3: Quality Gate (waits for all tests)
   # ============================================
   quality:
     name: Quality Gate
-    needs: [build, test]
+    needs: [build, test, types, package]
     runs-on: ubuntu-latest
     steps:
       - name: All tests passed
-        run: echo "All test suites passed on Node 20, 22, and 23!"
+        run: echo "All test suites, type tests, and package smoke checks passed!"
 
   release-next:
     name: Release Next
-    needs: quality
+    needs: [quality, package]
     if: |
       github.event_name == 'push' &&
       github.ref == 'refs/heads/main'
@@ -182,32 +312,17 @@ jobs:
         with:
           node-version: '20'
           registry-url: 'https://registry.npmjs.org'
-          cache: 'pnpm'
-
-      - name: Install Dependencies
+      
+      - name: Download Next Release Artifacts
         if: steps.check.outputs.skip != 'true'
-        run: pnpm install --frozen-lockfile
-
-      - name: Bump Version (Next)
-        if: steps.check.outputs.skip != 'true'
-        id: version
-        run: |
-          CURRENT_VERSION=$(node -p "require('./package.json').version")
-          SHA=$(git rev-parse --short HEAD)
-          BASE_VERSION=$(echo $CURRENT_VERSION | cut -d'-' -f1)
-          NEW_VERSION="$BASE_VERSION-next.$SHA"
-
-          echo "New version: $NEW_VERSION"
-          npm version $NEW_VERSION --no-git-tag-version
-          echo "version=$NEW_VERSION" >> $GITHUB_OUTPUT
-
-      - name: Build
-        if: steps.check.outputs.skip != 'true'
-        run: pnpm run build
+        uses: actions/download-artifact@v4
+        with:
+          name: release-next-packages
+          path: .artifacts
 
       - name: Publish to NPM (Next)
         if: steps.check.outputs.skip != 'true'
-        run: pnpm publish --tag next --no-git-checks --provenance
+        run: npm publish .artifacts/s3db.js-${{ needs.package.outputs.next_version }}.tgz --tag next --provenance
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
@@ -221,14 +336,7 @@ jobs:
 
       - name: Publish to GitHub Packages (Next)
         if: steps.check.outputs.skip != 'true'
-        run: |
-          node -e "
-            const pkg = require('./package.json');
-            pkg.name = '@forattini-dev/s3db.js';
-            pkg.publishConfig = { registry: 'https://npm.pkg.github.com' };
-            require('fs').writeFileSync('package.json', JSON.stringify(pkg, null, 2));
-          "
-          pnpm publish --tag next --no-git-checks
+        run: npm publish .artifacts/forattini-dev-s3db.js-${{ needs.package.outputs.next_version }}.tgz --tag next --registry=https://npm.pkg.github.com
         env:
           NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -239,7 +347,7 @@ jobs:
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "| Property | Value |" >> $GITHUB_STEP_SUMMARY
           echo "|----------|-------|" >> $GITHUB_STEP_SUMMARY
-          echo "| **Version** | \`${{ steps.version.outputs.version }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Version** | \`${{ needs.package.outputs.next_version }}\` |" >> $GITHUB_STEP_SUMMARY
           echo "| **Tag** | \`next\` |" >> $GITHUB_STEP_SUMMARY
           echo "| **Commit** | [\`${GITHUB_SHA::7}\`](${{ github.server_url }}/${{ github.repository }}/commit/${{ github.sha }}) |" >> $GITHUB_STEP_SUMMARY
           echo "| **Branch** | \`${{ github.ref_name }}\` |" >> $GITHUB_STEP_SUMMARY
@@ -254,7 +362,7 @@ jobs:
           echo "pnpm add s3db.js@next" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "# Specific version" >> $GITHUB_STEP_SUMMARY
-          echo "npm install s3db.js@${{ steps.version.outputs.version }}" >> $GITHUB_STEP_SUMMARY
+          echo "npm install s3db.js@${{ needs.package.outputs.next_version }}" >> $GITHUB_STEP_SUMMARY
           echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "### 🔗 Links" >> $GITHUB_STEP_SUMMARY
@@ -297,14 +405,16 @@ jobs:
           registry-url: 'https://registry.npmjs.org'
           cache: 'pnpm'
 
-      - name: Install Dependencies
-        run: pnpm install --frozen-lockfile
-
-      - name: Build
-        run: pnpm run build
+      - name: Download Stable Release Artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: release-stable-packages
+          path: .artifacts
 
       - name: Publish to NPM (Stable)
-        run: pnpm publish --no-git-checks --provenance
+        run: |
+          VERSION=${GITHUB_REF#refs/tags/v}
+          npm publish .artifacts/s3db.js-$VERSION.tgz --provenance
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
@@ -317,13 +427,8 @@ jobs:
 
       - name: Publish to GitHub Packages (Stable)
         run: |
-          node -e "
-            const pkg = require('./package.json');
-            pkg.name = '@forattini-dev/s3db.js';
-            pkg.publishConfig = { registry: 'https://npm.pkg.github.com' };
-            require('fs').writeFileSync('package.json', JSON.stringify(pkg, null, 2));
-          "
-          pnpm publish --no-git-checks
+          VERSION=${GITHUB_REF#refs/tags/v}
+          npm publish .artifacts/forattini-dev-s3db.js-$VERSION.tgz --registry=https://npm.pkg.github.com
         env:
           NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
