@@ -58,7 +58,7 @@ await db.usePlugin(new ApiPlugin({
   port: 3000,
   auth: {
     resource: 'users',
-    drivers: { jwt: { secret: process.env.JWT_SECRET } },
+    drivers: { jwt: { secret: process.env.JWT_SECRET, lookupById: true } },  // ⚡ O(1) when user.id = email
     pathRules: [{ path: '/api/**', methods: ['jwt'], required: true }]
   }
 }));
@@ -74,7 +74,8 @@ auth: {
       clientId: process.env.GOOGLE_CLIENT_ID,
       clientSecret: process.env.GOOGLE_CLIENT_SECRET,
       redirectUri: 'http://localhost:3000/auth/callback',
-      cookieSecret: process.env.COOKIE_SECRET
+      cookieSecret: process.env.COOKIE_SECRET,
+      lookupById: true                             // ⚡ O(1) user lookup
     }
   }
 }

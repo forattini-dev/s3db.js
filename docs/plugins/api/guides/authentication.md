@@ -70,7 +70,7 @@ await db.usePlugin(new ApiPlugin({
 
 **Result:** `resource.get('daniel@tetis.io')` — **1 S3 call** instead of scanning all users.
 
-Works with all drivers:
+Works with **all** drivers:
 
 ```javascript
 // JWT
@@ -81,6 +81,22 @@ drivers: { basic: { lookupById: true } }
 
 // API Key
 drivers: { 'api-key': { lookupById: true } }
+
+// OAuth2 Resource Server
+drivers: { oauth2: { issuer: '...', lookupById: true } }
+
+// OIDC
+drivers: { oidc: { issuer: '...', clientId: '...', lookupById: true } }
+```
+
+**Multi-driver:** each driver has its own `lookupById`. You can mix strategies:
+
+```javascript
+drivers: {
+  jwt: { secret: '...', lookupById: true },         // id = email
+  'api-key': { partitionName: 'byApiKey' },          // partition lookup
+  oauth2: { issuer: '...', lookupById: true }         // id = sub claim
+}
 ```
 
 #### Strategy 2: Partitions — O(1) via `listPartition()` ⚡
@@ -172,6 +188,7 @@ await db.usePlugin(new ApiPlugin({
       jwt: {
         secret: process.env.JWT_SECRET,  // REQUIRED
         expiresIn: '7d',                 // Token lifetime
+        lookupById: true,                // ⚡ O(1) lookup (when user.id = email)
         algorithm: 'HS256'               // HMAC SHA-256
       }
     },
@@ -191,6 +208,7 @@ jwt: {
   algorithm: 'HS256',                  // Signing algorithm
   issuer: 'my-api',                    // Token issuer (optional)
   audience: 'my-app',                  // Token audience (optional)
+  lookupById: true,                    // ⚡ O(1) via get() when user.id = userField value
 
   // Performance optimization
   cache: {
@@ -313,14 +331,9 @@ await db.usePlugin(new ApiPlugin({
 ```javascript
 basic: {
   realm: 'API Access',                 // Realm name (shown in browser prompt)
-  usernameField: 'email',              // User field to match (default: 'username')
+  usernameField: 'email',              // User field to match (default: 'email')
   passwordField: 'apiToken',           // Password field (default: 'password')
-  hashPassword: false,                 // Password hashed? (default: false)
-
-  // Optional: Custom user lookup
-  findUser: async (username) => {
-    return await db.resources.users.query({ email: username });
-  }
+  lookupById: true,                    // ⚡ O(1) via get() when user.id = usernameField value
 }
 ```
 
@@ -412,16 +425,14 @@ await db.usePlugin(new ApiPlugin({
 ```javascript
 apikey: {
   headerName: 'X-API-Key',             // Header name (default: 'X-API-Key')
-  fieldName: 'apiToken',               // User field (default: 'apiToken')
-  prefix: 'Bearer',                    // Optional: 'Bearer', 'Token', etc
+  keyField: 'apiKey',                   // User field with the key (default: 'apiKey')
   queryParam: 'apikey',                // Optional: allow ?apikey=xxx
-
-  // Optional: Custom token lookup
-  findUser: async (token) => {
-    return await db.resources.users.query({ apiToken: token });
-  }
+  lookupById: true,                    // ⚡ O(1) via get() when user.id = API key value
+  partitionName: 'byApiKey',           // Override auto-detected partition name (optional)
 }
 ```
+
+> **Tip:** If using API keys with UUID-based user IDs, add a partition `byApiKey` on your resource instead of `lookupById`. The auth system auto-detects it.
 
 ### Use API Keys
 
@@ -668,7 +679,8 @@ oidc: {
   clientId: 'YOUR_CLIENT_ID.apps.googleusercontent.com',
   clientSecret: 'YOUR_CLIENT_SECRET',
   redirectUri: 'http://localhost:3000/auth/callback',
-  cookieSecret: process.env.COOKIE_SECRET
+  cookieSecret: process.env.COOKIE_SECRET,
+  lookupById: true                     // ⚡ O(1) when user.id = email from claims
 }
 ```
 
@@ -744,6 +756,7 @@ await db.usePlugin(new ApiPlugin({
         cacheTTL: 3_600_000,                       // JWKS cache: 1 hour (default)
         clockTolerance: 60,                        // Clock skew tolerance in seconds
         fetchUserInfo: true,                       // Look up user in local DB (default)
+        lookupById: true,                          // ⚡ O(1) when user.id = sub claim
         userMapping: {                             // Map token claims to user fields
           id: 'sub',
           email: 'email',

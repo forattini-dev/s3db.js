@@ -86,6 +86,9 @@ await db.usePlugin(new ApiPlugin({
 |---------|---------|--------|
 | **💾 External Session Store** | Redis, Memory - Horizontal scaling | 🟣 Enterprise |
 | **⚡ WeakMap Token Caching** | Per-request caching - Zero decode overhead | 🟢 Performance |
+| **⚡ O(1) User Lookup** | `lookupById: true` or auto-partition detection | 🟢 Performance |
+
+> **⚡ User Lookup Performance:** Add `lookupById: true` to your OIDC driver config when `user.id = email`. This turns every user lookup from an O(n) S3 scan into a single O(1) GET call. If your user ID is different from the email, add a partition `byEmail` to your users resource — auto-detected by the auth system. See [Authentication Guide: Performance](authentication.md#️-performance-user-lookup-strategy-critical) for details.
 
 **Why Session Stores Matter:**
 - Without: Sessions stored in cookies (4-40KB) → Large headers, bandwidth waste

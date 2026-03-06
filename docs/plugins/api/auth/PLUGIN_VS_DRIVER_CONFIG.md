@@ -202,6 +202,26 @@ These auth settings are **shared across all drivers**:
 
 Each driver in the `drivers` array has its **own configuration**:
 
+### Shared: User Lookup Performance (all drivers)
+
+Every driver supports these options for O(1) user lookups:
+
+```javascript
+{
+  driver: 'jwt',  // or 'basic', 'apiKey', 'oauth2', 'oidc'
+  config: {
+    // ⚡ O(1) lookup: use when user.id = lookup field value (e.g., id = email)
+    lookupById: true,
+
+    // Override auto-detected partition name (default: "by{FieldName}")
+    partitionName: 'byEmail',
+  }
+}
+```
+
+**Lookup priority:** `lookupById` (O(1) get) → partition (O(1) listPartition) → query (O(n) scan + warning).
+See [Authentication Guide: Performance](../guides/authentication.md#️-performance-user-lookup-strategy-critical) for details.
+
 ### JWT Driver
 ```javascript
 {
@@ -218,6 +238,9 @@ Each driver in the `drivers` array has its **own configuration**:
     // Field mappings
     userField: 'email',        // Username field
     passwordField: 'password',
+
+    // User lookup performance
+    lookupById: true,          // ⚡ O(1) when user.id = userField value
 
     // Encryption
     passphrase: 'secret',
@@ -247,6 +270,10 @@ Each driver in the `drivers` array has its **own configuration**:
     // Field mapping
     keyField: 'apiKey',
 
+    // User lookup performance
+    lookupById: true,                // ⚡ O(1) when user.id = API key
+    partitionName: 'byApiKey',       // Or use partition (auto-detected from keyField)
+
     optional: false
   }
 }
@@ -265,6 +292,9 @@ Each driver in the `drivers` array has its **own configuration**:
     // Field mappings
     usernameField: 'email',
     passwordField: 'password',
+
+    // User lookup performance
+    lookupById: true,          // ⚡ O(1) when user.id = usernameField value
 
     // Encryption
     passphrase: 'secret',
@@ -306,6 +336,9 @@ Each driver in the `drivers` array has its **own configuration**:
       username: 'preferred_username',
       role: 'role'
     },
+
+    // User lookup performance
+    lookupById: true,          // ⚡ O(1) when user.id = sub claim from token
 
     // Caching
     cacheTTL: 3600000,         // 1 hour
@@ -349,7 +382,10 @@ Each driver in the `drivers` array has its **own configuration**:
 
     // User sync
     syncUser: true,
-    autoCreateUser: true
+    autoCreateUser: true,
+
+    // User lookup performance
+    lookupById: true           // ⚡ O(1) when user.id = email from OIDC claims
   }
 }
 ```

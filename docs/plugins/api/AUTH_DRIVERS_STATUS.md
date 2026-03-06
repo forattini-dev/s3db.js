@@ -2,13 +2,13 @@
 
 ## 📊 Driver Overview
 
-| Driver | Lines | Status | Resource Support | Field Mapping | Notes |
-|--------|-------|--------|------------------|---------------|-------|
-| **OIDC** | 1646 | ✅ Production-ready | ❌ Uses authResource param | ✅ Has userMapping | Most complete driver |
-| **OAuth2** | 282 | ✅ Working | ❌ Uses usersResource param | ⚠️ Hardcoded fields | Resource server mode |
-| **JWT** | 226 | ✅ Working | ❌ Uses authResource param | ⚠️ Hardcoded email/password | Simple implementation |
-| **Basic** | 152 | ✅ Working | ❌ Uses authResource param | ✅ Has userField/passwordField | Already configurable |
-| **API Key** | 92 | ✅ Working | ❌ Uses usersResource param | ⚠️ Hardcoded apiKey field | Very simple |
+| Driver | Status | Resource Support | Field Mapping | O(1) Lookup | Notes |
+|--------|--------|------------------|---------------|-------------|-------|
+| **OIDC** | ✅ Production-ready | ✅ Configurable | ✅ Has userMapping | ✅ `lookupById` + auto-partition | Most complete driver |
+| **OAuth2** | ✅ Working | ✅ Configurable | ✅ Has userMapping | ✅ `lookupById` + auto-partition | Resource server mode |
+| **JWT** | ✅ Working | ✅ Configurable | ✅ userField/passwordField | ✅ `lookupById` + auto-partition | Simple implementation |
+| **Basic** | ✅ Working | ✅ Configurable | ✅ usernameField/passwordField | ✅ `lookupById` + auto-partition | Already configurable |
+| **API Key** | ✅ Working | ✅ Configurable | ✅ keyField | ✅ `lookupById` + auto-partition + manual `partitionName` | Partition-aware |
 
 ## 🔍 Detailed Analysis
 
