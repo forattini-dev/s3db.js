@@ -6,7 +6,7 @@ import { createLogger } from '../../../concerns/logger.js';
 import { unauthorized } from '../utils/response-formatter.js';
 import { getCookie } from '#src/plugins/shared/http-runtime.js';
 import { LRUCache } from '../concerns/lru-cache.js';
-import { JWTResourceManager } from './resource-manager.js';
+import { JWTResourceManager, resolveUser } from './resource-manager.js';
 import { verifyPassword } from '#src/plugins/shared/password-verification.js';
 
 const logger = createLogger({ name: 'JwtAuth', level: 'info' });
@@ -40,6 +40,7 @@ export interface JWTConfig {
   issuer?: string;
   audience?: string | string[];
   clockTolerance?: number;
+  lookupById?: boolean;
   jwksUri?: string;
   algorithms?: string[];
 }
@@ -251,6 +252,7 @@ export async function createJWTHandler(
     issuer,
     audience,
     clockTolerance = 0,
+    lookupById = false,
     jwksUri
   } = config;
 
@@ -316,8 +318,7 @@ export async function createJWTHandler(
               const userIdentifier = payload[userField];
               if (typeof userIdentifier === 'string' || typeof userIdentifier === 'number') {
                 try {
-                  const users = await authResource.query({ [userField]: userIdentifier }, { limit: 1 }) as UserRecord[];
-                  const user = users[0];
+                  const user = await resolveUser<UserRecord>(authResource, userField, userIdentifier as string, lookupById);
 
                   if (user && user.active !== false && user.isActive !== false) {
                     c.set('user', user);
@@ -364,8 +365,7 @@ export async function createJWTHandler(
     const userIdentifier = payload[userField];
     if (typeof userIdentifier === 'string' || typeof userIdentifier === 'number') {
       try {
-        const users = await authResource.query({ [userField]: userIdentifier }, { limit: 1 }) as UserRecord[];
-        const user = users[0];
+        const user = await resolveUser<UserRecord>(authResource, userField, userIdentifier as string, lookupById);
 
         if (!user) {
           return buildUnauthorized(c);
@@ -412,7 +412,8 @@ export async function jwtRefresh(
     refreshExpiresIn = '30d',
     issuer,
     audience,
-    clockTolerance = 0
+    clockTolerance = 0,
+    lookupById = false
   } = config;
 
   if (!secret) {
@@ -430,8 +431,7 @@ export async function jwtRefresh(
   }
 
   try {
-    const users = await authResource.query({ [userField]: userIdentifier }, { limit: 1 }) as UserRecord[];
-    const user = users[0];
+    const user = await resolveUser<UserRecord>(authResource, userField, userIdentifier as string, lookupById);
 
     if (!user) {
       return { success: false, error: 'User not found' };
@@ -472,7 +472,8 @@ export async function jwtLogin(
     expiresIn = '7d',
     refreshExpiresIn = '30d',
     issuer,
-    audience
+    audience,
+    lookupById = false
   } = config;
 
   if (!secret) {
@@ -480,8 +481,7 @@ export async function jwtLogin(
   }
 
   try {
-    const users = await authResource.query({ [userField]: username }, { limit: 1 }) as UserRecord[];
-    const user = users[0];
+    const user = await resolveUser<UserRecord>(authResource, userField, username as string, lookupById);
 
     if (!user) {
       return { success: false, error: 'Invalid credentials' };

@@ -21,7 +21,7 @@ import { unauthorized } from '../utils/response-formatter.js';
 import { applyProviderPreset, applyProviderQuirks } from './providers.js';
 import { createAuthDriverRateLimiter } from '../middlewares/rate-limit.js';
 import { deriveOidcKeys } from '../concerns/crypto.js';
-import { OIDCResourceManager, type ResourceLike, type DatabaseLike } from './resource-manager.js';
+import { OIDCResourceManager, resolveUser, type ResourceLike, type DatabaseLike } from './resource-manager.js';
 import {
   setChunkedCookie,
   getChunkedCookie,
@@ -168,6 +168,7 @@ export interface OIDCConfig {
   provider?: string;
   onUserAuthenticated?: (params: OnUserAuthenticatedParams) => Promise<void>;
   hooks?: OIDCHooksConfig;
+  lookupById?: boolean;
 }
 
 export interface OnUserAuthenticatedParams {
@@ -528,7 +529,8 @@ async function getOrCreateUser(
     autoCreateUser = true,
     userIdClaim = 'sub',
     fallbackIdClaims = ['email', 'preferred_username'],
-    lookupFields = ['email', 'preferred_username']
+    lookupFields = ['email', 'preferred_username'],
+    lookupById
   } = config;
 
   logger.debug({
@@ -582,10 +584,10 @@ async function getOrCreateUser(
         logger.info({ field, reason: 'no value in claims' }, '[OIDC] Skipping lookup field');
         continue;
       }
-      const results = await usersResource.query({ [field]: value }, { limit: 1 }) as OIDCUser[];
-      logger.info({ field, resultsCount: results.length }, '[OIDC] Query result');
-      if (results.length > 0) {
-        user = results[0] ?? null;
+      const result = await resolveUser<OIDCUser>(usersResource, field, value as string, lookupById);
+      logger.info({ field, found: !!result }, '[OIDC] Lookup result');
+      if (result) {
+        user = result;
         break;
       }
     }

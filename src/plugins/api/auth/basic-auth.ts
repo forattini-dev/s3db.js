@@ -6,7 +6,7 @@ import { unauthorized } from '../utils/response-formatter.js';
 import { createLogger } from '../../../concerns/logger.js';
 import { verifyPassword } from '#src/plugins/shared/password-verification.js';
 import { getCookie } from '#src/plugins/shared/http-runtime.js';
-import { BasicAuthResourceManager } from './resource-manager.js';
+import { BasicAuthResourceManager, resolveUser, resolveUsers } from './resource-manager.js';
 
 const logger = createLogger({ name: 'BasicAuth', level: 'info' });
 
@@ -45,6 +45,7 @@ export interface BasicAuthConfig {
   adminUser?: AdminUserConfig | null;
   cookieName?: string | null;
   tokenField?: string;
+  lookupById?: boolean;
 }
 
 export interface UserRecord {
@@ -99,7 +100,8 @@ export async function createBasicAuthHandler(
     optional = false,
     adminUser = null,
     cookieName = null,
-    tokenField = 'apiToken'
+    tokenField = 'apiToken',
+    lookupById = false
   } = config;
 
   if (!database) {
@@ -119,7 +121,7 @@ export async function createBasicAuthHandler(
       try {
         const token = getCookie(c, cookieName);
         if (token) {
-          const users = await authResource.query({ [tokenField]: token }, { limit: 1 }) as UserRecord[];
+          const users = await resolveUsers<UserRecord>(authResource, tokenField, token);
           if (users && users.length > 0) {
             const user = users[0]!;
             if (user.active === false || user.isActive === false) {
@@ -171,14 +173,12 @@ export async function createBasicAuthHandler(
     }
 
     try {
-      const users = await authResource.query({ [usernameField]: username }, { limit: 1 }) as UserRecord[];
-      if (!users || users.length === 0) {
+      const user = await resolveUser<UserRecord>(authResource, usernameField, username, lookupById);
+      if (!user) {
         c.header('WWW-Authenticate', `Basic realm="${realm}"`);
         const response = unauthorized('Invalid credentials');
         return c.json(response, (response as { _status: number })._status as ContentfulStatusCode);
       }
-
-      const user = users[0]!;
       const storedPassword = user[passwordField] as string | undefined;
       if (!storedPassword) {
         c.header('WWW-Authenticate', `Basic realm="${realm}"`);

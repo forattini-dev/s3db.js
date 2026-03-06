@@ -20,6 +20,144 @@
 
 ---
 
+## ⚠️ Performance: User Lookup Strategy (CRITICAL)
+
+> **Every auth request needs to find a user.** By default, this is an **O(n) full scan** of your users resource — listing every object in S3 and filtering in memory. With 10,000 users, that's 10,000 S3 GET calls **per login**. This section shows how to make it O(1).
+
+### The Problem
+
+All auth drivers (JWT, Basic, API Key, OAuth2, OIDC) need to look up the authenticated user from your resource. Without configuration, this lookup does:
+
+```
+authResource.query({ email: 'user@example.com' })  // O(n) — scans ALL users
+```
+
+### The Solution: Three Strategies (fastest to slowest)
+
+#### Strategy 1: `lookupById` — O(1) via `resource.get()` ⚡
+
+**Use when: the user's ID IS the lookup field** (e.g., `user.id === user.email`).
+
+This is the **recommended pattern for 80%+ of use cases**. When your users resource uses email as the ID, every auth lookup becomes a single S3 GET:
+
+```javascript
+// Your resource: users where id = email
+const usersResource = await db.createResource({
+  name: 'users',
+  attributes: {
+    email: 'email|required',
+    password: 'password|required|min:8',
+    role: 'string|default:user'
+  }
+});
+
+// Insert with email as ID
+await usersResource.insert({ id: 'daniel@tetis.io', email: 'daniel@tetis.io', password: 'SecurePass123!' });
+
+// Auth config — just add lookupById: true
+await db.usePlugin(new ApiPlugin({
+  auth: {
+    resource: 'users',
+    drivers: {
+      jwt: {
+        secret: process.env.JWT_SECRET,
+        lookupById: true  // ⚡ O(1) — uses resource.get(email) instead of query
+      }
+    }
+  }
+}));
+```
+
+**Result:** `resource.get('daniel@tetis.io')` — **1 S3 call** instead of scanning all users.
+
+Works with all drivers:
+
+```javascript
+// JWT
+drivers: { jwt: { secret: '...', lookupById: true } }
+
+// Basic Auth
+drivers: { basic: { lookupById: true } }
+
+// API Key
+drivers: { 'api-key': { lookupById: true } }
+```
+
+#### Strategy 2: Partitions — O(1) via `listPartition()` ⚡
+
+**Use when: the lookup field is NOT the resource ID** (e.g., ID is UUID but you look up by email).
+
+Add a partition on the lookup field. The auth system **auto-detects partitions** using the convention `by{FieldName}`:
+
+```javascript
+const usersResource = await db.createResource({
+  name: 'users',
+  attributes: {
+    email: 'email|required',
+    password: 'password|required|min:8',
+    apiKey: 'string|required'
+  },
+  partitions: {
+    byEmail: { fields: { email: true } },      // Auto-detected for userField: 'email'
+    byApiKey: { fields: { apiKey: true } }      // Auto-detected for keyField: 'apiKey'
+  }
+});
+
+// Auth config — no lookupById needed, partitions are detected automatically
+await db.usePlugin(new ApiPlugin({
+  auth: {
+    resource: 'users',
+    drivers: {
+      jwt: { secret: process.env.JWT_SECRET }   // Uses byEmail partition automatically
+    }
+  }
+}));
+```
+
+**Partition naming convention:** field `email` → partition `byEmail`, field `apiKey` → partition `byApiKey`.
+
+You can override the auto-detected name:
+
+```javascript
+drivers: {
+  'api-key': {
+    partitionName: 'myCustomApiKeyPartition'  // Override auto-detection
+  }
+}
+```
+
+#### Strategy 3: Query scan — O(n) ❌ (last resort)
+
+If neither `lookupById` nor a partition is configured, the system falls back to `resource.query()`. This triggers a **loud warning on first use**:
+
+```
+WARN (AuthLookup): Auth lookup for field "email" is doing an O(n) full scan.
+  Add a partition "byEmail" on field "email", or set lookupById: true if the
+  field value is the resource ID.
+```
+
+**This warning is intentional.** Fix it by using Strategy 1 or 2.
+
+### Decision Tree
+
+```
+Is the lookup field the resource ID? (e.g., user.id === user.email)
+  ├─ YES → lookupById: true                    ⚡ O(1) get()
+  └─ NO  → Does a partition exist for the field?
+              ├─ YES → Automatic                ⚡ O(1) listPartition()
+              └─ NO  → Add partition or change ID strategy
+```
+
+### Performance Comparison
+
+| Strategy | S3 Calls per Auth | 10K Users | Cost |
+|----------|-------------------|-----------|------|
+| `lookupById: true` | **1** | 1 call | $0.000004 |
+| Partition lookup | **1** | 1 call | $0.000004 |
+| Query scan (no partition) | **10,000+** | 10,000 calls | $0.04 |
+
+---
+
 ## JWT Authentication
 
 **Best for:** Mobile apps, SPAs, stateless APIs

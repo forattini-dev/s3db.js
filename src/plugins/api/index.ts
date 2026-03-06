@@ -126,7 +126,7 @@ export interface ApiPluginOptions {
 import type { ServerInfo } from '../shared/types.js';
 
 const BASE_USER_ATTRIBUTES: Record<string, string> = {
-  id: 'string|optional',
+  id: 'string|required',
   username: 'string|required|minlength:3',
   email: 'string|required|email',
   role: 'string|default:user',

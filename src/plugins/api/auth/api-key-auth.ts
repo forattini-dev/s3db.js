@@ -4,7 +4,7 @@ import type { Logger } from '../../../concerns/logger.js';
 import type { ResourceLike, DatabaseLike } from './resource-manager.js';
 import { unauthorized } from '../utils/response-formatter.js';
 import { createLogger } from '../../../concerns/logger.js';
-import { APIKeyResourceManager } from './resource-manager.js';
+import { APIKeyResourceManager, resolveUser } from './resource-manager.js';
 
 const logger = createLogger({ name: 'ApiKeyAuth', level: 'info' });
 
@@ -16,6 +16,7 @@ export interface ApiKeyConfig {
   headerName?: string;
   queryParam?: string | null;
   optional?: boolean;
+  lookupById?: boolean;
 }
 
 export interface UserRecord {
@@ -45,7 +46,8 @@ export async function createApiKeyHandler(
     queryParam = null,
     keyField = 'apiKey',
     partitionName = null,
-    optional = false
+    optional = false,
+    lookupById = false
   } = config;
 
   if (!database) {
@@ -55,8 +57,7 @@ export async function createApiKeyHandler(
   const manager = new APIKeyResourceManager(database, 'apikey', config as unknown as ConstructorParameters<typeof APIKeyResourceManager>[2]);
   const authResource = await manager.getOrCreateResource();
 
-  const resolvedPartitionName = partitionName || `by${keyField.charAt(0).toUpperCase()}${keyField.slice(1)}`;
-  logger.debug(`API Key driver initialized: resource=${authResource.name}, keyField=${keyField}, partition=${resolvedPartitionName}`);
+  logger.debug(`API Key driver initialized: resource=${authResource.name}, keyField=${keyField}, lookupById=${lookupById}`);
 
   return async (c: Context, next: Next): Promise<Response | void> => {
     let apiKey: string | undefined = c.req.header(headerName);
@@ -79,25 +80,12 @@ export async function createApiKeyHandler(
     }
 
     try {
-      let users: UserRecord[];
+      const user = await resolveUser<UserRecord>(authResource, keyField, apiKey, lookupById, partitionName || undefined);
 
-      const resolvedPartitionName = partitionName || `by${keyField.charAt(0).toUpperCase()}${keyField.slice(1)}`;
-      const hasPartition = authResource.partitions && authResource.partitions[resolvedPartitionName];
-
-      if (hasPartition && authResource.listPartition) {
-        logger.debug(`Using partition ${resolvedPartitionName} for O(1) API key lookup`);
-        users = await authResource.listPartition(resolvedPartitionName, { [keyField]: apiKey }, { limit: 1 }) as UserRecord[];
-      } else {
-        logger.debug(`No partition found (${resolvedPartitionName}), falling back to query (O(n) scan)`);
-        users = await authResource.query({ [keyField]: apiKey }, { limit: 1 }) as UserRecord[];
-      }
-
-      if (!users || users.length === 0) {
+      if (!user) {
         const response = unauthorized('Invalid API key');
         return c.json(response, (response as { _status: number })._status as ContentfulStatusCode);
       }
-
-      const user = users[0]!;
 
       if (user.active === false || user.isActive === false) {
         const response = unauthorized('User account is inactive');

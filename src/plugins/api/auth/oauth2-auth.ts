@@ -40,7 +40,7 @@ import { createRemoteJWKSet, jwtVerify, type JWTPayload } from 'jose';
 import { createLogger, type Logger } from '../../../concerns/logger.js';
 import { createHttpClient, type HttpClient } from '../../../concerns/http-client.js';
 import { applyProviderPreset } from './providers.js';
-import { OAuth2ResourceManager, type ResourceLike, type DatabaseLike } from './resource-manager.js';
+import { OAuth2ResourceManager, resolveUser, type ResourceLike, type DatabaseLike } from './resource-manager.js';
 
 const logger: Logger = createLogger({ name: 'OAuth2Auth', level: 'info' });
 
@@ -101,6 +101,7 @@ export interface OAuth2Config {
   createResource?: boolean;
   provider?: string;
   logLevel?: string;
+  lookupById?: boolean;
 }
 
 export interface OAuth2User {
@@ -144,7 +145,8 @@ export async function createOAuth2Handler(
     introspection = null,
     validateScopes = false,
     requiredScopes = [],
-    scopeMode = 'any'
+    scopeMode = 'any',
+    lookupById = false
   } = config;
 
   if (!issuer) {
@@ -259,8 +261,7 @@ export async function createOAuth2Handler(
           user = await (authResource as unknown as { get(id: string): Promise<OAuth2User | null> }).get(userId).catch(() => null);
 
           if (!user && email) {
-            const users = await authResource.query({ email }, { limit: 1 }) as OAuth2User[];
-            user = users[0] ?? null;
+            user = await resolveUser<OAuth2User>(authResource, 'email', email, lookupById);
           }
         } catch {
           // User not found in local database
@@ -366,8 +367,7 @@ export async function createOAuth2Handler(
           try {
             user = await (authResource as unknown as { get(id: string): Promise<OAuth2User | null> }).get(userId).catch(() => null);
             if (!user && email) {
-              const res = await authResource.query({ email }, { limit: 1 }) as OAuth2User[];
-              user = res[0] ?? null;
+              user = await resolveUser<OAuth2User>(authResource, 'email', email, lookupById);
             }
           } catch {
             // User not found

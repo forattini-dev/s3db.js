@@ -8,6 +8,7 @@ import { createToken, createRefreshToken, verifyRefreshToken } from '../auth/jwt
 import { generateApiKey } from '../auth/api-key-auth.js';
 import { compactHash, hashPassword, isPasswordHash, type SecurityConfig } from '../../../concerns/password-hashing.js';
 import { verifyPassword } from '#src/plugins/shared/password-verification.js';
+import { resolveUser } from '../auth/resource-manager.js';
 
 export interface AuthResource {
   name: string;
@@ -15,7 +16,8 @@ export interface AuthResource {
   schema?: {
     attributes?: Record<string, unknown>;
   };
-  query(filter: Record<string, unknown>): Promise<AuthUser[]>;
+  get?(id: string, options?: Record<string, unknown>): Promise<AuthUser | null>;
+  query(filter: Record<string, unknown>, options?: { limit?: number }): Promise<AuthUser[]>;
   insert(data: Record<string, unknown>): Promise<AuthUser>;
   update(id: string, data: Record<string, unknown>): Promise<AuthUser>;
   database?: unknown;
@@ -65,6 +67,7 @@ export interface AuthRoutesConfig {
   registration?: RegistrationConfig;
   loginThrottle?: LoginThrottleConfig;
   clientCredentials?: ClientCredentialsConfig;
+  lookupById?: boolean;
 }
 
 interface ThrottleRecord {
@@ -185,7 +188,8 @@ export function createAuthRoutes(authResource: AuthResource, config: AuthRoutesC
     jwtRefreshExpiresIn = '30d',
     registration = {},
     loginThrottle = {},
-    clientCredentials = {}
+    clientCredentials = {},
+    lookupById = false
   } = config;
   const passwordPepper = resolvePasswordPepper(authResource);
   const passwordSecurity = resolvePasswordSecurity(authResource);
@@ -349,9 +353,8 @@ export function createAuthRoutes(authResource: AuthResource, config: AuthRoutesC
         return c.json(response, response._status as ContentfulStatusCode);
       }
 
-      const queryFilter = { [usernameField]: username };
-      const existing = await authResource.query(queryFilter);
-      if (existing && existing.length > 0) {
+      const existing = await resolveUser<AuthUser>(authResource, usernameField, username, lookupById);
+      if (existing) {
         const response = formatter.error(`${usernameField} already exists`, {
           status: 409,
           code: 'CONFLICT'
@@ -370,6 +373,9 @@ export function createAuthRoutes(authResource: AuthResource, config: AuthRoutesC
       }
 
       userData[usernameField] = username;
+      if (lookupById) {
+        userData.id = String(username);
+      }
 
       if (password) {
         if (isPasswordType) {
@@ -427,9 +433,8 @@ export function createAuthRoutes(authResource: AuthResource, config: AuthRoutesC
         return c.json(response, response._status as ContentfulStatusCode);
       }
 
-      const queryFilter = { [usernameField]: username };
-      const users = await authResource.query(queryFilter);
-      if (!users || users.length === 0) {
+      const user = await resolveUser<AuthUser>(authResource, usernameField, username, lookupById);
+      if (!user) {
         const now = Date.now();
         let throttleRecord: ThrottleRecord | null = null;
         if (loginThrottleConfig.enabled) {
@@ -451,8 +456,6 @@ export function createAuthRoutes(authResource: AuthResource, config: AuthRoutesC
         const response = formatter.unauthorized('Invalid credentials');
         return c.json(response, response._status as ContentfulStatusCode);
       }
-
-      const user = users[0]!;
 
       if (user.active === false || user.isActive === false) {
         const response = formatter.unauthorized('User account is inactive');
@@ -553,8 +556,7 @@ export function createAuthRoutes(authResource: AuthResource, config: AuthRoutesC
 
         const userIdentifier = payload[usernameField] || payload.userId;
         if (typeof userIdentifier === 'string' || typeof userIdentifier === 'number') {
-          const users = await authResource.query({ [usernameField]: userIdentifier });
-          const user = users[0];
+          const user = await resolveUser<AuthUser>(authResource, usernameField, userIdentifier as string, lookupById);
           if (!user || user.active === false || user.isActive === false) {
             const response = formatter.unauthorized('User not found or inactive');
             return c.json(response, response._status as ContentfulStatusCode);
@@ -680,9 +682,9 @@ export function createAuthRoutes(authResource: AuthResource, config: AuthRoutesC
 
       let serviceUser: AuthUser | null = null;
 
-      const byApiKey = await authResource.query({ apiKey: clientId });
-      if (byApiKey.length > 0) {
-        const candidate = byApiKey[0]!;
+      const candidateByApiKey = await resolveUser<AuthUser>(authResource, 'apiKey', clientId);
+      if (candidateByApiKey) {
+        const candidate = candidateByApiKey;
         const storedSecret = (candidate as Record<string, unknown>)[passwordField] as string | undefined;
 
         if (storedSecret && await verifyClientSecret(clientSecret, storedSecret, passwordPepper)) {
@@ -691,9 +693,9 @@ export function createAuthRoutes(authResource: AuthResource, config: AuthRoutesC
       }
 
       if (!serviceUser) {
-        const byUsername = await authResource.query({ [usernameField]: clientId });
-        if (byUsername.length > 0) {
-          const candidate = byUsername[0]!;
+        const candidateByUsername = await resolveUser<AuthUser>(authResource, usernameField, clientId, lookupById);
+        if (candidateByUsername) {
+          const candidate = candidateByUsername;
           const storedSecret = (candidate as Record<string, unknown>)[passwordField] as string | undefined;
 
           if (storedSecret && await verifyClientSecret(clientSecret, storedSecret, passwordPepper)) {

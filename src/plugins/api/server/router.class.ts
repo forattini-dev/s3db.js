@@ -567,6 +567,7 @@ export class Router {
     }
 
     const driverConfig = jwtDriver.config || {};
+    const lookupById = (driverConfig as Record<string, unknown>).lookupById === true;
     const registrationConfig = {
       enabled: (driverConfig as Record<string, unknown>).allowRegistration === true ||
         ((driverConfig as Record<string, { enabled?: boolean }>).registration)?.enabled === true ||
@@ -599,6 +600,7 @@ export class Router {
       jwtExpiresIn: (driverConfig as Record<string, string>).jwtExpiresIn || (driverConfig as Record<string, string>).expiresIn || '7d',
       jwtRefreshExpiresIn: (driverConfig as Record<string, string>).jwtRefreshExpiresIn || (driverConfig as Record<string, string>).refreshExpiresIn || '30d',
       passphrase: (driverConfig as Record<string, string>).passphrase || 'secret',
+      lookupById,
       allowRegistration: registrationConfig.enabled,
       registration: registrationConfig,
       loginThrottle: loginThrottleConfig,

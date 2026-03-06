@@ -9,6 +9,7 @@ export interface ResourceLike {
   name: string;
   schema: ResourceSchema;
   partitions?: Record<string, unknown>;
+  get?: (id: string, options?: Record<string, unknown>) => Promise<unknown>;
   query: (filter: Record<string, unknown>, options?: { limit?: number }) => Promise<unknown[]>;
   listPartition?: (partitionName: string, filter: Record<string, unknown>, options?: { limit?: number }) => Promise<unknown[]>;
   patch?: (id: string, data: Record<string, unknown>) => Promise<unknown>;
@@ -29,6 +30,7 @@ export interface DatabaseLike {
 export interface AuthResourceConfig {
   resource?: string;
   createResource?: boolean;
+  lookupById?: boolean;
   userField?: string;
   passwordField?: string;
   usernameField?: string;
@@ -126,6 +128,136 @@ export class AuthResourceManager {
   getMinimalSchema(): Record<string, string> {
     throw new Error('getMinimalSchema() must be implemented by driver resource manager');
   }
+}
+
+export interface UserLookupResource {
+  name?: string;
+  get?: (id: string, options?: Record<string, unknown>) => Promise<unknown>;
+  query: (filter: Record<string, unknown>, options?: { limit?: number }) => Promise<unknown[]>;
+  partitions?: Record<string, unknown>;
+  listPartition?: (partitionName: string, filter: Record<string, unknown>, options?: { limit?: number }) => Promise<unknown[]>;
+}
+
+const lookupLogger = createLogger({ name: 'AuthLookup', level: 'info' });
+const warnedFields = new Set<string>();
+
+function derivePartitionName(field: string): string {
+  return `by${field.charAt(0).toUpperCase()}${field.slice(1)}`;
+}
+
+function resourceHasPartition(resource: UserLookupResource, partitionName: string): boolean {
+  return !!(resource.partitions && resource.partitions[partitionName] && resource.listPartition);
+}
+
+function warnScanOnce(resourceName: string, field: string): void {
+  const key = `${resourceName}:${field}`;
+  if (warnedFields.has(key)) return;
+  warnedFields.add(key);
+  lookupLogger.warn(
+    { field, partition: derivePartitionName(field) },
+    `Auth lookup for field "${field}" is doing an O(n) full scan. ` +
+    `Add a partition "${derivePartitionName(field)}" on field "${field}", ` +
+    `or set lookupById: true if the field value is the resource ID.`
+  );
+}
+
+function isLookupMissError(error: unknown): boolean {
+  if (!error || typeof error !== 'object') {
+    return false;
+  }
+
+  const candidate = error as {
+    code?: unknown;
+    statusCode?: unknown;
+    message?: unknown;
+    name?: unknown;
+  };
+
+  if (candidate.code === 'NoSuchKey' || candidate.code === 'NotFound') {
+    return true;
+  }
+
+  if (candidate.statusCode === 404) {
+    return true;
+  }
+
+  const message = typeof candidate.message === 'string' ? candidate.message : '';
+  const name = typeof candidate.name === 'string' ? candidate.name : '';
+
+  return /not found/i.test(message) || /NoSuchKey|NotFound/i.test(name);
+}
+
+/**
+ * Resolves a user from a resource with the following lookup strategy:
+ *
+ * 1. lookupById: true → resource.get(value) — O(1)
+ * 2. Partition exists for field → resource.listPartition() — O(1)
+ * 3. Fallback → resource.query() — O(n) with loud warning
+ *
+ * The partition name is auto-derived from the field: "email" → "byEmail".
+ * Override with the partitionName parameter.
+ */
+export async function resolveUser<T = unknown>(
+  resource: UserLookupResource,
+  field: string,
+  value: string | number,
+  lookupById: boolean = false,
+  partitionName?: string
+): Promise<T | null> {
+  if (lookupById && resource.get) {
+    try {
+      const user = await resource.get(String(value));
+      return (user as T) ?? null;
+    } catch (error) {
+      if (isLookupMissError(error)) {
+        return null;
+      }
+      throw error;
+    }
+  }
+
+  const resolvedPartition = partitionName || derivePartitionName(field);
+
+  if (resourceHasPartition(resource, resolvedPartition)) {
+    const results = await resource.listPartition!(resolvedPartition, { [field]: value }, { limit: 1 });
+    return (results[0] as T) ?? null;
+  }
+
+  warnScanOnce(resource.name || 'unknown', field);
+  const results = await resource.query({ [field]: value }, { limit: 1 });
+  return (results[0] as T) ?? null;
+}
+
+/**
+ * Resolves multiple users from a resource. Same lookup strategy as resolveUser.
+ */
+export async function resolveUsers<T = unknown>(
+  resource: UserLookupResource,
+  field: string,
+  value: string | number,
+  lookupById: boolean = false,
+  partitionName?: string
+): Promise<T[]> {
+  if (lookupById && resource.get) {
+    try {
+      const user = await resource.get(String(value));
+      return user ? [user as T] : [];
+    } catch (error) {
+      if (isLookupMissError(error)) {
+        return [];
+      }
+      throw error;
+    }
+  }
+
+  const resolvedPartition = partitionName || derivePartitionName(field);
+
+  if (resourceHasPartition(resource, resolvedPartition)) {
+    return await resource.listPartition!(resolvedPartition, { [field]: value }, { limit: 1 }) as T[];
+  }
+
+  warnScanOnce(resource.name || 'unknown', field);
+  return await resource.query({ [field]: value }, { limit: 1 }) as T[];
 }
 
 export class JWTResourceManager extends AuthResourceManager {

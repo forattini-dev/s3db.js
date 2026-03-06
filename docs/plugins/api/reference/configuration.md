@@ -55,10 +55,17 @@ Login Throttle (auth.loginThrottle)
 - blockDurationMs: number = 300000
 - maxEntries: number = 10000
 
+User Lookup Performance (auth.drivers[].config — all drivers)
+- lookupById: boolean = false — When true, uses resource.get(fieldValue) for O(1) lookup. Use when the lookup field IS the resource ID (e.g., user.id === user.email).
+- partitionName: string | null — Override auto-detected partition name. Default: auto-derives from field name (email → "byEmail", apiKey → "byApiKey"). When a matching partition exists, uses O(1) listPartition() automatically.
+
+Lookup priority: lookupById (O(1) get) → partition (O(1) listPartition) → query (O(n) scan + warning).
+See [Authentication Guide: Performance](../guides/authentication.md#️-performance-user-lookup-strategy-critical) for full details.
+
 Driver‑specific (exemplos)
-- JWT: { secret: string; expiresIn?: string }
-- API Key: { headerName?: string }
-- Basic: { realm?: string; passphrase?: string; adminUser?: { enabled: boolean; username: string; password: string; scopes?: string[] } }
+- JWT: { secret: string; expiresIn?: string; lookupById?: boolean }
+- API Key: { headerName?: string; lookupById?: boolean; partitionName?: string }
+- Basic: { realm?: string; passphrase?: string; lookupById?: boolean; adminUser?: { enabled: boolean; username: string; password: string; scopes?: string[] } }
 - OAuth2 (RS): { issuer?: string; jwksUri?: string; audience?: string; algorithms?: string[]; cacheTTL?: number; clockTolerance?: number; validateScopes?: boolean; fetchUserInfo?: boolean; introspection?: { enabled?: boolean; endpoint?: string; clientId?: string; clientSecret?: string; useDiscovery?: boolean }; logLevel?: string }
 - OIDC (RP): { issuer: string; clientId: string; clientSecret: string; redirectUri: string; scopes?: string[]; cookieSecret: string; cookieName?: string; cookieDomain?: string; cookieMaxAge?: number; loginPath?: string; callbackPath?: string; logoutPath?: string; postLoginRedirect?: string; postLogoutRedirect?: string; idpLogout?: boolean; autoCreateUser?: boolean; autoRefreshTokens?: boolean; refreshThreshold?: number; externalUrl?: string; cookieSecure?: boolean; cookieSameSite?: 'Strict'|'Lax'|'None'; rollingDuration?: number; absoluteDuration?: number; discovery?: { enabled?: boolean }; pkce?: { enabled?: boolean; method?: 'S256' }; logLevel?: string }
 
