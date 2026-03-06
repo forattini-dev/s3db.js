@@ -648,6 +648,8 @@ export class Router {
         }
 
         const driverConfig = (config.config || {}) as Record<string, unknown>;
+        const mountedPath = this._withBasePath(config.path);
+        const routePattern = mountedPath === '/' ? '/*' : `${mountedPath}/*`;
 
         let handler: MiddlewareHandler;
 
@@ -658,6 +660,7 @@ export class Router {
           const indexArray = typeof indexValue === 'string' ? [indexValue] : (indexValue as string[] | undefined);
           handler = createFilesystemHandler({
             root: config.root!,
+            mountPath: mountedPath,
             index: indexArray,
             fallback: driverConfig.fallback as string | boolean | undefined,
             maxAge: driverConfig.maxAge as number | undefined,
@@ -678,6 +681,7 @@ export class Router {
           handler = createS3Handler({
             s3Client: s3Client as Parameters<typeof createS3Handler>[0]['s3Client'],
             bucket: config.bucket!,
+            mountPath: mountedPath,
             prefix: config.prefix,
             streaming: driverConfig.streaming as boolean | undefined,
             signedUrlExpiry: driverConfig.signedUrlExpiry as number | undefined,
@@ -694,15 +698,14 @@ export class Router {
           );
         }
 
-        const mountPath = config.path === '/' ? '/*' : `${config.path}/*`;
-        app.get(mountPath, handler);
+        app.get(routePattern, handler);
         // Use on() for HEAD - fallback to get() if on() not available (bundling issues)
         if (typeof (app as any).on === 'function') {
-          (app as any).on('HEAD', mountPath, handler);
+          (app as any).on('HEAD', routePattern, handler);
         }
 
         const source = config.driver === 'filesystem' ? config.root : `s3://${config.bucket}/${config.prefix || ''}`;
-        this.logger?.debug({ driver: config.driver, path: config.path, source }, `Mounted static files (${config.driver}) at ${config.path} -> ${source}`);
+        this.logger?.debug({ driver: config.driver, path: mountedPath, source }, `Mounted static files (${config.driver}) at ${mountedPath} -> ${source}`);
 
       } catch (err) {
         this.logger.error({ index, error: (err as Error).message }, `[API Router] Failed to setup static files for index ${index}`);

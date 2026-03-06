@@ -5,12 +5,14 @@ import path from 'path';
 import { createReadStream } from 'fs';
 import crypto from 'crypto';
 import { getContentType } from './mime-types.js';
+import { stripStaticMountPath } from './static-mount-path.js';
 import type { Context, MiddlewareHandler } from '#src/plugins/shared/http-runtime.js';
 
 const logger: Logger = createLogger({ name: 'StaticFilesystem', level: 'info' });
 
 export interface FilesystemHandlerConfig {
   root: string;
+  mountPath?: string;
   index?: string[];
   fallback?: string | boolean;
   maxAge?: number;
@@ -35,6 +37,7 @@ interface ResponseHeaders {
 export function createFilesystemHandler(config: FilesystemHandlerConfig): MiddlewareHandler {
   const {
     root,
+    mountPath = '/',
     index = ['index.html'],
     fallback = false,
     maxAge = 0,
@@ -58,7 +61,7 @@ export function createFilesystemHandler(config: FilesystemHandlerConfig): Middle
 
   return async (c: Context): Promise<Response> => {
     try {
-      let requestPath = c.req.path.replace(/^\//, '');
+      const requestPath = stripStaticMountPath(c.req.path, mountPath).replace(/^\//, '');
 
       const safePath = path.normalize(requestPath).replace(/^(\.\.(\/|\\|$))+/, '');
       const fullPath = path.join(absoluteRoot, safePath);
@@ -206,6 +209,10 @@ export function createFilesystemHandler(config: FilesystemHandlerConfig): Middle
 export function validateFilesystemConfig(config: Partial<FilesystemHandlerConfig>): void {
   if (!config.root || typeof config.root !== 'string') {
     throw new Error('Filesystem static config requires "root" directory (string)');
+  }
+
+  if (config.mountPath !== undefined && typeof config.mountPath !== 'string') {
+    throw new Error('Filesystem static "mountPath" must be a string');
   }
 
   if (config.index !== undefined && !Array.isArray(config.index)) {

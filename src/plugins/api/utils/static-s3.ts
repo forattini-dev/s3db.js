@@ -4,6 +4,7 @@ import { createLogger } from '../../../concerns/logger.js';
 import type { Logger } from '../../../concerns/logger.js';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { getContentType } from './mime-types.js';
+import { stripStaticMountPath } from './static-mount-path.js';
 import type { Context, MiddlewareHandler } from '#src/plugins/shared/http-runtime.js';
 
 const logger: Logger = createLogger({ name: 'StaticS3', level: 'info' });
@@ -11,6 +12,7 @@ const logger: Logger = createLogger({ name: 'StaticS3', level: 'info' });
 export interface S3HandlerConfig {
   s3Client: S3Client;
   bucket: string;
+  mountPath?: string;
   prefix?: string;
   streaming?: boolean;
   signedUrlExpiry?: number;
@@ -46,6 +48,7 @@ export function createS3Handler(config: S3HandlerConfig): MiddlewareHandler {
   const {
     s3Client,
     bucket,
+    mountPath = '/',
     prefix = '',
     streaming = true,
     signedUrlExpiry = 300,
@@ -66,7 +69,7 @@ export function createS3Handler(config: S3HandlerConfig): MiddlewareHandler {
 
   return async (c: Context): Promise<Response> => {
     try {
-      let requestPath = c.req.path.replace(/^\//, '');
+      const requestPath = stripStaticMountPath(c.req.path, mountPath).replace(/^\//, '');
       const key = prefix ? `${prefix}${requestPath}` : requestPath;
 
       if (key.includes('..') || key.includes('//')) {
@@ -176,6 +179,10 @@ export function createS3Handler(config: S3HandlerConfig): MiddlewareHandler {
 export function validateS3Config(config: Partial<S3HandlerConfig>): void {
   if (!config.bucket || typeof config.bucket !== 'string') {
     throw new Error('S3 static config requires "bucket" name (string)');
+  }
+
+  if (config.mountPath !== undefined && typeof config.mountPath !== 'string') {
+    throw new Error('S3 static "mountPath" must be a string');
   }
 
   if (config.prefix !== undefined && typeof config.prefix !== 'string') {
