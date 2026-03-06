@@ -53,6 +53,10 @@ export interface AuthConfig {
   resource?: string;
   usernameField?: string;
   passwordField?: string;
+  /** When true, skip mounting built-in /auth/* routes (login, register, me, etc.).
+   *  Auth middleware still runs for resource guards. Useful when the host app
+   *  provides its own auth routes (e.g. custom MFA/OTP flow). */
+  skipRoutes?: boolean;
   registration?: {
     enabled?: boolean;
     allowedFields?: string[];
@@ -541,10 +545,15 @@ export class Router {
   }
 
   private mountAuthRoutes(app: HttpAppType): void {
-    const { drivers, resource: resourceName, usernameField, passwordField, registration, loginThrottle } = (this.auth || {});
+    const { drivers, resource: resourceName, usernameField, passwordField, registration, loginThrottle, skipRoutes } = (this.auth || {});
 
     if (!drivers || (Array.isArray(drivers) && drivers.length === 0)) {
       this.logger?.warn('Auth not configured or empty drivers; skipping built-in auth routes');
+      return;
+    }
+
+    if (skipRoutes) {
+      this.logger?.debug('auth.skipRoutes is true; skipping built-in auth routes (middleware still active)');
       return;
     }
 

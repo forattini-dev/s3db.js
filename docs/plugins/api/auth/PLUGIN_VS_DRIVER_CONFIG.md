@@ -202,22 +202,21 @@ These auth settings are **shared across all drivers**:
 
 Each driver in the `drivers` array has its **own configuration**:
 
-### Shared: User Lookup Performance (all drivers)
+### Shared: User Lookup Performance (resource-backed drivers)
 
-Every driver supports these options for O(1) user lookups:
+JWT, Basic, API Key, OAuth2, and OIDC can all use `lookupById` for O(1) user resolution when the lookup field value is also the resource ID:
 
 ```javascript
 {
   driver: 'jwt',  // or 'basic', 'apiKey', 'oauth2', 'oidc'
   config: {
     // ⚡ O(1) lookup: use when user.id = lookup field value (e.g., id = email)
-    lookupById: true,
-
-    // Override auto-detected partition name (default: "by{FieldName}")
-    partitionName: 'byEmail',
+    lookupById: true
   }
 }
 ```
+
+`partitionName` is an explicit public option only on the API Key driver. The other resource-backed drivers auto-detect standard partition names such as `byEmail` when those partitions exist.
 
 **Lookup priority:** `lookupById` (O(1) get) → partition (O(1) listPartition) → query (O(n) scan + warning).
 See [Authentication Guide: Performance](../guides/authentication.md#️-performance-user-lookup-strategy-critical) for details.
@@ -338,7 +337,7 @@ See [Authentication Guide: Performance](../guides/authentication.md#️-performa
     },
 
     // User lookup performance
-    lookupById: true,          // ⚡ O(1) when user.id = sub claim from token
+    lookupById: true,          // ⚡ O(1) for fallback field lookups such as email
 
     // Caching
     cacheTTL: 3600000,         // 1 hour
@@ -356,6 +355,8 @@ See [Authentication Guide: Performance](../guides/authentication.md#️-performa
   }
 }
 ```
+
+OAuth2 first tries the mapped ID claim, usually `userMapping.id` or `sub`, with a direct `get()`. `lookupById` helps when it falls back to another field lookup.
 
 ### OIDC Driver (Authorization Code Flow)
 ```javascript
@@ -385,10 +386,12 @@ See [Authentication Guide: Performance](../guides/authentication.md#️-performa
     autoCreateUser: true,
 
     // User lookup performance
-    lookupById: true           // ⚡ O(1) when user.id = email from OIDC claims
+    lookupById: true           // ⚡ O(1) for fallback lookupFields such as email
   }
 }
 ```
+
+OIDC first tries candidate IDs from claims via direct `get()`. `lookupById` helps when the configured `lookupFields` fallback resolves by another field value that is also the resource ID.
 
 ---
 

@@ -75,7 +75,7 @@ auth: {
       clientSecret: process.env.GOOGLE_CLIENT_SECRET,
       redirectUri: 'http://localhost:3000/auth/callback',
       cookieSecret: process.env.COOKIE_SECRET,
-      lookupById: true                             // ⚡ O(1) user lookup
+      lookupById: true                             // ⚡ O(1) when your fallback lookup field is also the user ID
     }
   }
 }

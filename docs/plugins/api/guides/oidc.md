@@ -86,9 +86,9 @@ await db.usePlugin(new ApiPlugin({
 |---------|---------|--------|
 | **💾 External Session Store** | Redis, Memory - Horizontal scaling | 🟣 Enterprise |
 | **⚡ WeakMap Token Caching** | Per-request caching - Zero decode overhead | 🟢 Performance |
-| **⚡ O(1) User Lookup** | `lookupById: true` or auto-partition detection | 🟢 Performance |
+| **⚡ O(1) User Lookup** | Direct claim ID lookup, `lookupById`, or auto-detected partitions | 🟢 Performance |
 
-> **⚡ User Lookup Performance:** Add `lookupById: true` to your OIDC driver config when `user.id = email`. This turns every user lookup from an O(n) S3 scan into a single O(1) GET call. If your user ID is different from the email, add a partition `byEmail` to your users resource — auto-detected by the auth system. See [Authentication Guide: Performance](authentication.md#️-performance-user-lookup-strategy-critical) for details.
+> **⚡ User Lookup Performance:** OIDC already tries candidate ID claims with direct `get()` lookups. Add `lookupById: true` when your fallback `lookupFields` value is also the resource ID, for example when `user.id = email`. If your user ID is different, add a standard partition such as `byEmail` to your users resource so the fallback remains O(1). OIDC does not expose a driver-level `partitionName` override. See [Authentication Guide: Performance](authentication.md#️-performance-user-lookup-strategy-critical) for details.
 
 **Why Session Stores Matter:**
 - Without: Sessions stored in cookies (4-40KB) → Large headers, bandwidth waste

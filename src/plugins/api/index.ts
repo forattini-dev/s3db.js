@@ -186,6 +186,7 @@ export class ApiPlugin extends Plugin {
     normalizedAuth.usersResourcePasswordValidation = options.auth?.usersResourcePasswordValidation || 'password|required|minlength:8';
     normalizedAuth.enableIdentityContextMiddleware = options.auth?.enableIdentityContextMiddleware !== false;
     normalizedAuth.usersResourceAttributes = options.auth?.usersResourceAttributes || {};
+    normalizedAuth.skipRoutes = options.auth?.skipRoutes === true;
 
     this.config = {
       port: options.port || 3000,

@@ -22,11 +22,11 @@
 
 ## ⚠️ Performance: User Lookup Strategy (CRITICAL)
 
-> **Every auth request needs to find a user.** By default, this is an **O(n) full scan** of your users resource — listing every object in S3 and filtering in memory. With 10,000 users, that's 10,000 S3 GET calls **per login**. This section shows how to make it O(1).
+> **Every resource-backed auth request needs to find a user.** By default, this can become an **O(n) full scan** of your users resource. This section shows how to keep it O(1).
 
 ### The Problem
 
-All auth drivers (JWT, Basic, API Key, OAuth2, OIDC) need to look up the authenticated user from your resource. Without configuration, this lookup does:
+The resource-backed auth drivers (JWT, Basic, API Key, OAuth2, OIDC) may need to look up the authenticated user from your resource. Without an ID match or a usable partition, that lookup falls back to:
 
 ```
 authResource.query({ email: 'user@example.com' })  // O(n) — scans ALL users
@@ -70,7 +70,7 @@ await db.usePlugin(new ApiPlugin({
 
 **Result:** `resource.get('daniel@tetis.io')` — **1 S3 call** instead of scanning all users.
 
-Works with **all** drivers:
+Supported by all resource-backed drivers:
 
 ```javascript
 // JWT
@@ -83,11 +83,15 @@ drivers: { basic: { lookupById: true } }
 drivers: { 'api-key': { lookupById: true } }
 
 // OAuth2 Resource Server
-drivers: { oauth2: { issuer: '...', lookupById: true } }
+drivers: { oauth2: { issuer: '...', lookupById: true } }  // For fallback field lookups such as email
 
 // OIDC
-drivers: { oidc: { issuer: '...', clientId: '...', lookupById: true } }
+drivers: { oidc: { issuer: '...', clientId: '...', lookupById: true } }  // For fallback lookupFields such as email
 ```
+
+`Header Secret` is not part of this because it does not query a user resource.
+
+`OAuth2` and `OIDC` use hybrid resolution flows. They already try direct ID-style lookups from token claims first. `lookupById` helps when those drivers need to resolve a user by another configured field such as `email`.
 
 **Multi-driver:** each driver has its own `lookupById`. You can mix strategies:
 
@@ -95,7 +99,7 @@ drivers: { oidc: { issuer: '...', clientId: '...', lookupById: true } }
 drivers: {
   jwt: { secret: '...', lookupById: true },         // id = email
   'api-key': { partitionName: 'byApiKey' },          // partition lookup
-  oauth2: { issuer: '...', lookupById: true }         // id = sub claim
+  oauth2: { issuer: '...', lookupById: true }         // fallback field lookup uses get() when field value is the resource ID
 }
 ```
 
@@ -680,7 +684,7 @@ oidc: {
   clientSecret: 'YOUR_CLIENT_SECRET',
   redirectUri: 'http://localhost:3000/auth/callback',
   cookieSecret: process.env.COOKIE_SECRET,
-  lookupById: true                     // ⚡ O(1) when user.id = email from claims
+  lookupById: true                     // ⚡ O(1) for fallback lookupFields when that value is the resource ID
 }
 ```
 
@@ -756,7 +760,7 @@ await db.usePlugin(new ApiPlugin({
         cacheTTL: 3_600_000,                       // JWKS cache: 1 hour (default)
         clockTolerance: 60,                        // Clock skew tolerance in seconds
         fetchUserInfo: true,                       // Look up user in local DB (default)
-        lookupById: true,                          // ⚡ O(1) when user.id = sub claim
+        lookupById: true,                          // ⚡ O(1) for fallback field lookups such as email
         userMapping: {                             // Map token claims to user fields
           id: 'sub',
           email: 'email',
@@ -777,6 +781,8 @@ await db.usePlugin(new ApiPlugin({
   }
 }));
 ```
+
+OAuth2 first tries the mapped ID claim, typically `userMapping.id` or `sub`, with a direct `get()`. `lookupById` applies when the driver falls back to another field-based lookup such as `email`.
 
 **Provider presets** simplify configuration for common providers:
 
