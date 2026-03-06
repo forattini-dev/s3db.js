@@ -139,7 +139,8 @@ function compileHttpPath(path: string): CompiledPath {
 
     const parameterMatch = /^:([a-zA-Z_][a-zA-Z0-9_]*)(\?)?$/.exec(segment);
     if (parameterMatch) {
-      const [, name, optional] = parameterMatch;
+      const name = parameterMatch[1]!;
+      const optional = parameterMatch[2];
       paramNames.push(name);
       pattern += optional ? '(?:/([^/]+))?' : '/([^/]+)';
       continue;
@@ -173,7 +174,7 @@ function compileMiddlewarePattern(path: string): RegExp {
  * deterministic single-segment and deep-wildcard semantics.
  */
 export class HttpApp<E extends Record<string, unknown> = Record<string, unknown>> extends RaffelHttpApp<E> {
-  on(method: HttpMethod | '*', path: string, ...handlers: (HttpMiddleware<E> | HttpHandler<E>)[]): this {
+  override on(method: HttpMethod | '*', path: string, ...handlers: (HttpMiddleware<E> | HttpHandler<E>)[]): this {
     if (handlers.length === 0) {
       throw new Error('At least one handler is required');
     }
@@ -196,7 +197,7 @@ export class HttpApp<E extends Record<string, unknown> = Record<string, unknown>
     return this;
   }
 
-  route(path: string, app: RaffelHttpApp<E>): this {
+  override route(path: string, app: RaffelHttpApp<E>): this {
     const state = this as unknown as MutableHttpAppState<E>;
     const childState = app as unknown as MutableHttpAppState<E>;
 
@@ -225,7 +226,7 @@ export class HttpApp<E extends Record<string, unknown> = Record<string, unknown>
     return this;
   }
 
-  basePathApp(prefix: string): HttpApp<E> {
+  override basePathApp(prefix: string): HttpApp<E> {
     const state = this as unknown as MutableHttpAppState<E>;
     const subApp = new HttpApp<E>({ basePath: `${state.basePath || ''}${prefix}` });
     const subState = subApp as unknown as MutableHttpAppState<E>;
