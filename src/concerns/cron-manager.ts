@@ -341,12 +341,21 @@ export class CronManager {
       const intervalMs = Math.max(normalizedMs, 10);
 
       let timerId: ReturnType<typeof setInterval> | null = null;
+      let isRunning = false;
 
       const run = async () => {
+        if (isRunning) {
+          return;
+        }
+
+        isRunning = true;
+
         try {
           await fn?.();
         } catch (error) {
           this.logger.warn({ error: (error as Error)?.message || String(error) }, `In-memory interval job '${name}' failed`);
+        } finally {
+          isRunning = false;
         }
       };
 

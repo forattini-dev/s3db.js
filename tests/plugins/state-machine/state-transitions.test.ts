@@ -56,8 +56,7 @@ describe('StateMachinePlugin - State Transitions', () => {
       },
       actions: mockActions,
       guards: mockGuards,
-      persistTransitions: true,
-      logLevel: 'silent'
+      persistTransitions: true
     });
 
     await database.connect();

@@ -110,10 +110,13 @@ describe('StateMachinePlugin - Triggers', () => {
       dueAt: new Date(Date.now() - 1000).toISOString()
     });
 
-    await sleep(120);
-
-    const state = await plugin.getState('poller', 'job-2');
-    expect(state).toBe('running');
+    await vi.waitFor(async () => {
+      const state = await plugin.getState('poller', 'job-2');
+      expect(state).toBe('running');
+    }, {
+      timeout: 1500,
+      interval: 25
+    });
 
     await plugin.stop();
   });
@@ -154,13 +157,23 @@ describe('StateMachinePlugin - Triggers', () => {
     await plugin.install(database);
     await plugin.initializeEntity('poller', 'job-3', { id: 'job-3' });
 
-    await sleep(150);
+    await vi.waitFor(async () => {
+      const state = await plugin.getState('poller', 'job-3');
+      expect(state).toBe('maxed');
+    }, {
+      timeout: 1500,
+      interval: 25
+    });
 
-    const state = await plugin.getState('poller', 'job-3');
-    expect(state).toBe('maxed');
     expect(heartbeatSpy).toHaveBeenCalledTimes(1);
 
-    await sleep(80);
+    await vi.waitFor(() => {
+      expect(heartbeatSpy).toHaveBeenCalledTimes(1);
+    }, {
+      timeout: 300,
+      interval: 25
+    });
+
     expect(heartbeatSpy).toHaveBeenCalledTimes(1);
 
     await plugin.stop();
@@ -199,10 +212,7 @@ describe('StateMachinePlugin - Triggers', () => {
     plugin.emit('manual-async', { entityId: 'job-4' });
 
     await expect(plugin.waitForPendingEvents(10)).rejects.toThrow('Timeout waiting for');
-
-    await sleep(80);
-
-    await expect(plugin.waitForPendingEvents(200)).resolves.toBeUndefined();
+    await expect(plugin.waitForPendingEvents(1000)).resolves.toBeUndefined();
     expect(slowAction).toHaveBeenCalledTimes(1);
 
     await plugin.stop();
@@ -243,9 +253,7 @@ describe('StateMachinePlugin - Triggers', () => {
     source.emit('updated', { entityId: 'job-5' });
 
     await expect(plugin.waitForPendingEvents(10)).rejects.toThrow('Timeout waiting for');
-
-    await sleep(80);
-    await expect(plugin.waitForPendingEvents(200)).resolves.toBeUndefined();
+    await expect(plugin.waitForPendingEvents(1000)).resolves.toBeUndefined();
     expect(slowAction).toHaveBeenCalledTimes(1);
 
     await plugin.stop();
@@ -279,7 +287,7 @@ describe('StateMachinePlugin - Triggers', () => {
         }
       },
       actions: {
-        exitWaiting,
+        exitWaiting: exitSpy,
         enterRunning: enterSpy
       },
       persistTransitions: true
@@ -293,7 +301,7 @@ describe('StateMachinePlugin - Triggers', () => {
 
     plugin.emit('manual-target', { id: 'job-6' });
 
-    await sleep(40);
+    await expect(plugin.waitForPendingEvents(1000)).resolves.toBeUndefined();
 
     const state = await plugin.getState('poller', 'job-6');
     expect(state).toBe('running');

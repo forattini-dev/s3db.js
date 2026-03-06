@@ -387,7 +387,10 @@ export class StateMachinePlugin extends Plugin {
     const startTime = Date.now();
 
     while (this._pendingEventHandlers.size > 0) {
-      if (Date.now() - startTime > timeout) {
+      const elapsed = Date.now() - startTime;
+      const remaining = timeout - elapsed;
+
+      if (remaining <= 0) {
         throw new StateMachineError(
           `Timeout waiting for ${this._pendingEventHandlers.size} pending event handlers`,
           {
@@ -399,7 +402,32 @@ export class StateMachinePlugin extends Plugin {
       }
 
       if (this._pendingEventHandlers.size > 0) {
-        await Promise.race(Array.from(this._pendingEventHandlers));
+        let timeoutHandle: NodeJS.Timeout | null = null;
+        const timeoutPromise = new Promise<'timeout'>((resolve) => {
+          timeoutHandle = setTimeout(() => resolve('timeout'), remaining);
+        });
+        const pendingPromise = Promise.race(
+          Array.from(this._pendingEventHandlers, (promise) => promise.then(
+            () => 'settled' as const,
+            () => 'settled' as const
+          ))
+        );
+
+        const result = await Promise.race([pendingPromise, timeoutPromise]);
+        if (timeoutHandle) {
+          clearTimeout(timeoutHandle);
+        }
+
+        if (result === 'timeout' && this._pendingEventHandlers.size > 0) {
+          throw new StateMachineError(
+            `Timeout waiting for ${this._pendingEventHandlers.size} pending event handlers`,
+            {
+              operation: 'waitForPendingEvents',
+              pendingCount: this._pendingEventHandlers.size,
+              timeout
+            }
+          );
+        }
       }
 
       await new Promise(resolve => setImmediate(resolve));
@@ -944,6 +972,15 @@ export class StateMachinePlugin extends Plugin {
         await this._executeAction(targetStateConfig.entry, context, event, machineId, entityId);
       }
 
+      this.emit('plg:state-machine:transition', {
+        machineId,
+        entityId,
+        from: fromState,
+        to: targetState,
+        event,
+        context
+      });
+
       return { from: fromState, to: targetState };
     } finally {
       await this._releaseTransitionLock(lock);
@@ -984,9 +1021,11 @@ export class StateMachinePlugin extends Plugin {
         .then(() => {});
       this._pendingEventHandlers.add(handlerPromise);
 
-      handlerPromise.finally(() => {
+      const removePendingHandler = () => {
         this._pendingEventHandlers.delete(handlerPromise);
-      });
+      };
+
+      handlerPromise.then(removePendingHandler, removePendingHandler);
     };
   }
 
