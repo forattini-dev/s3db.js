@@ -979,7 +979,9 @@ export class StateMachinePlugin extends Plugin {
     handler: (...args: unknown[]) => unknown
   ): (...args: unknown[]) => void {
     return (...args: unknown[]) => {
-      const handlerPromise = Promise.resolve().then(() => handler(...args));
+      const handlerPromise: Promise<void> = Promise.resolve()
+        .then(() => handler(...args))
+        .then(() => {});
       this._pendingEventHandlers.add(handlerPromise);
 
       handlerPromise.finally(() => {
