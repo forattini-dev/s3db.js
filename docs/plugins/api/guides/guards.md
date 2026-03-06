@@ -208,6 +208,8 @@ type GuardFunction = (
 
 Guards can be defined in two places with clear precedence:
 
+For the full `resource.api` surface, including `views`, `write`, `description`, and resource-level custom routes, see **[Resource API Reference](/plugins/api/reference/resource-api.md)**.
+
 ### 1. Resource-Level Guards (via `api` config)
 
 **Recommended** - Define guards, protected fields, and descriptions together:
@@ -247,6 +249,15 @@ await db.createResource({
 | `description` | `string` | OpenAPI documentation description for the resource |
 | `protected` | `string[]` | Fields to filter from API responses (supports dot notation) |
 | `guard` | `object` | Per-operation authorization rules |
+| `views` | `object` | Audience-specific response projections for native CRUD routes |
+| `write` | `object` | Per-operation mutability rules for create/update/patch |
+| `readonly` / `readOnly` | `string[]` | Global write denylist fallback |
+| `writable` | `string[]` | Global write allowlist fallback |
+
+**Also supported in `resource.api`:**
+- custom route definitions like `'GET /summary'`
+- actor-aware views selected via `?view=name` or auto-selection
+- response metadata such as `meta.view` when a view is active
 
 **Protected Fields:**
 - Supports nested paths: `['ip', 'metadata.internal', 'user.apiToken']`

@@ -179,6 +179,17 @@
       sidebarDisplayLevel: 1,
 
       alias: {
+        // More specific sidebar aliases must come first.
+        // This lets complex sections (like the API plugin) own their local navigation
+        // while the rest of the site still falls back to the global sidebar.
+        '/plugins/api/_sidebar.md': '/plugins/api/_sidebar.md',
+        '/plugins/api/.*/_sidebar.md': '/plugins/api/_sidebar.md',
+        '/plugins/identity/_sidebar.md': '/plugins/identity/_sidebar.md',
+        '/plugins/identity/.*/_sidebar.md': '/plugins/identity/_sidebar.md',
+        '/plugins/recon/_sidebar.md': '/plugins/recon/_sidebar.md',
+        '/plugins/recon/.*/_sidebar.md': '/plugins/recon/_sidebar.md',
+        '/plugins/cloud-inventory/_sidebar.md': '/plugins/cloud-inventory/_sidebar.md',
+        '/plugins/cloud-inventory/.*/_sidebar.md': '/plugins/cloud-inventory/_sidebar.md',
         '/.*/_navbar.md': '/_navbar.md',
         '/.*/_sidebar.md': '/_sidebar.md'
       },

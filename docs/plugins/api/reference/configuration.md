@@ -209,6 +209,7 @@ Operational note: failban cron cleanup is created on plugin startup and cleaned 
 Notes:
 - In object form, setting a resource to false disables its auto‑routes.
 - Custom routes support enhanced context when handler has arity 2: (c, ctx).
+- Resource-native batch routes such as `POST /:resource/bulk` are configured on the resource itself through `resource.api.bulk.create`; see [Resource API Reference](/plugins/api/reference/resource-api.md).
 
 —
 
@@ -682,7 +683,7 @@ resources: {
 }
 ```
 
-### 2.1 Put Visibility And Mutability In `resource.api`
+### 2.1 Put Visibility, Mutability, And Resource-Level Routes In `resource.api`
 
 When a resource is part of the public or admin API surface, keep response shape and mutability on the resource:
 
@@ -697,6 +698,7 @@ await db.createResource({
     tokenHash: 'string|optional'
   },
   api: {
+    description: 'Users exposed to self-service and admin clients',
     protected: [{ path: 'tokenHash', unlessRole: ['admin'] }],
     views: {
       public: {
@@ -716,12 +718,28 @@ await db.createResource({
         { whenRole: ['admin'], priority: 100, writable: ['name', 'email', 'role'] },
         { whenRole: ['user'], priority: 10, writable: ['name', 'email'], readonly: ['role'] }
       ]
+    },
+    'GET /summary': async (c, { resource }) => {
+      const total = await resource.count();
+      return c.json({ total });
     }
   }
 });
 ```
 
-See [Resource Policies](/plugins/api/guides/resource-policies.md) for the full reference and precedence rules.
+Use this surface for:
+
+- `description` to improve generated docs
+- `guard` to authorize native CRUD operations
+- `protected` to hide fields from API responses
+- `views` to define audience-specific projections
+- `write`, `readonly`, and `writable` to control mutability
+- `'METHOD /path'` keys to colocate resource-level custom routes
+
+Read:
+
+- [Resource Policies](/plugins/api/guides/resource-policies.md) for design patterns and precedence
+- [Resource API Reference](/plugins/api/reference/resource-api.md) for the exact key-by-key contract
 
 ### 3. Enable Production Features
 

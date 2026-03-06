@@ -327,6 +327,24 @@ For full examples and the evaluation order, read [Resource Policies](/plugins/ap
 
 ---
 
+### Where is the full `resource.api` reference?
+
+Use [Resource API Reference](/plugins/api/reference/resource-api.md).
+
+That page is the best place to look up:
+
+- `description`
+- `guard`
+- `protected`
+- `views`
+- global `readonly` / `writable`
+- `write.create`, `write.update`, `write.patch`
+- custom resource routes like `'GET /summary'`
+
+If you want patterns and tradeoffs instead of a key-by-key contract, read [Resource Policies](/plugins/api/guides/resource-policies.md).
+
+---
+
 ### Can custom routes share guards, protected fields, and metadata in one place?
 
 Partially. Resource-level custom routes already colocate well with the resource itself, but route-specific guard/projection metadata is still more manual than the CRUD surface.

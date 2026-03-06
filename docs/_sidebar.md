@@ -32,7 +32,7 @@
   - [Memory Client](clients/memory-client.md)
   - [Filesystem Client](clients/filesystem-client.md)
 
-- **The "Mega" Plugins**
+- **Platform Plugins**
   - [API Plugin](plugins/api/README.md)
   - [Identity (OIDC)](plugins/identity/README.md)
   - [Recon System](plugins/recon/README.md)

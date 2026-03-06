@@ -7,7 +7,7 @@ await db.usePlugin(new ApiPlugin({ port: 3000 }));
 // ✅ REST API + Auth + Docs + Metrics running
 ```
 
-**Instant features:** Auto-generated endpoints • JWT/OAuth2/OIDC/Header Secret auth • Row-level security • Role-aware protected fields • Native resource views • Write policies per operation • Interactive docs (OpenAPI + USD) • Production metrics
+**Instant features:** Auto-generated endpoints • JWT/OAuth2/OIDC/Header Secret auth • Row-level security • Role-aware protected fields • Native resource views • Write policies per operation • Resource-level custom routes • Interactive docs (OpenAPI + USD) • Production metrics
 
 **Works with:** Any OIDC provider (IdentityPlugin, Keycloak, Azure AD, AWS Cognito, etc.)
 
@@ -120,6 +120,11 @@ await db.createResource({
 
 This keeps “who can see what” and “who can change what” attached to the resource instead of spread across handlers.
 
+It also extends naturally to native batch routes. `resource.api.bulk.create` can expose `POST /:resource/bulk` while reusing the same `guard`, `write`, `views`, and `protected` rules defined on the resource.
+
+Need the exact keys, precedence, and custom-route shape for `resource.api`?
+**[→ Resource API Reference](/plugins/api/reference/resource-api.md)**
+
 ---
 
 ## 📚 Documentation
@@ -152,6 +157,7 @@ This keeps “who can see what” and “who can change what” attached to the 
 | Document | Description |
 |----------|-------------|
 | **[Configuration](/plugins/api/reference/configuration.md)** | All config options (alphabetical) |
+| **[Resource API Reference](/plugins/api/reference/resource-api.md)** | Exact `resource.api` keys, precedence, and custom route behavior |
 | **[Enhanced Context](/plugins/api/reference/enhanced-context.md)** | Route context API reference |
 | **[FAQ](/plugins/api/faq.md)** | Common questions and troubleshooting |
 

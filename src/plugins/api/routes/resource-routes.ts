@@ -150,6 +150,29 @@ interface RelationListCursorPayload {
   pageSize: number;
 }
 
+type BulkCreateMode = 'partial' | 'all-or-nothing';
+
+interface BulkCreateRouteConfig {
+  enabled?: boolean;
+  path?: string;
+  maxItems?: number;
+  mode?: BulkCreateMode;
+}
+
+interface NormalizedBulkCreateRouteConfig {
+  path: string;
+  maxItems: number;
+  mode: BulkCreateMode;
+}
+
+interface BulkCreateItemError {
+  index: number;
+  code: string;
+  message: string;
+  status: number;
+  details: Record<string, unknown>;
+}
+
 function parsePopulateValues(raw: unknown): string[] {
   if (raw === undefined || raw === null) return [];
 
@@ -644,6 +667,165 @@ function parseCustomRoute(routeDef: string): ParsedRoute {
   return { method, path };
 }
 
+function normalizeBulkCreateConfig(apiConfig: Record<string, unknown>): NormalizedBulkCreateRouteConfig | null {
+  const bulkConfig = apiConfig.bulk;
+
+  if (!bulkConfig || typeof bulkConfig !== 'object' || Array.isArray(bulkConfig)) {
+    return null;
+  }
+
+  const createConfig = (bulkConfig as { create?: boolean | BulkCreateRouteConfig }).create;
+  if (!createConfig) {
+    return null;
+  }
+
+  const defaults: NormalizedBulkCreateRouteConfig = {
+    path: '/bulk',
+    maxItems: 100,
+    mode: 'partial'
+  };
+
+  if (createConfig === true) {
+    return defaults;
+  }
+
+  if (typeof createConfig !== 'object' || Array.isArray(createConfig)) {
+    return defaults;
+  }
+
+  const normalizedPath = typeof createConfig.path === 'string' && createConfig.path.trim().length > 0
+    ? createConfig.path.trim()
+    : defaults.path;
+  const path = normalizedPath.startsWith('/') ? normalizedPath : `/${normalizedPath}`;
+
+  const rawMaxItems = typeof createConfig.maxItems === 'number'
+    ? createConfig.maxItems
+    : Number.parseInt(String(createConfig.maxItems ?? defaults.maxItems), 10);
+  const maxItems = Number.isFinite(rawMaxItems) && rawMaxItems > 0
+    ? Math.min(Math.trunc(rawMaxItems), 1000)
+    : defaults.maxItems;
+
+  const mode = createConfig.mode === 'all-or-nothing'
+    ? 'all-or-nothing'
+    : defaults.mode;
+
+  if (createConfig.enabled === false) {
+    return null;
+  }
+
+  return {
+    path,
+    maxItems,
+    mode
+  };
+}
+
+function normalizeBulkCreateItems(
+  payload: unknown,
+  maxItems: number
+): { ok: true; items: Record<string, unknown>[] } | { ok: false; message: string; code: string; details: Record<string, unknown> } {
+  const items = Array.isArray(payload)
+    ? payload
+    : (
+        payload &&
+        typeof payload === 'object' &&
+        !Array.isArray(payload) &&
+        Array.isArray((payload as { items?: unknown[] }).items)
+      )
+        ? (payload as { items: unknown[] }).items
+        : null;
+
+  if (!items) {
+    return {
+      ok: false,
+      message: 'Invalid bulk create payload',
+      code: 'INVALID_BULK_PAYLOAD',
+      details: {
+        suggestion: 'Send a JSON array or an object shaped like { "items": [ ... ] }.'
+      }
+    };
+  }
+
+  if (items.length === 0) {
+    return {
+      ok: false,
+      message: 'Bulk create payload must include at least one item',
+      code: 'INVALID_BULK_PAYLOAD',
+      details: {
+        suggestion: 'Provide one or more objects inside the bulk request.'
+      }
+    };
+  }
+
+  if (items.length > maxItems) {
+    return {
+      ok: false,
+      message: 'Bulk create payload exceeds the configured limit',
+      code: 'BULK_LIMIT_EXCEEDED',
+      details: {
+        maxItems,
+        receivedItems: items.length
+      }
+    };
+  }
+
+  const invalidItems: number[] = [];
+  const normalizedItems: Record<string, unknown>[] = [];
+
+  items.forEach((item, index) => {
+    if (!item || typeof item !== 'object' || Array.isArray(item)) {
+      invalidItems.push(index);
+      return;
+    }
+
+    normalizedItems.push(item as Record<string, unknown>);
+  });
+
+  if (invalidItems.length > 0) {
+    return {
+      ok: false,
+      message: 'Bulk create payload items must be JSON objects',
+      code: 'INVALID_BULK_PAYLOAD',
+      details: {
+        invalidItems
+      }
+    };
+  }
+
+  return {
+    ok: true,
+    items: normalizedItems
+  };
+}
+
+function createBulkItemError(index: number, err: Error): BulkCreateItemError {
+  const details: Record<string, unknown> = {};
+  const maybeStatus = (err as Error & { statusCode?: number }).statusCode;
+  const status = typeof maybeStatus === 'number' ? maybeStatus : 500;
+  const maybeCode = (err as Error & { code?: string }).code;
+  const code = typeof maybeCode === 'string' && maybeCode.trim().length > 0
+    ? maybeCode
+    : (err instanceof ValidationError ? 'VALIDATION_ERROR' : err.name || 'BULK_CREATE_ITEM_ERROR');
+
+  if (err instanceof ValidationError) {
+    if (err.field) details.field = err.field;
+    if (err.constraint) details.constraint = err.constraint;
+    if (err.suggestion) details.suggestion = err.suggestion;
+  }
+
+  if ((err as Error & { suggestion?: string }).suggestion && !details.suggestion) {
+    details.suggestion = (err as Error & { suggestion?: string }).suggestion;
+  }
+
+  return {
+    index,
+    code,
+    message: err.message,
+    status,
+    details
+  };
+}
+
 interface HttpAppWithDescribe extends HttpAppType {
   describe?(meta: Record<string, unknown>): HttpAppWithDescribe;
 }
@@ -678,7 +860,8 @@ export function createResourceRoutes(resource: ResourceLike, _version: string, c
     app.use('*', middleware);
   });
 
-  const RESERVED_API_KEYS = ['guard', 'protected', 'description', 'readonly', 'readOnly', 'writable', 'write', 'views'];
+  const bulkCreateConfig = normalizeBulkCreateConfig(apiConfig);
+  const RESERVED_API_KEYS = ['guard', 'protected', 'description', 'readonly', 'readOnly', 'writable', 'write', 'views', 'bulk'];
   if (resource.config?.api && typeof resource.config.api === 'object') {
     for (const [routeDef, handler] of Object.entries(resource.config.api)) {
       if (RESERVED_API_KEYS.includes(routeDef)) {
@@ -1273,6 +1456,166 @@ export function createResourceRoutes(resource: ResourceLike, _version: string, c
       }
     }).post('/', createGuard, createHandler);
     app.post('', createGuard, createHandler);
+
+    if (bulkCreateConfig) {
+      const bulkCreateHandler = asyncHandler(async (c: Context) => {
+        let payload: unknown;
+        try {
+          payload = await c.req.json();
+        } catch {
+          const response = formatter.error('Invalid bulk create payload', {
+            status: 400,
+            code: 'INVALID_BULK_PAYLOAD',
+            details: {
+              suggestion: 'Send valid JSON with a top-level array or { "items": [ ... ] }.'
+            }
+          });
+          return c.json(response, response._status as ContentfulStatusCode);
+        }
+
+        const normalizedPayload = normalizeBulkCreateItems(payload, bulkCreateConfig.maxItems);
+        if (!normalizedPayload.ok) {
+          const response = formatter.error(normalizedPayload.message, {
+            status: 400,
+            code: normalizedPayload.code,
+            details: normalizedPayload.details
+          });
+          return c.json(response, response._status as ContentfulStatusCode);
+        }
+
+        const viewName = typeof c.req.query('view') === 'string' ? c.req.query('view') : null;
+        const viewResolution = resolveRequestedView(apiConfig, viewName, c.get('user') as Record<string, unknown> | null | undefined);
+        if (!viewResolution.ok) {
+          const response = formatter.error(viewResolution.message, {
+            status: viewResolution.status,
+            code: viewResolution.code,
+            details: viewResolution.details || {}
+          });
+          return c.json(response, response._status as ContentfulStatusCode);
+        }
+
+        const createdItems: Record<string, unknown>[] = [];
+        const errors: BulkCreateItemError[] = [];
+        let processed = 0;
+        let stopped = false;
+
+        for (const [index, item] of normalizedPayload.items.entries()) {
+          const writePolicy = resolveWritePolicy(apiConfig, 'create', item, c.get('user') as Record<string, unknown> | null | undefined);
+          if (!writePolicy.ok) {
+            errors.push({
+              index,
+              code: 'FIELD_WRITE_NOT_ALLOWED',
+              message: 'One or more fields are not writable for this operation',
+              status: 400,
+              details: {
+                operation: 'create',
+                rejectedFields: writePolicy.rejectedPaths,
+                readonlyFields: writePolicy.readonlyPaths,
+                writableFields: writePolicy.writablePaths
+              }
+            });
+            processed += 1;
+            if (bulkCreateConfig.mode === 'all-or-nothing') {
+              stopped = true;
+              break;
+            }
+            continue;
+          }
+
+          try {
+            const created = await resource.insert(item, {
+              user: c.get('user'),
+              request: c.req
+            });
+
+            if (events) {
+              events.emitResourceEvent('created', {
+                resource: resourceName,
+                id: created.id as string,
+                data: created,
+                user: c.get('user')
+              });
+            }
+
+            createdItems.push(applyResponsePolicy(
+              created,
+              { ...apiConfig, protected: protectedFields },
+              c.get('user') as Record<string, unknown> | null | undefined,
+              viewResolution.definition
+            ) as Record<string, unknown>);
+          } catch (err) {
+            errors.push(createBulkItemError(index, err as Error));
+            if (bulkCreateConfig.mode === 'all-or-nothing') {
+              stopped = true;
+              processed += 1;
+              break;
+            }
+          }
+
+          processed += 1;
+        }
+
+        const response = formatter.success({
+          items: createdItems,
+          errors,
+          summary: {
+            total: normalizedPayload.items.length,
+            processed,
+            created: createdItems.length,
+            failed: errors.length,
+            stopped,
+            mode: bulkCreateConfig.mode
+          }
+        }, {
+          status: errors.length > 0 ? 207 : 201,
+          meta: viewResolution.name ? { view: viewResolution.name } : {}
+        });
+
+        return c.json(response, response._status as ContentfulStatusCode);
+      });
+
+      app.describe!({
+        description: `Create multiple ${resourceName} records in one request`,
+        tags: [resourceName],
+        operationId: `bulk_create_${resourceName}`,
+        responseSchema: {
+          type: 'object',
+          properties: {
+            success: { type: 'boolean' },
+            data: {
+              type: 'object',
+              properties: {
+                items: { type: 'array', items: { type: 'object' } },
+                errors: {
+                  type: 'array',
+                  items: {
+                    type: 'object',
+                    properties: {
+                      index: { type: 'integer' },
+                      code: { type: 'string' },
+                      message: { type: 'string' },
+                      status: { type: 'integer' },
+                      details: { type: 'object' }
+                    }
+                  }
+                },
+                summary: {
+                  type: 'object',
+                  properties: {
+                    total: { type: 'integer' },
+                    processed: { type: 'integer' },
+                    created: { type: 'integer' },
+                    failed: { type: 'integer' },
+                    stopped: { type: 'boolean' },
+                    mode: { type: 'string' }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }).post(bulkCreateConfig.path, createGuard, bulkCreateHandler);
+    }
   }
 
   if (methods.includes('PUT')) {
@@ -1608,7 +1951,8 @@ export function createResourceRoutes(resource: ResourceLike, _version: string, c
           partitioning: Object.keys(resource.config?.partitions || {}).length > 0,
           filtering: true,
           pagination: true,
-          sorting: false
+          sorting: false,
+          bulkCreate: Boolean(bulkCreateConfig)
         },
 
         conditionalHeaders: {
@@ -1630,6 +1974,7 @@ export function createResourceRoutes(resource: ResourceLike, _version: string, c
           list: `/${resourceVersion}/${resourceName}`,
           get: `/${resourceVersion}/${resourceName}/:id`,
           create: `/${resourceVersion}/${resourceName}`,
+          ...(bulkCreateConfig ? { bulkCreate: `${basePath}${bulkCreateConfig.path}` } : {}),
           update: `/${resourceVersion}/${resourceName}/:id`,
           delete: `/${resourceVersion}/${resourceName}/:id`
         },
@@ -1646,6 +1991,7 @@ export function createResourceRoutes(resource: ResourceLike, _version: string, c
         statusCodes: {
           200: 'OK - Successful GET/PUT/PATCH',
           201: 'Created - Successful POST',
+          207: 'Multi-Status - Bulk create completed with one or more item-level failures',
           204: 'No Content - Successful DELETE',
           304: 'Not Modified - Resource unchanged (If-None-Match)',
           404: 'Not Found - Resource does not exist',

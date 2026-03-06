@@ -50,6 +50,13 @@ export interface WriteOperationPolicy extends AccessConditionRule {
 
 export type WritePolicyConfig = WriteOperationPolicy | WriteOperationPolicy[];
 
+export interface BulkCreatePolicyConfig {
+  enabled?: boolean;
+  path?: string;
+  maxItems?: number;
+  mode?: 'partial' | 'all-or-nothing';
+}
+
 export interface ApiPolicyConfig {
   protected?: ProtectedFieldsConfig;
   views?: Record<string, ViewDefinition>;
@@ -60,6 +67,9 @@ export interface ApiPolicyConfig {
     create?: WritePolicyConfig;
     update?: WritePolicyConfig;
     patch?: WritePolicyConfig;
+  };
+  bulk?: {
+    create?: boolean | BulkCreatePolicyConfig;
   };
   [key: string]: unknown;
 }

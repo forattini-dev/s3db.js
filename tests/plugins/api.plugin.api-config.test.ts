@@ -755,6 +755,249 @@ describe('API Plugin - resource.$schema.api configuration', () => {
     });
   });
 
+  describe('api.bulk.create', () => {
+    it('creates multiple items and applies response views for bulk create', async () => {
+      await db.createResource({
+        name: 'bulk_users',
+        attributes: {
+          id: 'string|optional',
+          email: 'string|required',
+          name: 'string|required',
+          tokenHash: 'string|optional'
+        },
+        behavior: 'body-overflow',
+        timestamps: true,
+        api: {
+          bulk: {
+            create: true
+          },
+          protected: [
+            { path: 'tokenHash', unlessRole: ['admin'] }
+          ],
+          views: {
+            admin: {
+              whenRole: ['admin'],
+              fields: ['id', 'email', 'name', 'tokenHash']
+            }
+          }
+        }
+      });
+
+      apiPlugin = new ApiPlugin({
+        logLevel: 'silent',
+        port,
+        host: '127.0.0.1',
+        docs: { enabled: false },
+        logging: { enabled: false },
+        resources: {
+          bulk_users: {
+            customMiddleware: [async (c, next) => {
+              const role = c.req.raw.headers.get('x-role');
+              if (role) {
+                c.set('user', { role, roles: [role] });
+              }
+              await next();
+            }]
+          }
+        }
+      });
+
+      await db.usePlugin(apiPlugin);
+      await waitForServer(port);
+
+      const response = await fetch(`http://127.0.0.1:${port}/bulk_users/bulk?view=admin`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-role': 'admin'
+        },
+        body: JSON.stringify({
+          items: [
+            { id: 'bulk-user-1', email: 'bulk-1@example.com', name: 'Bulk One', tokenHash: 'tok-1' },
+            { id: 'bulk-user-2', email: 'bulk-2@example.com', name: 'Bulk Two', tokenHash: 'tok-2' }
+          ]
+        })
+      });
+
+      const body = await response.json();
+      expect(response.status).toBe(201);
+      expect(body.meta.view).toBe('admin');
+      expect(body.data.summary).toEqual({
+        total: 2,
+        processed: 2,
+        created: 2,
+        failed: 0,
+        stopped: false,
+        mode: 'partial'
+      });
+      expect(body.data.errors).toEqual([]);
+      expect(body.data.items).toEqual([
+        {
+          id: 'bulk-user-1',
+          email: 'bulk-1@example.com',
+          name: 'Bulk One',
+          tokenHash: 'tok-1'
+        },
+        {
+          id: 'bulk-user-2',
+          email: 'bulk-2@example.com',
+          name: 'Bulk Two',
+          tokenHash: 'tok-2'
+        }
+      ]);
+    });
+
+    it('returns partial results when some items violate create policy', async () => {
+      await db.createResource({
+        name: 'bulk_memberships',
+        attributes: {
+          id: 'string|optional',
+          email: 'string|required',
+          phone: 'string|optional',
+          role: 'string|optional'
+        },
+        behavior: 'body-overflow',
+        timestamps: true,
+        api: {
+          bulk: {
+            create: {
+              mode: 'partial'
+            }
+          },
+          write: {
+            create: {
+              writable: ['id', 'email', 'phone'],
+              readonly: ['role']
+            }
+          }
+        }
+      });
+
+      apiPlugin = new ApiPlugin({
+        logLevel: 'silent',
+        port,
+        host: '127.0.0.1',
+        docs: { enabled: false },
+        logging: { enabled: false },
+        resources: ['bulk_memberships']
+      });
+
+      await db.usePlugin(apiPlugin);
+      await waitForServer(port);
+
+      const response = await fetch(`http://127.0.0.1:${port}/bulk_memberships/bulk`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          items: [
+            { id: 'membership-1', email: 'membership-1@example.com', phone: '1111' },
+            { id: 'membership-2', email: 'membership-2@example.com', role: 'admin' }
+          ]
+        })
+      });
+
+      const body = await response.json();
+      expect(response.status).toBe(207);
+      expect(body.data.summary).toEqual({
+        total: 2,
+        processed: 2,
+        created: 1,
+        failed: 1,
+        stopped: false,
+        mode: 'partial'
+      });
+      expect(body.data.items).toHaveLength(1);
+      expect(body.data.items[0].email).toBe('membership-1@example.com');
+      expect(body.data.errors).toEqual([
+        expect.objectContaining({
+          index: 1,
+          code: 'FIELD_WRITE_NOT_ALLOWED',
+          status: 400
+        })
+      ]);
+
+      const saved = await db.resources.bulk_memberships.get('membership-1');
+      expect(saved?.email).toBe('membership-1@example.com');
+      await expect(db.resources.bulk_memberships.get('membership-2')).rejects.toThrow('No such key');
+    });
+
+    it('stops processing after the first failure in all-or-nothing mode', async () => {
+      await db.createResource({
+        name: 'bulk_contacts',
+        attributes: {
+          id: 'string|optional',
+          email: 'string|required',
+          name: 'string|required',
+          role: 'string|optional'
+        },
+        behavior: 'body-overflow',
+        timestamps: true,
+        api: {
+          bulk: {
+            create: {
+              mode: 'all-or-nothing'
+            }
+          },
+          write: {
+            create: {
+              writable: ['id', 'email', 'name'],
+              readonly: ['role']
+            }
+          }
+        }
+      });
+
+      apiPlugin = new ApiPlugin({
+        logLevel: 'silent',
+        port,
+        host: '127.0.0.1',
+        docs: { enabled: false },
+        logging: { enabled: false },
+        resources: ['bulk_contacts']
+      });
+
+      await db.usePlugin(apiPlugin);
+      await waitForServer(port);
+
+      const response = await fetch(`http://127.0.0.1:${port}/bulk_contacts/bulk`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          items: [
+            { id: 'contact-1', email: 'contact-1@example.com', name: 'First' },
+            { id: 'contact-2', email: 'contact-2@example.com', name: 'Second', role: 'admin' },
+            { id: 'contact-3', email: 'contact-3@example.com', name: 'Third' }
+          ]
+        })
+      });
+
+      const body = await response.json();
+      expect(response.status).toBe(207);
+      expect(body.data.summary).toEqual({
+        total: 3,
+        processed: 2,
+        created: 1,
+        failed: 1,
+        stopped: true,
+        mode: 'all-or-nothing'
+      });
+      expect(body.data.errors).toEqual([
+        expect.objectContaining({
+          index: 1,
+          code: 'FIELD_WRITE_NOT_ALLOWED'
+        })
+      ]);
+
+      expect(await db.resources.bulk_contacts.get('contact-1')).not.toBeNull();
+      await expect(db.resources.bulk_contacts.get('contact-2')).rejects.toThrow('No such key');
+      await expect(db.resources.bulk_contacts.get('contact-3')).rejects.toThrow('No such key');
+    });
+  });
+
   describe('api.guard', () => {
     it('applies guard from api.guard config', async () => {
       await db.createResource({

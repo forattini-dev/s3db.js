@@ -20,6 +20,8 @@ When the API grows, the hardest part is not exposing CRUD. It is keeping policy 
 
 `ApiPlugin` now lets you express that in `resource.api` instead of scattering logic across `admin.ts`, custom handlers, and ad hoc middleware.
 
+If you want the exhaustive key-by-key contract for `resource.api`, including custom route definitions like `'GET /summary'`, use the **[Resource API Reference](/plugins/api/reference/resource-api.md)** alongside this guide.
+
 ---
 
 ## Mental Model
@@ -434,6 +436,91 @@ write: {
 
 ---
 
+## `api.bulk.create`
+
+Use `api.bulk.create` when the endpoint is still about one resource, but the client needs to create many records in one request.
+
+```javascript
+api: {
+  bulk: {
+    create: {
+      path: '/bulk',
+      maxItems: 100,
+      mode: 'partial'
+    }
+  },
+  write: {
+    create: {
+      writable: ['email', 'name'],
+      readonly: ['role']
+    }
+  }
+}
+```
+
+This exposes `POST /users/bulk`.
+
+Each item still goes through:
+
+- `guard.create`
+- `write.create`
+- normal resource validation and persistence
+- response shaping via `views` and `protected`
+
+### Supported keys
+
+| Key | Type | Meaning |
+|-----|------|---------|
+| `path` | string | Route path under the resource, default `/bulk` |
+| `maxItems` | number | Maximum number of items accepted in one request, default `100` |
+| `mode` | `'partial' \| 'all-or-nothing'` | Process every item or stop after the first failure |
+
+### Request body
+
+The route accepts either:
+
+- a top-level JSON array
+- an object with `items: []`
+
+### Modes
+
+- `partial`
+  The plugin processes every item and returns created items plus indexed failures. Mixed outcomes return `207`.
+
+- `all-or-nothing`
+  The plugin stops after the first failure and returns what was created before the stop, plus the indexed error. This is fail-fast behavior, not rollback.
+
+### Response shape
+
+```json
+{
+  "success": true,
+  "data": {
+    "items": [{ "id": "user-1", "email": "a@example.com" }],
+    "errors": [
+      {
+        "index": 1,
+        "code": "FIELD_WRITE_NOT_ALLOWED",
+        "message": "One or more fields are not writable for this operation",
+        "status": 400
+      }
+    ],
+    "summary": {
+      "total": 2,
+      "processed": 2,
+      "created": 1,
+      "failed": 1,
+      "stopped": false,
+      "mode": "partial"
+    }
+  }
+}
+```
+
+Use native bulk create when the resource should still own the policy. If the route aggregates multiple resources or external systems, keep it as a custom route.
+
+---
+
 ## Recommended Structure
 
 When a resource gets complex, this shape stays maintainable:
@@ -443,7 +530,8 @@ api: {
   guard: { ... },
   protected: [ ... ],
   views: { ... },
-  write: { ... }
+  write: { ... },
+  bulk: { ... }
 }
 ```
 
@@ -453,6 +541,8 @@ Recommendation:
 - `views` for audience payloads
 - `protected` for secrets and invariants
 - `write` for mutability
+- `bulk` for resource-native batch operations
+- resource-level custom routes for operations adjacent to CRUD but still owned by the resource
 
 Avoid putting projection logic into guards or write logic into views.
 
@@ -465,6 +555,8 @@ Avoid putting projection logic into guards or write logic into views.
 | `INVALID_VIEW` | 400 | Requested view name does not exist |
 | `VIEW_FORBIDDEN` | 403 | Actor is not allowed to use that view |
 | `FIELD_WRITE_NOT_ALLOWED` | 400 | Submitted payload contains forbidden paths |
+| `INVALID_BULK_PAYLOAD` | 400 | The batch body is not a valid array or `{ items: [] }` payload |
+| `BULK_LIMIT_EXCEEDED` | 400 | The batch exceeds the configured `maxItems` limit |
 
 ---
 
@@ -503,4 +595,5 @@ Use a custom route. `views` are for shaping a single resource payload, not for b
 - [Guards](./guards.md)
 - [Authentication](./authentication.md)
 - [Configuration Reference](../reference/configuration.md)
+- [Resource API Reference](../reference/resource-api.md)
 - [FAQ](../faq.md)
