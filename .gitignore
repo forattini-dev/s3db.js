@@ -33,9 +33,11 @@ subfinder/
 .claude.json
 .mcp.json
 .mailmap
+.tmp-vitest-plugin-config.ts
 AGENTS.md
 CLAUDE.md
 GEMINI.md
+.vscode/
 
 # pnpm store
 .pnpm-store/
