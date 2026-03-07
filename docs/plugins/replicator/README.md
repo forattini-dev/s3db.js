@@ -290,11 +290,13 @@ Stream events to SQS for microservices:
   driver: 'sqs',
   resources: ['orders', 'payments'],
   config: {
-    queueUrl: process.env.SQS_URL,
+    queueName: process.env.SQS_QUEUE_NAME,
     region: 'us-east-1'
   }
 }
 ```
+
+When the SQS replicator boots, it resolves the queue and creates it automatically if it does not exist yet.
 
 ### 3. Real-Time Backup
 

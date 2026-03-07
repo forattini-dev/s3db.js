@@ -188,11 +188,13 @@ new ReplicatorPlugin({
     {
       driver: 'sqs',
       resources: ['orders'],
-      config: { queueUrl: process.env.SQS_URL, region: 'us-east-1' }
+      config: { queueName: process.env.SQS_QUEUE_NAME, region: 'us-east-1' }
     }
   ]
 })
 ```
+
+For SQS targets you can use either `queueUrl` or `queueName`. During plugin initialization the replicator resolves the queue and creates it automatically when it does not exist.
 
 ---
 

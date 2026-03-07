@@ -34,6 +34,7 @@ export interface AuthMiddlewareOptions {
   oauth2?: OAuth2Config;
   headerSecret?: HeaderSecretConfig;
   oidc?: MiddlewareHandler | null;
+  oidcCookieName?: string;
   database: DatabaseLike;
   optional?: boolean;
   strategy?: 'any' | 'priority';
@@ -54,6 +55,7 @@ export async function createAuthMiddleware(options: AuthMiddlewareOptions): Prom
     oauth2: oauth2Config = {} as OAuth2Config,
     headerSecret: headerSecretConfig = {},
     oidc: oidcMiddleware = null,
+    oidcCookieName = 'oidc_session',
     database,
     optional = false,
     strategy = 'any',
@@ -181,6 +183,19 @@ export async function createAuthMiddleware(options: AuthMiddlewareOptions): Prom
       if (name === 'headerSecret') {
         const headerName = headerSecretConfig.headerName || 'x-admin-secret';
         return !!c.req.header(headerName);
+      }
+
+      if (name === 'oidc') {
+        const cookieHeader = c.req.header('cookie') || '';
+        if (!cookieHeader) {
+          return false;
+        }
+
+        return [
+          `${oidcCookieName}=`,
+          `${oidcCookieName}.0=`,
+          `${oidcCookieName}.__chunks=`
+        ].some((prefix) => cookieHeader.includes(prefix));
       }
 
       return false;

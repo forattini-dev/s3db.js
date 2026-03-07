@@ -6,11 +6,12 @@ export class GlobalAuthStrategy extends BaseAuthStrategy {
   override async createMiddleware(): Promise<MiddlewareHandler> {
     const methods: string[] = [];
     const driverConfigs = this.extractDriverConfigs(null);
+    const oidcConfig = this.drivers.find((driver) => driver.driver === 'oidc' || driver.type === 'oidc')?.config || {};
 
     for (const driverDef of this.drivers) {
       const driverName = driverDef.driver;
 
-      if (driverName === 'oauth2-server' || driverName === 'oidc') {
+      if (driverName === 'oauth2-server') {
         continue;
       }
 
@@ -29,6 +30,7 @@ export class GlobalAuthStrategy extends BaseAuthStrategy {
       oauth2: driverConfigs.oauth2,
       headerSecret: driverConfigs.headerSecret,
       oidc: this.oidcMiddleware || null,
+      oidcCookieName: typeof oidcConfig.cookieName === 'string' ? oidcConfig.cookieName : 'oidc_session',
       database: this.database,
       optional: true
     });

@@ -14,14 +14,22 @@ export async function createCorsMiddleware(
 ): Promise<(c: Context, next: Next) => Promise<Response | void>> {
   return async (c: Context, next: Next): Promise<Response | void> => {
     const { origin, methods, allowedHeaders, exposedHeaders, credentials, maxAge } = corsConfig;
+    const requestOrigin = c.req.header('origin');
+    const allowOrigin = credentials && origin === '*' && requestOrigin
+      ? requestOrigin
+      : origin;
 
-    c.header('Access-Control-Allow-Origin', origin);
+    c.header('Access-Control-Allow-Origin', allowOrigin);
     c.header('Access-Control-Allow-Methods', methods.join(', '));
     c.header('Access-Control-Allow-Headers', allowedHeaders.join(', '));
     c.header('Access-Control-Expose-Headers', exposedHeaders.join(', '));
 
     if (credentials) {
       c.header('Access-Control-Allow-Credentials', 'true');
+    }
+
+    if (allowOrigin !== origin) {
+      c.header('Vary', 'Origin');
     }
 
     c.header('Access-Control-Max-Age', maxAge.toString());

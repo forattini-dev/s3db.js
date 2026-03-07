@@ -628,7 +628,8 @@ export class ApiApp {
         try {
           compiledValidator = this.validator.compile(schema);
         } catch (err) {
-          console.warn('Failed to compile schema:', err);
+          const message = err instanceof Error ? err.message : String(err);
+          throw new Error(`Failed to compile route schema: ${message}`);
         }
 
         openApiRequestSchema = this._fvToOpenApi(schema);
@@ -691,7 +692,7 @@ export class ApiApp {
       try {
         return await handler(ctx) as Response;
       } catch (err) {
-        return ctx.serverError((err as Error).message, { details: { stack: (err as Error).stack } });
+        return ctx.error(err as Error, { status: 500, code: 'INTERNAL_ERROR' });
       }
     });
 

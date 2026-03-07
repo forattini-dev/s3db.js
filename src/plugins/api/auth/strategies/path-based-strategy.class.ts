@@ -24,9 +24,10 @@ export class PathBasedAuthStrategy extends BaseAuthStrategy {
 
     const methods = this.drivers
       .map(d => d.driver)
-      .filter(d => d !== 'oauth2-server' && d !== 'oidc');
+      .filter(d => d !== 'oauth2-server');
 
     const driverConfigs = this.extractDriverConfigs(null);
+    const oidcConfig = this.drivers.find((driver) => driver.driver === 'oidc' || driver.type === 'oidc')?.config || {};
 
     const globalAuth = await createAuthMiddleware({
       methods,
@@ -36,6 +37,7 @@ export class PathBasedAuthStrategy extends BaseAuthStrategy {
       oauth2: driverConfigs.oauth2,
       headerSecret: driverConfigs.headerSecret,
       oidc: this.oidcMiddleware || null,
+      oidcCookieName: typeof oidcConfig.cookieName === 'string' ? oidcConfig.cookieName : 'oidc_session',
       database: this.database,
       optional: true
     });
@@ -74,6 +76,7 @@ export class PathBasedAuthStrategy extends BaseAuthStrategy {
           oauth2: ruleConfigs.oauth2,
           headerSecret: ruleConfigs.headerSecret,
           oidc: this.oidcMiddleware || null,
+          oidcCookieName: typeof oidcConfig.cookieName === 'string' ? oidcConfig.cookieName : 'oidc_session',
           database: this.database,
           optional: false
         });

@@ -115,6 +115,35 @@ describeSqs('SqsReplicator - Comprehensive Integration Tests', () => {
     // With default queue, all resources are accepted
     expect(replicator.shouldReplicateResource('products', 'insert')).toBe(true);
   });
+
+  test('creates the default queue during boot when only defaultQueueName is configured', async () => {
+    const queueName = `replicator_boot_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+    const bootPlugin = new ReplicatorPlugin({
+      replicators: [
+        {
+          driver: 'sqs',
+          defaultQueueName: queueName,
+          client: sqsClient,
+          resources: ['users']
+        }
+      ]
+    });
+
+    await bootPlugin.install(db);
+
+    const bootReplicator = bootPlugin.replicators[0];
+    expect(bootReplicator.defaultQueue).toBeDefined();
+    expect(bootReplicator.defaultQueue).toContain(queueName);
+
+    await users.insert({ id: 'boot-1', name: 'Boot Queue' });
+    await sleep(200);
+
+    const messages = (await sqsClient.quickGet(bootReplicator.defaultQueue, 5)).Messages || [];
+    const createdMessage = messages.find(m => JSON.parse(m.Body).data.id === 'boot-1');
+    expect(createdMessage).toBeDefined();
+
+    await bootPlugin.uninstall();
+  });
 });
 
 describe('SqsReplicator - Additional Coverage Tests', () => {
@@ -165,6 +194,24 @@ describe('SqsReplicator - Additional Coverage Tests', () => {
     const replicator = new SqsReplicator({}, resources);
     expect(replicator.resources.users).toEqual({ name: 'users', queueUrl: 'user-queue' });
     expect(replicator.resources.posts).toEqual({ name: 'posts', queueUrl: 'post-queue' });
+  });
+
+  test('should create queue during initialization when configured with queueName', async () => {
+    const createdQueueUrl = 'http://localhost:4566/000000000000/orders-events';
+    const queueClient = {
+      send: vi.fn()
+        .mockRejectedValueOnce(new Error('AWS.SimpleQueueService.NonExistentQueue'))
+        .mockResolvedValueOnce({ QueueUrl: createdQueueUrl })
+    };
+    const replicator = new SqsReplicator({ queueName: 'orders-events' }, ['orders'], queueClient);
+
+    await replicator.initialize({});
+
+    expect(queueClient.send).toHaveBeenCalledTimes(2);
+    expect(queueClient.send.mock.calls[0][0].input.QueueName).toBe('orders-events');
+    expect(queueClient.send.mock.calls[1][0].input.QueueName).toBe('orders-events');
+    expect(replicator.queueUrl).toBe(createdQueueUrl);
+    expect(replicator.queueName).toBe('orders-events');
   });
 
   test('should get queue URLs for resource correctly', () => {
