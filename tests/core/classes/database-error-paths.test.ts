@@ -38,18 +38,18 @@ describe('Database Error Paths', () => {
     });
 
     it('should handle invalid connection string format', async () => {
-      expect(() => new Database({ connectionString: 'invalid-format' }))
-        .toThrow();
+      const db = new Database({ connectionString: 'invalid-format' });
+      await expect(db.connect()).rejects.toThrow();
     });
 
     it('should handle empty connection string', async () => {
-      expect(() => new Database({ connectionString: '' }))
-        .toThrow();
+      const db = new Database({ connectionString: '' });
+      await expect(db.connect()).rejects.toThrow();
     });
 
     it('should handle missing bucket in config', async () => {
-      expect(() => new Database({}))
-        .toThrow();
+      const db = new Database({});
+      await expect(db.connect()).rejects.toThrow();
     });
   });
 
