@@ -300,11 +300,12 @@ jobs:
     steps:
       - name: Check if version bump commit
         id: check
+        env:
+          COMMIT_MSG: ${{ github.event.head_commit.message }}
         run: |
-          COMMIT_MSG="${{ github.event.head_commit.message }}"
           if [[ "$COMMIT_MSG" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
             echo "skip=true" >> $GITHUB_OUTPUT
-            echo "Skipping: commit message '$COMMIT_MSG' is a version bump"
+            echo "Skipping: version bump commit"
           else
             echo "skip=false" >> $GITHUB_OUTPUT
           fi
