@@ -170,7 +170,14 @@ export class DistributedLock {
         return null;
       }
 
-      const current = await this.storage.get(key);
+      let current: LockInfo | null;
+      try {
+        current = await this.storage.get(key);
+      } catch {
+        await tryFn(() => this.storage.delete(key));
+        continue;
+      }
+
       if (!current) {
         continue;
       }
@@ -210,7 +217,14 @@ export class DistributedLock {
       throw new Error('Invalid lock key');
     }
 
-    const current = await this.storage.get(key);
+    let current: LockInfo | null;
+    try {
+      current = await this.storage.get(key);
+    } catch {
+      await tryFn(() => this.storage.delete(key));
+      return;
+    }
+
     if (!current) return;
 
     if (current.token !== expectedToken) {
@@ -243,7 +257,14 @@ export class DistributedLock {
 
   async isLocked(lockName: string): Promise<boolean> {
     const key = this.keyGenerator(lockName);
-    const lock = await this.storage.get(key);
+
+    let lock: LockInfo | null;
+    try {
+      lock = await this.storage.get(key);
+    } catch {
+      await tryFn(() => this.storage.delete(key));
+      return false;
+    }
 
     if (!isValidLockPayload(lock) || isExpiredLockPayload(lock, Date.now())) {
       if (lock) {
@@ -257,7 +278,14 @@ export class DistributedLock {
 
   async getLockInfo(lockName: string): Promise<LockInfo | null> {
     const key = this.keyGenerator(lockName);
-    const lock = await this.storage.get(key);
+
+    let lock: LockInfo | null;
+    try {
+      lock = await this.storage.get(key);
+    } catch {
+      await tryFn(() => this.storage.delete(key));
+      return null;
+    }
 
     if (!isValidLockPayload(lock) || isExpiredLockPayload(lock, Date.now())) {
       if (lock) {

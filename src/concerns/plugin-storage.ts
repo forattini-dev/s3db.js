@@ -1009,7 +1009,13 @@ export class PluginStorage {
           try {
             return await callback();
           } finally {
-            const current = await this.get(lockKey);
+            let current: Record<string, unknown> | null;
+            try {
+              current = await this.get(lockKey);
+            } catch {
+              await tryFn(() => this.delete(lockKey));
+              current = null;
+            }
             if (current && current.token === token) {
               await tryFn(() => this.delete(lockKey));
             }
@@ -1024,7 +1030,13 @@ export class PluginStorage {
           return null;
         }
 
-        const current = await this.get(lockKey);
+        let current: Record<string, unknown> | null;
+        try {
+          current = await this.get(lockKey);
+        } catch {
+          await tryFn(() => this.delete(lockKey));
+          continue;
+        }
         if (!current) continue;
 
         if (!isValidLockPayload(current) || isExpiredLockPayload(current, this._now())) {
