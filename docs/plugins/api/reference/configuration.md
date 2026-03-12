@@ -26,7 +26,7 @@ This section is the single source of truth for all ApiPlugin options. Other guid
 
 Notes:
 - `/openapi.json` serves OpenAPI 3.1.
-- `/api.usd.json` serves USD 1.0.0 (compatibility path).
+- `/api.usd.json` serves USD 1.0.0.
 - `/docs/openapi.json`, `/docs/usd.json`, and `/docs/usd.yaml` are canonical docs aliases.
 
 ## Auth
@@ -41,7 +41,6 @@ Notes:
 - auth.strategy: 'any'|'priority' (for pathRules)
 - auth.priorities: Record<string, number>
 - auth.pathRules: Array<{ path: string; methods: string[]; required: boolean; unauthorizedBehavior?: 'auto'|object; strategy?: string; priorities?: object }>
-- auth.pathAuth: legacy path‑based rules (deprecated; prefer pathRules)
 
 Registration (auth.registration)
 - enabled: boolean = false
@@ -151,7 +150,7 @@ Behavior: honors Accept‑Encoding; gzip/deflate via CompressionStream; brotli f
 - security.xssFilter: { mode: 'block' } | false
 - security.permissionsPolicy: { features: Record<string, string[]> } | false
 
-Deprecated: csp (legacy alias) — prefer security.contentSecurityPolicy.
+Deprecated: csp — prefer security.contentSecurityPolicy.
 
 ## Request ID
 
@@ -210,19 +209,19 @@ Operational note: failban cron cleanup is created on plugin startup and cleaned 
 
 ## Routes & Resources
 
-- routes: Record<'METHOD /path', (c) => any>
+- routes: Record<'METHOD /path', (c, ctx) => any>
 - resources: string[] | Record<string, object | boolean>
 
 Notes:
 - In object form, setting a resource to false disables its auto‑routes.
-- Custom routes support enhanced context when handler has arity 2: (c, ctx).
+- Custom routes use one supported contract: `(c, ctx)`. In JavaScript you can omit `ctx` when you do not need it.
+- Resource-level custom routes are declared on the resource itself through `resource.api` keys like `'POST /:id/activate'`.
 - Resource-native batch routes such as `POST /:resource/bulk` are configured on the resource itself through `resource.api.bulk.create`; see [Resource API Reference](/plugins/api/reference/resource-api.md).
 
 —
 
-## Deprecated/Legacy
+## Deprecated
 
-- pathAuth (use auth.pathRules)
 - csp (use security.contentSecurityPolicy)
 
 —

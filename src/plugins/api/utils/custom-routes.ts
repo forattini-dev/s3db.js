@@ -2,7 +2,7 @@ import type { Context } from '#src/plugins/shared/http-runtime.js';
 import { asyncHandler } from './error-handler.js';
 import { createLogger } from '../../../concerns/logger.js';
 import type { Logger } from '../../../concerns/logger.js';
-import { withContext } from '../concerns/route-context.js';
+import { createRouteContext, type RouteContext } from '../concerns/route-context.js';
 import { applyBasePath } from './base-path.js';
 
 const logger: Logger = createLogger({ name: 'CustomRoutes', level: 'info' });
@@ -14,22 +14,17 @@ export interface ParsedRoute {
   path: string;
 }
 
-export interface RouteContext {
+export interface RouteContextOptions {
   resource?: unknown;
   database?: unknown;
+  plugins?: Record<string, unknown>;
   [key: string]: unknown;
 }
 
-export type RouteHandler = (c: Context) => Promise<Response> | Response;
-export type EnhancedRouteHandler = (c: Context, ctx: unknown) => Promise<Response> | Response;
+export type RouteHandler = (c: Context, ctx: RouteContext) => Promise<Response> | Response;
 
 export interface Routes {
-  [key: string]: RouteHandler | EnhancedRouteHandler;
-}
-
-export interface MountOptions {
-  autoWrap?: boolean;
-  pathPrefix?: string;
+  [key: string]: RouteHandler;
 }
 
 export interface ValidationError {
@@ -38,7 +33,7 @@ export interface ValidationError {
 }
 
 export interface HttpAppLike {
-  on(method: string, path: string, handler: RouteHandler): void;
+  on(method: string, path: string, handler: (c: Context) => Promise<Response> | Response): void;
 }
 
 export function parseRouteKey(key: string): ParsedRoute {
@@ -57,15 +52,15 @@ export function parseRouteKey(key: string): ParsedRoute {
 export function mountCustomRoutes(
   app: HttpAppLike,
   routes: Routes | null | undefined,
-  context: RouteContext = {},
+  context: RouteContextOptions = {},
   logLevel: string = 'info',
-  options: MountOptions = {}
+  options: { pathPrefix?: string } = {}
 ): void {
   if (!routes || typeof routes !== 'object') {
     return;
   }
 
-  const { autoWrap = true, pathPrefix = '' } = options;
+  const { pathPrefix = '' } = options;
 
   for (const [key, handler] of Object.entries(routes)) {
     try {
@@ -73,20 +68,18 @@ export function mountCustomRoutes(
       const finalPath = pathPrefix ? applyBasePath(pathPrefix, path) : path;
 
       const wrappedHandler = asyncHandler(async (c: Context): Promise<Response> => {
-        c.set('customRouteContext', context);
-
-        if (autoWrap && handler.length === 2) {
-          return await withContext(handler as unknown as Parameters<typeof withContext>[0], { resource: context.resource as unknown } as Parameters<typeof withContext>[1])(c);
-        } else {
-          return await (handler as RouteHandler)(c);
-        }
+        const ctx = createRouteContext(c, {
+          database: context.database as any,
+          resource: (context.resource || null) as any,
+          plugins: context.plugins
+        });
+        return await handler(c, ctx);
       });
 
       app.on(method, finalPath, wrappedHandler);
 
       if (logLevel === 'debug' || logLevel === 'trace') {
-        const contextType = (autoWrap && handler.length === 2) ? '(enhanced)' : '(legacy)';
-        logger.info(`[Custom Routes] Mounted ${method} ${finalPath} ${contextType}`);
+        logger.info(`[Custom Routes] Mounted ${method} ${finalPath}`);
       }
     } catch (err) {
       if (logLevel === 'debug' || logLevel === 'trace') {

@@ -354,7 +354,7 @@ async function main() {
   console.log('  - Per-path auth method selection');
   console.log('  - Per-path priority configuration');
   console.log('  - Optional vs Required auth per path');
-  console.log('  - Backward compatible with existing pathAuth');
+  console.log('  - One supported pathRules model across the whole API');
 
   console.log('\\n⏳ Server will remain running for testing...');
   console.log('   Press Ctrl+C to stop\\n');

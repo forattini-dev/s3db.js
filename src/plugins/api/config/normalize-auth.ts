@@ -25,7 +25,6 @@ export interface AuthOptions {
   driver?: string | { driver: string; config?: DriverConfig };
   config?: DriverConfig;
   pathRules?: PathRule[];
-  pathAuth?: boolean | Record<string, unknown>;
   strategy?: string;
   priorities?: Record<string, number>;
   createResource?: boolean;
@@ -34,7 +33,6 @@ export interface AuthOptions {
 export interface NormalizedAuthConfig {
   drivers: DriverEntry[];
   pathRules: PathRule[];
-  pathAuth: boolean | Record<string, unknown> | undefined;
   strategy: string;
   priorities: Record<string, number>;
   createResource: boolean;
@@ -81,7 +79,6 @@ export function normalizeAuthConfig(authOptions: AuthOptions | null | undefined 
     return {
       drivers: [],
       pathRules: [],
-      pathAuth: undefined,
       strategy: 'any',
       priorities: {},
       resource: null,
@@ -90,10 +87,18 @@ export function normalizeAuthConfig(authOptions: AuthOptions | null | undefined 
     };
   }
 
+  if (
+    typeof authOptions === 'object' &&
+    authOptions !== null &&
+    'pathAuth' in authOptions &&
+    (authOptions as { pathAuth?: unknown }).pathAuth !== undefined
+  ) {
+    throw new Error('auth.pathAuth has been removed. Use auth.pathRules instead.');
+  }
+
   const normalized: NormalizedAuthConfig = {
     drivers: [],
     pathRules: Array.isArray(authOptions.pathRules) ? authOptions.pathRules : [],
-    pathAuth: authOptions.pathAuth,
     strategy: authOptions.strategy || 'any',
     priorities: authOptions.priorities || {},
     createResource: authOptions.createResource !== false,

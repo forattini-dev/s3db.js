@@ -1,6 +1,6 @@
 export type AuthDriverName = 'jwt' | 'apiKey' | 'basic' | 'oauth2' | 'oidc';
 
-export interface PathAuthRule {
+export interface PathPatternRule {
   pattern: string;
   drivers?: AuthDriverName[];
   required?: boolean;
@@ -41,7 +41,7 @@ function calculateSpecificity(pattern: string): number {
   return score;
 }
 
-export function findBestMatch<T extends PathAuthRule>(rules: T[] | null | undefined, path: string): T | null {
+export function findBestMatch<T extends PathPatternRule>(rules: T[] | null | undefined, path: string): T | null {
   if (!rules || rules.length === 0) {
     return null;
   }
@@ -56,51 +56,7 @@ export function findBestMatch<T extends PathAuthRule>(rules: T[] | null | undefi
 
   return matches.length > 0 ? matches[0]!.rule : null;
 }
-
-export function validatePathAuth(pathAuth: unknown): void {
-  if (!Array.isArray(pathAuth)) {
-    throw new Error('pathAuth must be an array of rules');
-  }
-
-  const validDrivers: string[] = ['jwt', 'apiKey', 'basic', 'oauth2', 'oidc', 'api-key', 'apikey'];
-
-  for (const [index, rule] of pathAuth.entries()) {
-    if (!rule.pattern || typeof rule.pattern !== 'string') {
-      throw new Error(`pathAuth[${index}]: pattern is required and must be a string`);
-    }
-
-    if (!rule.pattern.startsWith('/')) {
-      throw new Error(`pathAuth[${index}]: pattern must start with / (got: ${rule.pattern})`);
-    }
-
-    if (rule.drivers !== undefined && !Array.isArray(rule.drivers)) {
-      throw new Error(`pathAuth[${index}]: drivers must be an array (got: ${typeof rule.drivers})`);
-    }
-
-    if (rule.required !== undefined && typeof rule.required !== 'boolean') {
-      throw new Error(`pathAuth[${index}]: required must be a boolean (got: ${typeof rule.required})`);
-    }
-
-    if (rule.drivers) {
-      for (const driver of rule.drivers) {
-        const rawDriver = String(driver || '').trim().toLowerCase();
-        const normalizedDriver = rawDriver === 'api-key' || rawDriver === 'api_key' || rawDriver === 'apikey'
-          ? 'apiKey'
-          : String(driver);
-
-        if (!validDrivers.includes(normalizedDriver)) {
-          throw new Error(
-            `pathAuth[${index}]: invalid driver '${driver}'. ` +
-            `Valid drivers: ${validDrivers.join(', ')}`
-          );
-        }
-      }
-    }
-  }
-}
-
 export default {
   matchPath,
-  findBestMatch,
-  validatePathAuth
+  findBestMatch
 };

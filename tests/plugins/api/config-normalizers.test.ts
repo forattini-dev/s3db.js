@@ -11,7 +11,6 @@ describe('normalizeAuthConfig', () => {
       expect(result).toEqual({
         drivers: [],
         pathRules: [],
-        pathAuth: undefined,
         strategy: 'any',
         priorities: {},
         resource: null,
@@ -25,7 +24,6 @@ describe('normalizeAuthConfig', () => {
       expect(result).toEqual({
         drivers: [],
         pathRules: [],
-        pathAuth: undefined,
         strategy: 'any',
         priorities: {},
         resource: null,
@@ -39,6 +37,12 @@ describe('normalizeAuthConfig', () => {
       expect(result.drivers).toEqual([]);
       expect(result.strategy).toBe('any');
       expect(result.createResource).toBe(true);
+    });
+
+    test('throws a migration error for removed pathAuth', () => {
+      expect(() => normalizeAuthConfig({
+        pathAuth: [{ pattern: '/api/**', drivers: ['jwt'] }]
+      } as any)).toThrow('auth.pathAuth has been removed. Use auth.pathRules instead.');
     });
   });
 

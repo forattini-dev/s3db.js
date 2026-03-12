@@ -1,7 +1,7 @@
 /**
  * Example 88: API Plugin - Pug Templates Only
  *
- * Demonstrates pure Pug template usage with enhanced context
+ * Demonstrates pure Pug template usage with RouteContext helpers
  *
  * Run: node docs/examples/e88-api-templates-pug-only.js
  */

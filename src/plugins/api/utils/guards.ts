@@ -1,6 +1,7 @@
 import type { Context, MiddlewareHandler, Next } from '#src/plugins/shared/http-runtime.js';
 import { createLogger } from '../../../concerns/logger.js';
 import type { Logger } from '../../../concerns/logger.js';
+import { createRouteContext } from '../concerns/route-context.js';
 
 const logger: Logger = createLogger({ name: 'Guards', level: 'info' });
 
@@ -14,6 +15,7 @@ export interface User {
 export interface RouteContextLike {
   user?: User | null;
   _currentResource?: unknown;
+  resource?: unknown;
   setPartition?(partition: string, values: Record<string, unknown>): void;
   hasPartitionFilters?(): boolean;
   getPartitionFilters?(): Record<string, unknown>;
@@ -214,12 +216,12 @@ export function getOperationGuard(guards: Guard | GuardsConfig | null | undefine
 
 export function guardMiddleware(guards: GuardsConfig | null, operation: string, options: GuardMiddlewareOptions = {}): MiddlewareHandler {
   return async (c: Context, next: Next): Promise<void | Response> => {
-    const { RouteContext } = await import('../concerns/route-context.js');
-
-    const legacyContext = c.get('customRouteContext') as Record<string, unknown> || {};
-    const { database, resource, plugins = {}, globalGuards = null } = { ...legacyContext, ...options };
-
-    const ctx = new RouteContext(c, database as unknown as ConstructorParameters<typeof RouteContext>[1], resource as unknown as ConstructorParameters<typeof RouteContext>[2], plugins);
+    const { database, resource, plugins = {}, globalGuards = null } = options;
+    const ctx = createRouteContext(c, {
+      database: database as any,
+      resource: (resource || null) as any,
+      plugins
+    });
 
     let guard = getOperationGuard(guards, operation);
 

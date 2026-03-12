@@ -1,17 +1,10 @@
 import { generateOpenAPISpec } from './openapi-generator.js';
 import type { OpenAPISpec, OpenAPIGeneratorConfig } from './openapi-generator.js';
 import { createHash } from 'crypto';
+import type { ApiRouteRegistryEntry } from '../route-registry.js';
 
-export interface ApiAppLike {
-  getRoutes(): RouteMetadata[];
-}
-
-export interface RouteMetadata {
-  method: string;
-  path: string;
-  description?: string;
-  operationId?: string;
-  tags?: string[];
+export interface ApiRouteRegistryLike {
+  list(): ApiRouteRegistryEntry[];
 }
 
 export interface DatabaseLike {
@@ -45,20 +38,20 @@ export interface LoggerLike {
 
 export class OpenAPIGeneratorCached {
   private database: DatabaseLike;
-  private app: ApiAppLike | null;
+  private routeRegistry: ApiRouteRegistryLike | null;
   private options: CachedGeneratorOptions;
   private logger: LoggerLike | null;
   private cache: OpenAPISpec | null;
   private cacheKey: string | null;
 
-  constructor({ database, app = null, options, logger = null }: {
+  constructor({ database, routeRegistry = null, options, logger = null }: {
     database: DatabaseLike;
-    app?: ApiAppLike | null;
+    routeRegistry?: ApiRouteRegistryLike | null;
     options: CachedGeneratorOptions;
     logger?: LoggerLike | null;
   }) {
     this.database = database;
-    this.app = app;
+    this.routeRegistry = routeRegistry;
     this.options = options;
     this.logger = logger;
 
@@ -86,7 +79,10 @@ export class OpenAPIGeneratorCached {
     }
 
     const startTime = Date.now();
-    this.cache = generateOpenAPISpec(this.database as unknown as Parameters<typeof generateOpenAPISpec>[0], { ...this.options, app: this.app });
+    this.cache = generateOpenAPISpec(this.database as unknown as Parameters<typeof generateOpenAPISpec>[0], {
+      ...this.options,
+      routeRegistry: this.routeRegistry
+    });
     this.cacheKey = currentKey;
 
     if (this.options.logLevel && this.logger) {
@@ -121,18 +117,27 @@ export class OpenAPIGeneratorCached {
       basePath: this.options.basePath || ''
     });
 
-    const appRoutesSignature = this.app
-      ? this.app.getRoutes()
-        .map((route: RouteMetadata) => ({
-          method: route.method,
+    const routeRegistrySignature = this.routeRegistry
+      ? this.routeRegistry.list()
+        .map((route: ApiRouteRegistryEntry) => ({
+          kind: route.kind,
+          methods: route.methods || [],
           path: route.path,
+          resource: route.resource,
+          relation: route.relation,
+          originalKey: route.originalKey,
+          tags: route.tags || [],
+          summary: route.summary,
           description: route.description,
           operationId: route.operationId,
-          tags: route.tags || []
+          sourceKind: route.sourceKind,
+          sourceLocation: route.sourceLocation,
+          auth: this.normalizeForHash(route.auth || {}),
+          schema: this.normalizeForHash(route.schema || {})
         }))
         .sort((left, right) => {
-          const leftKey = `${left.method}:${left.path}`;
-          const rightKey = `${right.method}:${right.path}`;
+          const leftKey = `${left.kind}:${left.path}:${left.methods.join(',')}`;
+          const rightKey = `${right.kind}:${right.path}:${right.methods.join(',')}`;
           return leftKey.localeCompare(rightKey);
         })
       : [];
@@ -140,7 +145,7 @@ export class OpenAPIGeneratorCached {
     const components = {
       resources: resourcesSignature,
       options: optionsSignature,
-      appRoutes: this.normalizeForHash(appRoutesSignature)
+      routeRegistry: this.normalizeForHash(routeRegistrySignature)
     };
 
     const hash = createHash('sha256')

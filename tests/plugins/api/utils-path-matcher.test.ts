@@ -1,5 +1,5 @@
 import { describe, test, expect } from 'vitest';
-import { matchPath, findBestMatch, validatePathAuth } from '../../../src/plugins/api/utils/path-matcher.js';
+import { matchPath, findBestMatch } from '../../../src/plugins/api/utils/path-matcher.js';
 
 describe('matchPath', () => {
   describe('exact matching', () => {
@@ -158,103 +158,6 @@ describe('findBestMatch', () => {
       ];
       const result = findBestMatch(rules, '/api/secure/data');
       expect(result).toEqual(rules[0]);
-    });
-  });
-});
-
-describe('validatePathAuth', () => {
-  describe('array validation', () => {
-    test('throws for non-array input', () => {
-      expect(() => validatePathAuth('not-array')).toThrow('must be an array');
-    });
-
-    test('throws for null', () => {
-      expect(() => validatePathAuth(null)).toThrow('must be an array');
-    });
-
-    test('accepts empty array', () => {
-      expect(() => validatePathAuth([])).not.toThrow();
-    });
-  });
-
-  describe('pattern validation', () => {
-    test('throws for missing pattern', () => {
-      expect(() => validatePathAuth([{ drivers: ['jwt'] }])).toThrow('pattern is required');
-    });
-
-    test('throws for non-string pattern', () => {
-      expect(() => validatePathAuth([{ pattern: 123 }])).toThrow('must be a string');
-    });
-
-    test('throws for pattern not starting with /', () => {
-      expect(() => validatePathAuth([{ pattern: 'api/users' }])).toThrow('must start with /');
-    });
-
-    test('accepts valid pattern', () => {
-      expect(() => validatePathAuth([{ pattern: '/api/users' }])).not.toThrow();
-    });
-  });
-
-  describe('drivers validation', () => {
-    test('throws for non-array drivers', () => {
-      expect(() => validatePathAuth([{ pattern: '/api', drivers: 'jwt' }])).toThrow('must be an array');
-    });
-
-    test('throws for invalid driver name', () => {
-      expect(() => validatePathAuth([{ pattern: '/api', drivers: ['invalid'] }])).toThrow("invalid driver 'invalid'");
-    });
-
-    test('accepts valid drivers', () => {
-      expect(() => validatePathAuth([
-        { pattern: '/api', drivers: ['jwt', 'apiKey', 'basic', 'oauth2', 'oidc'] }
-      ])).not.toThrow();
-    });
-
-    test('accepts undefined drivers', () => {
-      expect(() => validatePathAuth([{ pattern: '/api' }])).not.toThrow();
-    });
-  });
-
-  describe('required validation', () => {
-    test('throws for non-boolean required', () => {
-      expect(() => validatePathAuth([{ pattern: '/api', required: 'yes' }])).toThrow('must be a boolean');
-    });
-
-    test('accepts boolean required', () => {
-      expect(() => validatePathAuth([
-        { pattern: '/api', required: true },
-        { pattern: '/public', required: false }
-      ])).not.toThrow();
-    });
-
-    test('accepts undefined required', () => {
-      expect(() => validatePathAuth([{ pattern: '/api' }])).not.toThrow();
-    });
-  });
-
-  describe('error messages include index', () => {
-    test('includes index for pattern error', () => {
-      expect(() => validatePathAuth([
-        { pattern: '/valid' },
-        { pattern: 'invalid' }
-      ])).toThrow('pathAuth[1]');
-    });
-
-    test('includes index for drivers error', () => {
-      expect(() => validatePathAuth([
-        { pattern: '/first', drivers: ['jwt'] },
-        { pattern: '/second', drivers: ['invalid'] }
-      ])).toThrow('pathAuth[1]');
-    });
-  });
-
-  describe('multiple rules', () => {
-    test('validates all rules in array', () => {
-      expect(() => validatePathAuth([
-        { pattern: '/api/public/**', required: false },
-        { pattern: '/api/admin/**', drivers: ['jwt'], required: true },
-        { pattern: '/api/users/*', drivers: ['jwt', 'apiKey'] }
-      ])).not.toThrow();
     });
   });
 });

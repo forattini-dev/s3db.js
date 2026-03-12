@@ -118,19 +118,19 @@ async function setupAPI(db) {
       ],
       resource: 'users',
 
-      // ✨ NEW: Path-based authentication rules
+      // Path-based authentication rules
       // Rules are evaluated in order of specificity (most specific wins)
-      pathAuth: [
+      pathRules: [
         // ========================================
         // PUBLIC PATHS (no authentication)
         // ========================================
         {
-          pattern: '/health/**',
+          path: '/health/**',
           required: false,  // Public
-          drivers: []       // No auth drivers needed
+          methods: []       // No auth drivers needed
         },
         {
-          pattern: '/api/enums/**',
+          path: '/api/enums/**',
           required: false   // Public enums endpoint
         },
 
@@ -138,8 +138,8 @@ async function setupAPI(db) {
         // PROTECTED PATHS (JWT required)
         // ========================================
         {
-          pattern: '/api/v1/**',
-          drivers: ['jwt'],  // Only JWT auth
+          path: '/api/v1/**',
+          methods: ['jwt'],  // Only JWT auth
           required: true
         },
 
@@ -148,8 +148,8 @@ async function setupAPI(db) {
         // More specific than /api/v1/** above
         // ========================================
         {
-          pattern: '/api/v1/admin/**',
-          drivers: ['jwt', 'apiKey'],  // Both JWT and API Key accepted
+          path: '/api/v1/admin/**',
+          methods: ['jwt', 'apiKey'],  // Both JWT and API Key accepted
           required: true
         },
 
@@ -157,8 +157,8 @@ async function setupAPI(db) {
         // SUPER ADMIN (exact match, highest priority)
         // ========================================
         {
-          pattern: '/api/v1/admin/system',
-          drivers: ['jwt', 'apiKey'],  // Both required in headers
+          path: '/api/v1/admin/system',
+          methods: ['jwt', 'apiKey'],  // Both required in headers
           required: true
         }
       ]

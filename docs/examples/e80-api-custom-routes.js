@@ -64,9 +64,8 @@ async function main() {
     // Plugin-level custom routes (mounted at root)
     routes: {
       // Health check endpoint
-      'GET /health': async (c) => {
-        const context = c.get('customRouteContext');
-        const { database } = context;
+      'GET /health': async (c, ctx) => {
+        const { database } = ctx;
 
         return c.json({
           success: true,
@@ -80,10 +79,9 @@ async function main() {
       },
 
       // Webhook endpoint
-      'POST /webhook': async (c) => {
+      'POST /webhook': async (c, ctx) => {
         const payload = await c.req.json();
-        const context = c.get('customRouteContext');
-        const { database } = context;
+        const { database } = ctx;
 
         // Log webhook to events
         await database.resources.events.insert({
@@ -103,10 +101,9 @@ async function main() {
       },
 
       // Batch insert endpoint
-      'POST /batch/users': async (c) => {
+      'POST /batch/users': async (c, ctx) => {
         const users = await c.req.json();
-        const context = c.get('customRouteContext');
-        const { database } = context;
+        const { database } = ctx;
 
         const inserted = [];
         for (const userData of users) {
@@ -124,9 +121,8 @@ async function main() {
       },
 
       // Stats endpoint
-      'GET /stats': async (c) => {
-        const context = c.get('customRouteContext');
-        const { database } = context;
+      'GET /stats': async (c, ctx) => {
+        const { database } = ctx;
 
         const userCount = (await database.resources.users.list()).length;
         const eventCount = (await database.resources.events.list()).length;
@@ -152,10 +148,9 @@ async function main() {
         // Resource-level custom routes (nested under /users)
         routes: {
           // Activate user
-          'POST /:id/activate': async (c) => {
+          'POST /:id/activate': async (c, ctx) => {
             const userId = c.req.param('id');
-            const context = c.get('customRouteContext');
-            const { resource, database } = context;
+            const { resource, database } = ctx;
 
             await resource.update(userId, {
               status: 'active',
@@ -180,10 +175,9 @@ async function main() {
           },
 
           // Deactivate user
-          'POST /:id/deactivate': async (c) => {
+          'POST /:id/deactivate': async (c, ctx) => {
             const userId = c.req.param('id');
-            const context = c.get('customRouteContext');
-            const { resource, database } = context;
+            const { resource, database } = ctx;
 
             await resource.update(userId, {
               status: 'inactive',
@@ -208,10 +202,9 @@ async function main() {
           },
 
           // Simulate login (increment counter)
-          'POST /:id/login': async (c) => {
+          'POST /:id/login': async (c, ctx) => {
             const userId = c.req.param('id');
-            const context = c.get('customRouteContext');
-            const { resource, database } = context;
+            const { resource, database } = ctx;
 
             const user = await resource.get(userId);
 
@@ -238,10 +231,9 @@ async function main() {
           },
 
           // Get user stats
-          'GET /:id/stats': async (c) => {
+          'GET /:id/stats': async (c, ctx) => {
             const userId = c.req.param('id');
-            const context = c.get('customRouteContext');
-            const { resource, database } = context;
+            const { resource, database } = ctx;
 
             const user = await resource.get(userId);
             const userEvents = await database.resources.events.query({ userId });

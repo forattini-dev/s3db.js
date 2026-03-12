@@ -321,30 +321,30 @@ async function setupAPI(db, appDir) {
       resource: 'users',
 
       // 🔥 PATH-BASED AUTH: Protect /app/**
-      pathAuth: [
+      pathRules: [
         // Public health checks
         {
-          pattern: '/health/**',
+          path: '/health/**',
           required: false
         },
 
         // 🔓 Public: Auth endpoints
         {
-          pattern: '/auth/**',
+          path: '/auth/**',
           required: false
         },
 
         // 🔐 PROTECTED: /app/** requires JWT
         {
-          pattern: '/app/**',
-          drivers: ['jwt'],
+          path: '/app/**',
+          methods: ['jwt'],
           required: true
         },
 
         // 🔐 PROTECTED: API requires JWT
         {
-          pattern: '/api/**',
-          drivers: ['jwt'],
+          path: '/api/**',
+          methods: ['jwt'],
           required: true
         }
       ]

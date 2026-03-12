@@ -180,15 +180,31 @@ export interface AuthDriverDefinition {
   };
 }
 
+export interface AuthPathRule {
+  path?: string;
+  required?: boolean;
+  methods?: string[];
+  roles?: string | string[];
+  scopes?: string | string[];
+  allowServiceAccounts?: boolean;
+}
+
 export interface AuthConfig {
   drivers: AuthDriverDefinition[];
+  pathRules: AuthPathRule[];
+  strategy: string;
+  priorities: Record<string, number>;
   registration: RegistrationConfig;
   loginThrottle: LoginThrottleConfig;
   createResource: boolean;
+  driver: string | null;
   usersResourcePasswordValidation: string;
   enableIdentityContextMiddleware: boolean;
   usersResourceAttributes: Record<string, string>;
-  resource?: string;
+  usernameField?: string;
+  passwordField?: string;
+  resource?: string | null;
+  skipRoutes?: boolean;
   [key: string]: unknown;
 }
 

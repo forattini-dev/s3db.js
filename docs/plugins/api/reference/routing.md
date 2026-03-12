@@ -11,7 +11,7 @@ This page summarizes all ways to expose routes with the ApiPlugin, when to use e
   - Best for standard REST over your s3db.js resources.
 
 - Resource‑level custom routes
-  - Define per‑resource endpoints (mounted under that resource’s app) using `resource.config.routes`.
+  - Define per‑resource endpoints with `"METHOD /path"` keys inside `resource.api`.
   - Paths are RELATIVE to the resource mount. Example: `GET /:id/activate` resolves under `/{basePath}/{version?}/{resource}/:id/activate`.
   - Use when the route represents an action “about” that resource.
 
@@ -36,20 +36,33 @@ This page summarizes all ways to expose routes with the ApiPlugin, when to use e
 
 Formato comum (plugin e resource):
 ```js
-routes: {
-  'GET /stats': async (c) => c.json({ ok: true }),
-  'POST /:id/activate': async (c, ctx) => {
-    // ctx.resource (resource-level only), ctx.database
-    const { id } = c.req.param();
-    return c.json(await ctx.resource.update(id, { active: true }));
+const apiPlugin = new ApiPlugin({
+  routes: {
+    'GET /stats': async (c, ctx) => {
+      const total = await ctx.resources.users.count();
+      return ctx.success({ total });
+    }
   }
-}
+});
+
+await db.createResource({
+  name: 'users',
+  attributes: { email: 'string|required|email' },
+  api: {
+    'POST /:id/activate': async (c, ctx) => {
+      const { id } = c.req.param();
+      await ctx.resource.update(id, { active: true });
+      return ctx.success({ id, active: true });
+    }
+  }
+});
 ```
 
 Rules:
 - Key = `METHOD /path` (GET/POST/PUT/PATCH/DELETE/HEAD/OPTIONS)
-- Handler can be `(c)` or `(c, ctx)`; when it receives 2 args, the plugin provides the enhanced context (resource/database helpers).
-- Resource‑level: path is relative to the mounted resource. Plugin‑level: path is absolute (the plugin applies `basePath`).
+- The supported handler contract is `(c, ctx)`.
+- Resource‑level: path is relative to the mounted resource. Plugin‑level: path is absolute before `basePath` is applied.
+- In JavaScript you can still write `(c)` if you do not need `ctx`; the runtime still provides the same `RouteContext`.
 
 —
 
@@ -58,7 +71,7 @@ Rules:
 Execution order (high level):
 1. Middlewares: requestId → failban → security headers → CORS → session → custom middlewares → templates → body size
 2. Rotas de recursos (CRUD)
-3. Rotas customizadas por recurso (`resource.config.routes`)
+3. Rotas customizadas por recurso (`resource.api`)
 4. Rotas customizadas do plugin (`config.routes`)
 5. Rotas built‑in (docs, health, metrics, failban admin)
 
@@ -72,7 +85,7 @@ flowchart TB
   subgraph App
     MW[Middlewares\nrequestId → failban → security → CORS → session → custom → templates → size]
     CRUD[Auto‑CRUD por recurso]
-    RRES[Rotas custom (resource.config.routes)]
+    RRES[Rotas custom (resource.api)]
     RPLG[Rotas custom (plugin config.routes)]
     BUILTIN[Built‑in\n/docs /openapi.json /health /metrics /admin/security]
   end
@@ -94,6 +107,6 @@ flowchart TB
 ## Where to configure
 
 - Plugin‑level: `new ApiPlugin({ routes: { 'GET /foo': handler } })`
-- Resource‑level: `await db.createResource({ name: 'items', routes: { 'POST /:id/activate': handler } })`
+- Resource‑level: `await db.createResource({ name: 'items', api: { 'POST /:id/activate': handler } })`
 
 All related options live in [Configuration (Canonical)](./configuration.md).

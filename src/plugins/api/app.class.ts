@@ -13,7 +13,7 @@
 import { HttpApp } from '#src/plugins/shared/http-runtime.js';
 import type { Context, Next, MiddlewareHandler as HttpMiddleware, TypedResponse } from '#src/plugins/shared/http-runtime.js';
 import Validator from 'fastest-validator';
-import { RouteContext } from './route-context.class.js';
+import { RouteContext, createRouteContext } from './concerns/route-context.js';
 
 const DEFAULT_PRIORITY = 100;
 
@@ -648,19 +648,10 @@ export class ApiApp {
     const chain: HttpMiddleware[] = [];
 
     chain.push(async (c: Context, next: Next) => {
-      const ctx = new RouteContext(c, { db: this.db, resources: this.resources });
+      const ctx = createRouteContext(c, {
+        database: (this.db || { resources: this.resources }) as any
+      });
       c.set('ctx' as never, ctx as never);
-
-      (c as unknown as { db: unknown }).db = this.db;
-      (c as unknown as { database: unknown }).database = this.db;
-      (c as unknown as { resources: Record<string, unknown> }).resources = this.resources;
-
-      c.set('customRouteContext' as never, {
-        db: this.db,
-        database: this.db,
-        resources: this.resources,
-        resource: null
-      } as never);
 
       await next();
     });
@@ -692,7 +683,7 @@ export class ApiApp {
       try {
         return await handler(ctx) as Response;
       } catch (err) {
-        return ctx.error(err as Error, { status: 500, code: 'INTERNAL_ERROR' });
+        return ctx.error(err as Error, 500);
       }
     });
 

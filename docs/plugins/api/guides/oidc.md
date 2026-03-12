@@ -2547,7 +2547,7 @@ A: Yes! All features can be disabled:
 ```
 
 **Q: How do I get the user object in routes?**
-A: Use enhanced context:
+A: Use `RouteContext`:
 ```javascript
 routes: {
   'GET /profile': async (c, ctx) => {

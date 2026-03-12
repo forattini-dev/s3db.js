@@ -5,7 +5,7 @@
  * - EJS templates with layouts
  * - Pug templates
  * - JSX templates
- * - Using ctx.render() with enhanced context
+ * - Using ctx.render() with RouteContext helpers
  * - Template data passing
  *
  * Run: node docs/examples/e87-api-templates-ejs-pug.js
@@ -219,7 +219,7 @@ const apiPlugin = new ApiPlugin({
     // EJS Templates
     // ============================================
 
-    // ✅ EJS with layout + enhanced context
+    // ✅ EJS with layout + RouteContext helpers
     'GET /': async (c, ctx) => {
       const { resources } = ctx;
 
@@ -237,7 +237,7 @@ const apiPlugin = new ApiPlugin({
           'ORM-like interface',
           'Auto-generated REST API',
           'Multiple template engines (EJS, Pug, JSX)',
-          'Enhanced context for clean code'
+          'RouteContext helpers for clean code'
         ]
       });
     },

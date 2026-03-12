@@ -2,7 +2,7 @@ import type { Context, Next, MiddlewareHandler } from '#src/plugins/shared/http-
 import type { Logger } from '../../../concerns/logger.js';
 import { createLogger } from '../../../concerns/logger.js';
 
-const logger = createLogger({ name: 'PathAuthMatcher', level: 'info' });
+const logger = createLogger({ name: 'PathRulesMiddleware', level: 'info' });
 
 export interface AuthRule {
   path: string;
@@ -25,7 +25,7 @@ export interface AuthMiddlewareEntry {
   middleware: MiddlewareHandler;
 }
 
-export interface PathAuthOptions {
+export interface PathRulesMiddlewareOptions {
   rules?: AuthRule[];
   authMiddlewares?: Record<string, MiddlewareHandler>;
   unauthorizedHandler?: ((c: Context, message: string) => Response | Promise<Response>) | null;
@@ -112,7 +112,7 @@ export function findAuthRule(path: string, rules: AuthRule[] = []): (AuthRule & 
   return matches.length > 0 ? matches[0]! : null;
 }
 
-export function createPathBasedAuthMiddleware(options: PathAuthOptions = {}): MiddlewareHandler {
+export function createPathRulesAuthMiddleware(options: PathRulesMiddlewareOptions = {}): MiddlewareHandler {
   const {
     rules = [],
     authMiddlewares = {},
@@ -269,5 +269,5 @@ export default {
   matchPath,
   findAuthRule,
   calculateSpecificity,
-  createPathBasedAuthMiddleware
+  createPathRulesAuthMiddleware
 };

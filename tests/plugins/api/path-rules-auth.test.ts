@@ -1,5 +1,8 @@
-import { describe, test, expect, vi, beforeEach } from 'vitest';
-import { createPathBasedAuthMiddleware } from '../../../src/plugins/api/auth/path-auth-matcher.js';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { createDatabaseForTest } from '../../config.js';
+import { ApiPlugin } from '../../../src/plugins/api/index.js';
+import { createPathRulesAuthMiddleware } from '../../../src/plugins/api/auth/path-rules-middleware.js';
+import { startApiPlugin } from './helpers/server.js';
 
 type CtxStore = Map<string, unknown>;
 
@@ -37,7 +40,7 @@ function createMockContext(path: string, accept = 'application/json'): MockConte
       status,
       payload
     }),
-    redirect: (url: string, status = 302) => ({
+    redirect: (url, status = 302) => ({
       status,
       location: url
     })
@@ -51,16 +54,16 @@ function createAuthMiddlewareWithUser(user: Record<string, unknown>) {
   };
 }
 
-describe('createPathBasedAuthMiddleware', () => {
+describe('createPathRulesAuthMiddleware', () => {
   beforeEach(() => {
     vi.clearAllMocks();
   });
 
-  test('allows when user has required role', async () => {
+  it('allows when user has required role', async () => {
     const ctx = createMockContext('/admin/dashboard');
     const next = vi.fn();
 
-    const middleware = createPathBasedAuthMiddleware({
+    const middleware = createPathRulesAuthMiddleware({
       rules: [{
         path: '/admin/**',
         required: true,
@@ -78,11 +81,11 @@ describe('createPathBasedAuthMiddleware', () => {
     expect(next).toHaveBeenCalled();
   });
 
-  test('denies when user lacks required role', async () => {
+  it('denies when user lacks required role', async () => {
     const ctx = createMockContext('/admin/dashboard');
     const next = vi.fn();
 
-    const middleware = createPathBasedAuthMiddleware({
+    const middleware = createPathRulesAuthMiddleware({
       rules: [{
         path: '/admin/**',
         required: true,
@@ -112,11 +115,11 @@ describe('createPathBasedAuthMiddleware', () => {
     expect(next).not.toHaveBeenCalled();
   });
 
-  test('allows when user has required wildcard scope', async () => {
+  it('allows when user has required wildcard scope', async () => {
     const ctx = createMockContext('/reports/overview');
     const next = vi.fn();
 
-    const middleware = createPathBasedAuthMiddleware({
+    const middleware = createPathRulesAuthMiddleware({
       rules: [{
         path: '/reports/**',
         required: true,
@@ -134,11 +137,11 @@ describe('createPathBasedAuthMiddleware', () => {
     expect(next).toHaveBeenCalled();
   });
 
-  test('denies service account when allowServiceAccounts is false', async () => {
+  it('denies service account when allowServiceAccounts is false', async () => {
     const ctx = createMockContext('/admin/dashboard');
     const next = vi.fn();
 
-    const middleware = createPathBasedAuthMiddleware({
+    const middleware = createPathRulesAuthMiddleware({
       rules: [{
         path: '/admin/**',
         required: true,
@@ -166,5 +169,78 @@ describe('createPathBasedAuthMiddleware', () => {
       }
     });
     expect(next).not.toHaveBeenCalled();
+  });
+});
+
+describe('ApiPlugin auth.pathRules', () => {
+  it('fails fast with migration guidance when auth.pathAuth is configured', () => {
+    expect(() => new ApiPlugin({
+      docs: { enabled: false },
+      logging: { enabled: false },
+      auth: {
+        pathAuth: [{ pattern: '/secure/**', drivers: ['jwt'] }]
+      } as any
+    })).toThrow('auth.pathAuth has been removed. Use auth.pathRules instead.');
+  });
+
+  it('applies auth.pathRules to mounted resource routes', async () => {
+    const db = createDatabaseForTest(`api-path-rules-${Date.now()}`, { logLevel: 'error' });
+    await db.connect();
+    await db.createResource({
+      name: 'notes',
+      attributes: {
+        title: 'string|required'
+      }
+    });
+
+    let plugin;
+
+    try {
+      const started = await startApiPlugin(db, {
+        auth: {
+          drivers: [
+            {
+              driver: 'header-secret',
+              config: {
+                secret: 'top-secret',
+                subject: 'svc:internal',
+                roles: ['admin']
+              }
+            }
+          ],
+          pathRules: [
+            {
+              path: '/notes/**',
+              methods: ['header-secret'],
+              required: true
+            }
+          ]
+        }
+      }, 'api-path-rules');
+
+      plugin = started.plugin;
+      const { port } = started;
+
+      const unauthorized = await fetch(`http://127.0.0.1:${port}/notes`);
+      expect(unauthorized.status).toBe(401);
+
+      const authorized = await fetch(`http://127.0.0.1:${port}/notes`, {
+        headers: {
+          'x-admin-secret': 'top-secret'
+        }
+      });
+      expect(authorized.status).toBe(200);
+      await expect(authorized.json()).resolves.toMatchObject({ success: true });
+
+      const publicResponse = await fetch(`http://127.0.0.1:${port}/health`);
+      expect(publicResponse.status).toBe(200);
+      await expect(publicResponse.json()).resolves.toMatchObject({
+        success: true,
+        data: { status: 'ok' }
+      });
+    } finally {
+      await plugin?.stop();
+      await db.disconnect();
+    }
   });
 });

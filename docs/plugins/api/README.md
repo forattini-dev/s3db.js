@@ -19,6 +19,8 @@ await db.usePlugin(new ApiPlugin({ port: 3000 }));
 - `resource.api` is the center of gravity for resource-level policy: `guard`, `views`, `protected`, `write`, and native `bulk.create`.
 - Native batch support currently means `POST /:resource/bulk` via `resource.api.bulk.create`.
 - There is no native `bulk delete` route documented or registered in this runtime yet; for bulk deletion, keep using resource methods or explicit custom routes.
+- `ApiPlugin.previewRuntime()`, `ApiPlugin.doctor()`, and `ApiPlugin.contractTests()` expose the same route plan as structured inspection data, diagnostics, and generated checks without needing live traffic.
+- Generated OpenAPI/USD schemas now flow through Raffel's canonical schema descriptor normalization, so fallback diagnostics stay visible when a schema is opaque.
 
 ## Table of Contents
 
@@ -32,6 +34,23 @@ await db.usePlugin(new ApiPlugin({ port: 3000 }));
 - [What's Next](#-whats-next)
 
 ## ⚡ Quick Start
+
+### Inspection-First DX
+
+```javascript
+const api = new ApiPlugin({
+  auth: { drivers: [{ driver: 'jwt', config: { secret: process.env.JWT_SECRET } }] },
+  resources: { orders: { auth: ['jwt'] } }
+});
+
+await db.usePlugin(api);
+
+const preview = await api.previewRuntime();
+const doctor = await api.doctor();
+const contractTests = await api.contractTests();
+```
+
+Use this when you want to inspect route exposure, review diagnostics, or generate auth/input regression checks from the plugin's own route metadata.
 
 ### 1. Basic API (30 seconds)
 
@@ -177,7 +196,7 @@ Need the exact keys, precedence, and custom-route shape for `resource.api`?
 |----------|-------------|
 | **[Configuration](/plugins/api/reference/configuration.md)** | All config options (alphabetical) |
 | **[Resource API Reference](/plugins/api/reference/resource-api.md)** | Exact `resource.api` keys, precedence, and custom route behavior |
-| **[Enhanced Context](/plugins/api/reference/enhanced-context.md)** | Route context API reference |
+| **[Route Context](/plugins/api/reference/route-context.md)** | Request, auth, validation, and response helpers for custom routes |
 | **[FAQ](/plugins/api/faq.md)** | Common questions and troubleshooting |
 
 ### Batch Operations
@@ -314,7 +333,7 @@ OPTIONS /users           # Metadata
 
 GET     /docs            # Interactive docs UI (Raffel USD)
 GET     /openapi.json    # OpenAPI 3.1 spec
-GET     /api.usd.json    # USD 1.0.0 spec (legacy path)
+GET     /api.usd.json    # USD 1.0.0 spec
 GET     /docs/openapi.json # OpenAPI 3.1 spec (docs alias)
 GET     /docs/usd.json   # USD 1.0.0 spec (canonical path)
 GET     /docs/usd.yaml   # USD 1.0.0 spec in YAML

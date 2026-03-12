@@ -37,6 +37,7 @@ import { Plugin } from '../plugin.class.js';
 import { requirePluginDependency } from '../concerns/plugin-dependencies.js';
 import tryFn from '../../concerns/try-fn.js';
 import { ApiServer } from './server.js';
+import { ApiRouteRegistry } from './route-registry.js';
 import { idGenerator } from '../../concerns/id.js';
 import { resolveResourceName } from '../concerns/resource-names.js';
 import { normalizeBasePath } from './utils/base-path.js';
@@ -84,6 +85,7 @@ import type {
   DatabaseLike,
   ResourceLike,
 } from './types.internal.js';
+import type { ApiRuntimeInspectionPreview } from './runtime-inspection.js';
 
 export interface ApiPluginOptions {
   port?: number;
@@ -166,27 +168,35 @@ export class ApiPlugin extends Plugin {
       defaultName: 'plg_api_users',
       override: resourceNamesOption.authUsers || options.auth?.resource || jwtDriverResource
     };
-    const normalizedAuth = normalizeAuthConfig(options.auth as Parameters<typeof normalizeAuthConfig>[0], this.logger) as unknown as AuthConfig;
-    normalizedAuth.registration = {
-      enabled: options.auth?.registration?.enabled === true,
-      allowedFields: Array.isArray(options.auth?.registration?.allowedFields)
-        ? options.auth!.registration!.allowedFields!
-        : [],
-      defaultRole: options.auth?.registration?.defaultRole || 'user'
-    };
-    normalizedAuth.loginThrottle = {
-      enabled: options.auth?.loginThrottle?.enabled !== false,
-      maxAttempts: options.auth?.loginThrottle?.maxAttempts || 5,
-      windowMs: options.auth?.loginThrottle?.windowMs || 60_000,
-      blockDurationMs: options.auth?.loginThrottle?.blockDurationMs || 300_000,
-      maxEntries: options.auth?.loginThrottle?.maxEntries || 10_000
+    const normalizedAuthBase = normalizeAuthConfig(
+      options.auth as Parameters<typeof normalizeAuthConfig>[0],
+      this.logger
+    );
+    const normalizedAuth: AuthConfig = {
+      ...normalizedAuthBase,
+      registration: {
+        enabled: options.auth?.registration?.enabled === true,
+        allowedFields: Array.isArray(options.auth?.registration?.allowedFields)
+          ? options.auth.registration.allowedFields
+          : [],
+        defaultRole: options.auth?.registration?.defaultRole || 'user'
+      },
+      loginThrottle: {
+        enabled: options.auth?.loginThrottle?.enabled !== false,
+        maxAttempts: options.auth?.loginThrottle?.maxAttempts || 5,
+        windowMs: options.auth?.loginThrottle?.windowMs || 60_000,
+        blockDurationMs: options.auth?.loginThrottle?.blockDurationMs || 300_000,
+        maxEntries: options.auth?.loginThrottle?.maxEntries || 10_000
+      },
+      usersResourcePasswordValidation: options.auth?.usersResourcePasswordValidation || 'password|required|minlength:8',
+      enableIdentityContextMiddleware: options.auth?.enableIdentityContextMiddleware !== false,
+      usersResourceAttributes: options.auth?.usersResourceAttributes || {},
+      skipRoutes: options.auth?.skipRoutes === true,
+      usernameField: options.auth?.usernameField,
+      passwordField: options.auth?.passwordField
     };
     this.usersResourceName = this._resolveUsersResourceName();
     normalizedAuth.createResource = options.auth?.createResource !== false;
-    normalizedAuth.usersResourcePasswordValidation = options.auth?.usersResourcePasswordValidation || 'password|required|minlength:8';
-    normalizedAuth.enableIdentityContextMiddleware = options.auth?.enableIdentityContextMiddleware !== false;
-    normalizedAuth.usersResourceAttributes = options.auth?.usersResourceAttributes || {};
-    normalizedAuth.skipRoutes = options.auth?.skipRoutes === true;
 
     this.config = {
       port: options.port || 3000,
@@ -508,38 +518,7 @@ export class ApiPlugin extends Plugin {
       this.logger.info('Starting server...');
     }
 
-    this.server = new ApiServer({
-      port: this.config.port,
-      host: this.config.host,
-      database: this.database as any,
-      namespace: this.namespace,
-      basePath: this.config.basePath,
-      versionPrefix: this.config.versionPrefix,
-      resources: this.config.resources,
-      routes: this.config.routes,
-      templates: this.config.templates,
-      middlewares: this.compiledMiddlewares,
-      cors: this.config.cors as unknown as Record<string, unknown> & { enabled: boolean },
-      security: this.config.security as unknown as Record<string, unknown> & { enabled: boolean },
-      requestId: this.config.requestId,
-      sessionTracking: this.config.sessionTracking,
-      events: this.config.events,
-      metrics: this.config.metrics,
-      failban: this.config.failban,
-      static: this.config.static,
-      health: this.config.health,
-      maxBodySize: this.config.maxBodySize,
-      logLevel: this.config.logLevel || undefined,
-      auth: this.config.auth as Record<string, unknown>,
-      compression: this.config.compression,
-      docsEnabled: this.config.docs.enabled,
-      apiTitle: this.config.docs.title,
-      apiVersion: this.config.docs.version,
-      apiDescription: this.config.docs.description,
-      docs: this.config.docs,
-      startupBanner: this.config.startupBanner,
-      logger: this.logger
-    });
+    this.server = this._createApiServer();
 
     await this._checkPortAvailability(this.config.port, this.config.host);
     await this.server.start();
@@ -625,6 +604,65 @@ export class ApiPlugin extends Plugin {
   getApp(): HttpApp | null {
     return this.server ? this.server.getApp() : null;
   }
+
+  async previewRuntime(): Promise<ApiRuntimeInspectionPreview> {
+    return await this._withPreviewServer((server) => server.previewRuntime());
+  }
+
+  async doctor() {
+    return await this._withPreviewServer((server) => server.doctor());
+  }
+
+  async contractTests() {
+    return await this._withPreviewServer((server) => server.contractTests());
+  }
+
+  private _createApiServer(): ApiServer {
+    const routeRegistry = new ApiRouteRegistry();
+
+    return new ApiServer({
+      port: this.config.port,
+      host: this.config.host,
+      database: this.database as any,
+      namespace: this.namespace,
+      basePath: this.config.basePath,
+      versionPrefix: this.config.versionPrefix,
+      resources: this.config.resources,
+      routes: this.config.routes,
+      templates: this.config.templates,
+      middlewares: this.compiledMiddlewares,
+      cors: this.config.cors as unknown as Record<string, unknown> & { enabled: boolean },
+      security: this.config.security as unknown as Record<string, unknown> & { enabled: boolean },
+      requestId: this.config.requestId,
+      sessionTracking: this.config.sessionTracking,
+      events: this.config.events,
+      metrics: this.config.metrics,
+      failban: this.config.failban,
+      static: this.config.static,
+      health: this.config.health,
+      maxBodySize: this.config.maxBodySize,
+      logLevel: this.config.logLevel || undefined,
+      auth: this.config.auth,
+      compression: this.config.compression,
+      docs: this.config.docs,
+      startupBanner: this.config.startupBanner,
+      logger: this.logger,
+      routeRegistry
+    });
+  }
+
+  private async _withPreviewServer<T>(fn: (server: ApiServer) => Promise<T>): Promise<T> {
+    if (this.server) {
+      return await fn(this.server);
+    }
+
+    if (!this.database) {
+      throw new Error('ApiPlugin preview requires the plugin to be attached to a database via usePlugin().');
+    }
+
+    const previewServer = this._createApiServer();
+    return await fn(previewServer);
+  }
 }
 
 export { OIDCClient } from './auth/oidc-client.js';
@@ -658,7 +696,8 @@ export {
   createAttemptStateMachine
 } from './concerns/state-machine.js';
 
-export { RouteContext, withContext } from './concerns/route-context.js';
+export { RouteContext, createRouteContext, withContext } from './concerns/route-context.js';
+export type { ApiRuntimeInspectionPreview } from './runtime-inspection.js';
 
 export { errorResponse, successResponse } from './utils/route-helper.js';
 

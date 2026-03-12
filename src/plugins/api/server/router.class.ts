@@ -1,8 +1,8 @@
-import type { Context, MiddlewareHandler } from '#src/plugins/shared/http-runtime.js';
+import type { Context, HttpApp as HttpAppType, MiddlewareHandler } from '#src/plugins/shared/http-runtime.js';
 import type { Logger, LogLevel } from '../../../concerns/logger.js';
 import { createResourceRoutes, createRelationalRoutes } from '../routes/resource-routes.js';
 import { createAuthRoutes } from '../routes/auth-routes.js';
-import { mountCustomRoutes } from '../utils/custom-routes.js';
+import { mountCustomRoutes, parseRouteKey } from '../utils/custom-routes.js';
 import * as formatter from '../../shared/response-formatter.js';
 import { createFilesystemHandler, validateFilesystemConfig } from '../utils/static-filesystem.js';
 import { createS3Handler, validateS3Config } from '../utils/static-s3.js';
@@ -10,15 +10,11 @@ import { createFailbanAdminRoutes } from '../middlewares/failban.js';
 import { createContextInjectionMiddleware } from '../middlewares/context-injection.js';
 import { applyBasePath } from '../utils/base-path.js';
 import { createLogger } from '../../../concerns/logger.js';
+import { ApiRouteRegistry } from '../route-registry.js';
+import { assertNoLegacyResourceRoutes, getResourceCustomRoutes } from '../utils/resource-custom-routes.js';
+import type { AuthConfig, DocsConfig } from '../types.internal.js';
 
 type HttpAppConstructor = new () => HttpAppType;
-
-type HttpAppType = {
-  get: (path: string, handler: ((c: Context) => Response | Promise<Response>) | MiddlewareHandler) => void;
-  use: (path: string, handler: MiddlewareHandler) => void;
-  route: (path: string, app: HttpAppType) => void;
-  on: (method: string, path: string, handler: ((c: Context) => Response | Promise<Response>) | MiddlewareHandler) => void;
-};
 
 export interface ResourceConfig {
   enabled?: boolean;
@@ -46,29 +42,6 @@ export interface ResourceLike {
 
 export interface RoutesConfig {
   [path: string]: unknown;
-}
-
-export interface AuthConfig {
-  drivers?: Array<{ driver: string; config?: Record<string, unknown> }>;
-  resource?: string;
-  usernameField?: string;
-  passwordField?: string;
-  /** When true, skip mounting built-in /auth/* routes (login, register, me, etc.).
-   *  Auth middleware still runs for resource guards. Useful when the host app
-   *  provides its own auth routes (e.g. custom MFA/OTP flow). */
-  skipRoutes?: boolean;
-  registration?: {
-    enabled?: boolean;
-    allowedFields?: string[];
-    defaultRole?: string;
-  };
-  loginThrottle?: {
-    enabled?: boolean;
-    maxAttempts?: number;
-    windowMs?: number;
-    blockDurationMs?: number;
-    maxEntries?: number;
-  };
 }
 
 export interface StaticConfig {
@@ -118,7 +91,6 @@ export interface RelationsPlugin {
 
 export interface EventEmitter {
   emitResourceEvent(event: string, data: Record<string, unknown>): void;
-  [key: string]: unknown;
 }
 
 export interface DatabaseLike {
@@ -152,10 +124,9 @@ export interface RouterOptions {
   logLevel?: string;
   logger?: Logger;
   HttpApp: HttpAppConstructor;
-  apiTitle?: string;
-  apiDescription?: string;
-  docsEnabled?: boolean;
+  docs?: Pick<DocsConfig, 'enabled' | 'title' | 'description'>;
   rootRoute?: boolean | ((c: Context) => Response | Promise<Response>);
+  routeRegistry: ApiRouteRegistry;
 }
 
 export class Router {
@@ -173,11 +144,10 @@ export class Router {
   private logLevel: string | undefined;
   private logger: Logger;
   private HttpApp: HttpAppConstructor;
-  private apiTitle: string;
-  private apiDescription: string;
-  private docsEnabled: boolean;
+  private docs: Pick<DocsConfig, 'enabled' | 'title' | 'description'>;
   private rootRoute: boolean | ((c: Context) => Response | Promise<Response>) | undefined;
   private routeSummaries: RouteSummary[];
+  private routeRegistry: ApiRouteRegistry;
 
   constructor({
     database,
@@ -194,10 +164,9 @@ export class Router {
     logLevel,
     logger,
     HttpApp,
-    apiTitle,
-    apiDescription,
-    docsEnabled,
-    rootRoute
+    docs,
+    rootRoute,
+    routeRegistry
   }: RouterOptions) {
     this.database = database;
     this.resources = resources || {};
@@ -222,11 +191,14 @@ export class Router {
     }
 
     this.HttpApp = HttpApp;
-    this.apiTitle = apiTitle || 's3db.js API';
-    this.apiDescription = apiDescription || 'Auto-generated REST API for s3db.js resources';
-    this.docsEnabled = docsEnabled !== false;
+    this.docs = {
+      enabled: docs?.enabled !== false,
+      title: docs?.title || 's3db.js API',
+      description: docs?.description || 'Auto-generated REST API for s3db.js resources'
+    };
     this.rootRoute = rootRoute;
     this.routeSummaries = [];
+    this.routeRegistry = routeRegistry;
   }
 
   mount(app: HttpAppType, events: EventEmitter): void {
@@ -254,6 +226,13 @@ export class Router {
 
     if (typeof this.rootRoute === 'function') {
       app.get(rootPath, this.rootRoute);
+      this.routeRegistry.register({
+        kind: 'root',
+        path: rootPath,
+        methods: ['GET'],
+        tags: ['System'],
+        sourceKind: 'programmatic'
+      });
       this.logger?.debug({ path: rootPath }, `Mounted custom root handler at ${rootPath}`);
       return;
     }
@@ -264,13 +243,21 @@ export class Router {
       return c.html(html);
     });
 
+    this.routeRegistry.register({
+      kind: 'root',
+      path: rootPath,
+      methods: ['GET'],
+      tags: ['System'],
+      sourceKind: 'programmatic'
+    });
+
     this.logger?.debug({ path: rootPath }, `Mounted default splash screen at ${rootPath}`);
   }
 
   private _createSplashScreen(docsPath: string): string {
-    const title = this.apiTitle;
-    const description = this.apiDescription;
-    const docsLink = this.docsEnabled
+    const title = this.docs.title;
+    const description = this.docs.description;
+    const docsLink = this.docs.enabled
       ? `<a href="${docsPath}" class="docs-link">📚 View API Documentation</a>`
       : '';
 
@@ -476,6 +463,7 @@ export class Router {
       const prefix = this.resolveResourcePrefix(name, resource, version);
 
       const middlewares: MiddlewareHandler[] = [];
+      assertNoLegacyResourceRoutes(name, resource.config?.routes as Record<string, unknown> | undefined);
       const authDisabled = resourceConfig?.auth === false;
 
       if (this.authMiddleware && !authDisabled) {
@@ -519,7 +507,37 @@ export class Router {
 
       const mountPath = prefix ? `/${prefix}/${name}` : `/${name}`;
       const fullMountPath = this._withBasePath(mountPath);
+
+      const resourceCustomRoutes = getResourceCustomRoutes(resource.config?.api as Record<string, unknown> | undefined);
+      if (resourceCustomRoutes.length > 0) {
+        this.registerCustomRouteEntries(Object.fromEntries(
+          resourceCustomRoutes.map((route) => [route.key, route.handler])
+        ), {
+          kind: 'resource-custom',
+          pathPrefix: fullMountPath,
+          resource: name
+        });
+      }
+
       app.route(fullMountPath, resourceApp as unknown as HttpAppType);
+
+      this.routeRegistry.register({
+        kind: 'resource',
+        path: fullMountPath,
+        methods: methods as string[],
+        resource: name,
+        authEnabled: !!this.authMiddleware && !authDisabled,
+        authConfig: resourceConfig?.auth,
+        tags: [name],
+        sourceKind: 'rest-resource',
+        auth: {
+          required: !!this.authMiddleware && !authDisabled,
+          mode: !!this.authMiddleware && !authDisabled ? 'required' : 'optional',
+          drivers: Array.isArray(resourceConfig?.auth)
+            ? resourceConfig.auth.map((value) => String(value))
+            : undefined
+        }
+      });
 
       this.logger?.debug({ resourceName: name, path: fullMountPath, methods }, `Mounted routes for resource '${name}' at ${fullMountPath}`);
 
@@ -530,24 +548,19 @@ export class Router {
         authEnabled: !!this.authMiddleware && !authDisabled,
         authConfig: resourceConfig?.auth
       });
-
-      if (resource.config?.routes) {
-        const routeContext = {
-          resource,
-          database: this.database,
-          resourceName: name,
-          version
-        };
-
-        mountCustomRoutes(resourceApp as unknown as HttpAppType, resource.config.routes as unknown as Parameters<typeof mountCustomRoutes>[1], routeContext, this.logLevel);
-      }
     }
   }
 
   private mountAuthRoutes(app: HttpAppType): void {
-    const { drivers, resource: resourceName, usernameField, passwordField, registration, loginThrottle, skipRoutes } = (this.auth || {});
+    const drivers = this.auth?.drivers || [];
+    const resourceName = this.auth?.resource || null;
+    const usernameField = this.auth?.usernameField;
+    const passwordField = this.auth?.passwordField;
+    const registration = this.auth?.registration;
+    const loginThrottle = this.auth?.loginThrottle;
+    const skipRoutes = this.auth?.skipRoutes;
 
-    if (!drivers || (Array.isArray(drivers) && drivers.length === 0)) {
+    if (drivers.length === 0) {
       this.logger?.warn('Auth not configured or empty drivers; skipping built-in auth routes');
       return;
     }
@@ -602,7 +615,7 @@ export class Router {
 
     const authConfig = {
       driver: 'jwt' as const,
-      drivers: this.auth!.drivers,
+      drivers,
       usernameField,
       passwordField,
       jwtSecret: (driverConfig as Record<string, string>).jwtSecret || (driverConfig as Record<string, string>).secret,
@@ -616,21 +629,24 @@ export class Router {
       clientCredentials: (driverConfig as Record<string, unknown>).clientCredentials || {}
     };
 
-        const authApp = createAuthRoutes(
+    const authApp = createAuthRoutes(
+      authResource as unknown as Parameters<typeof createAuthRoutes>[0],
+      authConfig as unknown as Parameters<typeof createAuthRoutes>[1],
+      this.authMiddleware as unknown as Parameters<typeof createAuthRoutes>[2]
+    );
 
-          authResource as unknown as Parameters<typeof createAuthRoutes>[0],
+    const authPath = this._withBasePath('/auth');
 
-          authConfig as unknown as Parameters<typeof createAuthRoutes>[1],
+    app.route(authPath, authApp as unknown as HttpAppType);
 
-          this.authMiddleware as unknown as Parameters<typeof createAuthRoutes>[2]
-
-        );
-
-    
-
-        const authPath = this._withBasePath('/auth');
-
-        app.route(authPath, authApp as unknown as HttpAppType);
+    this.routeRegistry.registerMany([
+      { kind: 'auth', path: `${authPath}/register`, methods: ['POST'], tags: ['Authentication'], sourceKind: 'programmatic' },
+      { kind: 'auth', path: `${authPath}/login`, methods: ['POST'], tags: ['Authentication'], sourceKind: 'programmatic' },
+      { kind: 'auth', path: `${authPath}/token/refresh`, methods: ['POST'], tags: ['Authentication'], sourceKind: 'programmatic' },
+      { kind: 'auth', path: `${authPath}/me`, methods: ['GET'], tags: ['Authentication'], sourceKind: 'programmatic' },
+      { kind: 'auth', path: `${authPath}/api-key/regenerate`, methods: ['POST'], tags: ['Authentication'], sourceKind: 'programmatic' },
+      { kind: 'auth', path: `${authPath}/token`, methods: ['POST'], tags: ['Authentication'], sourceKind: 'programmatic' }
+    ]);
 
     this.logger?.debug({ path: authPath, driver: 'jwt' }, `Mounted auth routes (driver: jwt) at ${authPath}`);
   }
@@ -715,6 +731,14 @@ export class Router {
           (app as any).on('HEAD', routePattern, handler);
         }
 
+        this.routeRegistry.register({
+          kind: 'static',
+          path: routePattern,
+          methods: ['GET', 'HEAD'],
+          tags: ['Static Files'],
+          sourceKind: 'programmatic'
+        });
+
         const source = config.driver === 'filesystem' ? config.root : `s3://${config.bucket}/${config.prefix || ''}`;
         this.logger?.debug({ driver: config.driver, path: mountedPath, source }, `Mounted static files (${config.driver}) at ${mountedPath} -> ${source}`);
 
@@ -773,6 +797,16 @@ export class Router {
         );
         app.route(relationPath, relationalApp as unknown as HttpAppType);
 
+        this.routeRegistry.register({
+          kind: 'relation',
+          path: relationPath,
+          methods: ['GET'],
+          resource: resourceName,
+          relation: relationName,
+          tags: [resourceName],
+          sourceKind: 'rest-resource'
+        });
+
         this.logger?.debug({ path: relationPath, type: relationConfig.type, targetResource: relationConfig.resource }, `Mounted relational route: ${relationPath} (${relationConfig.type} -> ${relationConfig.resource})`);
       }
     }
@@ -789,6 +823,10 @@ export class Router {
     };
 
     mountCustomRoutes(app as unknown as Parameters<typeof mountCustomRoutes>[0], this.routes as unknown as Parameters<typeof mountCustomRoutes>[1], context, this.logLevel, {
+      pathPrefix: this.basePath
+    });
+    this.registerCustomRouteEntries(this.routes as Record<string, unknown>, {
+      kind: 'plugin-custom',
       pathPrefix: this.basePath
     });
 
@@ -812,6 +850,14 @@ export class Router {
         return c.json(response);
       });
 
+      this.routeRegistry.register({
+        kind: 'metrics',
+        path: metricsPath,
+        methods: ['GET'],
+        tags: ['Metrics'],
+        sourceKind: 'programmatic'
+      });
+
       this.logger?.debug({ path: metricsPath, format: metricsFormat }, `Metrics endpoint enabled at ${metricsPath}`);
     }
 
@@ -820,7 +866,57 @@ export class Router {
       const failbanPath = this._withBasePath('/admin/security');
       app.route(failbanPath, failbanAdminRoutes as unknown as HttpAppType);
 
+      this.routeRegistry.registerMany([
+        { kind: 'admin', path: `${failbanPath}/bans`, methods: ['GET', 'POST'], tags: ['Administration'], sourceKind: 'programmatic' },
+        { kind: 'admin', path: `${failbanPath}/bans/:ip`, methods: ['GET', 'DELETE'], tags: ['Administration'], sourceKind: 'programmatic' },
+        { kind: 'admin', path: `${failbanPath}/stats`, methods: ['GET'], tags: ['Administration'], sourceKind: 'programmatic' }
+      ]);
+
       this.logger?.debug({ path: failbanPath }, `Failban admin endpoints enabled at ${failbanPath}`);
+    }
+  }
+
+  private registerCustomRouteEntries(
+    routes: Record<string, unknown> | null | undefined,
+    {
+      kind,
+      pathPrefix = '',
+      resource
+    }: {
+      kind: 'plugin-custom' | 'resource-custom';
+      pathPrefix?: string;
+      resource?: string;
+    }
+  ): void {
+    if (!routes || typeof routes !== 'object') {
+      return;
+    }
+
+    for (const [key, handler] of Object.entries(routes)) {
+      if (typeof handler !== 'function') {
+        continue;
+      }
+
+      try {
+        const parsed = parseRouteKey(key);
+        const relativePath = parsed.path === '/' ? '' : parsed.path;
+        const fullPath = relativePath ? `${pathPrefix}${relativePath}` : pathPrefix;
+
+        this.routeRegistry.register({
+          kind,
+          path: fullPath || '/',
+          methods: [parsed.method],
+          resource,
+          originalKey: key,
+          tags: kind === 'resource-custom'
+            ? [resource || 'Resources']
+            : ['Custom Routes'],
+          sourceKind: kind === 'resource-custom' ? 'rest-resource' : 'programmatic',
+          sourceLocation: key
+        });
+      } catch {
+        continue;
+      }
     }
   }
 

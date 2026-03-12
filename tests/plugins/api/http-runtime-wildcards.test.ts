@@ -20,13 +20,27 @@ describe('HttpApp wildcard compatibility', () => {
     expect(await apiNested.text()).toBe('POST:v1/admin/users');
   });
 
+  test('supports optional params through the upstream Raffel matcher', async () => {
+    const app = new HttpApp();
+
+    app.get('/users/:id?', (c) => c.text(c.req.param('id') || 'ROOT'));
+
+    const collection = await app.fetch(new Request('http://localhost/users'));
+    expect(collection.status).toBe(200);
+    expect(await collection.text()).toBe('ROOT');
+
+    const member = await app.fetch(new Request('http://localhost/users/user-42'));
+    expect(member.status).toBe(200);
+    expect(await member.text()).toBe('user-42');
+  });
+
   test('preserves wildcard behavior for basePath groups, sub-app mounts and deep wildcards', async () => {
     const app = new HttpApp();
     const v1 = app.basePathApp('/v1');
     const admin = new HttpApp();
 
     v1.get('/reports/*', (c) => c.text(`reports:${c.req.param('*') || 'ROOT'}`));
-    admin.get('/docs/**/page', (c) => c.text(`docs:${c.req.param('*')}`));
+    admin.get('/docs/*', (c) => c.text(`docs:${c.req.param('*') || 'ROOT'}`));
     app.route('/admin', admin);
 
     const grouped = await app.fetch(new Request('http://localhost/v1/reports/2026/03/summary.json'));
@@ -35,6 +49,6 @@ describe('HttpApp wildcard compatibility', () => {
 
     const mounted = await app.fetch(new Request('http://localhost/admin/docs/platform/http/page'));
     expect(mounted.status).toBe(200);
-    expect(await mounted.text()).toBe('docs:platform/http');
+    expect(await mounted.text()).toBe('docs:platform/http/page');
   });
 });

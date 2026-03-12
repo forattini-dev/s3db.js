@@ -14,7 +14,7 @@ function createMockRequestContext() {
     },
     req: {
       param(name?: string) {
-        const params = { id: 'order-1' };
+        const params = { id: 'order%401' };
         return name ? params[name as keyof typeof params] : params;
       },
       query(name?: string) {
@@ -45,7 +45,7 @@ describe('guards helpers context adapters', () => {
 
     for (const adapted of [raffelContext, appContext]) {
       expect(adapted.user).toEqual({ sub: 'user-123', role: 'admin' });
-      expect(adapted.params).toEqual({ id: 'order-1' });
+      expect(adapted.params).toEqual({ id: 'order@1' });
       expect(adapted.query).toEqual({ status: 'active' });
       expect(adapted.body).toEqual({ total: 42 });
       expect(adapted.headers).toMatchObject({

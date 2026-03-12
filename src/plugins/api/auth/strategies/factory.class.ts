@@ -2,10 +2,8 @@ import type { MiddlewareHandler } from '#src/plugins/shared/http-runtime.js';
 import type { Logger } from '../../../../concerns/logger.js';
 import type { ResourceLike, DatabaseLike } from '../resource-manager.js';
 import type { DriverDefinition, BaseAuthStrategy } from './base-strategy.class.js';
-import type { AuthRule } from '../path-auth-matcher.js';
-import type { PathAuthRule } from './path-based-strategy.class.js';
+import type { AuthRule } from '../path-rules-middleware.js';
 import { GlobalAuthStrategy } from './global-strategy.class.js';
-import { PathBasedAuthStrategy } from './path-based-strategy.class.js';
 import { PathRulesAuthStrategy } from './path-rules-strategy.class.js';
 
 export interface AuthStrategyFactoryConfig {
@@ -14,7 +12,6 @@ export interface AuthStrategyFactoryConfig {
   oidcMiddleware?: MiddlewareHandler | null;
   database: DatabaseLike;
   pathRules?: AuthRule[];
-  pathAuth?: PathAuthRule[];
   events?: {
     emitAuthEvent: (event: string, data: Record<string, unknown>) => void;
   } | null;
@@ -29,7 +26,6 @@ export class AuthStrategyFactory {
     oidcMiddleware,
     database,
     pathRules,
-    pathAuth,
     events,
     logLevel,
     logger
@@ -42,18 +38,6 @@ export class AuthStrategyFactory {
         database,
         pathRules,
         events,
-        logLevel,
-        logger
-      });
-    }
-
-    if (pathAuth) {
-      return new PathBasedAuthStrategy({
-        drivers,
-        authResource,
-        oidcMiddleware,
-        database,
-        pathAuth,
         logLevel,
         logger
       });

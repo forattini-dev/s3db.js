@@ -1,12 +1,10 @@
 import {
-  HttpApp as RaffelHttpApp,
+  HttpApp,
   type HttpContextInterface,
-  type HttpHandler,
-  type HttpMethod,
-  type HttpMiddleware,
   type TypedResponse,
   type HttpRequest,
   type ContentfulStatusCode,
+  type HttpMiddleware,
   serve,
   getCookie as _getCookie,
   getCookies as _getCookies,
@@ -29,6 +27,8 @@ import {
  * `Record<string, string>`.  This matches the Raffel call sites.
  *
  * Cookie helpers are wrapped to bridge the CookieContext structural gap.
+ * Raffel 1.0.7 now owns route matching semantics directly, so this adapter
+ * only preserves local typing and cookie contracts.
  */
 
 declare module 'raffel/http' {
@@ -48,195 +48,9 @@ export type { HttpRequest, HttpContextInterface, HttpMiddleware as MiddlewareHan
 export type { HttpMiddleware };
 export type Next = () => Promise<void>;
 
-export { serve };
-export { generateCookie };
+export { HttpApp, serve, generateCookie };
 export type { CookieOptions };
 export type { CookieContext } from 'raffel/http';
-
-interface CompiledPath {
-  pattern: RegExp;
-  paramNames: string[];
-}
-
-interface RouteEntry<E extends Record<string, unknown> = Record<string, unknown>> {
-  method: HttpMethod | '*';
-  pattern: RegExp;
-  paramNames: string[];
-  handler: HttpHandler<E> | HttpMiddleware<E>;
-  middlewares: HttpMiddleware<E>[];
-  path: string;
-}
-
-interface MiddlewareEntry<E extends Record<string, unknown> = Record<string, unknown>> {
-  path: string;
-  pattern: RegExp;
-  middleware: HttpMiddleware<E>;
-}
-
-interface MutableHttpAppState<E extends Record<string, unknown> = Record<string, unknown>> {
-  routes: RouteEntry<E>[];
-  globalMiddlewares: MiddlewareEntry<E>[];
-  basePath: string;
-}
-
-function escapeRouteLiteral(value: string): string {
-  return value.replace(/[.+^${}()|[\]\\]/g, '\\$&');
-}
-
-function nextWildcardParamName(paramNames: string[]): string {
-  const wildcardCount = paramNames.filter((name) => name === '*' || /^\*\d+$/.test(name)).length;
-  return wildcardCount === 0 ? '*' : `*${wildcardCount + 1}`;
-}
-
-/**
- * Compile HTTP route patterns with support for params, optional params and deep wildcards.
- */
-function compileHttpPath(path: string): CompiledPath {
-  if (path === '') {
-    return { pattern: /^$/, paramNames: [] };
-  }
-
-  if (path === '/') {
-    return { pattern: /^\/$/, paramNames: [] };
-  }
-
-  const paramNames: string[] = [];
-  const segments = path.split('/');
-  let pattern = '^';
-
-  if (path.startsWith('/')) {
-    pattern += '';
-  }
-
-  for (let index = 0; index < segments.length; index++) {
-    if (index === 0) {
-      if (segments[index] !== '') {
-        pattern += escapeRouteLiteral(segments[index]!);
-      }
-      continue;
-    }
-
-    const segment = segments[index]!;
-    const isLast = index === segments.length - 1;
-
-    if (segment === '' && isLast) {
-      pattern += '/';
-      continue;
-    }
-
-    if (segment === '*' || segment === '**') {
-      paramNames.push(nextWildcardParamName(paramNames));
-
-      if (isLast) {
-        pattern += '(?:/(.*))?';
-      } else if (segment === '**') {
-        pattern += '/(.*)';
-      } else {
-        pattern += '/([^/]+)';
-      }
-      continue;
-    }
-
-    const parameterMatch = /^:([a-zA-Z_][a-zA-Z0-9_]*)(\?)?$/.exec(segment);
-    if (parameterMatch) {
-      const name = parameterMatch[1]!;
-      const optional = parameterMatch[2];
-      paramNames.push(name);
-      pattern += optional ? '(?:/([^/]+))?' : '/([^/]+)';
-      continue;
-    }
-
-    pattern += `/${escapeRouteLiteral(segment)}`;
-  }
-
-  pattern += '$';
-
-  return {
-    pattern: new RegExp(pattern),
-    paramNames
-  };
-}
-
-function compileMiddlewarePattern(path: string): RegExp {
-  const pattern = path
-    .replace(/[.+^${}()|[\]\\]/g, '\\$&')
-    .replace(/\*\*/g, '.*')
-    .replace(/\*/g, '.*');
-
-  return new RegExp(`^${pattern}`);
-}
-
-/**
- * Compatibility wrapper around Raffel's HttpApp.
- *
- * Raffel 1.0.6 mishandles terminal `*` wildcards in route registration.
- * This subclass preserves the public API while compiling routes with
- * deterministic single-segment and deep-wildcard semantics.
- */
-export class HttpApp<E extends Record<string, unknown> = Record<string, unknown>> extends RaffelHttpApp<E> {
-  override on(method: HttpMethod | '*', path: string, ...handlers: (HttpMiddleware<E> | HttpHandler<E>)[]): this {
-    if (handlers.length === 0) {
-      throw new Error('At least one handler is required');
-    }
-
-    const state = this as unknown as MutableHttpAppState<E>;
-    const fullPath = `${state.basePath || ''}${path}`;
-    const { pattern, paramNames } = compileHttpPath(fullPath);
-    const handler = handlers[handlers.length - 1]!;
-    const middlewares = handlers.slice(0, -1) as HttpMiddleware<E>[];
-
-    state.routes.push({
-      method,
-      pattern,
-      paramNames,
-      handler,
-      middlewares,
-      path: fullPath
-    });
-
-    return this;
-  }
-
-  override route(path: string, app: RaffelHttpApp<E>): this {
-    const state = this as unknown as MutableHttpAppState<E>;
-    const childState = app as unknown as MutableHttpAppState<E>;
-
-    for (const route of childState.routes) {
-      const fullPath = `${state.basePath || ''}${path}${route.path.replace(childState.basePath || '', '')}`;
-      const { pattern, paramNames } = compileHttpPath(fullPath);
-
-      state.routes.push({
-        ...route,
-        pattern,
-        paramNames,
-        path: fullPath
-      });
-    }
-
-    for (const middleware of childState.globalMiddlewares) {
-      const fullPath = `${state.basePath || ''}${path}${middleware.path.replace(childState.basePath || '', '')}`;
-
-      state.globalMiddlewares.push({
-        path: fullPath,
-        pattern: compileMiddlewarePattern(fullPath),
-        middleware: middleware.middleware
-      });
-    }
-
-    return this;
-  }
-
-  override basePathApp(prefix: string): HttpApp<E> {
-    const state = this as unknown as MutableHttpAppState<E>;
-    const subApp = new HttpApp<E>({ basePath: `${state.basePath || ''}${prefix}` });
-    const subState = subApp as unknown as MutableHttpAppState<E>;
-
-    subState.routes = state.routes;
-    subState.globalMiddlewares = state.globalMiddlewares;
-
-    return subApp;
-  }
-}
 
 /** Get a single cookie value. */
 export function getCookie(ctx: Context, name: string): string | undefined {

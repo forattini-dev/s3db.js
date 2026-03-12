@@ -100,16 +100,16 @@ Both return standardized error responses, but with different capabilities:
 
 | Feature | `ctx.error()` | `c.error()` |
 |---------|---------------|-------------|
-| **Availability** | Enhanced context only | Global |
+| **Availability** | `RouteContext` custom routes | Global |
 | **Response Format** | Basic | Advanced with auto-detection |
 | **Status Code** | Manual only | Auto-detects from error name |
 | **Stack Traces** | No | Yes (dev mode) |
 
 **When to use:**
-- `ctx.error()` - Quick & simple (enhanced context)
+- `ctx.error()` - Quick and predictable inside custom routes
 - `c.error()` - Advanced features (anywhere)
 
-**[→ Enhanced context guide](/plugins/api/reference/enhanced-context.md)**
+**[→ RouteContext reference](/plugins/api/reference/route-context.md)**
 
 ---
 
@@ -692,25 +692,25 @@ Check route precedence:
 
 ### Custom context not working
 
-Use **2 parameters** to trigger enhanced context:
+Custom routes use one supported contract: `(c, ctx)`.
 
 ```javascript
-// ✅ Enhanced context (automatic)
+// ✅ Use RouteContext directly
 routes: {
   '/custom': async (c, ctx) => {
     const user = ctx.user;  // Works!
   }
 }
 
-// ❌ Legacy behavior
+// ✅ Also valid when you do not need ctx
 routes: {
   '/custom': async (c) => {
-    const user = c.get('user');  // Manual access
+    return c.json({ ok: true });
   }
 }
 ```
 
-**[→ Enhanced context guide](/plugins/api/reference/enhanced-context.md)**
+**[→ RouteContext reference](/plugins/api/reference/route-context.md)**
 
 ---
 

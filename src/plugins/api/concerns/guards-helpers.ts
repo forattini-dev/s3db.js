@@ -1,4 +1,5 @@
 import type { Context as AppContext } from '#src/plugins/shared/http-runtime.js';
+import { decodeRequestParams } from '../utils/request-params.js';
 
 export interface UserInfo {
   sub?: string;
@@ -72,7 +73,7 @@ export function createExpressContext(req: ExpressRequest): GuardContext {
 export async function createRaffelContext(c: AppContext): Promise<GuardContext> {
   const context: GuardContext = {
     user: (c.get('user') as Record<string, unknown>) || {},
-    params: c.req.param(),
+    params: decodeRequestParams(c.req.param()),
     body: await c.req.json().catch(() => ({})) as Record<string, unknown>,
     query: c.req.query(),
     headers: Object.fromEntries((c.req.raw.headers as unknown as { entries(): IterableIterator<[string, string]> }).entries()),

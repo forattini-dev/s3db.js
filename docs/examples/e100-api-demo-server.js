@@ -5,7 +5,7 @@
  * - Multiple resources (users, posts, comments)
  * - Authentication (JWT + API Key)
  * - Guards (authorization, multi-tenancy)
- * - Custom routes with enhanced context
+ * - Custom routes with RouteContext helpers
  * - Interactive Swagger UI at /docs
  * - Health checks and metrics
  *
@@ -302,7 +302,7 @@ async function main() {
       }
     },
 
-    // 🛣️ Custom Routes (using Enhanced Context)
+    // 🛣️ Custom Routes (using RouteContext)
     routes: {
       // ============================================
       // Authentication Routes

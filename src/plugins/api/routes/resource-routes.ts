@@ -7,8 +7,11 @@ import type { Logger } from '../../../concerns/logger.js';
 import * as formatter from '../utils/response-formatter.js';
 import { guardMiddleware } from '../utils/guards.js';
 import type { GuardsConfig } from '../utils/guards.js';
+import { createRouteContext } from '../concerns/route-context.js';
 import { applyResponsePolicy, resolveRequestedView, resolveWritePolicy } from '../utils/resource-policy.js';
 import { generateRecordETag, validateIfMatch, validateIfNoneMatch } from '../utils/etag.js';
+import { getResourceCustomRoutes } from '../utils/resource-custom-routes.js';
+import { decodeRequestParam } from '../utils/request-params.js';
 import { ValidationError } from '../../../errors.js';
 import { createHash } from 'node:crypto';
 
@@ -182,6 +185,10 @@ function parsePopulateValues(raw: unknown): string[] {
     .flatMap(value => String(value).split(','))
     .map(value => value.trim())
     .filter(Boolean);
+}
+
+function getDecodedRouteId(c: Context): string | undefined {
+  return decodeRequestParam(c.req.param('id'));
 }
 
 function parsePartitionValues(raw: unknown): Record<string, unknown> | undefined {
@@ -634,39 +641,6 @@ function resolvePopulate(resource: ResourceLike, relationsPlugin: RelationsPlugi
   };
 }
 
-interface ParsedRoute {
-  method: string;
-  path: string;
-}
-
-function parseCustomRoute(routeDef: string): ParsedRoute {
-  let def = routeDef.trim();
-
-  if (def.startsWith('async ')) {
-    def = def.substring(6).trim();
-  }
-
-  const parts = def.split(/\s+/);
-
-  if (parts.length < 2 || !parts[0]) {
-    throw new Error(`Invalid route definition: "${routeDef}". Expected format: "METHOD /path" or "async METHOD /path"`);
-  }
-
-  const method = parts[0].toUpperCase();
-  const path = parts.slice(1).join(' ').trim();
-
-  const validMethods = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'HEAD', 'OPTIONS'];
-  if (!validMethods.includes(method)) {
-    throw new Error(`Invalid HTTP method: "${method}". Must be one of: ${validMethods.join(', ')}`);
-  }
-
-  if (!path.startsWith('/')) {
-    throw new Error(`Invalid route path: "${path}". Path must start with "/"`);
-  }
-
-  return { method, path };
-}
-
 function normalizeBulkCreateConfig(apiConfig: Record<string, unknown>): NormalizedBulkCreateRouteConfig | null {
   const bulkConfig = apiConfig.bulk;
 
@@ -853,6 +827,10 @@ export function createResourceRoutes(resource: ResourceLike, _version: string, c
   const apiConfig = resource.$schema?.api || {};
   const guards = apiConfig.guard || null;
   const globalGuards = config.globalGuards || null;
+  const guardOptions = {
+    globalGuards,
+    resource: resource as any
+  };
 
   const protectedFields = apiConfig.protected || [];
 
@@ -861,42 +839,34 @@ export function createResourceRoutes(resource: ResourceLike, _version: string, c
   });
 
   const bulkCreateConfig = normalizeBulkCreateConfig(apiConfig);
-  const RESERVED_API_KEYS = ['guard', 'protected', 'description', 'readonly', 'readOnly', 'writable', 'write', 'views', 'bulk'];
-  if (resource.config?.api && typeof resource.config.api === 'object') {
-    for (const [routeDef, handler] of Object.entries(resource.config.api)) {
-      if (RESERVED_API_KEYS.includes(routeDef)) {
-        continue;
-      }
+  try {
+    for (const route of getResourceCustomRoutes(resource.config?.api as Record<string, unknown> | undefined)) {
+      app.on(route.method as HttpMethod | '*', route.path, asyncHandler(async (c: Context) => {
+        const routeContext = createRouteContext(c, {
+          database: resource.database as any,
+          resource: resource as any,
+          plugins: (resource.database as { pluginRegistry?: Record<string, unknown> } | undefined)?.pluginRegistry || {}
+        });
+        const result = await route.handler(c, routeContext);
 
-      if (typeof handler !== 'function') {
-        continue;
-      }
-
-      try {
-        const { method, path } = parseCustomRoute(routeDef);
-
-        app.on(method as HttpMethod | '*', path, asyncHandler(async (c: Context) => {
-          const result = await (handler as (c: Context, ctx: { resource: ResourceLike; database: unknown }) => Promise<unknown>)(c, { resource, database: resource.database });
-
-          if (result && (result as Response).constructor && (result as Response).constructor.name === 'Response') {
-            return result as Response;
-          }
-
-          if (result !== undefined && result !== null) {
-            return c.json(formatter.success(result));
-          }
-
-          return c.json(formatter.noContent(), 204 as ContentfulStatusCode);
-        }));
-
-        if (config.logLevel || resource.database?.logger?.level === 'debug') {
-          logger.info(`[API Plugin] Registered custom route for ${resourceName}: ${method} ${path}`);
+        if (result && (result as Response).constructor && (result as Response).constructor.name === 'Response') {
+          return result as Response;
         }
-      } catch (error) {
-        logger.error({ err: error }, `[API Plugin] Error registering custom route "${routeDef}" for ${resourceName}`);
-        throw error;
+
+        if (result !== undefined && result !== null) {
+          return c.json(formatter.success(result));
+        }
+
+        return c.json(formatter.noContent(), 204 as ContentfulStatusCode);
+      }));
+
+      if (config.logLevel || resource.database?.logger?.level === 'debug') {
+        logger.info(`[API Plugin] Registered custom route for ${resourceName}: ${route.method} ${route.path}`);
       }
     }
+  } catch (error) {
+    logger.error({ err: error }, `[API Plugin] Error registering custom routes for ${resourceName}`);
+    throw error;
   }
 
   if (methods.includes('GET')) {
@@ -1255,7 +1225,7 @@ export function createResourceRoutes(resource: ResourceLike, _version: string, c
       return c.json(response, response._status as ContentfulStatusCode);
     });
 
-    const listGuard = guardMiddleware(guards, 'list', { globalGuards });
+    const listGuard = guardMiddleware(guards, 'list', guardOptions);
     app.describe!({
       description: `List ${resourceName} records with cursor/page pagination and partition-aware filtering`,
       tags: [resourceName],
@@ -1284,7 +1254,7 @@ export function createResourceRoutes(resource: ResourceLike, _version: string, c
 
   if (methods.includes('GET')) {
     const getHandler = asyncHandler(async (c: Context) => {
-      const id = c.req.param('id')!;
+      const id = getDecodedRouteId(c)!;
       const query = c.req.query();
       const partition = query.partition;
       const partitionValues = parsePartitionValues(query.partitionValues);
@@ -1370,7 +1340,7 @@ export function createResourceRoutes(resource: ResourceLike, _version: string, c
           data: { type: 'object' }
         }
       }
-    }).get('/:id', guardMiddleware(guards, 'get', { globalGuards }), getHandler);
+    }).get('/:id', guardMiddleware(guards, 'get', guardOptions), getHandler);
   }
 
   if (methods.includes('POST')) {
@@ -1442,7 +1412,7 @@ export function createResourceRoutes(resource: ResourceLike, _version: string, c
       return c.json(response, response._status as ContentfulStatusCode);
     });
 
-    const createGuard = guardMiddleware(guards, 'create', { globalGuards });
+    const createGuard = guardMiddleware(guards, 'create', guardOptions);
     app.describe!({
       description: `Create new ${resourceName} record`,
       tags: [resourceName],
@@ -1620,7 +1590,7 @@ export function createResourceRoutes(resource: ResourceLike, _version: string, c
 
   if (methods.includes('PUT')) {
     const updateHandler = asyncHandler(async (c: Context) => {
-      const id = c.req.param('id')!;
+      const id = getDecodedRouteId(c)!;
       const data = await c.req.json() as Record<string, unknown>;
       const writePolicy = resolveWritePolicy(apiConfig, 'update', data, c.get('user') as Record<string, unknown> | null | undefined);
       if (!writePolicy.ok) {
@@ -1719,12 +1689,12 @@ export function createResourceRoutes(resource: ResourceLike, _version: string, c
           data: { type: 'object' }
         }
       }
-    }).put('/:id', guardMiddleware(guards, 'update', { globalGuards }), updateHandler);
+    }).put('/:id', guardMiddleware(guards, 'update', guardOptions), updateHandler);
   }
 
   if (methods.includes('PATCH')) {
     const patchHandler = asyncHandler(async (c: Context) => {
-      const id = c.req.param('id')!;
+      const id = getDecodedRouteId(c)!;
       const data = await c.req.json() as Record<string, unknown>;
       const writePolicy = resolveWritePolicy(apiConfig, 'patch', data, c.get('user') as Record<string, unknown> | null | undefined);
       if (!writePolicy.ok) {
@@ -1824,12 +1794,12 @@ export function createResourceRoutes(resource: ResourceLike, _version: string, c
           data: { type: 'object' }
         }
       }
-    }).patch('/:id', guardMiddleware(guards, 'update', { globalGuards }), patchHandler);
+    }).patch('/:id', guardMiddleware(guards, 'update', guardOptions), patchHandler);
   }
 
   if (methods.includes('DELETE')) {
     const deleteHandler = asyncHandler(async (c: Context) => {
-      const id = c.req.param('id')!;
+      const id = getDecodedRouteId(c)!;
 
       const existing = await resource.get(id);
       if (!existing) {
@@ -1873,7 +1843,7 @@ export function createResourceRoutes(resource: ResourceLike, _version: string, c
           success: { type: 'boolean' }
         }
       }
-    }).delete('/:id', guardMiddleware(guards, 'delete', { globalGuards }), deleteHandler);
+    }).delete('/:id', guardMiddleware(guards, 'delete', guardOptions), deleteHandler);
   }
 
   if (methods.includes('HEAD')) {
@@ -1889,7 +1859,7 @@ export function createResourceRoutes(resource: ResourceLike, _version: string, c
     });
 
     const headItemHandler = asyncHandler(async (c: Context) => {
-      const id = c.req.param('id')!;
+      const id = getDecodedRouteId(c)!;
       const item = await resource.get(id);
 
       if (!item) {
@@ -2036,10 +2006,10 @@ export function createRelationalRoutes(sourceResource: ResourceLike, relationNam
   const resourceName = sourceResource.name;
   const relatedResourceName = relationConfig.resource;
 
-  app.get('/', asyncHandler(async (c: Context) => {
+  const relationListHandler = asyncHandler(async (c: Context) => {
     const pathParts = c.req.path.split('/');
     const relationNameIndex = pathParts.lastIndexOf(relationName);
-    const id = pathParts[relationNameIndex - 1] || '';
+    const id = decodeRequestParam(pathParts[relationNameIndex - 1] || '') || '';
     const query = c.req.query();
 
     const source = await sourceResource.get(id);
@@ -2171,7 +2141,10 @@ export function createRelationalRoutes(sourceResource: ResourceLike, relationNam
       const response = formatter.success(relatedData as Record<string, unknown>);
       return c.json(response, response._status as ContentfulStatusCode);
     }
-  }));
+  });
+
+  app.get('/', relationListHandler);
+  app.get('', relationListHandler);
 
   return app;
 }

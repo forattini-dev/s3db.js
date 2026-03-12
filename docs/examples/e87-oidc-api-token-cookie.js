@@ -177,23 +177,23 @@ async function setupAPI(db) {
       resource: 'users',
 
       // Path-based auth: Use API Key (cookie) for /api/**
-      pathAuth: [
+      pathRules: [
         // Public: Health checks
         {
-          pattern: '/health/**',
+          path: '/health/**',
           required: false
         },
 
         // Public: Auth endpoints
         {
-          pattern: '/auth/**',
+          path: '/auth/**',
           required: false
         },
 
         // Protected: API endpoints (API Key from cookie or header)
         {
-          pattern: '/api/**',
-          drivers: ['apiKey'],
+          path: '/api/**',
+          methods: ['apiKey'],
           required: true
         }
       ]

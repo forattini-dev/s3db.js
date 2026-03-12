@@ -4,7 +4,7 @@
  * Demonstrates the 3 different ways to access database and resources
  * in custom routes with the API Plugin.
  *
- * 1. Enhanced Context (Recommended) - Auto-injected with (c, ctx)
+ * 1. RouteContext Contract (Recommended) - Available in every custom route as `(c, ctx)`
  * 2. Context Injection - Direct access via c.get()
  * 3. withContext Helper - Explicit wrapper with destructuring
  *
@@ -47,9 +47,9 @@ async function main() {
   console.log('✅ Created resources: urls, clicks\n');
 
   // ==============================================
-  // Pattern 1: Enhanced Context (RECOMMENDED)
+  // Pattern 1: RouteContext Contract (RECOMMENDED)
   // ==============================================
-  console.log('📦 Pattern 1: Enhanced Context (Recommended)\n');
+  console.log('📦 Pattern 1: RouteContext Contract (Recommended)\n');
 
   const apiEnhanced = new ApiPlugin({
     port: 3001,
@@ -57,9 +57,9 @@ async function main() {
     docsEnabled: false,
 
     routes: {
-      // ✨ Note: 2 parameters (c, ctx) triggers auto-wrapping!
+      // RouteContext is always available as the second argument.
       'GET /r/:id': async (c, ctx) => {
-        console.log('  🔹 Enhanced Context Route Handler');
+        console.log('  🔹 RouteContext Route Handler');
 
         // ✅ Clean resource access with Proxy validation
         const url = await ctx.resources.urls.get(ctx.param('id'));
@@ -90,7 +90,7 @@ async function main() {
       },
 
       'GET /stats/:id': async (c, ctx) => {
-        console.log('  🔹 Enhanced Context with Validation');
+        console.log('  🔹 RouteContext with Validation');
 
         // ✅ Param helper
         const shortId = ctx.param('id');
@@ -116,7 +116,7 @@ async function main() {
       },
 
       'POST /urls': async (c, ctx) => {
-        console.log('  🔹 Enhanced Context with Validation');
+        console.log('  🔹 RouteContext with Validation');
 
         // ✅ Validator helper
         const { valid, errors, data } = await ctx.validator.validateBody('urls');
@@ -138,11 +138,11 @@ async function main() {
     }
   });
 
-  await db.use(apiEnhanced, 'enhanced');
+  await db.use(apiEnhanced, 'route-context');
 
-  console.log('✅ Enhanced Context API running on port 3001\n');
+  console.log('✅ RouteContext API running on port 3001\n');
   console.log('Key Benefits:');
-  console.log('  • Auto-injection (2 params triggers it)');
+  console.log('  • One supported `(c, ctx)` contract');
   console.log('  • Resource Proxy with validation');
   console.log('  • Request helpers (ctx.param, ctx.query, ctx.body)');
   console.log('  • Response helpers (ctx.success, ctx.error, ctx.notFound)');
@@ -160,7 +160,7 @@ async function main() {
     docsEnabled: false,
 
     routes: {
-      // ⚠️ Note: 1 parameter (c) - no auto-wrapping
+      // This handler ignores `ctx` and uses the raw request context directly.
       'GET /r/:id': async (c) => {
         console.log('  🔹 Direct Injection Route Handler');
 
@@ -293,8 +293,8 @@ async function main() {
   // ==============================================
   console.log('🧪 Testing routes...\n');
 
-  // Test enhanced context
-  console.log('Testing Enhanced Context (3001):');
+  // Test RouteContext contract
+  console.log('Testing RouteContext Contract (3001):');
   const res1 = await fetch('http://localhost:3001/stats/demo123');
   const json1 = await res1.json();
   console.log('Response:', json1, '\n');
@@ -316,9 +316,9 @@ async function main() {
   // ==============================================
   console.log('📊 Context Pattern Comparison:\n');
   console.log('┌─────────────────────┬────────────┬──────────┬─────────────┐');
-  console.log('│ Feature             │ Enhanced   │ Direct   │ withContext │');
+  console.log('│ Feature             │ RouteCtx   │ Direct   │ withContext │');
   console.log('├─────────────────────┼────────────┼──────────┼─────────────┤');
-  console.log('│ Auto-injection      │ ✅ (2 args)│ ❌       │ ❌          │');
+  console.log('│ Built-in contract   │ ✅         │ ✅       │ ❌          │');
   console.log('│ Resource Proxy      │ ✅         │ ❌       │ ✅          │');
   console.log('│ Request Helpers     │ ✅         │ ❌       │ ❌          │');
   console.log('│ Response Helpers    │ ✅         │ ❌       │ ❌          │');
@@ -327,7 +327,7 @@ async function main() {
   console.log('│ Best For            │ Custom     │ Simple   │ Explicit    │');
   console.log('└─────────────────────┴────────────┴──────────┴─────────────┘\n');
 
-  console.log('💡 Recommendation: Use Enhanced Context (c, ctx) for most cases!\n');
+  console.log('💡 Recommendation: Use `RouteContext` (`c, ctx`) for most cases.\n');
 
   // Cleanup
   await db.disconnect();

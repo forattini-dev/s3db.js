@@ -1,6 +1,9 @@
 import { applyBasePath, normalizeBasePath } from './base-path.js';
 import startCase from 'lodash-es/startCase.js';
-import { findBestMatch, type PathAuthRule as PathMatcherRule } from './path-matcher.js';
+import { findBestMatch, type PathPatternRule as PathMatcherRule } from './path-matcher.js';
+import { normalizeSchemaDescriptor, type SchemaDescriptor } from 'raffel';
+import type { ApiRouteRegistryEntry } from '../route-registry.js';
+import { getResourceCustomRoutes } from './resource-custom-routes.js';
 
 function normalizeDriverNameForAuth(driverName: string): string {
   const lowered = String(driverName || '').trim().toLowerCase();
@@ -22,7 +25,7 @@ export interface ParsedRouteDefinition {
   originalKey: string;
 }
 
-export interface PathAuthRule {
+export interface OpenApiPathRule {
   id?: string;
   path?: string;
   pattern?: string;
@@ -55,7 +58,7 @@ export interface AuthDriver {
 
 export interface AuthConfig {
   drivers?: AuthDriver[];
-  pathRules?: PathAuthRule[];
+  pathRules?: OpenApiPathRule[];
   jwt?: { enabled?: boolean };
   apiKey?: { enabled?: boolean };
   basic?: { enabled?: boolean };
@@ -66,7 +69,6 @@ export interface ResourceConfigOptions {
   methods?: string[];
   auth?: string[];
   versionPrefix?: string | boolean;
-  routes?: Record<string, unknown>;
   relations?: Record<string, { expose?: boolean }>;
 }
 
@@ -78,7 +80,6 @@ export interface ResourceLike {
     versionPrefix?: string | boolean;
     description?: string | { resource?: string; attributes?: Record<string, string> };
     attributes?: Record<string, unknown>;
-    routes?: Record<string, unknown>;
     api?: Record<string, unknown>;
     [key: string]: unknown;
   };
@@ -137,19 +138,8 @@ export interface MetricsPluginLike {
   };
 }
 
-export interface ApiAppRoute {
-  path: string;
-  method: string;
-  description?: string;
-  summary?: string;
-  operationId?: string;
-  tags?: string[];
-  responseSchema?: OpenAPISchemaObject;
-  requestSchema?: OpenAPISchemaObject;
-}
-
-export interface ApiAppLike {
-  getRoutes(): ApiAppRoute[];
+export interface ApiRouteRegistryLike {
+  list(): ApiRouteRegistryEntry[];
 }
 
 export interface OpenAPIGeneratorConfig {
@@ -162,7 +152,7 @@ export interface OpenAPIGeneratorConfig {
   versionPrefix?: string | boolean;
   basePath?: string;
   routes?: Record<string, unknown>;
-  app?: ApiAppLike | null;
+  routeRegistry?: ApiRouteRegistryLike | null;
 }
 
 export interface OpenAPISchemaObject {
@@ -284,6 +274,8 @@ interface CustomRouteDetails {
   scope: string;
   tags: string[];
   security: Array<Record<string, string[]>> | null;
+  inputSchema?: SchemaDescriptor | null;
+  outputSchema?: SchemaDescriptor | null;
 }
 
 interface RegisterCustomRouteParams {
@@ -294,6 +286,8 @@ interface RegisterCustomRouteParams {
   tags: string[];
   basePrefix: string;
   versionPrefix: string;
+  inputSchema?: SchemaDescriptor | null;
+  outputSchema?: SchemaDescriptor | null;
 }
 
 type SecurityResolver = (path: string) => Array<Record<string, string[]>> | null;
@@ -350,6 +344,19 @@ function convertPathToOpenAPI(path: string): string {
 
 function methodSupportsRequestBody(method: string): boolean {
   return ['POST', 'PUT', 'PATCH'].includes(method.toUpperCase());
+}
+
+function normalizeOpenApiSchemaObject(schema: Record<string, unknown>): OpenAPISchemaObject {
+  return normalizeSchemaDescriptor(schema, { target: 'openApi3' }).jsonSchema as OpenAPISchemaObject;
+}
+
+function createPlaceholderSchema(description: string): OpenAPISchemaObject {
+  return {
+    type: 'object',
+    additionalProperties: true,
+    description,
+    'x-s3db-schema-placeholder': true
+  } as OpenAPISchemaObject;
 }
 
 function toRuntimePath(path: string = ''): string {
@@ -478,8 +485,10 @@ function createCustomRouteOperation(params: {
   scope: string;
   tags: string[];
   security: Array<Record<string, string[]>> | null;
+  inputSchema?: SchemaDescriptor | null;
+  outputSchema?: SchemaDescriptor | null;
 }): OpenAPIOperation {
-  const { method, path, originalKey, scope, tags, security } = params;
+  const { method, path, originalKey, scope, tags, security, inputSchema, outputSchema } = params;
   const summary = `${method} ${path}`;
   const descriptionLines = [
     `Route defined ${scope}.`,
@@ -492,24 +501,7 @@ function createCustomRouteOperation(params: {
       description: 'Successful response',
       content: {
         'application/json': {
-          schema: {
-            type: 'object',
-            properties: {
-              success: { type: 'boolean', example: true },
-              data: {
-                description: 'Handler-defined response payload',
-                nullable: true,
-                oneOf: [
-                  { type: 'object', additionalProperties: true },
-                  { type: 'array', items: {} },
-                  { type: 'string' },
-                  { type: 'number' },
-                  { type: 'boolean' },
-                  { type: 'string' } // null represented as string type
-                ]
-              }
-            }
-          }
+          schema: outputSchema?.jsonSchema as OpenAPISchemaObject || createPlaceholderSchema('Handler-defined response payload')
         }
       }
     },
@@ -536,11 +528,7 @@ function createCustomRouteOperation(params: {
         required: false,
         content: {
           'application/json': {
-            schema: {
-              type: 'object',
-              additionalProperties: true,
-              description: 'Arbitrary JSON payload accepted by the custom handler'
-            }
+            schema: inputSchema?.jsonSchema as OpenAPISchemaObject || createPlaceholderSchema('Arbitrary JSON payload accepted by the custom handler')
           }
         }
       }
@@ -580,7 +568,9 @@ function addCustomRouteOperation(
     originalKey: details.originalKey,
     scope: details.scope,
     tags: details.tags,
-    security: details.security
+    security: details.security,
+    inputSchema: details.inputSchema,
+    outputSchema: details.outputSchema
   });
 
   return true;
@@ -776,11 +766,11 @@ export function generateResourceSchema(resource: ResourceLike): OpenAPISchemaObj
     }
   }
 
-  return {
+  return normalizeOpenApiSchemaObject({
     type: 'object',
     properties,
     required: required.length > 0 ? required : undefined
-  };
+  });
 }
 
 interface ResourcePathsConfig {
@@ -1608,7 +1598,7 @@ export function generateOpenAPISpec(database: DatabaseLike, config: OpenAPIGener
     versionPrefix: globalVersionPrefix,
     basePath = '',
     routes: pluginRoutes = {},
-    app = null
+    routeRegistry = null
   } = config;
   const normalizedBasePath = normalizeBasePath(basePath);
 
@@ -1745,7 +1735,7 @@ For detailed information about each endpoint, see the sections below.`;
   let customRoutesUsed = false;
 
   const registerCustomRouteOperation = (params: RegisterCustomRouteParams): void => {
-    const { fullPath, method, originalKey, scope, tags, basePrefix, versionPrefix } = params;
+    const { fullPath, method, originalKey, scope, tags, basePrefix, versionPrefix, inputSchema, outputSchema } = params;
     const opKey = `${method.toUpperCase()} ${convertPathToOpenAPI(fullPath)}`;
     if (documentedCustomRouteOperations.has(opKey)) {
       return;
@@ -1797,7 +1787,9 @@ For detailed information about each endpoint, see the sections below.`;
       tags: finalTags,
       security: resolveSecurityForPath
         ? resolveSecurityForPath(fullPath)
-        : null
+        : null,
+      inputSchema,
+      outputSchema
     });
 
     if (added) {
@@ -2023,11 +2015,9 @@ For detailed information about each endpoint, see the sections below.`;
       }
     }
 
-    const resourceCustomRoutes = gatherCustomRouteDefinitions([
-      resource.config?.routes as Record<string, unknown> | undefined,
-      resource.config?.api as Record<string, unknown> | undefined,
-      resourceConfig?.routes as Record<string, unknown> | undefined
-    ]);
+    const resourceCustomRoutes = getResourceCustomRoutes(
+      resource.config?.api as Record<string, unknown> | undefined
+    );
 
     for (const routeDef of resourceCustomRoutes) {
       const relativePath = routeDef.path === '/' ? '' : routeDef.path;
@@ -2043,7 +2033,7 @@ For detailed information about each endpoint, see the sections below.`;
       registerCustomRouteOperation({
         fullPath,
         method: routeDef.method,
-        originalKey: routeDef.originalKey,
+        originalKey: routeDef.key,
         scope: `for resource "${resourceLabel}"`,
         tags,
         basePrefix: normalizedBasePath,
@@ -2066,86 +2056,30 @@ For detailed information about each endpoint, see the sections below.`;
     });
   }
 
-  if (app && typeof app.getRoutes === 'function') {
-    const appRoutes = app.getRoutes();
+  if (routeRegistry && typeof routeRegistry.list === 'function') {
+    const registryEntries = routeRegistry.list();
 
-    for (const route of appRoutes) {
-      if (!route.path || !route.method) continue;
-
-      const fullPath = applyBasePath(normalizedBasePath, route.path);
-      const openApiPath = convertPathToOpenAPI(fullPath);
-      const methodLower = route.method.toLowerCase() as keyof OpenAPIPathItem;
-
-      const opKey = `${route.method.toUpperCase()} ${openApiPath}`;
-      if (documentedCustomRouteOperations.has(opKey)) {
+    for (const entry of registryEntries) {
+      if (!entry.path || !Array.isArray(entry.methods) || entry.methods.length === 0) {
         continue;
       }
 
-      if (!spec.paths[openApiPath]) {
-        spec.paths[openApiPath] = {};
+      const scope = describeRegistryScope(entry);
+      const tags = resolveRegistryTags(entry);
+
+      for (const method of entry.methods) {
+        registerCustomRouteOperation({
+          fullPath: entry.path,
+          method,
+          originalKey: entry.originalKey || `${method.toUpperCase()} ${entry.path}`,
+          scope,
+          tags,
+          basePrefix: normalizedBasePath,
+          versionPrefix: typeof globalVersionPrefix === 'string' ? globalVersionPrefix : '',
+          inputSchema: entry.schema?.input,
+          outputSchema: entry.schema?.output
+        });
       }
-
-      const operation: OpenAPIOperation = {
-        summary: route.description || `${route.method.toUpperCase()} ${route.path}`,
-        operationId: route.operationId || `${methodLower}_${route.path.replace(/[^a-zA-Z0-9]/g, '_')}`,
-        tags: route.tags || [CUSTOM_ROUTES_TAG],
-        responses: {}
-      };
-
-      if (route.description && route.summary && route.description !== route.summary) {
-        operation.summary = route.summary;
-        operation.description = route.description;
-      }
-
-      if (route.responseSchema) {
-        operation.responses = {
-          '200': {
-            description: 'Successful response',
-            content: {
-              'application/json': {
-                schema: route.responseSchema
-              }
-            }
-          }
-        };
-      } else {
-        operation.responses = {
-          '200': {
-            description: 'Successful response'
-          }
-        };
-      }
-
-      if (route.requestSchema) {
-        operation.requestBody = {
-          required: true,
-          content: {
-            'application/json': {
-              schema: route.requestSchema
-            }
-          }
-        };
-      }
-
-      const pathSecurity = resolveSecurityForPath(fullPath);
-      if (pathSecurity) {
-        operation.security = pathSecurity;
-      }
-
-      if (route.tags) {
-        for (const tag of route.tags) {
-          if (!spec.tags.some(t => t.name === tag)) {
-            spec.tags.push({
-              name: tag,
-              description: `Routes for ${tag}`
-            });
-          }
-        }
-      }
-
-      (spec.paths[openApiPath] as Record<string, OpenAPIOperation>)[methodLower] = operation;
-      documentedCustomRouteOperations.add(opKey);
-      customRoutesUsed = true;
     }
   }
 
@@ -2451,6 +2385,66 @@ For detailed information about each endpoint, see the sections below.`;
   }
 
   return spec;
+}
+
+function resolveRegistryTags(entry: ApiRouteRegistryEntry): string[] {
+  if (Array.isArray(entry.tags) && entry.tags.length > 0) {
+    return entry.tags;
+  }
+
+  switch (entry.kind) {
+    case 'auth':
+      return ['Authentication'];
+    case 'docs':
+      return ['Documentation'];
+    case 'health':
+      return ['Health'];
+    case 'admin':
+      return ['Administration'];
+    case 'metrics':
+      return ['Metrics'];
+    case 'static':
+      return ['Static Files'];
+    case 'resource':
+    case 'resource-custom':
+    case 'relation':
+      return [entry.resource || 'Resources'];
+    case 'root':
+      return ['System'];
+    case 'plugin-custom':
+    default:
+      return [CUSTOM_ROUTES_TAG];
+  }
+}
+
+function describeRegistryScope(entry: ApiRouteRegistryEntry): string {
+  switch (entry.kind) {
+    case 'resource':
+      return entry.resource ? `for resource "${formatResourceLabel(entry.resource)}"` : 'for resource routes';
+    case 'resource-custom':
+      return entry.resource ? `for resource "${formatResourceLabel(entry.resource)}"` : 'for resource custom routes';
+    case 'relation':
+      return entry.resource && entry.relation
+        ? `for relation "${entry.resource}.${entry.relation}"`
+        : 'for relational routes';
+    case 'auth':
+      return 'for built-in auth';
+    case 'docs':
+      return 'for API documentation';
+    case 'health':
+      return 'for health and readiness probes';
+    case 'admin':
+      return 'for admin routes';
+    case 'metrics':
+      return 'for metrics';
+    case 'static':
+      return 'for static assets';
+    case 'root':
+      return 'for the API root';
+    case 'plugin-custom':
+    default:
+      return 'at plugin level';
+  }
 }
 
 export default {

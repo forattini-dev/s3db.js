@@ -1,6 +1,6 @@
 # Raffel in s3db.js
 
-This page explains how `raffel` fits into s3db.js. It is the HTTP runtime underneath the API and identity stack, but the project does not consume it raw everywhere. We wrap parts of it to stabilize the developer-facing behavior.
+This page explains how `raffel` fits into s3db.js. It is the HTTP runtime underneath the API and identity stack, and `raffel@1.0.7` is the supported baseline for the current API plugin runtime.
 
 **Navigation:** [← Dependencies](/dependencies/README.md) | [API Plugin](/plugins/api/README.md) | [Routing Reference](/plugins/api/reference/routing.md)
 
@@ -8,18 +8,11 @@ This page explains how `raffel` fits into s3db.js. It is the HTTP runtime undern
 
 ## TLDR
 
-- `raffel/http` provides the request, middleware, and app primitives used by the API runtime.
-- s3db.js adds a compatibility layer in `src/plugins/shared/http-runtime.ts`.
-- If you are debugging route matching, request typing, cookies, or middleware behavior, this is the first dependency page to read.
-- Some docs mention `Raffel` directly because advanced users may share middleware or build standalone apps around the same primitives.
-
-## Table of Contents
-
-- [Where We Use It](#where-we-use-it)
-- [Why We Wrap It](#why-we-wrap-it)
-- [What to Reach For First](#what-to-reach-for-first)
-- [Common Pitfalls](#common-pitfalls)
-- [FAQ](#faq)
+- `raffel/http` provides the request, middleware, cookie, and app primitives used by the API runtime.
+- s3db.js keeps a small adapter in `src/plugins/shared/http-runtime.ts`.
+- On `1.0.7`, route matching semantics come from Raffel itself; s3db.js no longer needs a local matcher override.
+- The local wrapper remains responsible for contract-stabilizing request typing and cookie helper bridges.
+- The API plugin now also reuses Raffel `1.0.7` for inspection-oriented tooling: runtime preview, doctor reports, generated contract tests, and canonical schema descriptor normalization.
 
 ## Where We Use It
 
@@ -32,45 +25,58 @@ This page explains how `raffel` fits into s3db.js. It is the HTTP runtime undern
 It gives us:
 
 - `HttpApp`
-- typed request/response helpers
+- typed request and response helpers
 - middleware composition
 - cookie helpers
 - low-level HTTP primitives used by plugin features
 
-## Why We Wrap It
+## What The Local Wrapper Still Does
 
-s3db.js keeps a local HTTP runtime adapter because framework behavior matters at the edges:
+s3db.js keeps a local HTTP runtime adapter because the plugin contract still benefits from one place that stabilizes framework-facing details:
 
-- route matching semantics must be predictable
-- TypeScript request helpers should return narrow types
-- cookie helpers should match our local context types
-- framework bugs should not leak directly into the public plugin surface
+- request helper overloads stay narrow in TypeScript
+- cookie helpers accept the local context shape directly
+- API and identity code import one shared runtime surface
 
-The recent wildcard routing fix is a good example: the project added compatibility logic locally instead of letting plugin docs depend on broken route semantics.
+The wrapper is now intentionally small. Raffel owns routing behavior, performance characteristics, optional params, terminal wildcards, and grouped or mounted route matching.
 
-## What to Reach For First
+The API plugin also follows Raffel's current tooling contract more directly:
 
-When you are working on HTTP behavior, use this order:
+- `ApiPlugin.previewRuntime()` builds a structured runtime inspection preview from the plugin's route metadata.
+- `ApiPlugin.doctor()` summarizes diagnostics for missing or fallback route/schema metadata.
+- `ApiPlugin.contractTests()` generates auth/input-oriented regression checks from the same inspection graph.
+- OpenAPI/USD generation normalizes schemas through Raffel's canonical descriptor helper before emitting docs output.
 
-1. `src/plugins/shared/http-runtime.ts`
-2. API plugin docs and references
-3. the upstream `raffel` package
+## What Changed With Raffel 1.0.7
 
-That ordering matters because the wrapper is part of the contract users actually experience inside s3db.js.
+For the API plugin, the important shift is that Raffel now directly covers the route semantics that previously required local patching:
+
+- optional params such as `/users/:id?`
+- terminal wildcards such as `/assets/*`
+- grouped routes through `basePathApp()`
+- mounted sub-app behavior through `route()`
+
+That means routing bugs should be investigated in this order:
+
+1. the API plugin route registration code
+2. `src/plugins/shared/http-runtime.ts`
+3. the upstream `raffel` runtime
+
+The adapter is no longer hiding a custom matcher layer between the plugin and Raffel.
 
 ## Common Pitfalls
 
-### Assuming docs for raw Raffel always describe s3db.js behavior exactly
+### Assuming the wrapper still owns routing semantics
 
-They often do, but not always. The wrapper intentionally smooths some rough edges.
+It does not on `1.0.7`. If a path does not match, start from how the API plugin registered the route and then inspect the upstream `HttpApp`.
 
-### Mixing `app.use()` and route semantics mentally
+### Treating the wrapper as optional for plugin code
 
-Middleware matching and route matching are not always identical concepts. If behavior looks inconsistent, inspect the wrapper and the actual registration method.
+For plugin and identity code, prefer the shared wrapper. It is the contract the repository maintains across the runtime surface.
 
-### Debugging in the plugin layer first
+### Mixing route and middleware matching expectations
 
-For routing bugs, it is often faster to inspect the shared HTTP runtime before reading plugin-specific code.
+Middleware registration and route registration are still different concepts. If behavior looks inconsistent, inspect the registration path, not just the request handler.
 
 ## FAQ
 
@@ -84,7 +90,7 @@ Only when you intentionally want the lower-level primitives. For code that shoul
 
 ### Why does the API plugin docs mention Raffel so often?
 
-Because it is the actual transport/runtime substrate behind the API layer, and advanced users sometimes need to drop below the plugin abstraction.
+Because it is the actual transport/runtime substrate behind the API layer, and the API plugin now intentionally aligns its route context and runtime behavior with Raffel's current contract.
 
 ## See Also
 

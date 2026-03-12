@@ -64,13 +64,11 @@
     - **Reference**
       - [Configuration](/plugins/api/reference/configuration.md)
       - [Routing](/plugins/api/reference/routing.md)
-      - [Enhanced Context](/plugins/api/reference/enhanced-context.md)
+      - [Route Context](/plugins/api/reference/route-context.md)
       - [FAQ](/plugins/api/faq.md)
     - **Advanced**
       - [Authorization Patterns](/plugins/api/guides/authorization-patterns.md)
       - [OpenAPI Docs](/plugins/api/guides/openapi.md)
-      - [API App Patterns](/plugins/api/apiapp-patterns.md)
-      - [Best DX](/plugins/api/BEST-DX.md)
       - [Request Logging Quickstart](/plugins/api/api-plugin-request-logging-quickstart.md)
       - [Logging Examples](/plugins/api/api-plugin-logging-examples.md)
   - [Audit](/plugins/audit/README.md)

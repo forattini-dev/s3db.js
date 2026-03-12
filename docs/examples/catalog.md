@@ -269,7 +269,7 @@ Need scenario-centric guidance? Read [use-cases.md](./use-cases.md). Looking for
 - `e85-api-path-based-auth.js` - Deep dive on enforcing auth using path parameters, ideal for multi-tenant APIs.
 - `e85-identity-whitelabel.js` - White-labeled identity UX with custom themes, logos, and domain mapping.
 - `e85-protected-spa.js` - Protects single-page apps with silent renew and route guards.
-- `e86-api-enhanced-context.js` - Shows how to inject helper utilities (logger, feature flags, user session) into
+- `e86-api-route-context.js` - Shows how to use the supported `RouteContext` contract for plugin-level and
   every API handler.
 - `e86-custom-login-page.js` - Build bespoke login/forgot password screens that still reuse the core identity
   engine.

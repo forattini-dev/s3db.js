@@ -1,4 +1,5 @@
 import type { Context } from '#src/plugins/shared/http-runtime.js';
+import { createRouteContext, type RouteAuthApi, type RouteInputApi, type RouteServicesApi } from '../concerns/route-context.js';
 
 export interface ResourceLike {
   [key: string]: unknown;
@@ -13,37 +14,36 @@ export interface RouteHelpers {
   db: DatabaseLike;
   database: DatabaseLike;
   resources: Record<string, ResourceLike>;
+  resource: ResourceLike | null;
+  services: RouteServicesApi;
+  input: RouteInputApi;
+  auth: RouteAuthApi;
+  logger: ReturnType<typeof createRouteContext>['logger'];
+  signal: AbortSignal;
+  requestId: string | null;
 }
 
 export type RouteHandler = (c: Context, helpers: RouteHelpers) => Promise<Response> | Response;
 
 export interface CustomRouteContext {
   database?: DatabaseLike;
+  resource?: ResourceLike | null;
+  plugins?: Record<string, unknown>;
 }
 
-export function withContext(handler: RouteHandler): (c: Context) => Promise<Response> {
+export function withContext(handler: RouteHandler, context: CustomRouteContext = {}): (c: Context) => Promise<Response> {
   return async (c: Context): Promise<Response> => {
-    let database = c.get('db') as DatabaseLike | undefined || c.get('database') as DatabaseLike | undefined;
-
-    if (!database) {
-      const ctx = c.get('customRouteContext') as CustomRouteContext | undefined;
-      if (ctx && ctx.database) {
-        database = ctx.database;
-      }
-    }
-
-    if (!database) {
-      throw new Error(
-        '[withContext] Database not found in context. ' +
-        'Ensure context injection middleware is registered or customRouteContext is set.'
-      );
-    }
+    const routeContext = createRouteContext(c, {
+      database: context.database as any,
+      resource: context.resource as any,
+      plugins: context.plugins
+    });
 
     const helpers: RouteHelpers = {
-      db: database,
-      database: database,
-
-      resources: new Proxy(database.resources || {}, {
+      db: routeContext.db as unknown as DatabaseLike,
+      database: routeContext.database as unknown as DatabaseLike,
+      resource: routeContext.resource,
+      resources: new Proxy((routeContext.database.resources || {}) as unknown as Record<string, ResourceLike>, {
         get(target: Record<string, ResourceLike>, prop: string | symbol): ResourceLike | undefined {
           if (prop === 'then' || prop === 'catch') {
             return undefined;
@@ -59,7 +59,13 @@ export function withContext(handler: RouteHandler): (c: Context) => Promise<Resp
           }
           return target[propStr];
         }
-      })
+      }),
+      services: routeContext.services,
+      input: routeContext.input,
+      auth: routeContext.auth,
+      logger: routeContext.logger,
+      signal: routeContext.signal,
+      requestId: routeContext.requestId
     };
 
     return await handler(c, helpers);

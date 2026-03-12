@@ -1,8 +1,28 @@
+import {
+  createAuthContext,
+  getAuthRoles,
+  getAuthScopes,
+  getPrincipalId,
+  type AuthRequirement,
+  type ContextLogger,
+  type Principal
+} from 'raffel';
 import type { Context } from '#src/plugins/shared/http-runtime.js';
 import type { Database } from '../../../database.class.js';
+import { decodeRequestParam, decodeRequestParams } from '../utils/request-params.js';
 
 export interface UserInfo {
+  id?: string;
+  sub?: string;
+  role?: string;
+  roles?: string[];
+  scope?: string;
   scopes?: string[];
+  tenantId?: string;
+  token_use?: string;
+  token_type?: string;
+  service_account?: Record<string, unknown>;
+  claims?: Record<string, unknown>;
   [key: string]: unknown;
 }
 
@@ -39,15 +59,13 @@ export interface ValidatorHelper {
   validateBody(resourceName?: string | null): Promise<ValidateBodyResult>;
 }
 
-export interface LegacyContext {
-  database?: Database;
-  resource?: ResourceLike;
+export interface RouteContextFactoryOptions {
+  database?: Database | null;
+  resource?: ResourceLike | null;
   plugins?: PluginRegistry;
 }
 
-export interface WithContextOptions {
-  resource?: ResourceLike | null;
-}
+export interface WithContextOptions extends RouteContextFactoryOptions {}
 
 export interface RouteRequestApi {
   readonly method: string;
@@ -72,11 +90,33 @@ export interface RouteResponseApi {
   json(data: unknown, status?: number): Response;
   success(data: unknown, status?: number): Response;
   error(message: string | Error | null, status?: number, details?: unknown): Response;
+  badRequest(message?: string, details?: unknown): Response;
   notFound(message?: string): Response;
   unauthorized(message?: string): Response;
   forbidden(message?: string): Response;
+  validationError(message?: string, details?: unknown): Response;
+  serverError(message?: string, details?: unknown): Response;
   html(htmlContent: string, status?: number): Response;
   redirect(url: string, status?: number): Response;
+}
+
+export interface RouteInputApi {
+  readonly params: Readonly<Record<string, string>>;
+  readonly query: Readonly<Record<string, string>>;
+  readonly metadata: Readonly<Record<string, string>>;
+  body<T = Record<string, unknown>>(): Promise<T>;
+  json<T = Record<string, unknown>>(): Promise<T>;
+  text(): Promise<string>;
+  formData(): Promise<FormData>;
+}
+
+export interface RouteServicesApi {
+  readonly db: Database;
+  readonly database: Database;
+  readonly resources: Readonly<Record<string, ResourceLike>>;
+  readonly resource: ResourceLike | null;
+  readonly plugins: Readonly<PluginRegistry>;
+  readonly pluginRegistry: Readonly<PluginRegistry>;
 }
 
 export interface RouteAuthApi {
@@ -87,8 +127,16 @@ export interface RouteAuthApi {
   readonly method: string | null;
   readonly identity: Record<string, unknown> | null;
   readonly serviceAccount: Record<string, unknown> | null;
+  readonly authenticated: boolean;
+  readonly principal: Principal | null;
+  readonly principalId: string | null;
+  readonly roles: readonly string[];
+  readonly scopes: readonly string[];
+  readonly claims: Readonly<Record<string, unknown>>;
+  readonly tenantId: string | null;
   readonly isAuthenticated: boolean;
   readonly isServiceAccount: boolean;
+  require(requirement?: AuthRequirement): Principal;
   hasRole(role: string): boolean;
   hasScope(scope: string): boolean;
   hasAnyScope(...scopes: string[]): boolean;
@@ -149,6 +197,110 @@ function normalizeStringList(input: unknown): string[] {
     .filter(Boolean);
 }
 
+function normalizeScopeList(input: unknown): string[] {
+  if (!input) {
+    return [];
+  }
+
+  if (Array.isArray(input)) {
+    return input
+      .filter((value): value is string => typeof value === 'string')
+      .flatMap((value) => value.split(/\s+/))
+      .map((value) => value.trim())
+      .filter(Boolean);
+  }
+
+  if (typeof input === 'string') {
+    return input
+      .split(/\s+/)
+      .map((value) => value.trim())
+      .filter(Boolean);
+  }
+
+  return [];
+}
+
+function freezeStringRecord(record: Record<string, string>): Readonly<Record<string, string>> {
+  return Object.freeze({ ...record });
+}
+
+function normalizeClaims(input: unknown): Readonly<Record<string, unknown>> {
+  if (!input || typeof input !== 'object') {
+    return Object.freeze({});
+  }
+
+  return Object.freeze({ ...(input as Record<string, unknown>) });
+}
+
+function matchesScope(grantedScopes: readonly string[], scope: string): boolean {
+  if (grantedScopes.includes(scope) || grantedScopes.includes('*')) {
+    return true;
+  }
+
+  const wildcards = grantedScopes.filter((value) => value.endsWith(':*'));
+  for (const wildcard of wildcards) {
+    const prefix = wildcard.slice(0, -2);
+    if (scope.startsWith(`${prefix}:`)) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+function isAbortSignal(value: unknown): value is AbortSignal {
+  return !!value
+    && typeof value === 'object'
+    && 'aborted' in value
+    && typeof (value as { addEventListener?: unknown }).addEventListener === 'function';
+}
+
+const NOOP_CONTEXT_LOGGER: ContextLogger = {
+  trace() {},
+  debug() {},
+  info() {},
+  warn() {},
+  error() {},
+  fatal() {},
+  child() {
+    return NOOP_CONTEXT_LOGGER;
+  }
+};
+
+function createContextLogger(input: unknown): ContextLogger {
+  if (!input || typeof input !== 'object') {
+    return NOOP_CONTEXT_LOGGER;
+  }
+
+  const logger = input as Partial<ContextLogger> & Record<string, unknown>;
+  let wrappedLogger: ContextLogger;
+  const bindMethod = (method: keyof Omit<ContextLogger, 'child'>): ContextLogger[typeof method] => {
+    const candidate = logger[method];
+    if (typeof candidate === 'function') {
+      return candidate.bind(input) as ContextLogger[typeof method];
+    }
+
+    return NOOP_CONTEXT_LOGGER[method];
+  };
+
+  wrappedLogger = {
+    trace: bindMethod('trace'),
+    debug: bindMethod('debug'),
+    info: bindMethod('info'),
+    warn: bindMethod('warn'),
+    error: bindMethod('error'),
+    fatal: bindMethod('fatal'),
+    child(bindings: Record<string, unknown>): ContextLogger {
+      const childLogger = typeof logger.child === 'function'
+        ? logger.child.call(input, bindings)
+        : null;
+      return createContextLogger(childLogger ?? input);
+    }
+  };
+
+  return wrappedLogger;
+}
+
 export class RouteContext {
   c: Context;
   db: Database;
@@ -158,6 +310,10 @@ export class RouteContext {
   resources: Record<string, ResourceLike>;
   validator: ValidatorHelper;
   resource: ResourceLike | null;
+  input: RouteInputApi;
+  services: RouteServicesApi;
+  logger: ContextLogger;
+  signal: AbortSignal;
   request: RouteRequestApi;
   response: RouteResponseApi;
   auth: RouteAuthApi;
@@ -185,6 +341,10 @@ export class RouteContext {
     this.resources = this._createResourcesProxy();
     this.validator = this._createValidator();
     this.resource = resource;
+    this.input = this._createInputApi();
+    this.services = this._createServicesApi();
+    this.logger = this._createLogger();
+    this.signal = this._resolveSignal();
     this.request = this._createRequestApi();
     this.response = this._createResponseApi();
     this.auth = this._createAuthApi();
@@ -281,6 +441,173 @@ export class RouteContext {
     };
   }
 
+  private _getHeaders(): Record<string, string> {
+    const rawHeaders = this.c.req.raw?.headers;
+    return rawHeaders ? Object.fromEntries(rawHeaders.entries()) : {};
+  }
+
+  private _createInputApi(): RouteInputApi {
+    const params = freezeStringRecord(this.params());
+    const query = freezeStringRecord(this.queries());
+    const metadata = freezeStringRecord(this._getHeaders());
+
+    return Object.freeze({
+      params,
+      query,
+      metadata,
+      body: async <T = Record<string, unknown>>(): Promise<T> => await this.body<T>(),
+      json: async <T = Record<string, unknown>>(): Promise<T> => await this.body<T>(),
+      text: async (): Promise<string> => await this.text(),
+      formData: async (): Promise<FormData> => await this.formData()
+    });
+  }
+
+  private _createServicesApi(): RouteServicesApi {
+    const plugins = Object.freeze({ ...this.pluginRegistry });
+
+    return Object.freeze({
+      db: this.db,
+      database: this.database,
+      resources: this.resources,
+      resource: this.resource,
+      plugins,
+      pluginRegistry: plugins
+    });
+  }
+
+  private _createLogger(): ContextLogger {
+    return createContextLogger(this.c.get('logger' as never) ?? this.c.get('reqLogger' as never));
+  }
+
+  private _resolveSignal(): AbortSignal {
+    const rawSignal = (this.c.req.raw as { signal?: unknown } | undefined)?.signal
+      ?? this.c.get('signal' as never);
+
+    return isAbortSignal(rawSignal) ? rawSignal : new AbortController().signal;
+  }
+
+  private _getClaims(): Readonly<Record<string, unknown>> {
+    const user = this.user;
+
+    if (user) {
+      const nestedClaims = user.claims && typeof user.claims === 'object'
+        ? user.claims
+        : {};
+      return normalizeClaims({
+        ...user,
+        ...nestedClaims
+      });
+    }
+
+    return normalizeClaims(this.serviceAccount);
+  }
+
+  private _getNormalizedRoles(): readonly string[] {
+    const claims = this._getClaims() as Record<string, unknown>;
+    return Object.freeze([
+      ...new Set([
+        ...normalizeStringList(this.user?.role),
+        ...normalizeStringList(this.user?.roles),
+        ...normalizeStringList(claims.role),
+        ...normalizeStringList(claims.roles)
+      ])
+    ]);
+  }
+
+  private _getNormalizedScopes(): readonly string[] {
+    const claims = this._getClaims() as Record<string, unknown>;
+    const serviceAccount = this.serviceAccount as { scopes?: unknown } | null;
+
+    return Object.freeze([
+      ...new Set([
+        ...normalizeScopeList(this.user?.scope),
+        ...normalizeScopeList(this.user?.scopes),
+        ...normalizeScopeList(serviceAccount?.scopes),
+        ...normalizeScopeList(claims.scope),
+        ...normalizeScopeList(claims.scopes)
+      ])
+    ]);
+  }
+
+  private _getTenantId(): string | null {
+    const claims = this._getClaims() as Record<string, unknown>;
+    const tenantId = this.user?.tenantId ?? claims.tenantId;
+    return typeof tenantId === 'string' && tenantId.trim() ? tenantId : null;
+  }
+
+  private _resolvePrincipalIdFromState(): string | null {
+    const user = this.user;
+    const serviceAccount = this.serviceAccount as { clientId?: unknown } | null;
+
+    const principalId = user?.id
+      ?? user?.sub
+      ?? (typeof serviceAccount?.clientId === 'string' ? serviceAccount.clientId : null);
+
+    return typeof principalId === 'string' && principalId.trim() ? principalId : null;
+  }
+
+  private _buildPrincipalFromState(): Principal | null {
+    const principalId = this._resolvePrincipalIdFromState();
+    if (!principalId) {
+      return null;
+    }
+
+    const roles = this._getNormalizedRoles();
+    const scopes = this._getNormalizedScopes();
+    const tenantId = this._getTenantId();
+    const claims = this._getClaims();
+
+    return {
+      type: this.isServiceAccount ? 'service' : 'user',
+      id: principalId,
+      ...(roles.length > 0 ? { roles } : {}),
+      ...(scopes.length > 0 ? { scopes } : {}),
+      ...(tenantId ? { tenantId } : {}),
+      ...(Object.keys(claims).length > 0 ? { claims } : {})
+    };
+  }
+
+  private _getAuthContext() {
+    return createAuthContext({
+      authenticated: this.isAuthenticated,
+      principal: this._buildPrincipalFromState() || undefined,
+      principalId: this._resolvePrincipalIdFromState() || undefined,
+      roles: this._getNormalizedRoles(),
+      scopes: this._getNormalizedScopes(),
+      tenantId: this._getTenantId() || undefined,
+      claims: { ...this._getClaims() }
+    });
+  }
+
+  private _getRoles(): readonly string[] {
+    return Object.freeze([...getAuthRoles(this._getAuthContext())]);
+  }
+
+  private _getScopes(): readonly string[] {
+    return Object.freeze([...getAuthScopes(this._getAuthContext())]);
+  }
+
+  private _getPrincipalId(): string | null {
+    const authContext = this._getAuthContext();
+    return authContext.principalId || getPrincipalId(authContext.principal) || null;
+  }
+
+  private _getPrincipal(): Principal | null {
+    const principal = this._getAuthContext().principal;
+    if (!principal) {
+      return null;
+    }
+
+    if (typeof principal === 'string') {
+      return {
+        type: this.isServiceAccount ? 'service' : 'user',
+        id: principal
+      };
+    }
+
+    return principal as Principal;
+  }
+
   private _createRequestApi(): RouteRequestApi {
     const self = this;
     return {
@@ -302,10 +629,7 @@ export class RouteContext {
       query: (name: string): string | undefined => this.query(name),
       queries: (): Record<string, string> => this.queries(),
       header: (name: string): string | undefined => this.header(name),
-      headers: (): Record<string, string> => {
-        const rawHeaders = this.c.req.raw?.headers;
-        return rawHeaders ? Object.fromEntries(rawHeaders.entries()) : {};
-      },
+      headers: (): Record<string, string> => ({ ...this.input.metadata }),
       body: async <T = Record<string, unknown>>(): Promise<T> => await this.body<T>(),
       json: async <T = Record<string, unknown>>(): Promise<T> => await this.body<T>(),
       text: async (): Promise<string> => await this.text(),
@@ -319,9 +643,12 @@ export class RouteContext {
       json: (data: unknown, status: number = 200): Response => this.json(data, status),
       success: (data: unknown, status: number = 200): Response => this.success(data, status),
       error: (message: string | Error | null, status: number = 400, details: unknown = null): Response => this.error(message, status, details),
+      badRequest: (message: string = 'Bad request', details: unknown = null): Response => this.badRequest(message, details),
       notFound: (message: string = 'Not found'): Response => this.notFound(message),
       unauthorized: (message: string = 'Unauthorized'): Response => this.unauthorized(message),
       forbidden: (message: string = 'Forbidden'): Response => this.forbidden(message),
+      validationError: (message: string = 'Validation failed', details: unknown = null): Response => this.validationError(message, details),
+      serverError: (message: string = 'Internal server error', details: unknown = null): Response => this.serverError(message, details),
       html: (htmlContent: string, status: number = 200): Response => this.html(htmlContent, status),
       redirect: (url: string, status: number = 302): Response => this.redirect(url, status)
     };
@@ -351,12 +678,34 @@ export class RouteContext {
       get serviceAccount() {
         return self.serviceAccount;
       },
+      get authenticated() {
+        return self.isAuthenticated;
+      },
+      get principal() {
+        return self._getPrincipal();
+      },
+      get principalId() {
+        return self._getPrincipalId();
+      },
+      get roles() {
+        return self._getRoles();
+      },
+      get scopes() {
+        return self._getScopes();
+      },
+      get claims() {
+        return self._getClaims();
+      },
+      get tenantId() {
+        return self._getTenantId();
+      },
       get isAuthenticated() {
         return self.isAuthenticated;
       },
       get isServiceAccount() {
         return self.isServiceAccount;
       },
+      require: (requirement?: AuthRequirement): Principal => this.require(requirement),
       hasRole: (role: string): boolean => this.hasRole(role),
       hasScope: (scope: string): boolean => this.hasScope(scope),
       hasAnyScope: (...scopes: string[]): boolean => this.hasAnyScope(...scopes),
@@ -368,15 +717,21 @@ export class RouteContext {
   }
 
   param(name: string): string | undefined {
-    return this.c.req.param(name);
+    return decodeRequestParam(this.c.req.param(name));
   }
 
   params(): Record<string, string> {
-    return this.c.req.param();
+    return decodeRequestParams(this.c.req.param());
   }
 
-  query(name: string): string | undefined {
-    return this.c.req.query(name);
+  query(): Record<string, string>;
+  query(name: string): string | undefined;
+  query(name?: string): Record<string, string> | string | undefined {
+    if (typeof name === 'string') {
+      return this.c.req.query(name);
+    }
+
+    return this.c.req.query();
   }
 
   queries(): Record<string, string> {
@@ -409,6 +764,14 @@ export class RouteContext {
     }
 
     return await this._formDataPromise;
+  }
+
+  set(key: string, value: unknown): void {
+    this.c.set(key as never, value as never);
+  }
+
+  get<T = unknown>(key: string): T | undefined {
+    return this.c.get(key as never) as T | undefined;
   }
 
   json(data: unknown, status: number = 200): Response {
@@ -444,6 +807,10 @@ export class RouteContext {
     }, resolvedStatus as Parameters<typeof this.c.json>[1]);
   }
 
+  badRequest(message: string = 'Bad request', details: unknown = null): Response {
+    return this.error(message, 400, details);
+  }
+
   notFound(message: string = 'Not found'): Response {
     return this.c.json({
       success: false,
@@ -475,6 +842,14 @@ export class RouteContext {
         status: 403
       }
     }, 403);
+  }
+
+  validationError(message: string = 'Validation failed', details: unknown = null): Response {
+    return this.error(message, 400, details);
+  }
+
+  serverError(message: string = 'Internal server error', details: unknown = null): Response {
+    return this.error(message, 500, details);
   }
 
   html(htmlContent: string, status: number = 200): Response {
@@ -525,7 +900,7 @@ export class RouteContext {
   }
 
   get isAuthenticated(): boolean {
-    return !!this.user;
+    return !!(this.user || this.serviceAccount);
   }
 
   get isServiceAccount(): boolean {
@@ -545,37 +920,19 @@ export class RouteContext {
   }
 
   hasRole(role: string): boolean {
-    if (!this.user || typeof role !== 'string' || !role.trim()) {
+    if (typeof role !== 'string' || !role.trim()) {
       return false;
     }
 
-    const roles = [
-      ...normalizeStringList(this.user.role),
-      ...normalizeStringList(this.user.roles)
-    ];
-
-    return roles.includes(role);
+    return this._getRoles().includes(role);
   }
 
   hasScope(scope: string): boolean {
-    const scopes = this.user?.scopes;
-    if (!Array.isArray(scopes)) {
+    if (typeof scope !== 'string' || !scope.trim()) {
       return false;
     }
 
-    if (scopes.includes(scope)) {
-      return true;
-    }
-
-    const wildcards = scopes.filter((s): s is string => typeof s === 'string' && s.endsWith(':*'));
-    for (const wildcard of wildcards) {
-      const prefix = wildcard.slice(0, -2);
-      if (scope.startsWith(`${prefix}:`)) {
-        return true;
-      }
-    }
-
-    return scopes.includes('*');
+    return matchesScope(this._getScopes(), scope);
   }
 
   hasAnyScope(...scopes: string[]): boolean {
@@ -584,6 +941,36 @@ export class RouteContext {
 
   hasAllScopes(...scopes: string[]): boolean {
     return scopes.every(scope => this.hasScope(scope));
+  }
+
+  require(requirement: AuthRequirement = { authenticated: true }): Principal {
+    if (requirement.authenticated !== false || requirement.roles?.length || requirement.scopes?.length) {
+      this.requireAuth();
+    }
+
+    if (requirement.roles && requirement.roles.some((role) => !this.hasRole(role))) {
+      throw Object.assign(
+        new Error('Missing required role'),
+        { status: 403, code: 'FORBIDDEN' }
+      );
+    }
+
+    if (requirement.scopes && requirement.scopes.some((scope) => !this.hasScope(scope))) {
+      throw Object.assign(
+        new Error('Missing required scope'),
+        { status: 403, code: 'FORBIDDEN' }
+      );
+    }
+
+    const principal = this._getPrincipal();
+    if (!principal) {
+      throw Object.assign(
+        new Error('Authentication required'),
+        { status: 401, code: 'UNAUTHORIZED' }
+      );
+    }
+
+    return principal;
   }
 
   requireAuth(): void {
@@ -635,28 +1022,42 @@ export class RouteContext {
 }
 
 export function withContext(
-  handler: (c: Context, ctx: RouteContext) => Promise<Response>,
+  handler: (c: Context, ctx: RouteContext) => Promise<Response> | Response,
   options: WithContextOptions = {}
 ): (c: Context) => Promise<Response> {
   return async (c: Context): Promise<Response> => {
-    const legacyContext = c.get('customRouteContext') as LegacyContext | undefined || {};
-    const { database, resource, plugins = {} } = legacyContext;
-
-    const currentResource = options.resource || resource || null;
-
-    const ctx = new RouteContext(c, database as Database, currentResource as ResourceLike | null, plugins);
-
+    const ctx = createRouteContext(c, options);
     return await handler(c, ctx);
   };
 }
 
 export function autoWrapHandler(
-  handler: ((c: Context) => Promise<Response>) | ((c: Context, ctx: RouteContext) => Promise<Response>),
+  handler: ((c: Context) => Promise<Response> | Response) | ((c: Context, ctx: RouteContext) => Promise<Response> | Response),
   options: WithContextOptions = {}
 ): (c: Context) => Promise<Response> {
-  if (handler.length === 1) {
-    return handler as (c: Context) => Promise<Response>;
+  return withContext(handler as (c: Context, ctx: RouteContext) => Promise<Response> | Response, options);
+}
+
+export function createRouteContext(c: Context, options: RouteContextFactoryOptions = {}): RouteContext {
+  const database = options.database
+    || c.get('db' as never)
+    || c.get('database' as never);
+
+  if (!database) {
+    throw new Error(
+      '[RouteContext] Database not found. ' +
+      'Ensure context injection middleware is registered or pass options.database.'
+    );
   }
 
-  return withContext(handler as (c: Context, ctx: RouteContext) => Promise<Response>, options);
+  const plugins = options.plugins
+    || (database as Database & { pluginRegistry?: PluginRegistry }).pluginRegistry
+    || {};
+
+  return new RouteContext(
+    c,
+    database as Database,
+    (options.resource || null) as ResourceLike | null,
+    plugins
+  );
 }

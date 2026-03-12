@@ -259,18 +259,18 @@ await db.usePlugin(new ApiPlugin({
     resource: 'users',
 
     // Path-based auth
-    pathAuth: [
+    pathRules: [
       {
-        pattern: '/auth/**',
+        path: '/auth/**',
         required: false  // Login public
       },
       {
-        pattern: '/app/**',
-        drivers: ['jwt'],
+        path: '/app/**',
+        methods: ['jwt'],
         required: true   // Protected React app
       },
       {
-        pattern: '/public/**',
+        path: '/public/**',
         required: false  // Public assets
       }
     ]
@@ -378,10 +378,12 @@ static: [
     config: { fallback: 'index.html' }
   }
 ],
-pathAuth: [
-  { pattern: '/', required: false },
-  { pattern: '/dashboard/**', drivers: ['jwt'], required: true }
-]
+auth: {
+  pathRules: [
+    { path: '/', required: false },
+    { path: '/dashboard/**', methods: ['jwt'], required: true }
+  ]
+}
 ```
 
 **3. User Uploads from S3**
@@ -405,7 +407,7 @@ static: [
 ## Examples
 
 - **[Example 84: Static File Serving](/examples/e84-static-files.js)** - Filesystem + S3 drivers, ETag, Range requests, CORS
-- **[Example 85: Protected SPA](/examples/e85-protected-spa.js)** - React app with JWT authentication and pathAuth
+- **[Example 85: Protected SPA](/examples/e85-protected-spa.js)** - React app with JWT authentication and `auth.pathRules`
 - **[Example 87: OIDC + API Token Cookie](/examples/e87-oidc-api-token-cookie.js)** - OIDC login with static file serving
 
 ---

@@ -17,7 +17,6 @@ import { createOIDCHandler } from './auth/oidc-auth.js';
 import { createSessionStore } from './concerns/session-store-factory.js';
 import { FailbanManager } from '../../concerns/failban-manager.js';
 import { bumpProcessMaxListeners } from '../../concerns/process-max-listeners.js';
-import { validatePathAuth } from './utils/path-matcher.js';
 import { ApiEventEmitter } from './concerns/event-emitter.js';
 import { MetricsCollector } from './concerns/metrics-collector.js';
 import { MiddlewareChain } from './server/middleware-chain.class.js';
@@ -26,6 +25,15 @@ import { HealthManager } from './server/health-manager.class.js';
 import { OpenAPIGeneratorCached } from './utils/openapi-generator-cached.class.js';
 import { AuthStrategyFactory } from './auth/strategies/factory.class.js';
 import { applyBasePath } from './utils/base-path.js';
+import { ApiRouteRegistry } from './route-registry.js';
+import {
+  buildApiRuntimeContractTests,
+  buildApiRuntimeDoctorReport,
+  buildApiRuntimeInspectionPreview,
+  type ApiRuntimeInspectionPreview
+} from './runtime-inspection.js';
+import type { AuthConfig, AuthPathRule, DocsConfig } from './types.internal.js';
+import type { AuthRule } from './auth/path-rules-middleware.js';
 
 export interface ApiServerOptions {
   port?: number;
@@ -69,56 +77,18 @@ export interface ApiServerOptions {
   health?: { enabled: boolean; [key: string]: unknown };
   logLevel?: string;
   auth?: AuthConfig;
-  docsEnabled?: boolean;
-  apiTitle?: string;
-  apiVersion?: string;
-  apiDescription?: string;
   maxBodySize?: number;
   startupBanner?: boolean;
   rootRoute?: boolean | ((c: Context) => Response | Promise<Response>);
   compression?: { enabled: boolean; threshold?: number };
   logger?: Logger;
-  docs?: {
-    enabled?: boolean;
-    title?: string;
-    version?: string;
-    description?: string;
-    uiTheme?: 'light' | 'dark' | 'auto';
-    tryItOut?: boolean;
-    codeGeneration?: boolean;
-  };
+  docs?: Partial<DocsConfig>;
+  routeRegistry?: ApiRouteRegistry;
 }
 
 export interface StaticConfig {
   path: string;
   root: string;
-  [key: string]: unknown;
-}
-
-export interface AuthConfig {
-  drivers?: DriverConfig[];
-  resource?: string;
-  pathAuth?: PathAuthConfig[];
-  pathRules?: PathRuleConfig[];
-  [key: string]: unknown;
-}
-
-export interface DriverConfig {
-  driver: string;
-  config?: Record<string, unknown>;
-}
-
-export interface PathAuthConfig {
-  pattern?: string;
-  path?: string;
-  required?: boolean;
-  drivers?: string[];
-}
-
-export interface PathRuleConfig {
-  pattern: string;
-  auth?: string[] | boolean;
-  methods?: string[];
   [key: string]: unknown;
 }
 
@@ -162,6 +132,66 @@ export interface SessionStore {
   destroy(id: string): Promise<void>;
 }
 
+function normalizeAuthPathRules(pathRules: AuthPathRule[] | undefined): AuthRule[] {
+  if (!Array.isArray(pathRules)) {
+    return [];
+  }
+
+  return pathRules
+    .map((rule): AuthRule | null => {
+      if (!rule || typeof rule !== 'object') {
+        return null;
+      }
+
+      const path = typeof rule.path === 'string' ? rule.path.trim() : '';
+      if (!path) {
+        return null;
+      }
+
+      return {
+        path,
+        methods: Array.isArray(rule.methods)
+          ? rule.methods
+            .filter((value): value is string => typeof value === 'string')
+            .map((value) => value.trim())
+            .filter(Boolean)
+          : [],
+        required: rule.required !== false,
+        roles: rule.roles,
+        scopes: rule.scopes,
+        allowServiceAccounts: rule.allowServiceAccounts
+      };
+    })
+    .filter((rule): rule is AuthRule => rule !== null);
+}
+
+function createDefaultAuthConfig(): AuthConfig {
+  return {
+    drivers: [],
+    pathRules: [],
+    strategy: 'any',
+    priorities: {},
+    registration: {
+      enabled: false,
+      allowedFields: [],
+      defaultRole: 'user'
+    },
+    loginThrottle: {
+      enabled: true,
+      maxAttempts: 5,
+      windowMs: 60_000,
+      blockDurationMs: 300_000,
+      maxEntries: 10_000
+    },
+    createResource: true,
+    driver: null,
+    resource: null,
+    usersResourcePasswordValidation: 'password|required|minlength:8',
+    enableIdentityContextMiddleware: true,
+    usersResourceAttributes: {}
+  };
+}
+
 export class ApiServer {
   private options: Required<Pick<ApiServerOptions, 'port' | 'host'>> & ApiServerOptions;
   private logger: Logger;
@@ -180,6 +210,7 @@ export class ApiServer {
   failban: FailbanManager | null = null;
   private relationsPlugin: unknown;
   private openApiGenerator: OpenAPIGeneratorCached;
+  private routeRegistry: ApiRouteRegistry;
   private _signalHandlersSetup = false;
   private _boundSigtermHandler: (() => void) | null = null;
   private _boundSigintHandler: (() => void) | null = null;
@@ -208,16 +239,15 @@ export class ApiServer {
       static: Array.isArray(options.static) ? options.static : [],
       health: options.health ?? { enabled: true },
       logLevel: options.logLevel || 'info',
-      auth: options.auth || {},
-      docsEnabled: (options.docs?.enabled !== false) && (options.docsEnabled !== false),
-      apiTitle: options.docs?.title || options.apiTitle || 's3db.js API',
-      apiVersion: options.docs?.version || options.apiVersion || '1.0.0',
-      apiDescription: options.docs?.description || options.apiDescription || 'Auto-generated REST API for s3db.js resources',
+      auth: options.auth || createDefaultAuthConfig(),
       docs: {
-        ...options.docs,
+        enabled: options.docs?.enabled !== false,
+        title: options.docs?.title || 's3db.js API',
+        version: options.docs?.version || '1.0.0',
+        description: options.docs?.description || 'Auto-generated REST API for s3db.js resources',
         uiTheme: options.docs?.uiTheme || 'auto',
         tryItOut: options.docs?.tryItOut !== false,
-        codeGeneration: options.docs?.codeGeneration !== false,
+        codeGeneration: options.docs?.codeGeneration !== false
       },
       maxBodySize: options.maxBodySize || 10 * 1024 * 1024,
       startupBanner: options.startupBanner !== false,
@@ -226,6 +256,7 @@ export class ApiServer {
     };
 
     this.logger = options.logger!;
+    this.routeRegistry = options.routeRegistry || new ApiRouteRegistry();
 
     this.events = new ApiEventEmitter({
       enabled: this.options.events?.enabled !== false,
@@ -273,17 +304,17 @@ export class ApiServer {
 
     this.openApiGenerator = new OpenAPIGeneratorCached({
       database: this.options.database as ConstructorParameters<typeof OpenAPIGeneratorCached>[0]['database'],
-      app: this.app as ConstructorParameters<typeof OpenAPIGeneratorCached>[0]['app'],
+      routeRegistry: this.routeRegistry,
       logger: this.logger,
       options: {
-        auth: this.options.auth as ConstructorParameters<typeof OpenAPIGeneratorCached>[0]['options']['auth'],
+        auth: this.options.auth,
         resources: this.options.resources as ConstructorParameters<typeof OpenAPIGeneratorCached>[0]['options']['resources'],
         routes: this.options.routes,
         versionPrefix: this.options.versionPrefix,
         basePath: this.options.basePath,
-        title: this.options.apiTitle,
-        version: this.options.apiVersion,
-        description: this.options.apiDescription,
+        title: this.options.docs?.title,
+        version: this.options.docs?.version,
+        description: this.options.docs?.description,
         serverUrl: `http://${resolvedHost}:${this.options.port}`,
         logLevel: this.options.logLevel
       }
@@ -301,14 +332,11 @@ export class ApiServer {
     if (!this.initialized) {
       const { HttpApp } = await import('#src/plugins/shared/http-runtime.js');
       const { cors } = await import('raffel/http');
-      const { ApiApp } = await import('./app.class.js');
 
       const corsMiddleware = cors as unknown as ConstructorParameters<typeof MiddlewareChain>[0]['corsMiddleware'];
 
-      this.app = new (ApiApp as unknown as new (options: unknown) => HttpApp)({
-        db: this.options.database,
-        resources: this.options.database?.resources
-      });
+      this.routeRegistry.clear();
+      this.app = new HttpApp();
 
       if (this.failban) {
         await this.failban.initialize();
@@ -353,29 +381,11 @@ export class ApiServer {
           logger: this.logger
         });
         this.healthManager.register(this.app!);
+        this._registerHealthRouteEntries();
       }
 
-      this.router = new Router({
-        database: this.options.database as ConstructorParameters<typeof Router>[0]['database'],
-        resources: this.options.resources as ConstructorParameters<typeof Router>[0]['resources'],
-        routes: this.options.routes,
-        versionPrefix: this.options.versionPrefix,
-        basePath: this.options.basePath,
-        auth: this.options.auth,
-        static: this.options.static as ConstructorParameters<typeof Router>[0]['static'],
-        failban: this.failban as unknown as ConstructorParameters<typeof Router>[0]['failban'],
-        metrics: this.metrics as unknown as ConstructorParameters<typeof Router>[0]['metrics'],
-        relationsPlugin: this.relationsPlugin as unknown as ConstructorParameters<typeof Router>[0]['relationsPlugin'],
-        authMiddleware: authMiddleware as unknown as ConstructorParameters<typeof Router>[0]['authMiddleware'],
-        logLevel: this.options.logLevel,
-        logger: this.logger,
-        HttpApp: HttpApp as unknown as ConstructorParameters<typeof Router>[0]['HttpApp'],
-        apiTitle: this.options.apiTitle,
-        apiDescription: this.options.apiDescription,
-        docsEnabled: this.options.docsEnabled,
-        rootRoute: this.options.rootRoute
-      });
-      this.router.mount(this.app! as unknown as Parameters<Router['mount']>[0], this.events as unknown as Parameters<Router['mount']>[1]);
+      this.router = this._createRouter(HttpApp, authMiddleware || undefined);
+      this.router.mount(this.app!, this.events);
 
       this.app!.onError((err: Error, c: Context) => (errorHandler as (err: Error, c: Context) => Response)(err, c));
       this.app!.notFound((c: Context) => {
@@ -562,6 +572,30 @@ export class ApiServer {
     return this.app;
   }
 
+  getRegisteredRoutes() {
+    return this.routeRegistry.list();
+  }
+
+  async previewRuntime(): Promise<ApiRuntimeInspectionPreview> {
+    await this._ensurePlannedRouteRegistry();
+
+    return buildApiRuntimeInspectionPreview({
+      spec: this.openApiGenerator.generate(),
+      routes: this.routeRegistry.list(),
+      host: this.options.host,
+      port: this.options.port,
+      basePath: this.options.basePath || ''
+    });
+  }
+
+  async doctor() {
+    return buildApiRuntimeDoctorReport(await this.previewRuntime());
+  }
+
+  async contractTests() {
+    return buildApiRuntimeContractTests(await this.previewRuntime());
+  }
+
   stopAcceptingRequests(): void {
     this.acceptingRequests = false;
     if (this.options.logLevel) {
@@ -570,20 +604,10 @@ export class ApiServer {
   }
 
   private _registerMetricsPluginRoute(): void {
-    const metricsPlugin = this.options.database?.pluginRegistry?.metrics ||
-                          this.options.database?.pluginRegistry?.MetricsPlugin;
+    const metricsRoute = this._getIntegratedMetricsPluginRoute();
+    if (!metricsRoute || !this.app) return;
 
-    if (!metricsPlugin) return;
-
-    const config = (metricsPlugin as { config?: { prometheus?: { enabled?: boolean; mode?: string; path?: string; enforceIpAllowlist?: boolean; ipAllowlist?: string[] } } }).config;
-    if (!config?.prometheus?.enabled) return;
-
-    const mode = config.prometheus.mode;
-    if (mode !== 'integrated' && mode !== 'auto') return;
-
-    const path = config.prometheus.path || '/metrics';
-    const enforceIpAllowlist = config.prometheus.enforceIpAllowlist;
-    const ipAllowlist = config.prometheus.ipAllowlist || [];
+    const { metricsPlugin, path, enforceIpAllowlist, ipAllowlist } = metricsRoute;
 
     this.app!.get(path, async (c: Context) => {
       if (enforceIpAllowlist) {
@@ -613,6 +637,8 @@ export class ApiServer {
         return c.text('Internal Server Error', 500);
       }
     });
+
+    this._registerMetricsPluginRouteEntry();
 
     if (this.options.logLevel) {
       const ipFilter = enforceIpAllowlist ? ` (IP allowlist: ${ipAllowlist.length} ranges)` : ' (no IP filtering)';
@@ -778,7 +804,7 @@ export class ApiServer {
     const { createUSDHandlers, createRegistry, createSchemaRegistry } = await import('raffel');
 
     if (this.options.logLevel) {
-      this.logger.debug({ docsEnabled: this.options.docsEnabled }, 'Setting up documentation routes');
+      this.logger.debug({ docsEnabled: this.options.docs?.enabled }, 'Setting up documentation routes');
     }
 
     const basePath = this.options.basePath || '';
@@ -796,7 +822,7 @@ export class ApiServer {
       );
     }
 
-    if (this.options.docsEnabled) {
+    if (this.options.docs?.enabled) {
       const registry = createRegistry();
       const schemaRegistry = createSchemaRegistry();
 
@@ -806,9 +832,9 @@ export class ApiServer {
           { registry, schemaRegistry },
           {
             info: {
-              title: this.options.apiTitle || 's3db.js API',
-              version: this.options.apiVersion || '1.0.0',
-              description: this.options.apiDescription,
+              title: this.options.docs?.title || 's3db.js API',
+              version: this.options.docs?.version || '1.0.0',
+              description: this.options.docs?.description,
             },
             protocols: ['http'],
             externalPaths: spec.paths as Record<string, never>,
@@ -835,6 +861,8 @@ export class ApiServer {
       this.app!.get(docsUsdJsonPath, () => getHandlers().serveUSD());
       this.app!.get(docsUsdYamlPath, () => getHandlers().serveUSDYaml());
       this.app!.get(docsPath, () => getHandlers().serveUI());
+
+      this._registerDocumentationRouteEntries();
 
       if (this.options.logLevel) {
         this.logger.debug(
@@ -886,7 +914,7 @@ export class ApiServer {
 
   private async _createAuthMiddleware(): Promise<MiddlewareHandler | null> {
     const { database, auth } = this.options;
-    const { drivers, resource: defaultResourceName, pathAuth, pathRules } = auth || {};
+    const { drivers, resource: defaultResourceName, pathRules } = auth || {};
 
     if (!drivers || drivers.length === 0) {
       return null;
@@ -906,22 +934,12 @@ export class ApiServer {
       return null;
     }
 
-    if (pathAuth) {
-      try {
-        validatePathAuth(pathAuth);
-      } catch (err) {
-        this.logger.error({ error: (err as Error).message }, 'Invalid pathAuth configuration');
-        throw err;
-      }
-    }
-
     const strategy = AuthStrategyFactory.create({
       drivers,
       authResource: authResource as unknown as Parameters<typeof AuthStrategyFactory.create>[0]['authResource'],
       oidcMiddleware: this.oidcMiddleware || null,
       database: database as unknown as Parameters<typeof AuthStrategyFactory.create>[0]['database'],
-      pathRules: pathRules as unknown as Parameters<typeof AuthStrategyFactory.create>[0]['pathRules'],
-      pathAuth,
+      pathRules: normalizeAuthPathRules(pathRules),
       events: this.events,
       logLevel: this.options.logLevel || 'info',
       logger: this.logger
@@ -946,7 +964,7 @@ export class ApiServer {
     const localUrl = this._buildUrl(localHost, info.port, basePath);
     const networkHost = this._resolveNetworkHostname();
     const networkUrl = networkHost ? this._buildUrl(networkHost, info.port, basePath) : null;
-    const docsPath = this.options.docsEnabled !== false
+    const docsPath = this.options.docs?.enabled !== false
       ? (basePath ? `${basePath}/docs` : '/docs')
       : null;
     const docsUrl = docsPath ? this._buildUrl(localHost, info.port, docsPath) : null;
@@ -1055,6 +1073,157 @@ export class ApiServer {
 
   _generateOpenAPISpec(): Record<string, unknown> {
     return this.openApiGenerator.generate() as unknown as Record<string, unknown>;
+  }
+
+  private _createRouter(
+    HttpAppCtor: new () => HttpApp,
+    authMiddleware?: MiddlewareHandler
+  ): Router {
+    return new Router({
+      database: this.options.database as ConstructorParameters<typeof Router>[0]['database'],
+      resources: this.options.resources as ConstructorParameters<typeof Router>[0]['resources'],
+      routes: this.options.routes,
+      versionPrefix: this.options.versionPrefix,
+      basePath: this.options.basePath,
+      auth: this.options.auth,
+      static: this.options.static as ConstructorParameters<typeof Router>[0]['static'],
+      failban: this.failban as unknown as ConstructorParameters<typeof Router>[0]['failban'],
+      metrics: this.metrics as unknown as ConstructorParameters<typeof Router>[0]['metrics'],
+      relationsPlugin: this.relationsPlugin as unknown as ConstructorParameters<typeof Router>[0]['relationsPlugin'],
+      authMiddleware,
+      logLevel: this.options.logLevel,
+      logger: this.logger,
+      HttpApp: HttpAppCtor,
+      docs: {
+        enabled: this.options.docs?.enabled !== false,
+        title: this.options.docs?.title || 's3db.js API',
+        description: this.options.docs?.description || 'Auto-generated REST API for s3db.js resources'
+      },
+      rootRoute: this.options.rootRoute,
+      routeRegistry: this.routeRegistry
+    });
+  }
+
+  private async _ensurePlannedRouteRegistry(): Promise<void> {
+    if (this.routeRegistry.list().length > 0) {
+      return;
+    }
+
+    const { HttpApp } = await import('#src/plugins/shared/http-runtime.js');
+
+    this.routeRegistry.clear();
+    this._registerMetricsPluginRouteEntry();
+    this._registerDocumentationRouteEntries();
+    if (this.options.health?.enabled !== false) {
+      this._registerHealthRouteEntries();
+    }
+
+    this.router = this._createRouter(HttpApp as unknown as new () => HttpApp);
+
+    const noopApp = {
+      use() {},
+      get() {},
+      on() {},
+      route() {}
+    };
+
+    this.router.mount(
+      noopApp as unknown as HttpApp,
+      { emitResourceEvent() {} }
+    );
+  }
+
+  private _getIntegratedMetricsPluginRoute():
+    | {
+        metricsPlugin: Record<string, unknown>;
+        path: string;
+        enforceIpAllowlist: boolean | undefined;
+        ipAllowlist: string[];
+      }
+    | null {
+    const metricsPlugin = this.options.database?.pluginRegistry?.metrics ||
+                          this.options.database?.pluginRegistry?.MetricsPlugin;
+
+    if (!metricsPlugin) return null;
+
+    const config = (metricsPlugin as { config?: { prometheus?: { enabled?: boolean; mode?: string; path?: string; enforceIpAllowlist?: boolean; ipAllowlist?: string[] } } }).config;
+    if (!config?.prometheus?.enabled) return null;
+
+    const mode = config.prometheus.mode;
+    if (mode !== 'integrated' && mode !== 'auto') return null;
+
+    return {
+      metricsPlugin: metricsPlugin as Record<string, unknown>,
+      path: config.prometheus.path || '/metrics',
+      enforceIpAllowlist: config.prometheus.enforceIpAllowlist,
+      ipAllowlist: config.prometheus.ipAllowlist || []
+    };
+  }
+
+  private _registerMetricsPluginRouteEntry(): void {
+    const metricsRoute = this._getIntegratedMetricsPluginRoute();
+    if (!metricsRoute) {
+      return;
+    }
+
+    this.routeRegistry.register({
+      kind: 'metrics',
+      path: metricsRoute.path,
+      methods: ['GET'],
+      summary: 'Prometheus Metrics',
+      tags: ['Monitoring'],
+      sourceKind: 'programmatic'
+    });
+  }
+
+  private _registerDocumentationRouteEntries(): void {
+    if (this.options.docs?.enabled === false) {
+      return;
+    }
+
+    const basePath = this.options.basePath || '';
+    const entries = [
+      applyBasePath(basePath, '/openapi.json'),
+      applyBasePath(basePath, '/api.usd.json'),
+      applyBasePath(basePath, '/docs/openapi.json'),
+      applyBasePath(basePath, '/docs/usd.json'),
+      applyBasePath(basePath, '/docs/usd.yaml'),
+      applyBasePath(basePath, '/docs')
+    ].map((path) => ({
+      kind: 'docs' as const,
+      path,
+      methods: ['GET'],
+      tags: ['Documentation'],
+      sourceKind: 'programmatic' as const
+    }));
+
+    this.routeRegistry.registerMany(entries);
+  }
+
+  private _registerHealthRouteEntries(): void {
+    this.routeRegistry.registerMany([
+      {
+        kind: 'health',
+        path: '/health',
+        methods: ['GET'],
+        tags: ['Health'],
+        sourceKind: 'programmatic'
+      },
+      {
+        kind: 'health',
+        path: '/health/live',
+        methods: ['GET'],
+        tags: ['Health'],
+        sourceKind: 'programmatic'
+      },
+      {
+        kind: 'health',
+        path: '/health/ready',
+        methods: ['GET'],
+        tags: ['Health'],
+        sourceKind: 'programmatic'
+      }
+    ]);
   }
 }
 

@@ -1,6 +1,6 @@
 import type { Context, Next, MiddlewareHandler } from '#src/plugins/shared/http-runtime.js';
 import { BaseAuthStrategy, type BaseAuthStrategyOptions } from './base-strategy.class.js';
-import { createPathBasedAuthMiddleware, type AuthRule } from '../path-auth-matcher.js';
+import { createPathRulesAuthMiddleware, type AuthRule } from '../path-rules-middleware.js';
 import { createJWTHandler } from '../jwt-auth.js';
 import { createApiKeyHandler } from '../api-key-auth.js';
 import { createBasicAuthHandler } from '../basic-auth.js';
@@ -251,7 +251,7 @@ export class PathRulesAuthStrategy extends BaseAuthStrategy {
       this.logger.debug('Some path rules explicitly disable service account access');
     }
 
-    return createPathBasedAuthMiddleware({
+    return createPathRulesAuthMiddleware({
       rules: this.pathRules,
       authMiddlewares,
       unauthorizedHandler: (c: Context, message: string) => {
