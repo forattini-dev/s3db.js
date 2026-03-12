@@ -1927,7 +1927,7 @@ For detailed information about each endpoint, see the sections below.`;
     }
 
     const resourceConfig: ResourceConfigOptions = rawConfig && typeof rawConfig === 'object' ? { ...rawConfig } : {
-      methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'],
+      methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'HEAD', 'OPTIONS'],
       auth: []
     };
 

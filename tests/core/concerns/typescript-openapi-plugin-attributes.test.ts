@@ -183,10 +183,8 @@ describe('TypeScript & OpenAPI - Plugin Attributes Filtering', () => {
 
     it('should include plugin-level and resource-level custom routes in the spec', () => {
       users.config = users.config || {};
-      users.config.routes = {
-        'POST /:id/activate': async () => {}
-      };
       users.config.api = {
+        'POST /:id/activate': async () => {},
         'async GET /:id/stats': async () => {}
       };
 
@@ -194,11 +192,6 @@ describe('TypeScript & OpenAPI - Plugin Attributes Filtering', () => {
         basePath: '/v1',
         routes: {
           'GET /health': async () => {}
-        },
-        resources: {
-          users: {
-            routes: users.config.routes
-          }
         }
       });
 

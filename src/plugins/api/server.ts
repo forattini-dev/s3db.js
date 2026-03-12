@@ -11,7 +11,7 @@ import type { Server } from 'node:http';
 import type { NetworkInterfaceInfo } from 'node:os';
 import type { Logger } from '../../concerns/logger.js';
 import { networkInterfaces } from 'node:os';
-import { errorHandler } from '../shared/error-handler.js';
+import { createErrorHandler } from '../shared/error-handler.js';
 import * as formatter from '../shared/response-formatter.js';
 import { createOIDCHandler } from './auth/oidc-auth.js';
 import { createSessionStore } from './concerns/session-store-factory.js';
@@ -387,7 +387,8 @@ export class ApiServer {
       this.router = this._createRouter(HttpApp, authMiddleware || undefined);
       this.router.mount(this.app!, this.events);
 
-      this.app!.onError((err: Error, c: Context) => (errorHandler as (err: Error, c: Context) => Response)(err, c));
+      const handleAppError = createErrorHandler({ logger: this.logger as Parameters<typeof createErrorHandler>[0]['logger'] });
+      this.app!.onError((err: Error, c: Context) => handleAppError(err, c));
       this.app!.notFound((c: Context) => {
         const response = formatter.error('Route not found', {
           status: 404,

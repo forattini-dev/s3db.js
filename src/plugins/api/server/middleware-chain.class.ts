@@ -189,7 +189,7 @@ export class MiddlewareChain {
         this.events.emitRequestEvent('end', {
           ...requestInfo,
           duration: Date.now() - startTime,
-          status: c.res!.status
+          status: c.res?.status ?? 404
         });
       } catch (err) {
         this.events.emitRequestEvent('error', {
