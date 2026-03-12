@@ -26,7 +26,7 @@ jobs:
         run: corepack enable pnpm && corepack prepare pnpm@9 --activate
 
       - name: Setup Node.js
-        uses: actions/setup-node@v6
+        uses: actions/setup-node@v5
         with:
           node-version: ${{ matrix.node-version }}
           registry-url: 'https://registry.npmjs.org'
@@ -98,7 +98,7 @@ jobs:
         run: corepack enable pnpm && corepack prepare pnpm@9 --activate
 
       - name: Setup Node.js
-        uses: actions/setup-node@v6
+        uses: actions/setup-node@v5
         with:
           node-version: ${{ matrix.node-version }}
           cache: 'pnpm'
@@ -126,7 +126,7 @@ jobs:
         run: corepack enable pnpm && corepack prepare pnpm@9 --activate
 
       - name: Setup Node.js
-        uses: actions/setup-node@v6
+        uses: actions/setup-node@v5
         with:
           node-version: '20'
           cache: 'pnpm'
@@ -149,7 +149,7 @@ jobs:
         run: corepack enable pnpm && corepack prepare pnpm@9 --activate
 
       - name: Setup Node.js
-        uses: actions/setup-node@v6
+        uses: actions/setup-node@v5
         with:
           node-version: '20'
           cache: 'pnpm'
@@ -177,7 +177,7 @@ jobs:
         run: corepack enable pnpm && corepack prepare pnpm@9 --activate
 
       - name: Setup Node.js
-        uses: actions/setup-node@v6
+        uses: actions/setup-node@v5
         with:
           node-version: '20'
           registry-url: 'https://registry.npmjs.org'
@@ -322,7 +322,7 @@ jobs:
 
       - name: Setup Node.js (NPM Registry)
         if: steps.check.outputs.skip != 'true'
-        uses: actions/setup-node@v6
+        uses: actions/setup-node@v5
         with:
           node-version: '20'
           registry-url: 'https://registry.npmjs.org'
@@ -342,7 +342,7 @@ jobs:
 
       - name: Setup Node.js (GitHub Packages)
         if: steps.check.outputs.skip != 'true'
-        uses: actions/setup-node@v6
+        uses: actions/setup-node@v5
         with:
           node-version: '20'
           registry-url: 'https://npm.pkg.github.com'
@@ -413,7 +413,7 @@ jobs:
         run: corepack enable pnpm && corepack prepare pnpm@9 --activate
 
       - name: Setup Node.js (NPM Registry)
-        uses: actions/setup-node@v6
+        uses: actions/setup-node@v5
         with:
           node-version: '20'
           registry-url: 'https://registry.npmjs.org'
@@ -433,7 +433,7 @@ jobs:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
       - name: Setup Node.js (GitHub Packages)
-        uses: actions/setup-node@v6
+        uses: actions/setup-node@v5
         with:
           node-version: '20'
           registry-url: 'https://npm.pkg.github.com'
