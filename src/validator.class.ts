@@ -252,7 +252,7 @@ export class Validator extends FastestValidator {
         errors.push({ type: 'datetime', field, message: `The '${field}' field must be a valid datetime.`, actual: value });
         return value;
       },
-    } as ValidationRuleObject);
+    } as unknown as ValidationRuleObject);
 
     this.alias('dateonly', {
       type: 'any',
@@ -284,7 +284,7 @@ export class Validator extends FastestValidator {
         errors.push({ type: 'date', field, message: `The '${field}' field must be a valid date.`, actual: value });
         return value;
       },
-    } as ValidationRuleObject);
+    } as unknown as ValidationRuleObject);
 
     this.alias('timeonly', {
       type: 'any',
@@ -320,7 +320,7 @@ export class Validator extends FastestValidator {
         errors.push({ type: 'timeonly', field, message: `The '${field}' field must be a valid time.`, actual: value });
         return value;
       },
-    } as ValidationRuleObject);
+    } as unknown as ValidationRuleObject);
 
     this.alias('s3db-mac', {
       type: 'any',
@@ -335,7 +335,7 @@ export class Validator extends FastestValidator {
         errors.push({ type: 'mac', field, message: `The '${field}' field must be a valid MAC address (e.g., AA:BB:CC:DD:EE:FF).`, actual: value });
         return value;
       },
-    } as ValidationRuleObject);
+    } as unknown as ValidationRuleObject);
 
     this.alias('cidr', {
       type: 'any',
@@ -354,7 +354,7 @@ export class Validator extends FastestValidator {
         errors.push({ type: 'cidr', field, message: `The '${field}' field must be a valid CIDR notation (e.g., 192.168.1.0/24).`, actual: value });
         return value;
       },
-    } as ValidationRuleObject);
+    } as unknown as ValidationRuleObject);
 
     this.alias('semver', {
       type: 'any',
@@ -370,7 +370,7 @@ export class Validator extends FastestValidator {
         errors.push({ type: 'semver', field, message: `The '${field}' field must be a valid semantic version (e.g., 1.2.3).`, actual: value });
         return value;
       },
-    } as ValidationRuleObject);
+    } as unknown as ValidationRuleObject);
 
     this.alias('phone', {
       type: 'any',
@@ -387,7 +387,7 @@ export class Validator extends FastestValidator {
         errors.push({ type: 'phone', field, message: `The '${field}' field must be a valid phone number in E.164 format (e.g., +5511999999999).`, actual: value });
         return value;
       },
-    } as ValidationRuleObject);
+    } as unknown as ValidationRuleObject);
 
     this.alias('color', {
       type: 'any',
@@ -406,7 +406,7 @@ export class Validator extends FastestValidator {
         errors.push({ type: 'color', field, message: `The '${field}' field must be a valid hex color (e.g., #FF5733 or #F57).`, actual: value });
         return value;
       },
-    } as ValidationRuleObject);
+    } as unknown as ValidationRuleObject);
 
     this.alias('duration', {
       type: 'any',
@@ -436,7 +436,7 @@ export class Validator extends FastestValidator {
         errors.push({ type: 'duration', field, message: `The '${field}' field must be a valid duration (e.g., PT1H30M, 1h30m, 90m).`, actual: value });
         return value;
       },
-    } as ValidationRuleObject);
+    } as unknown as ValidationRuleObject);
 
     this.alias('cron', {
       type: 'any',
@@ -452,7 +452,7 @@ export class Validator extends FastestValidator {
         errors.push({ type: 'cron', field, message: `The '${field}' field must be a valid 5-field cron expression (e.g., 0 */5 * * *).`, actual: value });
         return value;
       },
-    } as ValidationRuleObject);
+    } as unknown as ValidationRuleObject);
 
     this.alias('locale', {
       type: 'any',
@@ -466,7 +466,7 @@ export class Validator extends FastestValidator {
         errors.push({ type: 'locale', field, message: `The '${field}' field must be a valid locale (e.g., pt-BR, en-US, or just en).`, actual: value });
         return value;
       },
-    } as ValidationRuleObject);
+    } as unknown as ValidationRuleObject);
 
     this.alias('s3db-currency', {
       type: 'any',
@@ -478,7 +478,7 @@ export class Validator extends FastestValidator {
         errors.push({ type: 'currency', field, message: `The '${field}' field must be a valid 3-letter currency code (e.g., USD, BRL, EUR).`, actual: value });
         return value;
       },
-    } as ValidationRuleObject);
+    } as unknown as ValidationRuleObject);
 
     this.alias('country', {
       type: 'any',
@@ -490,7 +490,7 @@ export class Validator extends FastestValidator {
         errors.push({ type: 'country', field, message: `The '${field}' field must be a valid 2-letter country code (e.g., BR, US, DE).`, actual: value });
         return value;
       },
-    } as ValidationRuleObject);
+    } as unknown as ValidationRuleObject);
 
     this.alias('ean', {
       type: 'any',
@@ -506,7 +506,7 @@ export class Validator extends FastestValidator {
         errors.push({ type: 'ean', field, message: `The '${field}' field must be a valid barcode (EAN-8, UPC-A 12, EAN-13, or GTIN-14 digits).`, actual: value });
         return value;
       },
-    } as ValidationRuleObject);
+    } as unknown as ValidationRuleObject);
   }
 }
 

@@ -1710,8 +1710,9 @@ export class Schema {
 
       if (!hasAfterUnmapHook && typeof attrDef === 'string' && (attrDef === 'uuid' || attrDef.startsWith('uuid|'))) {
         if (typeof parsedValue === 'string' && parsedValue.length === 24 && !parsedValue.includes('-')) {
+          const pv = parsedValue as string;
           const hex = [0, 6, 12, 18].map(i =>
-            fromBase62(parsedValue.slice(i, i + 6)).toString(16).padStart(8, '0')
+            fromBase62(pv.slice(i, i + 6)).toString(16).padStart(8, '0')
           ).join('');
           parsedValue = `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20, 32)}`;
         }
