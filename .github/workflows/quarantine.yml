@@ -87,7 +87,7 @@ jobs:
         run: pnpm run build
 
       - name: Run Quarantine Suite
-        run: pnpm vitest run ${{ matrix.suite.path }} --reporter=verbose ${{ matrix.suite.flags }}
+        run: pnpm vitest run ${{ matrix.suite.path }} --reporter=verbose --exclude 'node_modules/**' ${{ matrix.suite.flags }}
         timeout-minutes: ${{ matrix.suite.timeout }}
         env:
           TEST_FORCE_MEMORY_CLIENT: 'false'
