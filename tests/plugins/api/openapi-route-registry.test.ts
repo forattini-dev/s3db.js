@@ -141,4 +141,35 @@ describe('OpenAPI route registry integration', () => {
       await db.disconnect();
     }
   });
+
+  it('respects the ApiPlugin rootRoute option', async () => {
+    const port = 4800 + Math.floor(Math.random() * 1000);
+    const testName = `api-plugin-root-route-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+    const db = createMemoryDatabaseForTest(testName, { logLevel: 'silent' });
+    let apiPlugin: ApiPlugin | null = null;
+
+    try {
+      await db.connect();
+
+      apiPlugin = new ApiPlugin({
+        port,
+        host: '127.0.0.1',
+        logLevel: 'silent',
+        logging: { enabled: false },
+        rootRoute: (c) => c.json({ ok: true }),
+      });
+
+      await db.usePlugin(apiPlugin);
+      await waitForServer(port);
+
+      const response = await fetch(`http://127.0.0.1:${port}/`);
+      expect(response.status).toBe(200);
+      expect(await response.json()).toEqual({ ok: true });
+    } finally {
+      if (apiPlugin) {
+        await apiPlugin.stop();
+      }
+      await db.disconnect();
+    }
+  });
 });

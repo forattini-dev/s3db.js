@@ -109,6 +109,7 @@ export interface ApiPluginOptions {
   security?: Partial<SecurityConfig> & { contentSecurityPolicy?: Partial<ContentSecurityPolicyConfig> | false };
   csp?: { directives?: CspDirectives; reportOnly?: boolean; reportUri?: string };
   middlewares?: MiddlewareHandler[];
+  rootRoute?: boolean | ((c: Context) => Response | Promise<Response>);
   requestId?: { enabled: boolean };
   sessionTracking?: { enabled: boolean };
   events?: { enabled: boolean };
@@ -344,6 +345,7 @@ export class ApiPlugin extends Plugin {
         ? options.health as HealthConfig
         : { enabled: options.health !== false },
       maxBodySize: options.maxBodySize || 10 * 1024 * 1024,
+      rootRoute: options.rootRoute,
       resources: normalizeResourcesConfig(this.options.resources as Parameters<typeof normalizeResourcesConfig>[0], this.logger)
     };
 
@@ -644,6 +646,7 @@ export class ApiPlugin extends Plugin {
       logLevel: this.config.logLevel || undefined,
       auth: this.config.auth,
       compression: this.config.compression,
+      rootRoute: this.config.rootRoute,
       docs: this.config.docs,
       startupBanner: this.config.startupBanner,
       logger: this.logger,

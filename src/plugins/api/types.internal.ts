@@ -222,6 +222,7 @@ export interface ApiPluginConfig {
   cors: ApiCorsConfig;
   rateLimit: ApiRateLimitConfig;
   logging: ApiLoggingConfig;
+  rootRoute?: boolean | ((c: Context) => Response | Promise<Response>);
   compression: CompressionConfig;
   validation: ValidationConfig;
   security: ApiSecurityConfig;
