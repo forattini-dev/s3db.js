@@ -16,6 +16,7 @@
       - [Hooks & Middlewares](/core/resource/hooks-middlewares.md)
       - [Advanced Features](/core/resource/advanced-features.md)
     - [Schema & Validation](/core/schema.md)
+      - [Field Types & Compression](/core/schema/field-types.md)
       - [Custom Types](/core/schema/custom-types.md)
       - [Validation Rules](/core/schema/validation-rules.md)
       - [Nested Objects & Arrays](/core/schema/nested-objects-arrays.md)
