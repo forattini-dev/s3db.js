@@ -1,0 +1,15 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "declaration": false,
+    "declarationMap": false,
+    "noCheck": true,
+    "sourceMap": true,
+    "outDir": "./dist/mcp",
+    "rootDir": "./mcp",
+    "removeComments": true,
+    "allowJs": false
+  },
+  "include": ["mcp/**/*.ts"],
+  "exclude": ["node_modules", "dist", "tests"]
+}

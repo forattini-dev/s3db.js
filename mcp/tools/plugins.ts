@@ -1,5 +1,5 @@
 import type { S3dbMCPServer } from '../entrypoint.js';
-import type { S3db } from '../../src/index.js';
+import type { S3db } from 's3db.js';
 
 export const pluginTools = [
   // ============================================

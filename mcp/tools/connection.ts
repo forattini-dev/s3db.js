@@ -1,7 +1,7 @@
 import type { S3dbMCPServer } from '../entrypoint.js';
 import type { DbConnectArgs } from '../types/index.js';
-import type { S3db, CachePlugin, CostsPlugin } from '../../src/index.js';
-import type { FilesystemCache } from '../../src/plugins/cache/filesystem-cache.class.js';
+import type { S3db, CachePlugin, CostsPlugin } from 's3db.js';
+import type { FilesystemCache } from 's3db.js/plugins/cache/filesystem-cache.class';
 import { resolveConfig } from '../config.js';
 
 export const connectionTools = [

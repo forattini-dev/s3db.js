@@ -170,18 +170,14 @@ const cli = createCLI({
           const { spawn } = await import('child_process');
           const { existsSync } = await import('fs');
 
-          const possiblePaths = [
-            path.resolve(__dirname, '../../mcp/entrypoint.ts'),
-            path.resolve(__dirname, '../../../mcp/entrypoint.ts'),
-          ];
-
-          let entrypointPath: string | null = null;
-          for (const p of possiblePaths) {
-            if (existsSync(p)) {
-              entrypointPath = p;
-              break;
-            }
-          }
+          const distEntrypointPath = path.resolve(__dirname, '../../dist/mcp/entrypoint.js');
+          const srcEntrypointPath = path.resolve(__dirname, '../../mcp/entrypoint.ts');
+          const entrypointPath = existsSync(distEntrypointPath)
+            ? distEntrypointPath
+            : existsSync(srcEntrypointPath)
+              ? srcEntrypointPath
+              : null;
+          const useBuiltEntrypoint = entrypointPath === distEntrypointPath;
 
           if (!entrypointPath) {
             throw new Error('Could not find MCP server entrypoint.');
@@ -199,11 +195,15 @@ const cli = createCLI({
           }
 
           const workingDirectory = path.resolve(opts.cwd || process.cwd());
-          const child = spawn('npx', ['tsx', entrypointPath, ...args], {
+          const child = spawn(
+            useBuiltEntrypoint ? process.execPath : 'npx',
+            useBuiltEntrypoint ? [entrypointPath, ...args] : ['tsx', entrypointPath, ...args],
+            {
             stdio: isStdio ? ['inherit', 'inherit', 'inherit'] : 'inherit',
             env: process.env,
             cwd: workingDirectory
-          });
+            }
+          );
 
           child.on('close', (code) => process.exit(code ?? 0));
           child.on('error', (err) => {

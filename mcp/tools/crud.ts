@@ -9,7 +9,7 @@ import type {
   ResourceDeleteArgs,
   ResourcePageArgs
 } from '../types/index.js';
-import type { S3db } from '../../src/index.js';
+import type { S3db } from 's3db.js';
 
 export const crudTools = [
   {

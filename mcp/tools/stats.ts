@@ -1,6 +1,6 @@
 import type { S3dbMCPServer } from '../entrypoint.js';
 import type { DbClearCacheArgs, ResourceGetStatsArgs, CacheGetStatsArgs } from '../types/index.js';
-import type { S3db, CachePlugin } from '../../src/index.js';
+import type { S3db, CachePlugin } from 's3db.js';
 
 export const statsTools = [
   {

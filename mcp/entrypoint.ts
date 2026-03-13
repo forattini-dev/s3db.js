@@ -11,7 +11,7 @@ import {
   GetPromptRequestSchema,
 } from '@modelcontextprotocol/sdk/types.js';
 import { S3db, CachePlugin, CostsPlugin } from 's3db.js';
-import { FilesystemCache } from 's3db.js/plugins/cache/filesystem-cache.class.js';
+import { FilesystemCache } from 's3db.js/plugins/cache/filesystem-cache.class';
 import { config } from 'dotenv';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
@@ -37,20 +37,14 @@ config({ path: join(process.cwd(), '.env'), quiet: true });
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
+const VERSION = '__INJECT_VERSION__';
 
 // Global database instance
 let database: S3db | null = null;
 
 // Server configuration
 const SERVER_NAME = 's3db-mcp';
-const SERVER_VERSION = (() => {
-  try {
-    const pkg = JSON.parse(readFileSync(join(__dirname, '..', 'package.json'), 'utf-8'));
-    return pkg.version;
-  } catch {
-    return '0.0.0';
-  }
-})();
+const SERVER_VERSION = VERSION !== '__INJECT_VERSION__' ? VERSION : '0.0.0-dev';
 
 const SERVER_INSTRUCTIONS = `s3db.js v${SERVER_VERSION} — S3-based document database. Turns AWS S3 (or MinIO) into a queryable database.
 

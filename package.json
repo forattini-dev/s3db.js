@@ -91,7 +91,7 @@
   ],
   "scripts": {
     "clean": "node scripts/clean-build.js",
-    "build": "pnpm run clean && tsc -p tsconfig.build.json && tsc-alias -p tsconfig.build.json && node scripts/inject-version.js",
+    "build": "pnpm run clean && tsc -p tsconfig.build.json && tsc-alias -p tsconfig.build.json && tsc -p tsconfig.mcp.json && node scripts/inject-version.js",
     "typecheck": "tsc --noEmit",
     "build:cli": "node scripts/bundle-cli.js",
     "build:binary": "node scripts/build-sea.js",
