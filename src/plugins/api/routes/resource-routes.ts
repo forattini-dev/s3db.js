@@ -20,6 +20,7 @@ const logger: Logger = createLogger({ name: 'ResourceRoutes', level: 'info' });
 export interface ResourceLike {
   name: string;
   version?: string;
+  attributes?: Record<string, unknown>;
   config?: {
     currentVersion?: string;
     attributes?: Record<string, unknown>;
@@ -246,6 +247,10 @@ function getPartitionFieldRules(resource: ResourceLike, partitionName: string): 
 
 function listPartitionNames(resource: ResourceLike): string[] {
   return Object.keys(resource.config?.partitions || {});
+}
+
+function getResourceAttributes(resource: ResourceLike): Record<string, unknown> {
+  return resource.attributes || resource.config?.attributes || resource.schema?.attributes || {};
 }
 
 function normalizePartitionFieldValue(resource: ResourceLike, value: unknown, rule: string): unknown {
@@ -642,29 +647,37 @@ function resolvePopulate(resource: ResourceLike, relationsPlugin: RelationsPlugi
 }
 
 function normalizeBulkCreateConfig(apiConfig: Record<string, unknown>): NormalizedBulkCreateRouteConfig | null {
-  const bulkConfig = apiConfig.bulk;
-
-  if (!bulkConfig || typeof bulkConfig !== 'object' || Array.isArray(bulkConfig)) {
-    return null;
-  }
-
-  const createConfig = (bulkConfig as { create?: boolean | BulkCreateRouteConfig }).create;
-  if (!createConfig) {
-    return null;
-  }
-
   const defaults: NormalizedBulkCreateRouteConfig = {
     path: '/bulk',
     maxItems: 100,
     mode: 'partial'
   };
 
-  if (createConfig === true) {
+  const bulkConfig = apiConfig.bulk;
+
+  if (!bulkConfig || typeof bulkConfig !== 'object' || Array.isArray(bulkConfig)) {
+    if ((bulkConfig as unknown) === false) {
+      return null;
+    }
+    return defaults;
+  }
+
+  const createConfig = (bulkConfig as { create?: boolean | BulkCreateRouteConfig; enabled?: boolean }).create;
+
+  if ((bulkConfig as { enabled?: boolean }).enabled === false) {
+    return null;
+  }
+
+  if (!createConfig || createConfig === true) {
     return defaults;
   }
 
   if (typeof createConfig !== 'object' || Array.isArray(createConfig)) {
     return defaults;
+  }
+
+  if (createConfig.enabled === false) {
+    return null;
   }
 
   const normalizedPath = typeof createConfig.path === 'string' && createConfig.path.trim().length > 0
@@ -682,10 +695,6 @@ function normalizeBulkCreateConfig(apiConfig: Record<string, unknown>): Normaliz
   const mode = createConfig.mode === 'all-or-nothing'
     ? 'all-or-nothing'
     : defaults.mode;
-
-  if (createConfig.enabled === false) {
-    return null;
-  }
 
   return {
     path,
@@ -1848,12 +1857,38 @@ export function createResourceRoutes(resource: ResourceLike, _version: string, c
 
   if (methods.includes('HEAD')) {
     const headListHandler = asyncHandler(async (c: Context) => {
-      const total = await resource.count();
+      const query = c.req.query();
       const resourceVersion = resource.config?.currentVersion || resource.version || 'v1';
+      const partitions = resource.config?.partitions || {};
+      const attributes = getResourceAttributes(resource);
+
+      const partitionResolution = resolvePartitionFromFilters(resource, {}, query.partition || null, query.partitionValues ? JSON.parse(query.partitionValues) : undefined);
+      const countOptions: { partition?: string | null; partitionValues?: Record<string, unknown> } = {};
+      if (partitionResolution.partition) {
+        countOptions.partition = partitionResolution.partition;
+        countOptions.partitionValues = partitionResolution.partitionValues;
+      }
+      const total = await resource.count(countOptions);
+
+      const pageSize = Math.min(Math.max(parseInt(query.limit || '100', 10) || 100, 1), 1000);
+      const totalPages = Math.ceil(total / pageSize);
 
       c.header('X-Total-Count', total.toString());
+      c.header('X-Total-Pages', totalPages.toString());
+      c.header('X-Page-Size', pageSize.toString());
       c.header('X-Resource-Version', resourceVersion);
-      c.header('X-Schema-Fields', Object.keys(resource.config?.attributes || {}).length.toString());
+      c.header('X-Schema-Fields', Object.keys(attributes).length.toString());
+
+      const partitionNames = Object.keys(partitions);
+      if (partitionNames.length > 0) {
+        c.header('X-Partitions', partitionNames.join(', '));
+      }
+
+      if (countOptions.partition) {
+        c.header('X-Partition-Used', countOptions.partition);
+      }
+
+      c.header('X-Allowed-Methods', methods.join(', '));
 
       return c.body(null, 200);
     });
@@ -1906,24 +1941,30 @@ export function createResourceRoutes(resource: ResourceLike, _version: string, c
       }
 
       const total = await resource.count();
-      const schema = resource.config?.attributes || {};
+      const schema = getResourceAttributes(resource);
       const resourceVersion = resource.config?.currentVersion || resource.version || 'v1';
+      const partitionNames = Object.keys(resource.config?.partitions || {});
 
       const metadata = {
         resource: resourceName,
         version: resourceVersion,
         totalRecords: total,
+        defaultPageSize: 100,
+        maxPageSize: 1000,
+        totalPages: Math.ceil(total / 100),
         allowedMethods: methods,
 
         features: {
           etag: true,
           conditionalRequests: true,
-          partitioning: Object.keys(resource.config?.partitions || {}).length > 0,
+          partitioning: partitionNames.length > 0,
           filtering: true,
           pagination: true,
           sorting: false,
           bulkCreate: Boolean(bulkCreateConfig)
         },
+
+        ...(partitionNames.length > 0 ? { partitions: partitionNames } : {}),
 
         conditionalHeaders: {
           'If-Match': 'Prevent conflicts (PUT/PATCH/DELETE) - returns 412 on mismatch',

@@ -165,22 +165,37 @@ const pluginCatalog = {
 };
 
 const fieldTypes = {
-  count: 28,
+  count: 42,
   types: [
     // Primitives
     { name: 'string', encoding: 'utf8', compression: 'none', example: "'string|required'" },
     { name: 'number', encoding: 'base62', compression: '~40%', example: "'number|min:0'" },
     { name: 'boolean', encoding: '"1"/"0"', compression: '50%+', example: "'boolean|default:true'" },
     { name: 'date', encoding: 'ISO8601', compression: 'none', example: "'date'" },
+    { name: 'datetime', encoding: 'ms→base62', compression: '~70%', example: "'datetime'" },
+    { name: 'dateonly', encoding: 'days→base62', compression: '~70%', example: "'dateonly'" },
+    { name: 'timeonly', encoding: 'ms-of-day→base62', compression: '~58%', example: "'timeonly'" },
     { name: 'email', encoding: 'utf8', compression: 'none', example: "'email|required'" },
     { name: 'url', encoding: 'utf8', compression: 'none', example: "'url'" },
-    { name: 'uuid', encoding: 'utf8', compression: 'none', example: "'uuid'" },
+    { name: 'uuid', encoding: '4×32bit→base62', compression: '33%', example: "'uuid'" },
     // Security
     { name: 'password', encoding: 'bcrypt/argon2id', compression: 'one-way hash (56-76 chars)', example: "'password|required|min:8'" },
     { name: 'secret', encoding: 'AES-256-GCM', compression: 'encrypted (reversible)', example: "'secret'" },
     // Network
+    { name: 'mac', encoding: '48bit→base62', compression: '47%', example: "'mac'" },
+    { name: 'cidr', encoding: 'ip+prefix→base62', compression: '50%', example: "'cidr'" },
     { name: 'ip4', encoding: 'uint32→base62', compression: '44%', example: "'ip4'" },
     { name: 'ip6', encoding: 'uint128→base62', compression: '47%', example: "'ip6'" },
+    // Formats
+    { name: 'phone', encoding: 'E.164→base62', compression: '40%+', example: "'phone'" },
+    { name: 'semver', encoding: 'packed→base62', compression: '~20-40%', example: "'semver'" },
+    { name: 'color', encoding: '24bit→base62', compression: '29%', example: "'color'" },
+    { name: 'duration', encoding: 'ms→base62', compression: '~60%', example: "'duration'" },
+    { name: 'cron', encoding: 'validated', compression: 'none', example: "'cron'" },
+    { name: 'locale', encoding: 'validated', compression: 'none', example: "'locale'" },
+    { name: 'currency', encoding: 'validated', compression: 'none', example: "'currency'" },
+    { name: 'country', encoding: 'validated', compression: 'none', example: "'country'" },
+    { name: 'ean', encoding: 'EAN-8/UPC-A/EAN-13/GTIN-14→base62', compression: '~31%', example: "'ean'" },
     // Numeric specializations
     { name: 'money', encoding: 'fixed-point→base62', compression: '~40%', example: "'money' or 'money:4'" },
     { name: 'crypto', encoding: 'fixed-point→base62', compression: '~40%', example: "'crypto' or 'crypto:18'" },

@@ -234,7 +234,7 @@ Transform AWS S3 into a powerful document database with ORM-like interface.
 ## Key Features
 
 - **Zero-cost storage**: Pay only for S3 usage
-- **30+ field types**: With automatic encoding/compression
+- **42+ field types**: With automatic encoding/compression
 - **5 behavior strategies**: Handle the 2KB metadata limit
 - **Partitioning**: O(1) queries instead of O(n) scans
 - **Built-in encryption**: AES-256-GCM for secret fields, bcrypt/argon2id for passwords

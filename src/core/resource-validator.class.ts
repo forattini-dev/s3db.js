@@ -150,6 +150,15 @@ export class ResourceValidator {
 
     for (const [key, value] of Object.entries(attributes)) {
       if (typeof value === 'string') {
+
+        if (value === 'mac' || value.startsWith('mac|')) {
+          processed[key] = value.replace(/^mac/, 's3db-mac');
+          continue;
+        }
+        if (value === 'currency' || value.startsWith('currency|')) {
+          processed[key] = value.replace(/^currency/, 's3db-currency');
+          continue;
+        }
         if (value === 'ip4' || value.startsWith('ip4|')) {
           processed[key] = value.replace(/^ip4/, 'string');
           continue;
@@ -246,7 +255,7 @@ export class ResourceValidator {
         processed[key] = value;
       } else if (typeof value === 'object' && value !== null && !Array.isArray(value)) {
         const validatorTypes = [
-          'string', 'number', 'boolean', 'any', 'object', 'array', 'date', 'email', 'url', 'uuid',
+          'string', 'number', 'boolean', 'any', 'object', 'array', 'date', 'dateonly', 'datetime', 'timeonly', 'email', 'url', 'uuid', 'mac', 'cidr', 'semver', 'phone', 'color', 'duration', 'cron', 'locale', 'currency', 'country', 'ean',
           'enum', 'custom', 'ip4', 'ip6', 'buffer', 'bits', 'money', 'crypto', 'decimal',
           'geo:lat', 'geo:lon', 'geo:point', 'geo-lat', 'geo-lon', 'geo-point', 'secret', 'password', 'password:bcrypt', 'password:argon2id', 'embedding'
         ];
@@ -263,7 +272,11 @@ export class ResourceValidator {
             __pluginCreated__?: unknown;
           };
 
-          if (cleanValue.type === 'ip4') {
+          if (cleanValue.type === 'mac') {
+            processed[key] = { ...cleanValue, type: 's3db-mac' };
+          } else if (cleanValue.type === 'currency') {
+            processed[key] = { ...cleanValue, type: 's3db-currency' };
+          } else if (cleanValue.type === 'ip4') {
             processed[key] = { ...cleanValue, type: 'string' };
           } else if (cleanValue.type === 'ip6') {
             processed[key] = { ...cleanValue, type: 'string' };

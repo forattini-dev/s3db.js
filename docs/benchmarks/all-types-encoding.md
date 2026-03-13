@@ -86,7 +86,16 @@ s3db.js implements **specialized type encoding** for common data patterns:
 | **money** | Financial values (USD, BTC, etc.) | 40-75% | 0.10-0.32 μs |
 | **decimal** | Ratings, scores, percentages | 33-75% | 0.04-0.07 μs |
 | **geo** | GPS coordinates (lat/lon) | 40-87% | 0.13 μs |
+| **mac** | MAC addresses | 47% | <1 μs |
+| **cidr** | CIDR notation | 50% | <1 μs |
+| **phone** | E.164 phone numbers | 40%+ | <1 μs |
+| **semver** | Semantic versions | 20-40% | <1 μs |
+| **color** | Hex colors | 29% | <1 μs |
 | **ip4/ip6** | IP addresses | 27-60% | 0.84-4.62 μs |
+| **datetime** | Timestamps (ISO 8601) | ~70% | <1 μs |
+| **dateonly** | Dates (YYYY-MM-DD) | ~70% | <1 μs |
+| **timeonly** | Times (HH:mm:ss.SSS) | ~58% | <1 μs |
+| **uuid** | UUIDs (RFC 4122) | 33% | <1 μs |
 | **embedding** | Vector arrays for AI/ML | 68-77% | 44-272 μs |
 
 **How it works:**
@@ -94,6 +103,15 @@ s3db.js implements **specialized type encoding** for common data patterns:
 - `money` → Integer-based (cents/satoshis) + Base62 encoding
 - `decimal` → Fixed-point multiplication + Base62
 - `geo` → Normalize to [0, max] + Base62 (eliminates negative sign)
+- `datetime` → Milliseconds since epoch → Base62
+- `dateonly` → Days since epoch → Base62
+- `timeonly` → Milliseconds of day → Base62
+- `uuid` → 4 × 32-bit integer chunks → Base62 (padded)
+- `mac` → 48-bit integer → Base62
+- `cidr` → IPv4 uint32 + prefix → Base62
+- `phone` → E.164 digits → integer → Base62
+- `semver` → major×1M + minor×1K + patch → Base62
+- `color` → 24-bit hex → Base62
 - `ip4/ip6` → Binary representation + Base64
 - `embedding` → Fixed-point array + Base62 comma-separated
 

@@ -118,6 +118,78 @@ describe('API Plugin URL-encoded resource ids', () => {
     expect(getAfterDeleteResponse.status).toBe(404);
   });
 
+  it('keeps encoded ids only at the URL edge and uses decoded ids through handler, resource, client and response', async () => {
+    const resource = await db.createResource({
+      name: 'users',
+      attributes: {
+        id: 'string|required',
+        email: 'string|required|email',
+        name: 'string|optional'
+      },
+      timestamps: true
+    });
+
+    const userId = 'filipe@forattini.com.br';
+    await resource.insert({
+      id: userId,
+      email: userId,
+      name: 'Filipe'
+    });
+
+    const getSpy = vi.spyOn(resource, 'get');
+    const clientGetSpy = vi.spyOn(db.client, 'getObject');
+
+    apiPlugin = new ApiPlugin({
+      port,
+      host: '127.0.0.1',
+      logLevel: 'silent',
+      docs: { enabled: false },
+      logging: { enabled: false },
+      resources: ['users'],
+      routes: {
+        'GET /trace/:id': async (c, ctx) => {
+          const handlerId = c.req.param('id');
+          const routeContextId = ctx.request.param('id');
+          const inputId = ctx.input.params.id;
+          const record = await ctx.services.resources.users.get(handlerId!);
+
+          return c.json({
+            rawUrl: c.req.url,
+            rawPath: c.req.path,
+            handlerId,
+            routeContextId,
+            inputId,
+            recordId: record?.id ?? null
+          });
+        }
+      }
+    });
+
+    await db.usePlugin(apiPlugin);
+    await waitForServer(port);
+
+    const encodedId = encodeURIComponent(userId);
+    const response = await fetch(`http://127.0.0.1:${port}/trace/${encodedId}`);
+    expect(response.status).toBe(200);
+
+    const body = await response.json();
+    expect(body).toMatchObject({
+      rawUrl: expect.stringContaining(`/trace/${encodedId}`),
+      rawPath: `/trace/${encodedId}`,
+      handlerId: userId,
+      routeContextId: userId,
+      inputId: userId,
+      recordId: userId
+    });
+
+    expect(getSpy).toHaveBeenCalledWith(userId);
+    expect(clientGetSpy).toHaveBeenCalled();
+
+    const keysRead = clientGetSpy.mock.calls.map(([key]) => String(key));
+    expect(keysRead.some((key) => key.includes(`id=${userId}`))).toBe(true);
+    expect(keysRead.some((key) => key.includes(encodedId))).toBe(false);
+  });
+
   it('decodes URL-encoded parent ids for mounted relational routes', async () => {
     const parentId = 'filipe@forattini.com.br';
     const sourceResource = {

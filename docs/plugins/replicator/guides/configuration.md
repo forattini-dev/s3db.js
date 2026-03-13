@@ -265,6 +265,8 @@ Automatically create and sync database tables:
 | `uuid` | `UUID` | UUID type |
 | `date` | `DATE` | Date only |
 | `datetime` | `TIMESTAMPTZ` | Timestamp with timezone |
+| `dateonly` | `DATE` | Date only |
+| `timeonly` | `TIME` | Time only |
 
 **S3DB → MySQL:**
 

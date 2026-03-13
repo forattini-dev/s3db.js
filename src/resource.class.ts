@@ -691,10 +691,10 @@ export class Resource extends AsyncEventEmitter implements Disposable {
 
     if (this.config.timestamps) {
       if (!this.attributes.createdAt) {
-        this.attributes.createdAt = 'string|optional';
+        this.attributes.createdAt = 'datetime|optional';
       }
       if (!this.attributes.updatedAt) {
-        this.attributes.updatedAt = 'string|optional';
+        this.attributes.updatedAt = 'datetime|optional';
       }
 
       if (!this.config.partitions) {

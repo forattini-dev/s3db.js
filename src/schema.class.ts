@@ -1532,7 +1532,140 @@ export class Schema {
     for (const [key, value] of Object.entries(flattenedObj)) {
       const mappedKey = this.pluginMap[key] || this.map[key] || key;
       const attrDef = this.getAttributeDefinition(key);
-      if (typeof value === 'number' && typeof attrDef === 'string' && attrDef.includes('number')) {
+      if (typeof attrDef === 'string' && (attrDef === 'uuid' || attrDef.startsWith('uuid|'))) {
+        if (typeof value === 'string' && value !== '') {
+          const hex = value.replace(/-/g, '');
+          if (hex.length === 32) {
+            rest[mappedKey] = [0, 8, 16, 24].map(i =>
+              toBase62(parseInt(hex.slice(i, i + 8), 16)).padStart(6, '0')
+            ).join('');
+          } else {
+            rest[mappedKey] = value;
+          }
+        } else {
+          rest[mappedKey] = value;
+        }
+      } else if (typeof attrDef === 'string' && attrDef.includes('datetime')) {
+        if (value instanceof Date) {
+          rest[mappedKey] = toBase62(value.getTime());
+        } else if (typeof value === 'string' && value !== '') {
+          const ms = new Date(value).getTime();
+          rest[mappedKey] = Number.isFinite(ms) ? toBase62(ms) : value;
+        } else {
+          rest[mappedKey] = value;
+        }
+      } else if (typeof attrDef === 'string' && attrDef.includes('dateonly')) {
+        if (value instanceof Date) {
+          rest[mappedKey] = toBase62(Math.floor(value.getTime() / 86_400_000));
+        } else if (typeof value === 'string' && value !== '') {
+          const ms = new Date(value + (value.includes('T') ? '' : 'T00:00:00.000Z')).getTime();
+          rest[mappedKey] = Number.isFinite(ms) ? toBase62(Math.floor(ms / 86_400_000)) : value;
+        } else {
+          rest[mappedKey] = value;
+        }
+      } else if (typeof attrDef === 'string' && (attrDef === 'timeonly' || attrDef.startsWith('timeonly|'))) {
+        if (value instanceof Date) {
+          const h = value.getUTCHours();
+          const m = value.getUTCMinutes();
+          const s = value.getUTCSeconds();
+          const ms = value.getUTCMilliseconds();
+          rest[mappedKey] = toBase62(((h * 3600 + m * 60 + s) * 1000) + ms);
+        } else if (typeof value === 'string' && value !== '') {
+          const timeMatch = value.match(/^(\d{2}):(\d{2})(?::(\d{2})(?:\.(\d{1,3}))?)?$/);
+          if (timeMatch) {
+            const h = parseInt(timeMatch[1]!, 10);
+            const mn = parseInt(timeMatch[2]!, 10);
+            const sc = timeMatch[3] ? parseInt(timeMatch[3], 10) : 0;
+            const ms = timeMatch[4] ? parseInt(timeMatch[4].padEnd(3, '0'), 10) : 0;
+            rest[mappedKey] = toBase62(((h * 3600 + mn * 60 + sc) * 1000) + ms);
+          } else {
+            rest[mappedKey] = value;
+          }
+        } else {
+          rest[mappedKey] = value;
+        }
+      } else if (typeof attrDef === 'string' && (attrDef === 'mac' || attrDef.startsWith('mac|'))) {
+        if (typeof value === 'string' && value !== '') {
+          const hex = value.replace(/:/g, '');
+          if (hex.length === 12) {
+            rest[mappedKey] = toBase62(parseInt(hex, 16)).padStart(9, '0');
+          } else {
+            rest[mappedKey] = value;
+          }
+        } else {
+          rest[mappedKey] = value;
+        }
+      } else if (typeof attrDef === 'string' && (attrDef === 'cidr' || attrDef.startsWith('cidr|'))) {
+        if (typeof value === 'string' && value.includes('/')) {
+          const [ipStr, prefixStr] = value.split('/');
+          const parts = ipStr!.split('.').map(Number);
+          const ip = ((parts[0]! << 24) | (parts[1]! << 16) | (parts[2]! << 8) | parts[3]!) >>> 0;
+          rest[mappedKey] = toBase62(ip).padStart(6, '0') + toBase62(parseInt(prefixStr!, 10));
+        } else {
+          rest[mappedKey] = value;
+        }
+      } else if (typeof attrDef === 'string' && (attrDef === 'semver' || attrDef.startsWith('semver|'))) {
+        if (typeof value === 'string' && value !== '') {
+          const match = value.match(/^(\d+)\.(\d+)\.(\d+)$/);
+          if (match) {
+            const packed = parseInt(match[1]!, 10) * 1_000_000 + parseInt(match[2]!, 10) * 1000 + parseInt(match[3]!, 10);
+            rest[mappedKey] = toBase62(packed);
+          } else {
+            rest[mappedKey] = value;
+          }
+        } else {
+          rest[mappedKey] = value;
+        }
+      } else if (typeof attrDef === 'string' && (attrDef === 'phone' || attrDef.startsWith('phone|'))) {
+        if (typeof value === 'string' && value.startsWith('+')) {
+          const digits = value.slice(1);
+          rest[mappedKey] = toBase62(parseInt(digits, 10));
+        } else {
+          rest[mappedKey] = value;
+        }
+      } else if (typeof attrDef === 'string' && (attrDef === 'color' || attrDef.startsWith('color|'))) {
+        if (typeof value === 'string' && value.startsWith('#')) {
+          const hex = value.slice(1);
+          if (hex.length === 6) {
+            rest[mappedKey] = toBase62(parseInt(hex, 16)).padStart(5, '0');
+          } else {
+            rest[mappedKey] = value;
+          }
+        } else {
+          rest[mappedKey] = value;
+        }
+      } else if (typeof attrDef === 'string' && (attrDef === 'duration' || attrDef.startsWith('duration|'))) {
+        if (typeof value === 'number' && Number.isFinite(value) && value >= 0) {
+          rest[mappedKey] = toBase62(Math.round(value));
+        } else if (typeof value === 'string' && value !== '') {
+          let ms = -1;
+          const iso = value.match(/^P(?:(\d+)D)?(?:T(?:(\d+)H)?(?:(\d+)M)?(?:(\d+(?:\.\d+)?)S)?)?$/);
+          if (iso && value !== 'P' && value !== 'PT') {
+            ms = Math.round((parseInt(iso[1] || '0', 10) * 86400 + parseInt(iso[2] || '0', 10) * 3600 + parseInt(iso[3] || '0', 10) * 60 + parseFloat(iso[4] || '0')) * 1000);
+          } else {
+            let total = 0; let matched = false;
+            const s = value.toLowerCase();
+            const msM = s.match(/(\d+)ms/); if (msM) { total += parseInt(msM[1]!, 10); matched = true; }
+            const clean = s.replace(/\d+ms/g, '');
+            const dM = clean.match(/(\d+(?:\.\d+)?)d/); if (dM) { total += parseFloat(dM[1]!) * 86400000; matched = true; }
+            const hM = clean.match(/(\d+(?:\.\d+)?)h/); if (hM) { total += parseFloat(hM[1]!) * 3600000; matched = true; }
+            const mM = clean.match(/(\d+(?:\.\d+)?)m/); if (mM) { total += parseFloat(mM[1]!) * 60000; matched = true; }
+            const sM = clean.match(/(\d+(?:\.\d+)?)s/); if (sM) { total += parseFloat(sM[1]!) * 1000; matched = true; }
+            if (matched) ms = Math.round(total);
+          }
+          rest[mappedKey] = ms >= 0 ? toBase62(ms) : value;
+        } else {
+          rest[mappedKey] = value;
+        }
+      } else if (typeof attrDef === 'string' && (attrDef === 'ean' || attrDef.startsWith('ean|'))) {
+        if (typeof value === 'string' && /^\d{8,14}$/.test(value)) {
+          const prefixMap: Record<number, string> = { 8: '0', 12: '2', 13: '1', 14: '3' };
+          const prefix = prefixMap[value.length];
+          rest[mappedKey] = prefix !== undefined ? prefix + toBase62(parseInt(value, 10)) : value;
+        } else {
+          rest[mappedKey] = value;
+        }
+      } else if (typeof value === 'number' && typeof attrDef === 'string' && attrDef.includes('number')) {
         rest[mappedKey] = toBase62(value);
       } else if (typeof value === 'string') {
         if (value === '[object Object]') {
@@ -1575,7 +1708,99 @@ export class Schema {
       const attrDef = this.getAttributeDefinition(originalKey);
       const hasAfterUnmapHook = this.options.hooks?.afterUnmap?.[originalKey];
 
-      if (!hasAfterUnmapHook && typeof attrDef === 'string' && attrDef.includes('number') && !attrDef.includes('array') && !attrDef.includes('decimal')) {
+      if (!hasAfterUnmapHook && typeof attrDef === 'string' && (attrDef === 'uuid' || attrDef.startsWith('uuid|'))) {
+        if (typeof parsedValue === 'string' && parsedValue.length === 24 && !parsedValue.includes('-')) {
+          const hex = [0, 6, 12, 18].map(i =>
+            fromBase62(parsedValue.slice(i, i + 6)).toString(16).padStart(8, '0')
+          ).join('');
+          parsedValue = `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20, 32)}`;
+        }
+      } else if (!hasAfterUnmapHook && typeof attrDef === 'string' && attrDef.includes('datetime')) {
+        if (typeof parsedValue === 'string' && parsedValue !== '') {
+          const ms = fromBase62(parsedValue);
+          parsedValue = new Date(ms).toISOString();
+        }
+      } else if (!hasAfterUnmapHook && typeof attrDef === 'string' && attrDef.includes('dateonly')) {
+        if (typeof parsedValue === 'string' && parsedValue !== '') {
+          const days = fromBase62(parsedValue);
+          const d = new Date(days * 86_400_000);
+          parsedValue = d.toISOString().slice(0, 10);
+        }
+      } else if (!hasAfterUnmapHook && typeof attrDef === 'string' && (attrDef === 'timeonly' || attrDef.startsWith('timeonly|'))) {
+        if (typeof parsedValue === 'string' && parsedValue !== '') {
+          const totalMs = fromBase62(parsedValue);
+          const ms = totalMs % 1000;
+          const totalSecs = Math.floor(totalMs / 1000);
+          const s = totalSecs % 60;
+          const totalMins = Math.floor(totalSecs / 60);
+          const m = totalMins % 60;
+          const h = Math.floor(totalMins / 60);
+          parsedValue = `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}.${String(ms).padStart(3, '0')}`;
+        }
+      } else if (!hasAfterUnmapHook && typeof attrDef === 'string' && (attrDef === 'mac' || attrDef.startsWith('mac|'))) {
+        if (typeof parsedValue === 'string' && parsedValue.length === 9 && !parsedValue.includes(':')) {
+          const num = fromBase62(parsedValue);
+          const hex = num.toString(16).padStart(12, '0');
+          parsedValue = hex.match(/.{2}/g)!.join(':');
+        }
+      } else if (!hasAfterUnmapHook && typeof attrDef === 'string' && (attrDef === 'cidr' || attrDef.startsWith('cidr|'))) {
+        if (typeof parsedValue === 'string' && parsedValue.length === 7 && !parsedValue.includes('.')) {
+          const ip = fromBase62(parsedValue.slice(0, 6));
+          const prefix = fromBase62(parsedValue.slice(6));
+          const a = (ip >>> 24) & 0xFF;
+          const b = (ip >>> 16) & 0xFF;
+          const c = (ip >>> 8) & 0xFF;
+          const d = ip & 0xFF;
+          parsedValue = `${a}.${b}.${c}.${d}/${prefix}`;
+        }
+      } else if (!hasAfterUnmapHook && typeof attrDef === 'string' && (attrDef === 'semver' || attrDef.startsWith('semver|'))) {
+        if (typeof parsedValue === 'string' && parsedValue !== '' && !parsedValue.includes('.')) {
+          const packed = fromBase62(parsedValue);
+          const major = Math.floor(packed / 1_000_000);
+          const minor = Math.floor((packed % 1_000_000) / 1000);
+          const patch = packed % 1000;
+          parsedValue = `${major}.${minor}.${patch}`;
+        }
+      } else if (!hasAfterUnmapHook && typeof attrDef === 'string' && (attrDef === 'phone' || attrDef.startsWith('phone|'))) {
+        if (typeof parsedValue === 'string' && parsedValue !== '' && !parsedValue.startsWith('+')) {
+          parsedValue = '+' + fromBase62(parsedValue).toString();
+        }
+      } else if (!hasAfterUnmapHook && typeof attrDef === 'string' && (attrDef === 'color' || attrDef.startsWith('color|'))) {
+        if (typeof parsedValue === 'string' && parsedValue.length === 5 && !parsedValue.startsWith('#')) {
+          parsedValue = '#' + fromBase62(parsedValue).toString(16).padStart(6, '0');
+        }
+      } else if (!hasAfterUnmapHook && typeof attrDef === 'string' && (attrDef === 'duration' || attrDef.startsWith('duration|'))) {
+        if (typeof parsedValue === 'string' && parsedValue !== '' && !/^P/.test(parsedValue)) {
+          const ms = fromBase62(parsedValue);
+          let result = 'P';
+          const days = Math.floor(ms / 86400000);
+          const hours = Math.floor((ms % 86400000) / 3600000);
+          const minutes = Math.floor((ms % 3600000) / 60000);
+          const seconds = Math.floor((ms % 60000) / 1000);
+          const millis = ms % 1000;
+          if (days) result += days + 'D';
+          const hasTime = hours || minutes || seconds || millis;
+          if (hasTime) {
+            result += 'T';
+            if (hours) result += hours + 'H';
+            if (minutes) result += minutes + 'M';
+            if (seconds && millis) result += seconds + '.' + String(millis).padStart(3, '0') + 'S';
+            else if (seconds) result += seconds + 'S';
+            else if (millis) result += '0.' + String(millis).padStart(3, '0') + 'S';
+          }
+          if (result === 'P') result = 'PT0S';
+          parsedValue = result;
+        }
+      } else if (!hasAfterUnmapHook && typeof attrDef === 'string' && (attrDef === 'ean' || attrDef.startsWith('ean|'))) {
+        if (typeof parsedValue === 'string' && parsedValue !== '' && /^[0-3]/.test(parsedValue) && !/^\d{8,14}$/.test(parsedValue)) {
+          const lengthMap: Record<string, number> = { '0': 8, '1': 13, '2': 12, '3': 14 };
+          const targetLen = lengthMap[parsedValue[0]!];
+          if (targetLen) {
+            const num = fromBase62(parsedValue.slice(1));
+            parsedValue = num.toString().padStart(targetLen, '0');
+          }
+        }
+      } else if (!hasAfterUnmapHook && typeof attrDef === 'string' && attrDef.includes('number') && !attrDef.includes('array') && !attrDef.includes('decimal')) {
         if (typeof parsedValue === 'string' && parsedValue !== '') {
           parsedValue = fromBase62(parsedValue);
         } else if (typeof parsedValue === 'number') {
@@ -1683,6 +1908,15 @@ export class Schema {
 
     for (const [key, value] of Object.entries(attributes)) {
       if (typeof value === 'string') {
+
+        if (value === 'mac' || value.startsWith('mac|')) {
+          processed[key] = value.replace(/^mac/, 's3db-mac');
+          continue;
+        }
+        if (value === 'currency' || value.startsWith('currency|')) {
+          processed[key] = value.replace(/^currency/, 's3db-currency');
+          continue;
+        }
         if (value === 'ip4' || value.startsWith('ip4|')) {
           processed[key] = value.replace(/^ip4/, 'string');
           continue;
@@ -1782,7 +2016,7 @@ export class Schema {
         }
         processed[key] = value;
       } else if (typeof value === 'object' && value !== null && !Array.isArray(value)) {
-        const validatorTypes = ['string', 'number', 'boolean', 'bool', 'any', 'object', 'array', 'date', 'email', 'url', 'uuid', 'enum', 'custom', 'ip4', 'ip6', 'buffer', 'bits', 'money', 'crypto', 'decimal', 'geo:lat', 'geo:lon', 'geo:point', 'geo-lat', 'geo-lon', 'geo-point', 'secret', 'password', 'password:bcrypt', 'password:argon2id', 'embedding'];
+        const validatorTypes = ['string', 'number', 'boolean', 'bool', 'any', 'object', 'array', 'date', 'dateonly', 'datetime', 'timeonly', 'email', 'url', 'uuid', 'enum', 'custom', 'ip4', 'ip6', 'mac', 'cidr', 'semver', 'phone', 'color', 'duration', 'cron', 'locale', 'currency', 'country', 'ean', 'buffer', 'bits', 'money', 'crypto', 'decimal', 'geo:lat', 'geo:lon', 'geo:point', 'geo-lat', 'geo-lon', 'geo-point', 'secret', 'password', 'password:bcrypt', 'password:argon2id', 'embedding'];
         const typeValue = (value as Record<string, unknown>).type as string | undefined;
         const isValidValidatorType = typeof typeValue === 'string' &&
           !typeValue.includes('|') &&
@@ -1792,7 +2026,11 @@ export class Schema {
         if (hasValidatorType) {
           const { __plugin__, __pluginCreated__, ...cleanValue } = value as Record<string, unknown>;
 
-          if (cleanValue.type === 'ip4') {
+          if (cleanValue.type === 'mac') {
+            processed[key] = { ...cleanValue, type: 's3db-mac' };
+          } else if (cleanValue.type === 'currency') {
+            processed[key] = { ...cleanValue, type: 's3db-currency' };
+          } else if (cleanValue.type === 'ip4') {
             processed[key] = { ...cleanValue, type: 'string' };
           } else if (cleanValue.type === 'ip6') {
             processed[key] = { ...cleanValue, type: 'string' };

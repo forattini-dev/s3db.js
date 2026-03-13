@@ -29,6 +29,10 @@ This guide documents the s3db.js field types that go beyond plain fastest-valida
 | `secret` | API keys, tokens, SSNs | reversible encryption |
 | `secretNumber` | sensitive numeric values | reversible encryption |
 | `secretAny` | sensitive structured payloads | reversible encryption |
+| `datetime` | timestamps with ms precision | base62 ms encoding (~70% compression) |
+| `dateonly` | dates without time | base62 days encoding (~70% compression) |
+| `timeonly` | time without date | base62 ms-of-day encoding (~58% compression) |
+| `uuid` | unique identifiers | base62 4×32-bit encoding (33% compression) |
 | `embedding:N` | vectors and embeddings | fixed-point compact encoding |
 | `json` | arbitrary JSON payloads | stringify/parse |
 | `ip4`, `ip6` | IP addresses | compact binary encoding |

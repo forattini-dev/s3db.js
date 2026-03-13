@@ -83,7 +83,7 @@ Pick the page that matches the decision you are trying to make:
 | --- | --- | --- |
 | Standard validators | `string`, `number`, `boolean`, `date`, `enum` | Base validation and normalization |
 | Security-aware | `password`, `secret`, `secretAny`, `secretNumber` | Hashing and encryption at rest |
-| Space-optimized | `embedding`, `ip4`, `ip6`, `geoLat`, `geoLon` | Better fit for S3 metadata limits |
+| Space-optimized | `datetime`, `dateonly`, `timeonly`, `uuid`, `mac`, `cidr`, `phone`, `semver`, `color`, `embedding`, `ip4`, `ip6`, `geoLat`, `geoLon` | Better fit for S3 metadata limits |
 | Structural | nested objects, arrays, `json` | Rich payloads with predictable shape |
 | Runtime-linked | hooks, schema registry | Safe evolution and transformation |
 

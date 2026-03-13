@@ -385,39 +385,71 @@ describe('Schema Class - Comprehensive Shorthand Notation Validation', () => {
       expect(result.find(err => err.field === 'required' && err.type === 'required')).toBeDefined();
     });
 
-    test('validates date constraints with conversion', async () => {
+    test('dateonly accepts string, Date object, and timestamp number', async () => {
       const testSchema = new Schema({
-        name: 'date-validation',
-        attributes: {
-          createdAt: 'date',
-          convertedDate: 'date',
-          optionalDate: 'date|optional:true'
-        },
+        name: 'dateonly-inputs',
+        attributes: { day: 'dateonly' },
         security: { passphrase: 'test-passphrase' }
       });
 
-      // Test valid date data (no conversion during validation)
-      const validObj = {
-        createdAt: new Date(),
-        convertedDate: new Date('2023-01-01'),
-        optionalDate: undefined
-      };
+      // String
+      const obj1 = { day: '2023-06-15' };
+      expect(await testSchema.validator(obj1)).toBe(true);
+      expect(obj1.day).toBe('2023-06-15');
 
-      expect(await testSchema.validator(validObj)).toBe(true);
-      // Note: conversion happens during mapping, not validation
-      expect(validObj.convertedDate instanceof Date).toBe(true);
+      // Date object
+      const obj2 = { day: new Date('2023-06-15T10:30:00.000Z') as any };
+      expect(await testSchema.validator(obj2)).toBe(true);
+      expect(obj2.day).toBe('2023-06-15');
 
-      // Test date violations
-      const result = await testSchema.validator({
-        createdAt: 'not-a-date',
-        convertedDate: 'invalid-date'
+      // ISO string with time → strips time
+      const obj3 = { day: '2023-06-15T10:30:00.000Z' };
+      expect(await testSchema.validator(obj3)).toBe(true);
+      expect(obj3.day).toBe('2023-06-15');
+
+      // Unix timestamp (ms)
+      const obj4 = { day: new Date('2023-06-15').getTime() as any };
+      expect(await testSchema.validator(obj4)).toBe(true);
+      expect(obj4.day).toBe('2023-06-15');
+
+      // Invalid
+      const result = await testSchema.validator({ day: 'not-a-date' });
+      expect(Array.isArray(result)).toBe(true);
+      expect(result.find(err => err.field === 'day' && err.type === 'date')).toBeDefined();
+    });
+
+    test('datetime accepts string, Date object, and timestamp number', async () => {
+      const testSchema = new Schema({
+        name: 'datetime-inputs',
+        attributes: { ts: 'datetime' },
+        security: { passphrase: 'test-passphrase' }
       });
 
-      expect(Array.isArray(result)).toBe(true);
-      expect(result.length).toBe(2); // Should have exactly 2 errors
+      // ISO string
+      const obj1 = { ts: '2023-06-15T10:30:00.000Z' };
+      expect(await testSchema.validator(obj1)).toBe(true);
+      expect(obj1.ts).toBe('2023-06-15T10:30:00.000Z');
 
-      expect(result.find(err => err.field === 'createdAt' && err.type === 'date')).toBeDefined();
-      expect(result.find(err => err.field === 'convertedDate' && err.type === 'date')).toBeDefined();
+      // Date object
+      const obj2 = { ts: new Date('2023-06-15T10:30:00.000Z') as any };
+      expect(await testSchema.validator(obj2)).toBe(true);
+      expect(obj2.ts).toBe('2023-06-15T10:30:00.000Z');
+
+      // Unix timestamp (ms)
+      const ts = new Date('2023-06-15T10:30:00.000Z').getTime();
+      const obj3 = { ts: ts as any };
+      expect(await testSchema.validator(obj3)).toBe(true);
+      expect(obj3.ts).toBe('2023-06-15T10:30:00.000Z');
+
+      // Date-only string → normalizes to midnight UTC
+      const obj4 = { ts: '2023-06-15' };
+      expect(await testSchema.validator(obj4)).toBe(true);
+      expect(obj4.ts).toMatch(/^2023-06-15T/);
+
+      // Invalid
+      const result = await testSchema.validator({ ts: 'garbage' });
+      expect(Array.isArray(result)).toBe(true);
+      expect(result.find(err => err.field === 'ts' && err.type === 'datetime')).toBeDefined();
     });
   });
 

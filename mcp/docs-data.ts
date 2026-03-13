@@ -438,9 +438,33 @@ export const fieldTypes: FieldTypeDoc[] = [
     name: 'date',
     syntax: "'date'",
     compression: 'None — stored as ISO 8601 string',
-    description: 'Date field validated as ISO 8601 format. Supports convert option to auto-parse date strings and timestamps. Validators: min/max (date range comparison), convert (auto-parse).',
+    description: 'Native fastest-validator date field. For new schemas, prefer "datetime" (base62 compressed, ~70% savings) or "dateonly" (date without time, ~70% savings). Validators: min/max (date range comparison), convert (auto-parse).',
     examples: ["createdAt: 'date'", "birthDate: 'date|convert:true'", "expiresAt: 'date|optional'"],
     validators: ['required', 'optional', 'convert', 'min', 'max', 'default'],
+  },
+  {
+    name: 'datetime',
+    syntax: "'datetime' | 'datetime|required' | 'datetime|optional'",
+    compression: '~70% compression — ISO 8601 (24 chars) → base62 ms timestamp (7-8 chars)',
+    description: 'Date+time field with millisecond precision. Accepts ISO 8601 strings, Date objects, or unix timestamps (ms). Stored as base62-encoded milliseconds. Decoded back to ISO 8601 string on read. Supports pre-1970 dates (negative timestamps). Recommended over "date" for new schemas.',
+    examples: ["createdAt: 'datetime'", "expiresAt: 'datetime|optional'", "updatedAt: 'datetime|required'"],
+    validators: ['required', 'optional', 'default'],
+  },
+  {
+    name: 'dateonly',
+    syntax: "'dateonly' | 'dateonly|required' | 'dateonly|optional'",
+    compression: '~70% compression — YYYY-MM-DD (10 chars) → base62 days (3-4 chars)',
+    description: 'Date-only field without time component. Accepts YYYY-MM-DD strings, ISO 8601 strings (time stripped), or Date objects. Stored as base62-encoded days since epoch. Decoded back to YYYY-MM-DD string on read. Supports pre-1970 dates.',
+    examples: ["birthday: 'dateonly'", "deadline: 'dateonly|optional'", "hireDate: 'dateonly|required'"],
+    validators: ['required', 'optional', 'default'],
+  },
+  {
+    name: 'timeonly',
+    syntax: "'timeonly' | 'timeonly|required' | 'timeonly|optional'",
+    compression: '~58% compression — HH:mm:ss.SSS (12 chars) → base62 ms-of-day (≤5 chars)',
+    description: 'Time-only field without date component. Accepts HH:mm, HH:mm:ss, or HH:mm:ss.SSS strings, and Date objects (UTC time extracted). Stored as base62-encoded milliseconds-of-day. Always decoded to HH:mm:ss.SSS format on read.',
+    examples: ["openTime: 'timeonly'", "closeTime: 'timeonly|optional'", "scheduledAt: 'timeonly|required'"],
+    validators: ['required', 'optional', 'default'],
   },
   {
     name: 'email',
@@ -460,9 +484,9 @@ export const fieldTypes: FieldTypeDoc[] = [
   },
   {
     name: 'uuid',
-    syntax: "'uuid'",
-    compression: 'None',
-    description: 'UUID field with format validation. Defaults to UUID v4 but supports version option for specific versions.',
+    syntax: "'uuid' | 'uuid|required' | 'uuid|optional'",
+    compression: '33% compression — 36 chars → 24 chars (4×32-bit chunks → base62)',
+    description: 'UUID field with format validation and base62 compression. Splits UUID into 4 × 32-bit integer chunks, each encoded as 6-char base62 string (padded). Lossless round-trip. Decoded back to standard UUID format (lowercase) on read.',
     examples: ["externalId: 'uuid'", "correlationId: 'uuid|optional'"],
     validators: ['required', 'optional', 'version', 'default'],
   },
@@ -487,6 +511,22 @@ export const fieldTypes: FieldTypeDoc[] = [
 
   // --- Network ---
   {
+    name: 'mac',
+    syntax: "'mac' | 'mac|required' | 'mac|optional'",
+    compression: '47% compression — 17 chars (AA:BB:CC:DD:EE:FF) → 9 chars (48-bit → base62)',
+    description: 'MAC address field. Accepts colon-separated (AA:BB:CC:DD:EE:FF), hyphen-separated, or bare hex formats. Normalizes to lowercase colon-separated on read. Stored as base62-encoded 48-bit integer.',
+    examples: ["deviceMac: 'mac'", "wifiAddr: 'mac|required'", "ethernetAddr: 'mac|optional'"],
+    validators: ['required', 'optional'],
+  },
+  {
+    name: 'cidr',
+    syntax: "'cidr' | 'cidr|required' | 'cidr|optional'",
+    compression: '50% compression — 14-18 chars (192.168.1.0/24) → 7 chars (IPv4 + prefix → base62)',
+    description: 'CIDR notation field for IPv4 subnets. Validates IP octets (0-255) and prefix length (0-32). Stored as base62-encoded IP (6 chars) + prefix (1 char). Ideal for firewall rules, ACLs, network configuration.',
+    examples: ["subnet: 'cidr'", "allowList: 'cidr|required'", "networkRange: 'cidr|optional'"],
+    validators: ['required', 'optional'],
+  },
+  {
     name: 'ip4',
     syntax: "'ip4'",
     compression: '44% compression — 15 chars ("192.168.1.100") → 8 chars (base62-encoded uint32)',
@@ -500,6 +540,86 @@ export const fieldTypes: FieldTypeDoc[] = [
     compression: '47% compression — 39 chars (full notation) → ~21 chars (base62-encoded uint128)',
     description: 'IPv6 address field. Validates format, then encodes as 128-bit binary in base62 for compact storage. Handles full and abbreviated IPv6 notation. Automatically decoded back to standard notation on read.',
     examples: ["serverIp: 'ip6'", "peerAddress: 'ip6|optional'"],
+    validators: ['required', 'optional'],
+  },
+
+  // --- Formats ---
+  {
+    name: 'phone',
+    syntax: "'phone' | 'phone|required' | 'phone|optional'",
+    compression: '40%+ compression — E.164 phone number → base62-encoded digits',
+    description: 'Phone number field in E.164 format. Accepts formats with +, spaces, hyphens, parentheses — normalizes to +digits. Validates 7-15 digit numbers. Stored as base62-encoded integer. Ideal for user contacts, SMS notifications.',
+    examples: ["tel: 'phone'", "mobile: 'phone|required'", "fax: 'phone|optional'"],
+    validators: ['required', 'optional'],
+  },
+  {
+    name: 'semver',
+    syntax: "'semver' | 'semver|required' | 'semver|optional'",
+    compression: '~20-40% compression — major.minor.patch packed into single base62 integer',
+    description: 'Semantic versioning field. Accepts "1.2.3" or "v1.2.3" (v prefix stripped). Validates three numeric components (max 999 each). Packed as major*1M + minor*1K + patch for base62 encoding. Ideal for package versions, API versions.',
+    examples: ["version: 'semver'", "apiVersion: 'semver|required'", "sdkVersion: 'semver|optional'"],
+    validators: ['required', 'optional'],
+  },
+  {
+    name: 'color',
+    syntax: "'color' | 'color|required' | 'color|optional'",
+    compression: '29% compression — #RRGGBB (7 chars) → base62 (5 chars)',
+    description: 'Hex color field. Accepts #RRGGBB, #RGB (expanded to 6-digit), or bare hex. Normalizes to lowercase #rrggbb. Stored as base62-encoded 24-bit integer. Ideal for design systems, theme configuration, UI settings.',
+    examples: ["bgColor: 'color'", "primaryColor: 'color|required'", "accentColor: 'color|optional'"],
+    validators: ['required', 'optional'],
+  },
+
+  // --- Temporal ---
+  {
+    name: 'duration',
+    syntax: "'duration' | 'duration|required' | 'duration|optional'",
+    compression: '~60% compression — ISO 8601 duration or human format → ms → base62',
+    description: 'Duration field. Accepts ISO 8601 (PT1H30M, P1DT2H), human format (1h30m, 90m, 2d, 500ms), or milliseconds as number. Stored as base62-encoded milliseconds. Decoded back to ISO 8601 format on read. Ideal for TTLs, timeouts, SLAs.',
+    examples: ["timeout: 'duration'", "ttl: 'duration|required'", "interval: 'duration|optional'"],
+    validators: ['required', 'optional'],
+  },
+  {
+    name: 'cron',
+    syntax: "'cron' | 'cron|required' | 'cron|optional'",
+    compression: 'None — stored as-is (validated only)',
+    description: 'Cron expression field. Validates standard 5-field cron format (minute hour day-of-month month day-of-week). Supports wildcards (*), ranges (1-5), lists (1,3,5), and steps (*/5). Ideal for scheduled tasks.',
+    examples: ["schedule: 'cron'", "backup: 'cron|required'"],
+    validators: ['required', 'optional'],
+  },
+
+  // --- Internationalization ---
+  {
+    name: 'locale',
+    syntax: "'locale' | 'locale|required' | 'locale|optional'",
+    compression: 'None — stored as-is (validated + normalized)',
+    description: 'Locale field. Accepts xx-XX or xx_XX format (e.g., pt-BR, en_US), or 2-letter language code (en). Normalizes to lowercase-UPPERCASE format on validation. Ideal for i18n, user preferences.',
+    examples: ["lang: 'locale'", "preferredLocale: 'locale|required'"],
+    validators: ['required', 'optional'],
+  },
+  {
+    name: 'currency',
+    syntax: "'currency' | 'currency|required' | 'currency|optional'",
+    compression: 'None — stored as-is (validated + normalized)',
+    description: 'Currency code field (ISO 4217). Validates 3-letter alphabetic code. Normalizes to uppercase on validation. Ideal for financial data, pricing.',
+    examples: ["cur: 'currency'", "baseCurrency: 'currency|required'"],
+    validators: ['required', 'optional'],
+  },
+  {
+    name: 'country',
+    syntax: "'country' | 'country|required' | 'country|optional'",
+    compression: 'None — stored as-is (validated + normalized)',
+    description: 'Country code field (ISO 3166-1 alpha-2). Validates 2-letter alphabetic code. Normalizes to uppercase on validation. Ideal for user profiles, addresses.',
+    examples: ["cc: 'country'", "billingCountry: 'country|required'"],
+    validators: ['required', 'optional'],
+  },
+
+  // --- Commerce ---
+  {
+    name: 'ean',
+    syntax: "'ean' | 'ean|required' | 'ean|optional'",
+    compression: '~31% compression — digits → base62 with format prefix',
+    description: 'Barcode field supporting EAN-8 (8 digits), UPC-A (12 digits), EAN-13 (13 digits), and GTIN-14 (14 digits). Stored as base62-encoded integer with format prefix. Ideal for product catalogs, inventory management.',
+    examples: ["barcode: 'ean'", "productCode: 'ean|required'"],
     validators: ['required', 'optional'],
   },
 
