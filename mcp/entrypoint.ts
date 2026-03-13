@@ -10,8 +10,8 @@ import {
   ListPromptsRequestSchema,
   GetPromptRequestSchema,
 } from '@modelcontextprotocol/sdk/types.js';
-import { S3db, CachePlugin, CostsPlugin } from '../src/index.js';
-import { FilesystemCache } from '../src/plugins/cache/filesystem-cache.class.js';
+import { S3db, CachePlugin, CostsPlugin } from 's3db.js';
+import { FilesystemCache } from 's3db.js/plugins/cache/filesystem-cache.class.js';
 import { config } from 'dotenv';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
