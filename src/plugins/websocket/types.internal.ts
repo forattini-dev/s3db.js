@@ -51,6 +51,14 @@ export interface WebSocketChannelsConfig {
   guards?: Record<string, Function>;
 }
 
+export type WebSocketSendFn = (message: unknown) => void;
+
+export type WebSocketMessageHandler = (
+  socketId: string,
+  payload: any,
+  context: { send: WebSocketSendFn; user: any; server: any }
+) => any | Promise<any>;
+
 export interface WebSocketOptions {
   port?: number;
   host?: string;
@@ -68,19 +76,58 @@ export interface WebSocketOptions {
   startupBanner?: boolean;
   health?: WebSocketHealthConfig;
   channels?: WebSocketChannelsConfig;
-  messageHandlers?: Record<string, Function>;
-}
 
-export interface ClientInfo {
-  ws: any;
-  user: any | null;
-  subscriptions: Set<string>;
-  connectedAt: string;
-  lastActivity: number;
-  metadata: {
-    ip?: string;
-    userAgent?: string;
-  };
+  /**
+   * Custom message handlers keyed by message type.
+   * Called when a message with matching `type` is received.
+   * If a handler is registered for a type, it takes priority over built-in handlers.
+   *
+   * @example
+   * messageHandlers: {
+   *   'game:move': async (socketId, payload, { send, user }) => {
+   *     return { type: 'game:moved', position: payload.position };
+   *   }
+   * }
+   */
+  messageHandlers?: Record<string, WebSocketMessageHandler>;
+
+  /**
+   * Raw message interceptor — called BEFORE any built-in processing.
+   * Return `true` to indicate the message was fully handled (skip all built-in handlers).
+   * Return `false` to let the server process it normally.
+   *
+   * Use this for full custom protocol implementation.
+   *
+   * @example
+   * // Full custom protocol — no built-in CRUD
+   * onMessage: (socketId, raw, send) => {
+   *   const msg = JSON.parse(raw.toString());
+   *   send({ type: 'echo', data: msg });
+   *   return true;
+   * }
+   */
+  onMessage?: (socketId: string, raw: string | Buffer, send: WebSocketSendFn) => boolean | Promise<boolean>;
+
+  /**
+   * Called when a new client connects (after auth).
+   * Receives the socket ID, a send function, and the HTTP upgrade request.
+   *
+   * @example
+   * onConnection: (socketId, send, req) => {
+   *   send({ type: 'welcome', message: 'Hello!' });
+   * }
+   */
+  onConnection?: (socketId: string, send: WebSocketSendFn, req: any) => void | Promise<void>;
+
+  /**
+   * Called when a client disconnects.
+   *
+   * @example
+   * onClose: (socketId, code, reason) => {
+   *   console.log(`Client ${socketId} disconnected: ${code}`);
+   * }
+   */
+  onClose?: (socketId: string, code: number, reason: string) => void | Promise<void>;
 }
 
 export interface WebSocketMetrics {

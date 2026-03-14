@@ -8,8 +8,6 @@ import { join, dirname, basename, relative } from 'path';
 import { fileURLToPath } from 'url';
 import { homedir } from 'os';
 import { execSync } from 'child_process';
-import Fuse from 'fuse.js';
-
 import type { S3dbMCPServer } from '../entrypoint.js';
 import type { S3dbSearchDocsArgs, S3dbListTopicsArgs } from '../types/index.js';
 
@@ -51,10 +49,21 @@ interface SearchResult {
 const CORE_PATHS = ['core', 'guides', 'reference', 'clients', 'benchmarks'];
 const PLUGIN_PATHS = ['plugins'];
 
-let coreIndex: Fuse<DocEntry> | null = null;
-let pluginIndex: Fuse<DocEntry> | null = null;
+let FuseConstructor: any | null = null;
+let coreIndex: any | null = null;
+let pluginIndex: any | null = null;
 let coreDocs: DocEntry[] = [];
 let pluginDocs: DocEntry[] = [];
+
+async function getFuseConstructor(): Promise<any> {
+  if (FuseConstructor) {
+    return FuseConstructor;
+  }
+
+  const module = await import('fuse.js');
+  FuseConstructor = module.default;
+  return FuseConstructor;
+}
 
 function extractTitle(content: string, filename: string): string {
   const match = content.match(/^#\s+(.+)$/m);
@@ -97,7 +106,9 @@ function loadMarkdownFiles(basePath: string, category: string): DocEntry[] {
   return entries;
 }
 
-function buildIndex(docs: DocEntry[]): Fuse<DocEntry> {
+async function buildIndex(docs: DocEntry[]): Promise<any> {
+  const Fuse = await getFuseConstructor();
+
   return new Fuse(docs, {
     keys: [
       { name: 'title', weight: 0.4 },
@@ -110,7 +121,7 @@ function buildIndex(docs: DocEntry[]): Fuse<DocEntry> {
   });
 }
 
-function loadCoreDocs(): void {
+async function loadCoreDocs(): Promise<void> {
   if (coreDocs.length > 0) return;
 
   for (const subdir of CORE_PATHS) {
@@ -135,10 +146,10 @@ function loadCoreDocs(): void {
     } catch (err) {}
   }
 
-  coreIndex = buildIndex(coreDocs);
+  coreIndex = await buildIndex(coreDocs);
 }
 
-function loadPluginDocs(): void {
+async function loadPluginDocs(): Promise<void> {
   if (pluginDocs.length > 0) return;
 
   for (const subdir of PLUGIN_PATHS) {
@@ -146,7 +157,7 @@ function loadPluginDocs(): void {
     pluginDocs.push(...loadMarkdownFiles(path, 'plugins'));
   }
 
-  pluginIndex = buildIndex(pluginDocs);
+  pluginIndex = await buildIndex(pluginDocs);
 }
 
 function pathToResourceUri(path: string): string | null {
@@ -190,7 +201,7 @@ function extractSnippet(content: string, query: string, maxLength = 300): string
   return snippet.trim();
 }
 
-function search(index: Fuse<DocEntry> | null, docs: DocEntry[], query: string, limit = 5): SearchResult[] {
+function search(index: any | null, docs: DocEntry[], query: string, limit = 5): SearchResult[] {
   if (!index) return [];
 
   const results = index.search(query, { limit });
@@ -207,7 +218,13 @@ function search(index: Fuse<DocEntry> | null, docs: DocEntry[], query: string, l
 
 async function searchDocs(type: 'core' | 'plugins', query: string, limit = 5): Promise<any> {
   try {
-    const docs = type === 'core' ? (loadCoreDocs(), coreDocs) : (loadPluginDocs(), pluginDocs);
+    if (type === 'core') {
+      await loadCoreDocs();
+    } else {
+      await loadPluginDocs();
+    }
+
+    const docs = type === 'core' ? coreDocs : pluginDocs;
     const index = type === 'core' ? coreIndex : pluginIndex;
     const results = search(index, docs, query, limit);
 
@@ -238,7 +255,7 @@ async function searchDocs(type: 'core' | 'plugins', query: string, limit = 5): P
 async function listTopics(type: 'core' | 'plugins'): Promise<any> {
   try {
     if (type === 'core') {
-      loadCoreDocs();
+      await loadCoreDocs();
       const categories = [...new Set(coreDocs.map(d => d.category))];
       return {
         success: true,
@@ -253,7 +270,7 @@ async function listTopics(type: 'core' | 'plugins'): Promise<any> {
         })),
       };
     } else {
-      loadPluginDocs();
+      await loadPluginDocs();
       const byPlugin = new Map<string, DocEntry[]>();
       for (const doc of pluginDocs) {
         const parts = doc.path.split('/');
@@ -441,8 +458,8 @@ export async function preloadSearch(): Promise<void> {
   if (!docsAvailable) {
     return;
   }
-  loadCoreDocs();
-  loadPluginDocs();
+  await loadCoreDocs();
+  await loadPluginDocs();
 }
 
 export default {

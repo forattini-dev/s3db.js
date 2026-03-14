@@ -4,11 +4,13 @@ import type {
   ApiListenerConfigInput,
   ApiListenerConfigInputProtocol,
   ApiListenerHttpConfig,
+  ApiListenerTcpConfig,
   ApiListenerUdpConfig,
-  ApiListenerWebSocketConfig
+  ApiListenerWebSocketConfig,
+  ApiListenerWebSocketProtocolHandlers
 } from '../types.internal.js';
 
-const KNOWN_PROTOCOLS = ['http', 'websocket', 'udp'] as const;
+const KNOWN_PROTOCOLS = ['http', 'websocket', 'tcp', 'udp'] as const;
 type KnownProtocol = (typeof KNOWN_PROTOCOLS)[number];
 
 interface BindDefaults {
@@ -166,7 +168,7 @@ function extractWebSocketCallbacks(raw: unknown) {
   return {
     onConnection: typeof source.onConnection === 'function' ? source.onConnection : undefined,
     onMessage: typeof source.onMessage === 'function' ? source.onMessage : undefined,
-    onError: typeof source.onError === 'function' ? source.onError : undefined
+    onClose: typeof source.onClose === 'function' ? source.onClose : undefined
   };
 }
 
@@ -182,6 +184,20 @@ function extractUdpCallbacks(raw: unknown) {
   };
 }
 
+function extractTcpCallbacks(raw: unknown) {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
+    return {};
+  }
+
+  const source = raw as Record<string, unknown>;
+  return {
+    onConnection: typeof source.onConnection === 'function' ? source.onConnection : undefined,
+    onData: typeof source.onData === 'function' ? source.onData : undefined,
+    onClose: typeof source.onClose === 'function' ? source.onClose : undefined,
+    onError: typeof source.onError === 'function' ? source.onError : undefined
+  };
+}
+
 function normalizeProtocolConfig(
   source: ApiListenerConfigInput,
   listenerIndex: number,
@@ -192,7 +208,11 @@ function normalizeProtocolConfig(
       ? source.protocols as Record<string, unknown>
       : undefined;
 
-  const hasProtocolDefinition = !!protocolsRaw || source.http !== undefined || source.websocket !== undefined || source.udp !== undefined;
+  const hasProtocolDefinition = !!protocolsRaw
+    || source.http !== undefined
+    || source.websocket !== undefined
+    || source.tcp !== undefined
+    || source.udp !== undefined;
 
   const rawHttp =
     protocolsRaw?.http !== undefined
@@ -206,17 +226,27 @@ function normalizeProtocolConfig(
     protocolsRaw?.udp !== undefined
       ? protocolsRaw.udp
       : source.udp;
+  const rawTcp =
+    protocolsRaw?.tcp !== undefined
+      ? protocolsRaw.tcp
+      : source.tcp;
 
   const httpDefaultEnabled = !hasProtocolDefinition;
   const wsDefaultEnabled = false;
   const udpDefaultEnabled = false;
+  const tcpDefaultEnabled = false;
 
   const httpConfig = normalizeBooleanTransportConfig(rawHttp, httpDefaultEnabled, DEFAULT_HTTP_PATH);
   const websocketConfig = normalizeBooleanTransportConfig(rawWebSocket, wsDefaultEnabled, DEFAULT_WEBSOCKET_PATH);
   const udpConfig = normalizeBooleanTransportConfig(rawUdp, udpDefaultEnabled, '');
+  const tcpEnabled = typeof rawTcp === 'boolean'
+    ? rawTcp
+    : typeof rawTcp === 'object' && rawTcp !== null
+      ? asBoolean((rawTcp as Record<string, unknown>).enabled, tcpDefaultEnabled)
+      : tcpDefaultEnabled;
 
   const custom = protocolsRaw ? normalizeCustomProtocols(protocolsRaw) : {};
-  const hasTransport = httpConfig.enabled || websocketConfig.enabled || udpConfig.enabled || hasEnabledProtocol(custom);
+  const hasTransport = httpConfig.enabled || websocketConfig.enabled || udpConfig.enabled || tcpEnabled || hasEnabledProtocol(custom);
 
   if (!hasTransport) {
     throw new Error(`ApiPlugin listener at index ${listenerIndex} has no enabled transport protocol.`);
@@ -231,16 +261,17 @@ function normalizeProtocolConfig(
       enabled: websocketConfig.enabled,
       path: websocketConfig.path,
       maxPayloadBytes: websocketConfig.maxPayloadBytes,
-      ...(extractWebSocketCallbacks(rawWebSocket) as {
-        onConnection?: (socket: unknown, request: unknown) => void;
-        onMessage?: (socket: unknown, message: unknown, isBinary?: boolean) => void;
+      ...(extractWebSocketCallbacks(rawWebSocket) as ApiListenerWebSocketProtocolHandlers)
+    } as ApiListenerWebSocketConfig & ApiListenerWebSocketProtocolHandlers,
+    tcp: {
+      enabled: tcpEnabled,
+      ...(extractTcpCallbacks(rawTcp) as {
+        onConnection?: (socket: unknown) => void;
+        onData?: (socket: unknown, data: Buffer) => void;
+        onClose?: (socket: unknown, hadError: boolean) => void;
         onError?: (error: Error) => void;
       })
-    } as ApiListenerWebSocketConfig & {
-      onConnection?: (socket: unknown, request: unknown) => void;
-      onMessage?: (socket: unknown, message: unknown, isBinary?: boolean) => void;
-      onError?: (error: Error) => void;
-    },
+    } as ApiListenerTcpConfig,
     udp: {
       enabled: udpConfig.enabled,
       maxMessageBytes: udpConfig.maxMessageBytes,
@@ -328,6 +359,7 @@ export function normalizeApiListeners(
       protocols: {
         http: { enabled: true, path: DEFAULT_HTTP_PATH },
         websocket: { enabled: false, path: DEFAULT_WEBSOCKET_PATH, maxPayloadBytes: DEFAULT_WEBSOCKET_MAX_PAYLOAD },
+        tcp: { enabled: false },
         udp: { enabled: false, maxMessageBytes: DEFAULT_UDP_MAX_MESSAGE },
         custom: {}
       }

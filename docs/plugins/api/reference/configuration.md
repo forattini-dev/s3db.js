@@ -8,11 +8,71 @@ This section is the single source of truth for all ApiPlugin options. Other guid
 
 - port: number = 3000
 - host: string = '0.0.0.0'
+- listeners?: ApiListenerConfigInput | ApiListenerConfigInput[]
 - basePath: string = '' (normalized; affects all routes, including /docs, /openapi.json, and /api.usd.json)
 - logLevel: string = false (controls log level output across the plugin)
 - startupBanner: boolean = true
 - versionPrefix: boolean | string = false
 - maxBodySize: number = 10_485_760 (10MB)
+
+### Listeners (multi-port / multiplexer)
+
+Use `listeners` to expose multiple binds (`multi-port`) and/or multiple transport protocols on each bind (`protocol multiplexing`).
+
+Defaults:
+- if `listeners` is omitted, the plugin creates one listener using top-level `host` and `port` with HTTP enabled.
+- each listener receives its own `bind` (`host`, `port`) and its own transport matrix.
+
+Supported transport keys in `protocols`:
+- `http`: exposes the HTTP API (including REST/resources/docs/health/etc).
+- `websocket`: upgrades HTTP traffic on a protocol path.
+- `udp`: starts a UDP socket on the same host:port.
+- `tcp`: starts a TCP socket on the host:port.
+
+`tcp` is isolated from HTTP/WebSocket because the current HTTP runtime bootstrap is already bound to the same TCP port; configure it in its own listener.
+
+Single listener + multiple protocols (HTTP + WebSocket, same port):
+```javascript
+await db.usePlugin(new ApiPlugin({
+  listeners: [{
+    bind: { host: '0.0.0.0', port: 3000 },
+    protocols: {
+      http: { enabled: true },
+      websocket: { enabled: true, path: '/ws', maxPayloadBytes: 2_097_152 }
+    }
+  }]
+}));
+```
+
+Multi-port HTTP + WebSocket + UDP + TCP (separate bind for TCP):
+```javascript
+await db.usePlugin(new ApiPlugin({
+  listeners: [
+    {
+      name: 'public-http',
+      bind: { host: '0.0.0.0', port: 3000 },
+      protocols: {
+        http: { enabled: true },
+        websocket: { enabled: true, path: '/ws' },
+        udp: { enabled: true }
+      }
+    },
+    {
+      name: 'raw-tcp',
+      bind: { host: '0.0.0.0', port: 4000 },
+      protocols: {
+        tcp: { enabled: true }
+      }
+    }
+  ]
+}));
+```
+
+Notes:
+- when `protocols` is provided, each transport must declare `enabled: true` explicitly to avoid ambiguity.
+- `http` path defaults to `/` if omitted.
+- `websocket` path defaults to `/` when omitted and is matched against request path.
+- UDP/TCP callbacks can be provided through `protocols.<transport>`.
 
 ## Docs
 

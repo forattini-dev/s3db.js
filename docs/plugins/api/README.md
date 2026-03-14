@@ -25,6 +25,7 @@ await db.usePlugin(new ApiPlugin({ port: 3000 }));
 ## Table of Contents
 
 - [Quick Start](#-quick-start)
+- [Listener Matrix](#listener-matrix-multi-port--multiplexer)
 - [Documentation](#-documentation)
 - [Batch Operations](#-batch-operations)
 - [Common Use Cases](#-common-use-cases)
@@ -162,6 +163,36 @@ It also extends naturally to native batch routes. `resource.api.bulk.create` can
 
 Need the exact keys, precedence, and custom-route shape for `resource.api`?
 **[→ Resource API Reference](/plugins/api/reference/resource-api.md)**
+
+---
+
+### Listener Matrix (multi-port / multiplexer)
+
+Use `listeners` when you need either:
+
+- **multi-port**: open multiple `bind` ports on the same plugin
+- **multiplexer**: run more than one protocol on the same bind
+
+```javascript
+await db.usePlugin(new ApiPlugin({
+  listeners: [{
+    bind: { host: '0.0.0.0', port: 3000 },
+    protocols: {
+      http: { enabled: true },
+      websocket: { enabled: true, path: '/ws' },
+      udp: { enabled: true }
+    }
+  }, {
+    bind: { host: '0.0.0.0', port: 4000 },
+    protocols: {
+      tcp: { enabled: true }
+    }
+  }]
+}));
+```
+
+For protocol details and exact option matrix, see:
+**[API Configuration Reference → Listeners section](/plugins/api/reference/configuration.md#listeners-multi-port--multiplexer)**
 
 ---
 

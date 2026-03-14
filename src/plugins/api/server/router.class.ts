@@ -8,6 +8,7 @@ import { createFilesystemHandler, validateFilesystemConfig } from '../utils/stat
 import { createS3Handler, validateS3Config } from '../utils/static-s3.js';
 import { createFailbanAdminRoutes } from '../middlewares/failban.js';
 import { createContextInjectionMiddleware } from '../middlewares/context-injection.js';
+import { createVersionAdapterMiddleware } from '../middlewares/version-adapter.js';
 import { applyBasePath } from '../utils/base-path.js';
 import { createLogger } from '../../../concerns/logger.js';
 import { ApiRouteRegistry } from '../route-registry.js';
@@ -15,6 +16,18 @@ import { assertNoLegacyResourceRoutes, getResourceCustomRoutes } from '../utils/
 import type { AuthConfig, DocsConfig } from '../types.internal.js';
 
 type HttpAppConstructor = new () => HttpAppType;
+
+export interface VersionAdapter {
+  response?: (data: Record<string, unknown>) => Record<string, unknown>;
+  request?: (data: Record<string, unknown>) => Record<string, unknown>;
+  deprecated?: boolean;
+  sunset?: string;
+}
+
+export interface VersionsConfig {
+  current?: string;
+  adapters: Record<string, VersionAdapter>;
+}
 
 export interface ResourceConfig {
   enabled?: boolean;
@@ -24,6 +37,7 @@ export interface ResourceConfig {
   methods?: string[];
   validation?: boolean;
   relations?: Record<string, { expose?: boolean }>;
+  versions?: VersionsConfig;
   [key: string]: unknown;
 }
 
@@ -540,6 +554,75 @@ export class Router {
       });
 
       this.logger?.debug({ resourceName: name, path: fullMountPath, methods }, `Mounted routes for resource '${name}' at ${fullMountPath}`);
+
+      const schemaVersions = (resource as unknown as { $schema?: { api?: { versions?: VersionsConfig } } }).$schema?.api?.versions;
+      const pluginVersions = resourceConfig?.versions;
+      const versionsConfig = pluginVersions || schemaVersions;
+
+      if (versionsConfig) {
+        const currentVersion = versionsConfig.current
+          || resource.config?.currentVersion
+          || resource.version
+          || 'v1';
+
+        if (!prefix) {
+          const currentMountPath = this._withBasePath(`/${currentVersion}/${name}`);
+          app.route(currentMountPath, resourceApp as unknown as HttpAppType);
+          this.routeRegistry.register({
+            kind: 'resource',
+            path: currentMountPath,
+            methods: methods as string[],
+            resource: name,
+            tags: [name],
+            sourceKind: 'rest-resource',
+            auth: {
+              required: !!this.authMiddleware && !authDisabled,
+              mode: !!this.authMiddleware && !authDisabled ? 'required' : 'optional',
+              drivers: Array.isArray(resourceConfig?.auth)
+                ? resourceConfig.auth.map((value) => String(value))
+                : undefined
+            }
+          });
+          this.logger?.debug({ resourceName: name, path: currentMountPath }, `Mounted current version alias '${currentVersion}' for resource '${name}'`);
+        }
+
+        for (const [versionKey, adapter] of Object.entries(versionsConfig.adapters)) {
+          const versionedApp = createResourceRoutes(
+            resource as unknown as Parameters<typeof createResourceRoutes>[0],
+            versionKey,
+            {
+              methods,
+              customMiddleware: [...middlewares, createVersionAdapterMiddleware(adapter, versionKey)],
+              versionPrefix: versionKey,
+              events,
+              relationsPlugin: this.relationsPlugin as unknown
+            } as Parameters<typeof createResourceRoutes>[2],
+            this.HttpApp as unknown as Parameters<typeof createResourceRoutes>[3]
+          );
+
+          const versionedMountPath = this._withBasePath(`/${versionKey}/${name}`);
+          app.route(versionedMountPath, versionedApp as unknown as HttpAppType);
+
+          this.routeRegistry.register({
+            kind: 'resource',
+            path: versionedMountPath,
+            methods: methods as string[],
+            resource: name,
+            tags: [name],
+            sourceKind: 'rest-resource',
+            deprecated: adapter.deprecated === true,
+            auth: {
+              required: !!this.authMiddleware && !authDisabled,
+              mode: !!this.authMiddleware && !authDisabled ? 'required' : 'optional',
+              drivers: Array.isArray(resourceConfig?.auth)
+                ? resourceConfig.auth.map((value) => String(value))
+                : undefined
+            }
+          });
+
+          this.logger?.debug({ resourceName: name, path: versionedMountPath, deprecated: adapter.deprecated }, `Mounted versioned route '${versionKey}' for resource '${name}'`);
+        }
+      }
 
       this.routeSummaries.push({
         resource: name,

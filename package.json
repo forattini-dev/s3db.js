@@ -6,7 +6,7 @@
   "types": "./dist/index.d.ts",
   "author": "@stone/martech",
   "license": "UNLICENSED",
-  "packageManager": "pnpm@9.12.2",
+  "packageManager": "pnpm@10.32.1",
   "bin": {
     "s3db.js": "./bin/cli.js",
     "s3db": "./bin/cli.js"
@@ -129,7 +129,7 @@
     "validate:types": "pnpm run test:ts && echo 'TypeScript definitions are valid!'",
     "test:ts:runtime": "node scripts/test-runtime-exports.js",
     "test:mcp": "tsx mcp/entrypoint.ts --help",
-    "install:peers": "pnpm add -D @aws-sdk/client-acm @aws-sdk/client-api-gateway @aws-sdk/client-apigatewayv2 @aws-sdk/client-backup @aws-sdk/client-cloudfront @aws-sdk/client-cloudtrail @aws-sdk/client-cloudwatch @aws-sdk/client-cloudwatch-logs @aws-sdk/client-cognito-identity-provider @aws-sdk/client-config-service @aws-sdk/client-dynamodb @aws-sdk/client-ec2 @aws-sdk/client-ecr @aws-sdk/client-ecs @aws-sdk/client-efs @aws-sdk/client-eks @aws-sdk/client-elasticache @aws-sdk/client-elastic-load-balancing @aws-sdk/client-elastic-load-balancing-v2 @aws-sdk/client-eventbridge @aws-sdk/client-iam @aws-sdk/client-kinesis @aws-sdk/client-kms @aws-sdk/client-lambda @aws-sdk/client-rds @aws-sdk/client-route-53 @aws-sdk/client-secrets-manager @aws-sdk/client-sfn @aws-sdk/client-sns @aws-sdk/client-sqs @aws-sdk/client-ssm @aws-sdk/client-sts @aws-sdk/client-waf @aws-sdk/client-wafv2 @google-cloud/bigquery @libsql/client @planetscale/database @tensorflow/tfjs-node amqplib bcrypt express jose nodemailer pg",
+    "install:peers": "pnpm add -D @aws-sdk/client-acm @aws-sdk/client-api-gateway @aws-sdk/client-apigatewayv2 @aws-sdk/client-backup @aws-sdk/client-cloudfront @aws-sdk/client-cloudtrail @aws-sdk/client-cloudwatch @aws-sdk/client-cloudwatch-logs @aws-sdk/client-cognito-identity-provider @aws-sdk/client-config-service @aws-sdk/client-dynamodb @aws-sdk/client-ec2 @aws-sdk/client-ecr @aws-sdk/client-ecs @aws-sdk/client-efs @aws-sdk/client-eks @aws-sdk/client-elasticache @aws-sdk/client-elastic-load-balancing @aws-sdk/client-elastic-load-balancing-v2 @aws-sdk/client-eventbridge @aws-sdk/client-iam @aws-sdk/client-kinesis @aws-sdk/client-kms @aws-sdk/client-lambda @aws-sdk/client-rds @aws-sdk/client-route-53 @aws-sdk/client-secrets-manager @aws-sdk/client-sfn @aws-sdk/client-sns @aws-sdk/client-sqs @aws-sdk/client-ssm @aws-sdk/client-sts @aws-sdk/client-waf @aws-sdk/client-wafv2 @google-cloud/bigquery @libsql/client @planetscale/database @tensorflow/tfjs-node amqplib bcrypt jose nodemailer pg",
     "install:peers:script": "./scripts/install-peer-deps.sh",
     "install:dev:core": "echo '✅ Core dependencies already installed via pnpm install'",
     "install:dev:replicators": "pnpm add -D pg @google-cloud/bigquery google-auth-library @planetscale/database @libsql/client @aws-sdk/client-sqs amqplib",
@@ -142,26 +142,27 @@
     "docs": "serve docs -p 3000"
   },
   "dependencies": {
-    "@aws-sdk/client-s3": "^3.1002.0",
-    "@aws-sdk/credential-providers": "^3.1002.0",
-    "@aws-sdk/s3-request-presigner": "^3.1002.0",
-    "argon2": "^0.44.0",
-    "bcrypt": "^6.0.0",
+    "@aws-sdk/client-s3": "^3.1009.0",
     "cli-args-parser": "^1.0.6",
     "fastest-validator": "^1.19.1",
-    "fuse.js": "^7.1.0",
     "json-stable-stringify": "^1.3.0",
     "lodash-es": "^4.17.23",
     "pino": "^10.3.1",
     "pino-pretty": "^13.1.3",
-    "raffel": "1.0.7",
     "recker": "1.0.84",
-    "tuiuiu.js": "^1.0.56"
+    "tuiuiu.js": "^1.0.57"
   },
   "optionalDependencies": {
+    "@aws-sdk/credential-providers": "^3.1009.0",
+    "@aws-sdk/s3-request-presigner": "^3.1009.0",
     "@modelcontextprotocol/sdk": "^1.27.1",
+    "argon2": "^0.44.0",
+    "bcrypt": "^6.0.0",
     "dotenv": "^17.3.1",
-    "glob": "^13.0.6"
+    "fuse.js": "^7.1.0",
+    "glob": "^13.0.6",
+    "jose": "^6.2.1",
+    "raffel": "1.0.12"
   },
   "peerDependencies": {
     "@aws-sdk/client-acm": "^3.0.0",
@@ -206,11 +207,9 @@
     "amqplib": "^0.10.8",
     "bullmq": ">=5.0.0",
     "ejs": "^3.0.0",
-    "express": "^4.0.0 || ^5.0.0",
     "ghost-cursor": "^1.0.0",
     "google-auth-library": "^9.0.0 || ^10.0.0",
     "ioredis": "^5.4.1",
-    "jose": "^5.0.0 || ^6.0.0",
     "node-cron": "^4.0.0",
     "nodemailer": "^6.0.0 || ^7.0.0",
     "pg": "^8.0.0",
@@ -219,9 +218,8 @@
     "puppeteer": "^24.29.1",
     "puppeteer-extra": "^3.0.0",
     "puppeteer-extra-plugin-stealth": "^2.0.0",
-    "raffel": "^1.0.7",
-    "user-agents": "^1.0.0",
-    "ws": "^8.0.0"
+    "raffel": "^1.0.8",
+    "user-agents": "^1.0.0"
   },
   "peerDependenciesMeta": {
     "@aws-sdk/client-acm": {
@@ -350,9 +348,6 @@
     "ejs": {
       "optional": true
     },
-    "express": {
-      "optional": true
-    },
     "ghost-cursor": {
       "optional": true
     },
@@ -360,9 +355,6 @@
       "optional": true
     },
     "ioredis": {
-      "optional": true
-    },
-    "jose": {
       "optional": true
     },
     "node-cron": {
@@ -394,9 +386,6 @@
     },
     "user-agents": {
       "optional": true
-    },
-    "ws": {
-      "optional": true
     }
   },
   "devDependencies": {
@@ -404,12 +393,12 @@
     "@babel/preset-env": "^7.29.0",
     "@types/argon2": "^0.15.4",
     "@types/lodash-es": "^4.17.12",
-    "@types/node": "25.3.3",
-    "@vitest/coverage-v8": "^4.0.18",
-    "@vitest/ui": "4.0.18",
-    "babel-loader": "^10.0.0",
+    "@types/node": "25.5.0",
+    "@vitest/coverage-v8": "^4.1.0",
+    "@vitest/ui": "4.1.0",
+    "babel-loader": "^10.1.1",
     "domhandler": "^5.0.3",
-    "esbuild": "^0.27.3",
+    "esbuild": "^0.27.4",
     "got": "^14.6.6",
     "node-loader": "^2.1.0",
     "nodemon": "^3.1.14",
@@ -421,9 +410,9 @@
     "type-coverage": "^2.29.7",
     "typescript": "5.9.3",
     "uuid": "^13.0.0",
-    "vitest": "^4.0.18",
+    "vitest": "^4.1.0",
     "webpack": "^5.105.4",
-    "webpack-cli": "^6.0.1",
+    "webpack-cli": "^7.0.0",
     "zod": "^4.3.6"
   },
   "funding": [

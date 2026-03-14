@@ -170,7 +170,7 @@ export const PLUGIN_DEPENDENCIES: Record<string, PluginDefinition> = {
     docsUrl: 'https://github.com/forattini-dev/s3db.js/blob/main/docs/plugins/api.md',
     dependencies: {
       'raffel': {
-        version: '^1.0.1',
+        version: '^1.0.8',
         description: 'Native HTTP runtime, serving and OpenAPI docs helpers',
         installCommand: 'pnpm add raffel',
         npmUrl: 'https://www.npmjs.com/package/raffel'
@@ -188,7 +188,7 @@ export const PLUGIN_DEPENDENCIES: Record<string, PluginDefinition> = {
     docsUrl: 'https://github.com/forattini-dev/s3db.js/blob/main/docs/plugins/identity.md',
     dependencies: {
       'raffel': {
-        version: '^1.0.1',
+        version: '^1.0.8',
         description: 'Native HTTP runtime, serving and OpenAPI docs helpers',
         installCommand: 'pnpm add raffel',
         npmUrl: 'https://www.npmjs.com/package/raffel'
@@ -297,11 +297,11 @@ export const PLUGIN_DEPENDENCIES: Record<string, PluginDefinition> = {
     name: 'WebSocket Plugin',
     docsUrl: 'https://github.com/forattini-dev/s3db.js/blob/main/docs/plugins/websocket.md',
     dependencies: {
-      'ws': {
-        version: '^8.0.0',
-        description: 'WebSocket client and server implementation',
-        installCommand: 'pnpm add ws',
-        npmUrl: 'https://www.npmjs.com/package/ws'
+      'raffel': {
+        version: '^1.0.8',
+        description: 'Unified multi-protocol runtime with native WebSocket transport',
+        installCommand: 'pnpm add raffel',
+        npmUrl: 'https://www.npmjs.com/package/raffel'
       },
       'jose': {
         version: '^5.0.0 || ^6.0.0',

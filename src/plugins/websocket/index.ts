@@ -2,6 +2,8 @@
  * WebSocket Plugin - Real-time communication for s3db.js resources
  *
  * Provides WebSocket server with real-time subscriptions, broadcasts, and CRUD operations.
+ * Uses raffel's WebSocket adapter for connection management, heartbeat, channels,
+ * backpressure, and compression.
  *
  * Features:
  * - Real-time subscriptions to resource changes (insert/update/delete)
@@ -10,7 +12,10 @@
  * - Protected fields filtering
  * - Rate limiting
  * - Heartbeat/ping-pong for connection health
- * - Custom message publishing
+ * - Pusher-like channels (public, private, presence)
+ * - Backpressure handling
+ * - Per-message compression
+ * - Connection recovery
  *
  * @example
  * const wsPlugin = new WebSocketPlugin({
@@ -89,8 +94,11 @@ export class WebSocketPlugin extends Plugin {
         ? options.channels
         : { enabled: options.channels !== false },
 
-      // Custom message handlers
+      // Custom message handlers and hooks
       messageHandlers: options.messageHandlers || {},
+      onMessage: options.onMessage,
+      onConnection: options.onConnection,
+      onClose: options.onClose,
 
       // Database property is required by WebSocketOptions but it's passed down from Plugin.
       // Assuming it's available via `this.database`
@@ -276,11 +284,12 @@ export class WebSocketPlugin extends Plugin {
   broadcastToResource(resource: string, message: any): void {
     if (!this.server) return;
 
-    this.server.broadcast(message, (client: any) => {
-      return Array.from(client.subscriptions).some((sub: unknown) => {
-        return typeof sub === 'string' && sub.startsWith(`${resource}:`);
-      });
-    });
+    const subscriberIds = this.server.subscriptions.get(resource);
+    if (!subscriberIds) return;
+
+    for (const socketId of subscriberIds) {
+      this.server.sendToClient(socketId, message);
+    }
   }
 
   /**
@@ -303,36 +312,27 @@ export class WebSocketPlugin extends Plugin {
 
   /**
    * Get channel info
-   * @param channelName - Channel name
-   * @returns
    */
   getChannel(channelName: string): any | null {
-    return this.server?.channelManager?.getChannelInfo(channelName) || null;
+    return this.server?.getChannelInfo(channelName) || null;
   }
 
   /**
    * List all channels
-   * @param options - { type?: 'public'|'private'|'presence', prefix?: string }
-   * @returns
    */
   listChannels(options: { type?: 'public' | 'private' | 'presence'; prefix?: string } = {}): any[] {
-    return this.server?.channelManager?.listChannels(options) || [];
+    return this.server?.listChannels(options) || [];
   }
 
   /**
    * Get members in a presence channel
-   * @param channelName - Channel name
-   * @returns
    */
   getChannelMembers(channelName: string): any[] {
-    return this.server?.channelManager?.getMembers(channelName) || [];
+    return this.server?.getChannelMembers(channelName) || [];
   }
 
   /**
    * Broadcast message to all members in a channel
-   * @param channelName - Channel name
-   * @param message - Message to broadcast
-   * @param excludeClientId - Optional client to exclude
    */
   broadcastToChannel(channelName: string, message: any, excludeClientId: string | null = null): number {
     if (!this.server) return 0;
@@ -341,10 +341,9 @@ export class WebSocketPlugin extends Plugin {
 
   /**
    * Get channel statistics
-   * @returns
    */
   getChannelStats(): any {
-    return this.server?.channelManager?.getStats() || {
+    return this.server?.getChannelStats() || {
       channels: 0,
       totalMembers: 0,
       byType: { public: 0, private: 0, presence: 0 },
@@ -355,6 +354,3 @@ export class WebSocketPlugin extends Plugin {
 
 // Export server class for advanced usage
 export { WebSocketServer };
-
-// Export channel manager for advanced usage
-export { ChannelManager } from './server/channel-manager.class.js';

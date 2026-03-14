@@ -16,7 +16,7 @@ import { config } from 'dotenv';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
 import { readFileSync } from 'fs';
-import express from 'express';
+import { createServer as createHttpServer, type IncomingMessage, type ServerResponse } from 'node:http';
 
 import { resolveConfig } from './config.js';
 import { createConnectionHandlers, connectionTools } from './tools/connection.js';
@@ -96,6 +96,7 @@ Use \`s3db://resource/{name}\` to see which partitions a resource has.
 export class S3dbMCPServer {
   private server: Server;
   private allToolHandlers: Record<string, Function>;
+  private httpTransportServer: ReturnType<typeof createHttpServer> | null;
 
   constructor() {
     this.server = new Server(
@@ -115,6 +116,7 @@ export class S3dbMCPServer {
     );
 
     this.allToolHandlers = this.setupToolHandlers();
+    this.httpTransportServer = null;
     this.setupResourceHandlers();
     this.setupPromptHandlers();
     this.setupTransport();
@@ -288,8 +290,7 @@ export class S3dbMCPServer {
     const useHttp = process.argv.includes('--transport=http') || process.env.MCP_TRANSPORT === 'http';
 
     if (useHttp) {
-      // Setup Express server for Streamable HTTP transport
-      this.setupHttpTransport();
+      void this.setupHttpTransport();
     } else {
       // Use stdio transport (default)
       const transport = new StdioServerTransport();
@@ -297,99 +298,128 @@ export class S3dbMCPServer {
     }
   }
 
-  setupHttpTransport(): void {
+  private _setCorsHeaders(res: ServerResponse): void {
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, DELETE, OPTIONS');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Mcp-Session-Id');
+    res.setHeader('Access-Control-Expose-Headers', 'Mcp-Session-Id');
+  }
+
+  private async _readJsonBody(req: IncomingMessage): Promise<any> {
+    const chunks: Buffer[] = [];
+
+    for await (const chunk of req) {
+      chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+    }
+
+    if (chunks.length === 0) {
+      return undefined;
+    }
+
+    const body = Buffer.concat(chunks).toString('utf-8').trim();
+    if (!body) {
+      return undefined;
+    }
+
+    return JSON.parse(body);
+  }
+
+  async setupHttpTransport(): Promise<void> {
     const host = process.env.MCP_SERVER_HOST || '0.0.0.0';
     const port = parseInt(process.env.MCP_SERVER_PORT || '17500');
 
-    const app = express();
-    app.use(express.json());
+    this.httpTransportServer = createHttpServer(async (req, res) => {
+      this._setCorsHeaders(res);
 
-    // Enable CORS for browser-based clients
-    app.use((req, res, next) => {
-      res.header('Access-Control-Allow-Origin', '*');
-      res.header('Access-Control-Allow-Methods', 'GET, POST, DELETE, OPTIONS');
-      res.header('Access-Control-Allow-Headers', 'Content-Type, Mcp-Session-Id');
-      res.header('Access-Control-Expose-Headers', 'Mcp-Session-Id');
+      const url = new URL(req.url || '/', `http://${req.headers.host || `${host}:${port}`}`);
 
       if (req.method === 'OPTIONS') {
-        return res.sendStatus(200);
+        res.writeHead(200);
+        res.end();
+        return;
       }
-      next();
-    });
 
-    // Streamable HTTP endpoint (stateless mode - recommended)
-    app.post('/mcp', async (req, res) => {
-      try {
-        // Create a new transport for each request to prevent request ID collisions
-        const transport = new StreamableHTTPServerTransport({
-          sessionIdGenerator: undefined,
-          enableJsonResponse: true
-        });
-
-        res.on('close', () => {
-          transport.close();
-        });
-
-        await this.server.connect(transport);
-        await transport.handleRequest(req, res, req.body);
-      } catch (error) {
-        console.error('Error handling MCP request:', error);
-        if (!res.headersSent) {
-          res.status(500).json({
-            jsonrpc: '2.0',
-            error: {
-              code: -32603,
-              message: 'Internal server error'
-            },
-            id: null
+      if (req.method === 'POST' && url.pathname === '/mcp') {
+        try {
+          const body = await this._readJsonBody(req);
+          const transport = new StreamableHTTPServerTransport({
+            sessionIdGenerator: undefined,
+            enableJsonResponse: true
           });
+
+          res.on('close', () => {
+            transport.close();
+          });
+
+          await this.server.connect(transport);
+          await transport.handleRequest(req, res, body);
+          return;
+        } catch (error) {
+          console.error('Error handling MCP request:', error);
+          if (!res.headersSent) {
+            res.writeHead(500, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({
+              jsonrpc: '2.0',
+              error: {
+                code: -32603,
+                message: 'Internal server error'
+              },
+              id: null
+            }));
+          }
+          return;
         }
       }
+
+      if (req.method === 'GET' && url.pathname === '/mcp') {
+        res.writeHead(405, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({
+          jsonrpc: '2.0',
+          error: {
+            code: -32000,
+            message: 'SSE streaming not supported in stateless mode. Use POST /mcp for JSON responses.'
+          },
+          id: null
+        }));
+        return;
+      }
+
+      if (req.method === 'DELETE' && url.pathname === '/mcp') {
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ ok: true }));
+        return;
+      }
+
+      if (req.method === 'GET' && url.pathname === '/health') {
+        const healthStatus = {
+          status: 'healthy',
+          timestamp: new Date().toISOString(),
+          uptime: process.uptime(),
+          version: SERVER_VERSION,
+          database: {
+            connected: database ? database.isConnected() : false,
+            bucket: database?.bucket || null,
+            keyPrefix: database?.keyPrefix || null,
+            resourceCount: database ? Object.keys(database.resources || {}).length : 0
+          },
+          memory: process.memoryUsage(),
+          environment: {
+            nodeVersion: process.version,
+            platform: process.platform,
+            transport: 'streamable-http'
+          }
+        };
+
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify(healthStatus));
+        return;
+      }
+
+      res.writeHead(404, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: 'Not found' }));
     });
 
-    // Streamable HTTP: GET for SSE streaming (stateless — not supported, return 405)
-    app.get('/mcp', (req, res) => {
-      res.status(405).json({
-        jsonrpc: '2.0',
-        error: {
-          code: -32000,
-          message: 'SSE streaming not supported in stateless mode. Use POST /mcp for JSON responses.'
-        },
-        id: null
-      });
-    });
-
-    // Streamable HTTP: DELETE for session cleanup (stateless — no-op)
-    app.delete('/mcp', (req, res) => {
-      res.status(200).json({ ok: true });
-    });
-
-    // Health check endpoint
-    app.get('/health', (req, res) => {
-      const healthStatus = {
-        status: 'healthy',
-        timestamp: new Date().toISOString(),
-        uptime: process.uptime(),
-        version: SERVER_VERSION,
-        database: {
-          connected: database ? database.isConnected() : false,
-          bucket: database?.bucket || null,
-          keyPrefix: database?.keyPrefix || null,
-          resourceCount: database ? Object.keys(database.resources || {}).length : 0
-        },
-        memory: process.memoryUsage(),
-        environment: {
-          nodeVersion: process.version,
-          platform: process.platform,
-          transport: 'streamable-http'
-        }
-      };
-
-      res.json(healthStatus);
-    });
-
-    // Start Express server
-    app.listen(port, host, () => {
+    this.httpTransportServer.listen(port, host, () => {
       console.log(`S3DB MCP Server running on http://${host}:${port}/mcp`);
       console.log(`Health check endpoint: http://${host}:${port}/health`);
     }).on('error', (error: Error) => {
@@ -662,6 +692,11 @@ export async function startServer(args?: TransportArgs): Promise<void> {
     log('Shutting down S3DB MCP Server...');
     if (database && database.isConnected()) {
       await database.disconnect();
+    }
+    if ((server as any).httpTransportServer) {
+      await new Promise<void>((resolve) => {
+        (server as any).httpTransportServer.close(() => resolve());
+      });
     }
     process.exit(0);
   };

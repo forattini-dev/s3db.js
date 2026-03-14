@@ -145,6 +145,7 @@ interface ApiFilterCursorPayload {
   pageSize: number;
   filtersHash: string;
   partitionSignature: string;
+  apiVersion?: string;
 }
 
 interface RelationListCursorPayload {
@@ -525,13 +526,17 @@ function decodeApiFilterCursor(cursor: string): ApiFilterCursorPayload | null {
   if (typeof filtersHash !== 'string' || filtersHash.length === 0) return null;
   if (typeof partitionSignature !== 'string' || partitionSignature.length === 0) return null;
 
+  const apiVersion = parsed.apiVersion;
+  if (apiVersion !== undefined && typeof apiVersion !== 'string') return null;
+
   return {
     v: 1,
     type: 'api-filter',
     cursor: cursorValue,
     pageSize,
     filtersHash,
-    partitionSignature
+    partitionSignature,
+    ...(apiVersion ? { apiVersion } : {})
   };
 }
 
@@ -813,6 +818,12 @@ interface HttpAppWithDescribe extends HttpAppType {
   describe?(meta: Record<string, unknown>): HttpAppWithDescribe;
 }
 
+async function getRequestBody(c: Context): Promise<Record<string, unknown>> {
+  const transformed = c.get('transformedBody' as never) as Record<string, unknown> | undefined;
+  if (transformed) return transformed;
+  return await c.req.json() as Record<string, unknown>;
+}
+
 export function createResourceRoutes(resource: ResourceLike, _version: string, config: ResourceRoutesConfig = {}, HttpApp: new () => HttpAppType): HttpAppType {
   const app = new HttpApp() as HttpAppWithDescribe;
 
@@ -1091,10 +1102,25 @@ export function createResourceRoutes(resource: ResourceLike, _version: string, c
         })
       };
 
+      const cursorApiVersion = versionPrefix || undefined;
+
       let requestCursorForPage = hasCursorParam ? cursor : null;
       if (!hasPageParam && requestCursorForPage) {
         const decodedFilterCursor = decodeApiFilterCursor(requestCursorForPage);
         if (decodedFilterCursor) {
+          if (decodedFilterCursor.apiVersion !== cursorApiVersion) {
+            const response = formatter.error('Cursor was generated for a different API version', {
+              status: 400,
+              code: 'INVALID_CURSOR',
+              details: {
+                cursorVersion: decodedFilterCursor.apiVersion || 'current',
+                requestVersion: cursorApiVersion || 'current',
+                suggestion: 'Restart pagination without cursor when switching API versions.'
+              }
+            });
+            return c.json(response, response._status as ContentfulStatusCode);
+          }
+
           if (decodedFilterCursor.pageSize !== limit) {
             const response = formatter.error('Cursor pageSize does not match current limit', {
               status: 400,
@@ -1175,7 +1201,8 @@ export function createResourceRoutes(resource: ResourceLike, _version: string, c
               cursor: scanCursor,
               pageSize: effectiveFilterLimit,
               filtersHash: filterCursorHashes.filtersHash,
-              partitionSignature: filterCursorHashes.partitionSignature
+              partitionSignature: filterCursorHashes.partitionSignature,
+              ...(cursorApiVersion ? { apiVersion: cursorApiVersion } : {})
             })
           : null;
       } else {
@@ -1354,7 +1381,7 @@ export function createResourceRoutes(resource: ResourceLike, _version: string, c
 
   if (methods.includes('POST')) {
     const createHandler = asyncHandler(async (c: Context) => {
-      const data = await c.req.json() as Record<string, unknown>;
+      const data = await getRequestBody(c);
       const writePolicy = resolveWritePolicy(apiConfig, 'create', data, c.get('user') as Record<string, unknown> | null | undefined);
       if (!writePolicy.ok) {
         const response = formatter.error('One or more fields are not writable for this operation', {
@@ -1440,7 +1467,8 @@ export function createResourceRoutes(resource: ResourceLike, _version: string, c
       const bulkCreateHandler = asyncHandler(async (c: Context) => {
         let payload: unknown;
         try {
-          payload = await c.req.json();
+          const transformed = c.get('transformedBody' as never) as Record<string, unknown> | undefined;
+          payload = transformed || await c.req.json();
         } catch {
           const response = formatter.error('Invalid bulk create payload', {
             status: 400,
@@ -1600,7 +1628,7 @@ export function createResourceRoutes(resource: ResourceLike, _version: string, c
   if (methods.includes('PUT')) {
     const updateHandler = asyncHandler(async (c: Context) => {
       const id = getDecodedRouteId(c)!;
-      const data = await c.req.json() as Record<string, unknown>;
+      const data = await getRequestBody(c);
       const writePolicy = resolveWritePolicy(apiConfig, 'update', data, c.get('user') as Record<string, unknown> | null | undefined);
       if (!writePolicy.ok) {
         const response = formatter.error('One or more fields are not writable for this operation', {
@@ -1704,7 +1732,7 @@ export function createResourceRoutes(resource: ResourceLike, _version: string, c
   if (methods.includes('PATCH')) {
     const patchHandler = asyncHandler(async (c: Context) => {
       const id = getDecodedRouteId(c)!;
-      const data = await c.req.json() as Record<string, unknown>;
+      const data = await getRequestBody(c);
       const writePolicy = resolveWritePolicy(apiConfig, 'patch', data, c.get('user') as Record<string, unknown> | null | undefined);
       if (!writePolicy.ok) {
         const response = formatter.error('One or more fields are not writable for this operation', {

@@ -1,21 +1,20 @@
 /**
  * WebSocket Server - Real-time connection manager for s3db.js resources
  *
- * Handles WebSocket connections, subscriptions, broadcasts, and authentication.
+ * Uses raffel's WebSocket adapter for connection management, heartbeat,
+ * auth, channels, backpressure, and compression. Implements s3db.js
+ * CRUD protocol via onMessage hook.
  *
  * @example
  * const server = new WebSocketServer({
  *   port: 3001,
  *   database,
- *   auth: { jwt: { secret: 'my-secret' } }
+ *   auth: { drivers: [{ driver: 'jwt', config: { secret: 'my-secret' } }] }
  * });
  * await server.start();
  */
 
 import { EventEmitter } from 'events';
-import { idGenerator } from '../../concerns/id.js';
-import { HealthManager } from './server/health-manager.class.js';
-import { ChannelManager } from './server/channel-manager.class.js';
 import type { Database } from '../../database.class.js';
 import type * as http from 'http';
 import type {
@@ -23,8 +22,9 @@ import type {
   WebSocketAuth,
   WebSocketResourceConfig,
   WebSocketOptions,
-  ClientInfo,
-  WebSocketMetrics
+  WebSocketMetrics,
+  WebSocketSendFn,
+  WebSocketMessageHandler
 } from './types.internal.js';
 
 export type {
@@ -32,7 +32,47 @@ export type {
   WebSocketAuth,
   WebSocketResourceConfig,
   WebSocketOptions,
-  ClientInfo
+  WebSocketSendFn,
+  WebSocketMessageHandler
+};
+
+type RaffelWebSocketAdapter = {
+  start(): Promise<void>;
+  stop(): Promise<void>;
+  readonly clientCount: number;
+  readonly channels: RaffelChannelManager | null;
+  send(socketId: string, message: unknown): void;
+  sendRaw(socketId: string, data: string | Buffer): void;
+  broadcast(message: unknown, except?: string): void;
+  getClient(socketId: string): { id: string; remoteAddress?: string; metadata: Record<string, string>; authSeed?: any; connectedAt: number } | undefined;
+  getClients(): Array<{ id: string; remoteAddress?: string; metadata: Record<string, string>; authSeed?: any; connectedAt: number }>;
+  disconnect(socketId: string, code?: number, reason?: string): void;
+};
+
+type RaffelChannelManager = {
+  subscribe(socketId: string, channel: string, ctx: any, since?: { seq: number; epoch: string }): Promise<{ success: boolean; error?: { code: string; status: number; message: string }; members?: any[] }>;
+  unsubscribe(socketId: string, channel: string): void;
+  unsubscribeAll(socketId: string): void;
+  isSubscribed(socketId: string, channel: string): boolean;
+  getSubscriptions(socketId: string): string[];
+  broadcast(channel: string, event: string, data: unknown, except?: string): void;
+  sendToSocket(socketId: string, channel: string, event: string, data: unknown): void;
+  getMembers(channel: string): Array<{ id: string; userId?: string; info: Record<string, unknown>; joinedAt: number }>;
+  getMember(channel: string, socketId: string): { id: string; userId?: string; info: Record<string, unknown>; joinedAt: number } | undefined;
+  getMemberCount(channel: string): number;
+  kick(channel: string, socketId: string): void;
+  getChannels(): string[];
+  getSubscribers(channel: string): string[];
+  hasChannel(channel: string): boolean;
+  getSubscriberCount(channel: string): number;
+  registerClient(socketId: string, info?: Partial<{ userId: string; data: Record<string, unknown> }>): void;
+  removeClient(socketId: string): void;
+  getClient(socketId: string): { id: string; userId?: string; data: Record<string, unknown>; channels: string[]; connectedAt: number } | undefined;
+  getClients(): Array<{ id: string; userId?: string; data: Record<string, unknown>; channels: string[]; connectedAt: number }>;
+  getClientCount(): number;
+  sendToClient(socketId: string, event: string, data: unknown): void;
+  broadcastAll(event: string, data: unknown, except?: string): void;
+  handleTyping(socketId: string, channel: string, isTyping: boolean): void;
 };
 
 export class WebSocketServer extends EventEmitter {
@@ -46,7 +86,6 @@ export class WebSocketServer extends EventEmitter {
   auth: WebSocketAuth;
   resources: Record<string, WebSocketResourceConfig>;
   heartbeatInterval: number;
-  heartbeatTimeout: number;
   maxPayloadSize: number;
   rateLimit: { enabled: boolean; windowMs?: number; maxRequests?: number };
   cors: { enabled: boolean; origin?: string };
@@ -54,17 +93,16 @@ export class WebSocketServer extends EventEmitter {
   health: { enabled?: boolean; [key: string]: any };
   channels: { enabled?: boolean; guards?: Record<string, Function> };
 
-  wss: any | null; // WebSocketServer
-  httpServer: http.Server | null;
-  clients: Map<string, ClientInfo>; // clientId -> ClientInfo
-  subscriptions: Map<string, Set<string>>; // resourceName -> Set<clientId>
-  heartbeatTimers: Map<string, { ping: NodeJS.Timeout; timeout: NodeJS.Timeout | null }>; // clientId -> { ping, timeout }
-  rateLimitState: Map<string, { count: number; windowStart: number }>; // clientId -> { count, windowStart }
-
-  _resourceListeners: Map<string, { insert: Function; update: Function; delete: Function }>;
-
-  healthManager: HealthManager | null;
-  channelManager: ChannelManager | null;
+  private adapter: RaffelWebSocketAdapter | null = null;
+  private httpServer: http.Server | null = null;
+  subscriptions: Map<string, Set<string>>;
+  private rateLimitState: Map<string, { count: number; windowStart: number }>;
+  private _resourceListeners: Map<string, { insert: Function; update: Function; delete: Function }>;
+  private _clientUsers: Map<string, any>;
+  private _messageHandlers: Record<string, WebSocketMessageHandler>;
+  private _onMessage?: (socketId: string, raw: string | Buffer, send: WebSocketSendFn) => boolean | Promise<boolean>;
+  private _onConnection?: (socketId: string, send: WebSocketSendFn, req: any) => void | Promise<void>;
+  private _onClose?: (socketId: string, code: number, reason: string) => void | Promise<void>;
 
   metrics: WebSocketMetrics;
 
@@ -78,36 +116,26 @@ export class WebSocketServer extends EventEmitter {
     this.logger = options.logger;
     this.logLevel = options.logLevel;
 
-    // Configuration
     this.auth = options.auth || {};
     this.resources = options.resources || {};
     this.heartbeatInterval = options.heartbeatInterval || 30000;
-    this.heartbeatTimeout = options.heartbeatTimeout || 10000;
-    this.maxPayloadSize = options.maxPayloadSize || 1024 * 1024; // 1MB
+    this.maxPayloadSize = options.maxPayloadSize || 1024 * 1024;
     this.rateLimit = options.rateLimit || { enabled: false };
     this.cors = options.cors || { enabled: true, origin: '*' };
     this.startupBanner = options.startupBanner !== false;
     this.health = options.health ?? { enabled: true };
     this.channels = options.channels || { enabled: true };
 
-    // Runtime state
-    this.wss = null;
-    this.httpServer = null;
-    this.clients = new Map(); // clientId -> { ws, user, subscriptions, metadata }
-    this.subscriptions = new Map(); // resourceName -> Set<clientId>
-    this.heartbeatTimers = new Map(); // clientId -> { ping, timeout }
-    this.rateLimitState = new Map(); // clientId -> { count, windowStart }
+    this._messageHandlers = options.messageHandlers || {};
+    this._onMessage = options.onMessage;
+    this._onConnection = options.onConnection;
+    this._onClose = options.onClose;
 
-    // Resource event listeners
+    this.subscriptions = new Map();
+    this.rateLimitState = new Map();
     this._resourceListeners = new Map();
+    this._clientUsers = new Map();
 
-    // Health manager
-    this.healthManager = null;
-
-    // Channel manager (presence, rooms)
-    this.channelManager = null;
-
-    // Metrics
     this.metrics = {
       connections: 0,
       disconnections: 0,
@@ -122,34 +150,11 @@ export class WebSocketServer extends EventEmitter {
    * Start WebSocket server
    */
   async start(): Promise<void> {
-    // @ts-ignore - ws module is dynamically imported
-    const { WebSocketServer: WSServer } = await import('ws');
+    const { createWebSocketAdapter, createRegistry, createRouter } = await import('raffel');
     const { createServer } = await import('http');
 
-    // Initialize health manager if enabled
-    if (this.health?.enabled !== false) {
-      this.healthManager = new HealthManager({
-        database: this.database,
-        wsServer: this,
-        healthConfig: this.health,
-        logLevel: this.logLevel,
-        logger: this.logger
-      });
-    }
-
-    // Initialize channel manager if enabled
-    if (this.channels?.enabled !== false) {
-      this.channelManager = new ChannelManager({
-        database: this.database,
-        authGuard: this.channels?.guards || {},
-        logLevel: this.logLevel,
-        logger: this.logger
-      });
-    }
-
-    // Create HTTP server for WebSocket upgrade
+    // Create HTTP server for health endpoints
     this.httpServer = createServer(async (req, res) => {
-      // Handle CORS preflight for HTTP fallback
       if (this.cors.enabled) {
         res.setHeader('Access-Control-Allow-Origin', this.cors.origin || '*');
         res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
@@ -162,9 +167,8 @@ export class WebSocketServer extends EventEmitter {
         return;
       }
 
-      // Health check endpoints (Kubernetes-compatible)
-      if (this.healthManager && req.url?.startsWith('/health')) {
-        const handled = await this.healthManager.handleRequest(req, res);
+      if (this.health?.enabled !== false && req.url?.startsWith('/health')) {
+        const handled = await this._handleHealthRequest(req, res);
         if (handled) return;
       }
 
@@ -172,18 +176,63 @@ export class WebSocketServer extends EventEmitter {
       res.end('WebSocket connection required');
     });
 
-    // Create WebSocket server
-    this.wss = new WSServer({
-      server: this.httpServer,
-      maxPayload: this.maxPayloadSize,
-      verifyClient: this._verifyClient.bind(this)
-    });
+    const registry = createRegistry();
+    const router = createRouter(registry);
 
-    // Handle connections
-    this.wss.on('connection', this._handleConnection.bind(this));
-    this.wss.on('error', (error: Error) => {
-      this.metrics.errors++;
-      this.logger?.error({ error: error.message }, 'WebSocket server error');
+    const channelsConfig = this.channels?.enabled !== false ? {
+      authorize: (socketId: string, channel: string, ctx: any) => this._authorizeChannel(socketId, channel, ctx),
+      presenceData: (socketId: string, channel: string, ctx: any) => this._getPresenceData(socketId, channel, ctx),
+      hooks: {
+        onSubscribe: (socketId: string, channel: string) => {
+          this.logger?.debug({ socketId, channel }, 'Client subscribed to channel');
+        },
+        onUnsubscribe: (socketId: string, channel: string) => {
+          this.logger?.debug({ socketId, channel }, 'Client unsubscribed from channel');
+        },
+        onMemberAdded: (channel: string, member: any) => {
+          this.emit('channel.joined', { clientId: member.id, channel });
+        },
+        onMemberRemoved: (channel: string, member: any) => {
+          this.emit('channel.left', { clientId: member.id, channel });
+        }
+      }
+    } : undefined;
+
+    this.adapter = createWebSocketAdapter(router, {
+      server: this.httpServer,
+      maxPayloadSize: this.maxPayloadSize,
+      heartbeatInterval: this.heartbeatInterval,
+      auth: this._buildRaffelAuth(),
+      channels: channelsConfig,
+      backpressure: { maxBufferedAmount: 1024 * 1024, strategy: 'drop' },
+      compression: true,
+      onConnection: async (socketId, send, req) => {
+        const user = (req as any)._user || null;
+        this._clientUsers.set(socketId, user);
+        this.metrics.connections++;
+        this.logger?.debug({ clientId: socketId, userId: user?.id }, 'Client connected');
+
+        send({
+          type: 'connected',
+          clientId: socketId,
+          user: user ? { id: user.id, role: user.role } : null,
+          timestamp: new Date().toISOString()
+        });
+
+        if (this._onConnection) {
+          await this._onConnection(socketId, send, req);
+        }
+
+        this.emit('client.connected', { clientId: socketId, user });
+      },
+      onMessage: (socketId, raw, send) => this._handleMessage(socketId, raw, send),
+      onClose: async (socketId, code, reason) => {
+        this._handleDisconnect(socketId, code, reason);
+
+        if (this._onClose) {
+          await this._onClose(socketId, code, reason);
+        }
+      }
     });
 
     // Start listening
@@ -195,7 +244,7 @@ export class WebSocketServer extends EventEmitter {
       });
     });
 
-    // Setup resource listeners
+    await this.adapter.start();
     await this._setupResourceListeners();
 
     if (this.startupBanner && this.logLevel) {
@@ -213,42 +262,23 @@ export class WebSocketServer extends EventEmitter {
    * Stop WebSocket server
    */
   async stop(): Promise<void> {
-    // Clear all heartbeat timers
-    for (const [clientId, timers] of this.heartbeatTimers) {
-      clearInterval(timers.ping);
-      clearTimeout(timers.timeout!);
-    }
-    this.heartbeatTimers.clear();
-
-    // Remove resource listeners
     this._removeResourceListeners();
 
-    // Close all client connections
-    for (const [clientId, client] of this.clients) {
-      try {
-        client.ws.close(1001, 'Server shutting down');
-      } catch (e) {
-        // Ignore close errors
-      }
-    }
-    this.clients.clear();
-    this.subscriptions.clear();
-
-    // Close WebSocket server
-    if (this.wss) {
-      await new Promise<void>((resolve) => {
-        this.wss!.close(() => resolve());
-      });
-      this.wss = null;
+    if (this.adapter) {
+      await this.adapter.stop();
+      this.adapter = null;
     }
 
-    // Close HTTP server
     if (this.httpServer) {
       await new Promise<void>((resolve) => {
         this.httpServer!.close(() => resolve());
       });
       this.httpServer = null;
     }
+
+    this.subscriptions.clear();
+    this.rateLimitState.clear();
+    this._clientUsers.clear();
 
     if (this.logLevel) {
       this.logger?.info('WebSocket server stopped');
@@ -258,38 +288,70 @@ export class WebSocketServer extends EventEmitter {
   }
 
   /**
-   * Verify client connection (authentication)
+   * Build raffel auth config from s3db auth drivers
    * @private
    */
-  private async _verifyClient(info: { origin: string; secure: boolean; req: http.IncomingMessage }, callback: (res: boolean, code?: number, message?: string, headers?: http.OutgoingHttpHeaders) => void): Promise<void> {
-    // If no auth configured, allow all
-    if (!this.auth.drivers || this.auth.drivers.length === 0) {
-      return callback(true);
+  private _buildRaffelAuth(): any {
+    const drivers = this.auth.drivers || [];
+    if (drivers.length === 0 && this.auth.required === false) return undefined;
+    if (drivers.length === 0) return undefined;
+
+    const jwtDriver = drivers.find(d => d.driver === 'jwt');
+    const apiKeyDriver = drivers.find(d => d.driver === 'apiKey');
+
+    if (jwtDriver) {
+      return {
+        mode: 'bearer' as const,
+        extractToken: (req: http.IncomingMessage) => {
+          const url = new URL(req.url || '/', `http://${req.headers.host}`);
+          return url.searchParams.get('token') ||
+            req.headers.authorization?.replace(/^Bearer\s+/i, '') ||
+            undefined;
+        },
+        validateToken: async (token: string) => {
+          const user = await this._validateToken(token);
+          if (!user) return null;
+          return {
+            auth: {
+              authenticated: true,
+              principal: user.id,
+              roles: [user.role],
+              scopes: user.scopes || [],
+              claims: user
+            }
+          };
+        }
+      };
     }
 
-    try {
-      const url = new URL(info.req.url || '/', `http://${info.req.headers.host}`);
-      const token = url.searchParams.get('token') ||
-        info.req.headers.authorization?.replace(/^Bearer\s+/i, '') ||
-        info.req.headers['x-api-key'] as string;
-
-      if (!token && this.auth.required !== false) {
-        return callback(false, 401, 'Authentication required');
-      }
-
-      // Validate token
-      const user = await this._validateToken(token);
-      if (!user && this.auth.required !== false) {
-        return callback(false, 401, 'Invalid token');
-      }
-
-      // Store user info for later retrieval
-      (info.req as any)._user = user;
-      callback(true);
-    } catch (error: any) {
-      this.logger?.error({ error: error.message }, 'Auth verification failed');
-      callback(false, 401, 'Authentication failed');
+    if (apiKeyDriver) {
+      return {
+        mode: 'custom' as const,
+        extractToken: (req: http.IncomingMessage) => {
+          const url = new URL(req.url || '/', `http://${req.headers.host}`);
+          const header = apiKeyDriver.config?.header || 'x-api-key';
+          return req.headers[header] as string ||
+            url.searchParams.get('token') ||
+            url.searchParams.get(apiKeyDriver.config?.queryParam || 'apiKey') ||
+            undefined;
+        },
+        validateToken: async (token: string) => {
+          const user = await this._validateToken(token);
+          if (!user) return null;
+          return {
+            auth: {
+              authenticated: true,
+              principal: user.id,
+              roles: [user.role],
+              scopes: user.scopes || [],
+              claims: user
+            }
+          };
+        }
+      };
     }
+
+    return undefined;
   }
 
   /**
@@ -337,7 +399,6 @@ export class WebSocketServer extends EventEmitter {
           }
         }
       } catch (e) {
-        // Try next driver
         continue;
       }
     }
@@ -346,93 +407,90 @@ export class WebSocketServer extends EventEmitter {
   }
 
   /**
-   * Handle new WebSocket connection
+   * Authorize channel subscription via raffel
    * @private
    */
-  private _handleConnection(ws: any, req: http.IncomingMessage): void {
-    const clientId = idGenerator();
-    const user = (req as any)._user || null;
+  private async _authorizeChannel(socketId: string, channel: string, ctx: any): Promise<boolean> {
+    const isPrivate = channel.startsWith('private-');
+    const isPresence = channel.startsWith('presence-');
 
-    // Store client
-    this.clients.set(clientId, {
-      ws,
-      user,
-      subscriptions: new Set(),
-      connectedAt: new Date().toISOString(),
-      lastActivity: Date.now(),
-      metadata: {
-        ip: req.socket?.remoteAddress,
-        userAgent: req.headers['user-agent']
+    if (!isPrivate && !isPresence) return true;
+
+    if (!ctx?.auth?.authenticated) return false;
+
+    const guardKey = channel.replace(/^(presence-|private-)/, '');
+    const guards = this.channels?.guards || {};
+    const guard = guards[guardKey] || guards['*'];
+
+    if (guard) {
+      try {
+        const user = this._clientUsers.get(socketId);
+        const result = await guard(user, channel, {});
+        if (result === false) return false;
+        if (typeof result === 'object' && result.authorized === false) return false;
+      } catch {
+        return false;
       }
-    });
+    }
 
-    this.metrics.connections++;
-    this.logger?.debug({ clientId, userId: user?.id }, 'Client connected');
-
-    // Setup heartbeat
-    this._setupHeartbeat(clientId, ws);
-
-    // Send welcome message
-    this._send(ws, {
-      type: 'connected',
-      clientId,
-      user: user ? { id: user.id, role: user.role } : null,
-      timestamp: new Date().toISOString()
-    });
-
-    // Handle messages
-    ws.on('message', (data: any) => this._handleMessage(clientId, data));
-
-    // Handle close
-    ws.on('close', (code: number, reason: Buffer) => {
-      this._handleDisconnect(clientId, code, reason?.toString());
-    });
-
-    // Handle errors
-    ws.on('error', (error: Error) => {
-      this.metrics.errors++;
-      this.logger?.error({ clientId, error: error.message }, 'Client error');
-    });
-
-    this.emit('client.connected', { clientId, user });
+    return true;
   }
 
   /**
-   * Handle incoming message
+   * Get presence data for channel member
    * @private
    */
-  private async _handleMessage(clientId: string, data: any): Promise<void> {
-    const client = this.clients.get(clientId);
-    if (!client) return;
+  private _getPresenceData(socketId: string, channel: string, ctx: any): Record<string, unknown> {
+    const user = this._clientUsers.get(socketId);
+    return {
+      userId: user?.id || ctx?.auth?.principal,
+      name: user?.name || user?.email || 'Anonymous',
+      avatar: user?.avatar
+    };
+  }
 
-    client.lastActivity = Date.now();
+  /**
+   * Handle incoming message via raffel onMessage hook
+   * @private
+   */
+  private async _handleMessage(socketId: string, raw: string | Buffer, send: (message: unknown) => void): Promise<boolean> {
     this.metrics.messagesReceived++;
 
-    // Rate limiting
-    if (this.rateLimit.enabled && !this._checkRateLimit(clientId)) {
-      this._send(client.ws, {
-        type: 'error',
-        code: 'RATE_LIMIT_EXCEEDED',
-        message: 'Too many requests'
-      });
-      return;
+    // User-level raw interceptor — full control, can skip everything
+    if (this._onMessage) {
+      const handled = await this._onMessage(socketId, raw, send);
+      if (handled) return true;
+    }
+
+    if (this.rateLimit.enabled && !this._checkRateLimit(socketId)) {
+      send({ type: 'error', code: 'RATE_LIMIT_EXCEEDED', message: 'Too many requests' });
+      return true;
     }
 
     let message: any;
     try {
-      message = JSON.parse(data.toString());
-    } catch (e) {
-      this._send(client.ws, {
-        type: 'error',
-        code: 'INVALID_JSON',
-        message: 'Invalid JSON format'
-      });
-      return;
+      message = JSON.parse(raw.toString());
+    } catch {
+      send({ type: 'error', code: 'INVALID_JSON', message: 'Invalid JSON format' });
+      return true;
     }
 
     const { type, requestId, ...payload } = message;
 
     try {
+      // Custom message handlers take priority over built-in
+      const customHandler = this._messageHandlers[type];
+      if (customHandler) {
+        const user = this._clientUsers.get(socketId);
+        const response = await customHandler(socketId, payload, { send, user, server: this });
+        if (response !== undefined && response !== null) {
+          if (requestId) response.requestId = requestId;
+          send(response);
+          this.metrics.messagesSent++;
+        }
+        return true;
+      }
+
       let response: any;
 
       switch (type) {
@@ -441,220 +499,166 @@ export class WebSocketServer extends EventEmitter {
           break;
 
         case 'subscribe':
-          response = await this._handleSubscribe(clientId, payload);
+          response = await this._handleSubscribe(socketId, payload);
           break;
 
         case 'unsubscribe':
-          response = await this._handleUnsubscribe(clientId, payload);
+          response = await this._handleUnsubscribe(socketId, payload);
           break;
 
         case 'publish':
-          response = await this._handlePublish(clientId, payload);
+          response = await this._handlePublish(socketId, payload);
           break;
 
         case 'get':
-          response = await this._handleGet(clientId, payload);
+          response = await this._handleGet(socketId, payload);
           break;
 
         case 'list':
-          response = await this._handleList(clientId, payload);
+          response = await this._handleList(socketId, payload);
           break;
 
         case 'insert':
-          response = await this._handleInsert(clientId, payload);
+          response = await this._handleInsert(socketId, payload);
           break;
 
         case 'update':
-          response = await this._handleUpdate(clientId, payload);
+          response = await this._handleUpdate(socketId, payload);
           break;
 
         case 'delete':
-          response = await this._handleDelete(clientId, payload);
+          response = await this._handleDelete(socketId, payload);
           break;
 
-        // Channel operations
         case 'join':
-          response = await this._handleJoinChannel(clientId, payload);
+          response = await this._handleJoinChannel(socketId, payload, send);
           break;
 
         case 'leave':
-          response = await this._handleLeaveChannel(clientId, payload);
+          response = await this._handleLeaveChannel(socketId, payload);
           break;
 
         case 'channel:message':
-          response = await this._handleChannelMessage(clientId, payload);
+          response = await this._handleChannelMessage(socketId, payload);
           break;
 
         case 'channel:update':
-          response = await this._handleChannelUpdate(clientId, payload);
+          response = await this._handleChannelUpdate(socketId, payload);
           break;
 
         default:
-          response = {
-            type: 'error',
-            code: 'UNKNOWN_MESSAGE_TYPE',
-            message: `Unknown message type: ${type}`
-          };
+          // Unknown type — pass to raffel for channel protocol handling
+          return false;
       }
 
       if (requestId) {
         response.requestId = requestId;
       }
 
-      this._send(client.ws, response);
+      send(response);
+      this.metrics.messagesSent++;
+      return true;
     } catch (error: any) {
       this.metrics.errors++;
-      this.logger?.error({ clientId, type, error: error.message }, 'Message handler error');
-
-      this._send(client.ws, {
-        type: 'error',
-        requestId,
-        code: 'INTERNAL_ERROR',
-        message: error.message
-      });
+      this.logger?.error({ clientId: socketId, type, error: error.message }, 'Message handler error');
+      send({ type: 'error', requestId, code: 'INTERNAL_ERROR', message: error.message });
+      return true;
     }
   }
 
   /**
-   * Handle subscribe request
+   * Handle subscribe request (resource subscription)
    * @private
    */
-  private async _handleSubscribe(clientId: string, payload: any): Promise<any> {
+  private async _handleSubscribe(socketId: string, payload: any): Promise<any> {
     const { resource, filter, events = ['insert', 'update', 'delete'] } = payload;
-    const client = this.clients.get(clientId)!;
+    const user = this._clientUsers.get(socketId);
 
-    // Check if resource exists and is allowed
     const resourceConfig = this.resources[resource];
     if (!resourceConfig && Object.keys(this.resources).length > 0) {
-      return {
-        type: 'error',
-        code: 'RESOURCE_NOT_FOUND',
-        message: `Resource "${resource}" not configured for WebSocket access`
-      };
+      return { type: 'error', code: 'RESOURCE_NOT_FOUND', message: `Resource "${resource}" not configured for WebSocket access` };
     }
 
-    // Check authorization
-    if (resourceConfig?.auth && client.user) {
-      const allowed = this._checkResourceAuth(client.user, resourceConfig, 'subscribe');
+    if (resourceConfig?.auth && user) {
+      const allowed = this._checkResourceAuth(user, resourceConfig, 'subscribe');
       if (!allowed) {
-        return {
-          type: 'error',
-          code: 'FORBIDDEN',
-          message: `Not authorized to subscribe to "${resource}"`
-        };
+        return { type: 'error', code: 'FORBIDDEN', message: `Not authorized to subscribe to "${resource}"` };
       }
     }
-
-    // Add subscription
-    const subscriptionKey = `${resource}:${JSON.stringify(filter || {})}`;
-    client.subscriptions.add(subscriptionKey);
 
     if (!this.subscriptions.has(resource)) {
       this.subscriptions.set(resource, new Set());
     }
-    this.subscriptions.get(resource)!.add(clientId);
+    this.subscriptions.get(resource)!.add(socketId);
 
-    this.logger?.debug({ clientId, resource, filter }, 'Client subscribed');
+    this.logger?.debug({ clientId: socketId, resource, filter }, 'Client subscribed');
 
-    return {
-      type: 'subscribed',
-      resource,
-      filter,
-      events
-    };
+    return { type: 'subscribed', resource, filter, events };
   }
 
   /**
    * Handle unsubscribe request
    * @private
    */
-  private async _handleUnsubscribe(clientId: string, payload: any): Promise<any> {
-    const { resource, filter } = payload;
-    const client = this.clients.get(clientId)!;
-
-    const subscriptionKey = `${resource}:${JSON.stringify(filter || {})}`;
-    client.subscriptions.delete(subscriptionKey);
-
-    // Check if client has any other subscriptions to this resource
-    const hasOtherSubs = Array.from(client.subscriptions).some(k => k.startsWith(`${resource}:`));
-    if (!hasOtherSubs) {
-      this.subscriptions.get(resource)?.delete(clientId);
-    }
-
-    this.logger?.debug({ clientId, resource }, 'Client unsubscribed');
-
-    return {
-      type: 'unsubscribed',
-      resource,
-      filter
-    };
+  private async _handleUnsubscribe(socketId: string, payload: any): Promise<any> {
+    const { resource } = payload;
+    this.subscriptions.get(resource)?.delete(socketId);
+    this.logger?.debug({ clientId: socketId, resource }, 'Client unsubscribed');
+    return { type: 'unsubscribed', resource };
   }
 
   /**
-   * Handle publish request (custom message to subscribers)
+   * Handle publish request
    * @private
    */
-  private async _handlePublish(clientId: string, payload: any): Promise<any> {
-    const { channel, message } = payload;
-    const client = this.clients.get(clientId)!;
+  private async _handlePublish(socketId: string, payload: any): Promise<any> {
+    const { channel, message: msg } = payload;
+    const user = this._clientUsers.get(socketId);
 
-    // Check if client can publish
     const resourceConfig = this.resources[channel];
-    if (resourceConfig?.publishAuth && client.user) {
-      const allowed = this._checkResourceAuth(client.user, resourceConfig, 'publish');
+    if (resourceConfig?.publishAuth && user) {
+      const allowed = this._checkResourceAuth(user, resourceConfig, 'publish');
       if (!allowed) {
-        return {
-          type: 'error',
-          code: 'FORBIDDEN',
-          message: `Not authorized to publish to "${channel}"`
-        };
+        return { type: 'error', code: 'FORBIDDEN', message: `Not authorized to publish to "${channel}"` };
       }
     }
 
-    // Broadcast to subscribers
     const subscriberIds = this.subscriptions.get(channel) || new Set();
     let delivered = 0;
 
     for (const subscriberId of subscriberIds) {
-      if (subscriberId === clientId) continue; // Don't send to self
-
-      const subscriber = this.clients.get(subscriberId);
-      if (subscriber) {
-        this._send(subscriber.ws, {
+      if (subscriberId === socketId) continue;
+      if (this.adapter) {
+        this.adapter.send(subscriberId, {
           type: 'message',
           channel,
-          from: clientId,
-          data: message,
+          from: socketId,
+          data: msg,
           timestamp: new Date().toISOString()
         });
         delivered++;
       }
     }
 
-    return {
-      type: 'published',
-      channel,
-      delivered
-    };
+    return { type: 'published', channel, delivered };
   }
 
   /**
    * Handle get request
    * @private
    */
-  private async _handleGet(clientId: string, payload: any): Promise<any> {
+  private async _handleGet(socketId: string, payload: any): Promise<any> {
     const { resource, id, partition } = payload;
-    const client = this.clients.get(clientId)!;
+    const user = this._clientUsers.get(socketId);
 
     const dbResource = this.database.resources?.[resource];
     if (!dbResource) {
       return { type: 'error', code: 'RESOURCE_NOT_FOUND', message: `Resource "${resource}" not found` };
     }
 
-    // Check authorization
     const resourceConfig = this.resources[resource];
     if (resourceConfig?.guard?.get) {
-      const allowed = await resourceConfig.guard.get(client.user, { id, partition });
+      const allowed = await resourceConfig.guard.get(user, { id, partition });
       if (!allowed) {
         return { type: 'error', code: 'FORBIDDEN', message: 'Access denied' };
       }
@@ -667,37 +671,29 @@ export class WebSocketServer extends EventEmitter {
       return { type: 'error', code: 'NOT_FOUND', message: 'Record not found' };
     }
 
-    // Filter protected fields
     const filtered = this._filterProtectedFields(record, resourceConfig);
-
-    return {
-      type: 'data',
-      resource,
-      data: filtered
-    };
+    return { type: 'data', resource, data: filtered };
   }
 
   /**
    * Handle list request
    * @private
    */
-  private async _handleList(clientId: string, payload: any): Promise<any> {
+  private async _handleList(socketId: string, payload: any): Promise<any> {
     const { resource, filter, partition, limit = 100, cursor } = payload;
-    const client = this.clients.get(clientId)!;
+    const user = this._clientUsers.get(socketId);
 
     const dbResource = this.database.resources?.[resource];
     if (!dbResource) {
       return { type: 'error', code: 'RESOURCE_NOT_FOUND', message: `Resource "${resource}" not found` };
     }
 
-    // Check authorization
     const resourceConfig = this.resources[resource];
     if (resourceConfig?.guard?.list) {
-      const guardResult = await resourceConfig.guard.list(client.user, { filter, partition });
+      const guardResult = await resourceConfig.guard.list(user, { filter, partition });
       if (guardResult === false) {
         return { type: 'error', code: 'FORBIDDEN', message: 'Access denied' };
       }
-      // Guard can return filter object
       if (typeof guardResult === 'object') {
         Object.assign(filter || {}, guardResult);
       }
@@ -714,7 +710,6 @@ export class WebSocketServer extends EventEmitter {
       records = await dbResource.list(options);
     }
 
-    // Filter protected fields
     const filtered = records.map((r: any) => this._filterProtectedFields(r, resourceConfig));
 
     return {
@@ -729,19 +724,18 @@ export class WebSocketServer extends EventEmitter {
    * Handle insert request
    * @private
    */
-  private async _handleInsert(clientId: string, payload: any): Promise<any> {
+  private async _handleInsert(socketId: string, payload: any): Promise<any> {
     const { resource, data } = payload;
-    const client = this.clients.get(clientId)!;
+    const user = this._clientUsers.get(socketId);
 
     const dbResource = this.database.resources?.[resource];
     if (!dbResource) {
       return { type: 'error', code: 'RESOURCE_NOT_FOUND', message: `Resource "${resource}" not found` };
     }
 
-    // Check authorization
     const resourceConfig = this.resources[resource];
     if (resourceConfig?.guard?.create) {
-      const allowed = await resourceConfig.guard.create(client.user, data);
+      const allowed = await resourceConfig.guard.create(user, data);
       if (!allowed) {
         return { type: 'error', code: 'FORBIDDEN', message: 'Access denied' };
       }
@@ -749,31 +743,25 @@ export class WebSocketServer extends EventEmitter {
 
     const record = await dbResource.insert(data);
     const filtered = this._filterProtectedFields(record, resourceConfig);
-
-    return {
-      type: 'inserted',
-      resource,
-      data: filtered
-    };
+    return { type: 'inserted', resource, data: filtered };
   }
 
   /**
    * Handle update request
    * @private
    */
-  private async _handleUpdate(clientId: string, payload: any): Promise<any> {
+  private async _handleUpdate(socketId: string, payload: any): Promise<any> {
     const { resource, id, data, partition } = payload;
-    const client = this.clients.get(clientId)!;
+    const user = this._clientUsers.get(socketId);
 
     const dbResource = this.database.resources?.[resource];
     if (!dbResource) {
       return { type: 'error', code: 'RESOURCE_NOT_FOUND', message: `Resource "${resource}" not found` };
     }
 
-    // Check authorization
     const resourceConfig = this.resources[resource];
     if (resourceConfig?.guard?.update) {
-      const allowed = await resourceConfig.guard.update(client.user, { id, data, partition });
+      const allowed = await resourceConfig.guard.update(user, { id, data, partition });
       if (!allowed) {
         return { type: 'error', code: 'FORBIDDEN', message: 'Access denied' };
       }
@@ -782,31 +770,25 @@ export class WebSocketServer extends EventEmitter {
     const options = partition ? { partition } : {};
     const record = await (dbResource as any).update(id, data, options);
     const filtered = this._filterProtectedFields(record, resourceConfig);
-
-    return {
-      type: 'updated',
-      resource,
-      data: filtered
-    };
+    return { type: 'updated', resource, data: filtered };
   }
 
   /**
    * Handle delete request
    * @private
    */
-  private async _handleDelete(clientId: string, payload: any): Promise<any> {
+  private async _handleDelete(socketId: string, payload: any): Promise<any> {
     const { resource, id, partition } = payload;
-    const client = this.clients.get(clientId)!;
+    const user = this._clientUsers.get(socketId);
 
     const dbResource = this.database.resources?.[resource];
     if (!dbResource) {
       return { type: 'error', code: 'RESOURCE_NOT_FOUND', message: `Resource "${resource}" not found` };
     }
 
-    // Check authorization
     const resourceConfig = this.resources[resource];
     if (resourceConfig?.guard?.delete) {
-      const allowed = await resourceConfig.guard.delete(client.user, { id, partition });
+      const allowed = await resourceConfig.guard.delete(user, { id, partition });
       if (!allowed) {
         return { type: 'error', code: 'FORBIDDEN', message: 'Access denied' };
       }
@@ -814,66 +796,43 @@ export class WebSocketServer extends EventEmitter {
 
     const options = partition ? { partition } : {};
     await (dbResource as any).delete(id, options);
-
-    return {
-      type: 'deleted',
-      resource,
-      id
-    };
+    return { type: 'deleted', resource, id };
   }
 
   /**
-   * Handle join channel request
+   * Handle join channel request (delegates to raffel ChannelManager)
    * @private
    */
-  private async _handleJoinChannel(clientId: string, payload: any): Promise<any> {
-    const { channel, userInfo = {} } = payload;
-    const client = this.clients.get(clientId)!;
+  private async _handleJoinChannel(socketId: string, payload: any, send: (message: unknown) => void): Promise<any> {
+    const { channel } = payload;
 
-    if (!this.channelManager) {
-      return {
-        type: 'error',
-        code: 'CHANNELS_DISABLED',
-        message: 'Channels feature is disabled'
-      };
+    if (!this.adapter?.channels) {
+      return { type: 'error', code: 'CHANNELS_DISABLED', message: 'Channels feature is disabled' };
     }
 
     if (!channel) {
-      return {
-        type: 'error',
-        code: 'INVALID_REQUEST',
-        message: 'Channel name is required'
-      };
+      return { type: 'error', code: 'INVALID_REQUEST', message: 'Channel name is required' };
     }
 
-    const result = await this.channelManager.join(clientId, channel, client.user, userInfo);
+    const user = this._clientUsers.get(socketId);
+    const ctx = user ? {
+      auth: { authenticated: true, principal: user.id, roles: [user.role], scopes: user.scopes || [] }
+    } : { auth: { authenticated: false } };
+
+    const result = await this.adapter.channels.subscribe(socketId, channel, ctx);
 
     if (!result.success) {
       return {
         type: 'error',
-        code: result.code || 'JOIN_FAILED',
-        message: result.error
+        code: result.error?.code || 'JOIN_FAILED',
+        message: result.error?.message || 'Failed to join channel'
       };
     }
-
-    // For presence channels, broadcast member_joined to other members
-    if (result.type === 'presence') {
-      this._broadcastToChannel(channel, {
-        type: 'presence:member_joined',
-        channel,
-        member: result.me,
-        timestamp: new Date().toISOString()
-      }, clientId); // Exclude the joining client
-    }
-
-    this.emit('channel.joined', { clientId, channel, type: result.type });
 
     return {
       type: 'channel:joined',
       channel,
-      channelType: result.type,
-      members: result.members,
-      me: result.me
+      members: result.members
     };
   }
 
@@ -881,251 +840,99 @@ export class WebSocketServer extends EventEmitter {
    * Handle leave channel request
    * @private
    */
-  private async _handleLeaveChannel(clientId: string, payload: any): Promise<any> {
+  private async _handleLeaveChannel(socketId: string, payload: any): Promise<any> {
     const { channel } = payload;
 
-    if (!this.channelManager) {
-      return {
-        type: 'error',
-        code: 'CHANNELS_DISABLED',
-        message: 'Channels feature is disabled'
-      };
+    if (!this.adapter?.channels) {
+      return { type: 'error', code: 'CHANNELS_DISABLED', message: 'Channels feature is disabled' };
     }
 
     if (!channel) {
-      return {
-        type: 'error',
-        code: 'INVALID_REQUEST',
-        message: 'Channel name is required'
-      };
+      return { type: 'error', code: 'INVALID_REQUEST', message: 'Channel name is required' };
     }
 
-    const channelInfo = this.channelManager.getChannelInfo(channel);
-    const result = this.channelManager.leave(clientId, channel);
+    this.adapter.channels.unsubscribe(socketId, channel);
 
-    if (!result.success) {
-      return {
-        type: 'error',
-        code: result.code || 'LEAVE_FAILED',
-        message: result.error
-      };
-    }
-
-    // For presence channels, broadcast member_left to remaining members
-    if (channelInfo?.type === 'presence' && result.member) {
-      this._broadcastToChannel(channel, {
-        type: 'presence:member_left',
-        channel,
-        member: result.member,
-        timestamp: new Date().toISOString()
-      });
-    }
-
-    this.emit('channel.left', { clientId, channel });
-
-    return {
-      type: 'channel:left',
-      channel
-    };
+    return { type: 'channel:left', channel };
   }
 
   /**
-   * Handle channel message (broadcast to channel members)
+   * Handle channel message
    * @private
    */
-  private async _handleChannelMessage(clientId: string, payload: any): Promise<any> {
+  private async _handleChannelMessage(socketId: string, payload: any): Promise<any> {
     const { channel, data, event = 'message' } = payload;
-    const client = this.clients.get(clientId)!;
 
-    if (!this.channelManager) {
-      return {
-        type: 'error',
-        code: 'CHANNELS_DISABLED',
-        message: 'Channels feature is disabled'
-      };
+    if (!this.adapter?.channels) {
+      return { type: 'error', code: 'CHANNELS_DISABLED', message: 'Channels feature is disabled' };
     }
 
     if (!channel || data === undefined) {
-      return {
-        type: 'error',
-        code: 'INVALID_REQUEST',
-        message: 'Channel and data are required'
-      };
+      return { type: 'error', code: 'INVALID_REQUEST', message: 'Channel and data are required' };
     }
 
-    // Check if client is in the channel
-    if (!this.channelManager.isInChannel(clientId, channel)) {
-      return {
-        type: 'error',
-        code: 'NOT_IN_CHANNEL',
-        message: 'You must join the channel first'
-      };
+    if (!this.adapter.channels.isSubscribed(socketId, channel)) {
+      return { type: 'error', code: 'NOT_IN_CHANNEL', message: 'You must join the channel first' };
     }
 
-    // Broadcast to all members except sender
-    const delivered = this._broadcastToChannel(channel, {
-      type: 'channel:message',
-      channel,
-      event,
+    const user = this._clientUsers.get(socketId);
+    this.adapter.channels.broadcast(channel, event, {
       data,
-      from: {
-        clientId,
-        userId: client.user?.id
-      },
+      from: { clientId: socketId, userId: user?.id },
       timestamp: new Date().toISOString()
-    }, clientId);
+    }, socketId);
 
-    return {
-      type: 'channel:sent',
-      channel,
-      delivered
-    };
+    const delivered = this.adapter.channels.getSubscriberCount(channel) - 1;
+    return { type: 'channel:sent', channel, delivered: Math.max(0, delivered) };
   }
 
   /**
-   * Handle channel update (update member info in presence channel)
+   * Handle channel update (presence info)
    * @private
    */
-  private async _handleChannelUpdate(clientId: string, payload: any): Promise<any> {
+  private async _handleChannelUpdate(socketId: string, payload: any): Promise<any> {
     const { channel, userInfo } = payload;
 
-    if (!this.channelManager) {
-      return {
-        type: 'error',
-        code: 'CHANNELS_DISABLED',
-        message: 'Channels feature is disabled'
-      };
+    if (!this.adapter?.channels) {
+      return { type: 'error', code: 'CHANNELS_DISABLED', message: 'Channels feature is disabled' };
     }
 
     if (!channel || !userInfo) {
-      return {
-        type: 'error',
-        code: 'INVALID_REQUEST',
-        message: 'Channel and userInfo are required'
-      };
+      return { type: 'error', code: 'INVALID_REQUEST', message: 'Channel and userInfo are required' };
     }
 
-    const result = this.channelManager.updateMemberInfo(clientId, channel, userInfo);
-
-    if (!result.success) {
-      return {
-        type: 'error',
-        code: 'UPDATE_FAILED',
-        message: result.error
-      };
+    const member = this.adapter.channels.getMember(channel, socketId);
+    if (!member) {
+      return { type: 'error', code: 'UPDATE_FAILED', message: 'Not a member of this channel' };
     }
 
-    // Broadcast member_updated to other members
-    this._broadcastToChannel(channel, {
-      type: 'presence:member_updated',
+    const updatedMember = { ...member, info: { ...member.info, ...userInfo, updatedAt: new Date().toISOString() } };
+
+    this.adapter.channels.broadcast(channel, 'presence:member_updated', {
       channel,
-      member: result.member,
+      member: updatedMember,
       timestamp: new Date().toISOString()
-    }, clientId);
+    }, socketId);
 
-    return {
-      type: 'channel:updated',
-      channel,
-      member: result.member
-    };
-  }
-
-  /**
-   * Broadcast message to all members in a channel
-   */
-  _broadcastToChannel(channelName: string, message: any, excludeClientId: string | null = null): number {
-    if (!this.channelManager) return 0;
-
-    const clientIds = this.channelManager.getChannelClients(channelName);
-    let delivered = 0;
-
-    for (const clientId of clientIds) {
-      if (excludeClientId && clientId === excludeClientId) continue;
-
-      const client = this.clients.get(clientId);
-      if (client && client.ws.readyState === 1) { // 1 = WebSocket.OPEN
-        this._send(client.ws, message);
-        delivered++;
-      }
-    }
-
-    return delivered;
+    return { type: 'channel:updated', channel, member: updatedMember };
   }
 
   /**
    * Handle client disconnect
    * @private
    */
-  private _handleDisconnect(clientId: string, code: number, reason: string | undefined): void {
-    const client = this.clients.get(clientId);
-    if (!client) return;
-
-    // Clear heartbeat
-    const timers = this.heartbeatTimers.get(clientId);
-    if (timers) {
-      clearInterval(timers.ping);
-      clearTimeout(timers.timeout!);
-      this.heartbeatTimers.delete(clientId);
-    }
-
-    // Remove from all subscriptions
+  private _handleDisconnect(socketId: string, code: number, reason: string): void {
     for (const [resource, subscribers] of this.subscriptions) {
-      subscribers.delete(clientId);
+      subscribers.delete(socketId);
     }
 
-    // Remove from all channels and broadcast presence:member_left
-    if (this.channelManager) {
-      const leftChannels = this.channelManager.leaveAll(clientId);
-      for (const { channel, member } of leftChannels) {
-        if (member) {
-          // This was a presence channel, broadcast member_left
-          this._broadcastToChannel(channel, {
-            type: 'presence:member_left',
-            channel,
-            member,
-            timestamp: new Date().toISOString()
-          });
-        }
-      }
-    }
-
-    // Remove client
-    this.clients.delete(clientId);
-    this.rateLimitState.delete(clientId);
+    this.rateLimitState.delete(socketId);
+    this._clientUsers.delete(socketId);
 
     this.metrics.disconnections++;
-    this.logger?.debug({ clientId, code, reason }, 'Client disconnected');
+    this.logger?.debug({ clientId: socketId, code, reason }, 'Client disconnected');
 
-    this.emit('client.disconnected', { clientId, code, reason });
-  }
-
-  /**
-   * Setup heartbeat for client
-   * @private
-   */
-  private _setupHeartbeat(clientId: string, ws: any): void {
-    const ping = setInterval(() => {
-      if (ws.readyState === 1) { // 1 = WebSocket.OPEN
-        ws.ping();
-
-        // Set timeout for pong response
-        const timeout = setTimeout(() => {
-          this.logger?.warn({ clientId }, 'Heartbeat timeout, closing connection');
-          ws.terminate();
-        }, this.heartbeatTimeout);
-
-        this.heartbeatTimers.set(clientId, { ping, timeout });
-      }
-    }, this.heartbeatInterval);
-
-    ws.on('pong', () => {
-      const timers = this.heartbeatTimers.get(clientId);
-      if (timers?.timeout) {
-        clearTimeout(timers.timeout);
-      }
-    });
-
-    this.heartbeatTimers.set(clientId, { ping, timeout: null });
+    this.emit('client.disconnected', { clientId: socketId, code, reason });
   }
 
   /**
@@ -1184,6 +991,7 @@ export class WebSocketServer extends EventEmitter {
   private _broadcastResourceEvent(resourceName: string, event: string, data: any): void {
     const subscriberIds = this.subscriptions.get(resourceName);
     if (!subscriberIds || subscriberIds.size === 0) return;
+    if (!this.adapter) return;
 
     const resourceConfig = this.resources[resourceName];
     const filteredData = this._filterProtectedFields(data, resourceConfig);
@@ -1197,41 +1005,17 @@ export class WebSocketServer extends EventEmitter {
     };
 
     let delivered = 0;
-    for (const clientId of subscriberIds) {
-      const client = this.clients.get(clientId);
-      if (client && client.ws.readyState === 1) { // 1 = WebSocket.OPEN
-        // Check if client's subscription filter matches
-        if (this._matchesSubscriptionFilter(client, resourceName, data)) {
-          this._send(client.ws, message);
-          delivered++;
-        }
+    for (const socketId of subscriberIds) {
+      try {
+        this.adapter.send(socketId, message);
+        delivered++;
+      } catch {
+        // Client may have disconnected
       }
     }
 
     this.metrics.broadcasts++;
     this.logger?.debug({ resourceName, event, delivered }, 'Broadcast sent');
-  }
-
-  /**
-   * Check if data matches client's subscription filter
-   * @private
-   */
-  private _matchesSubscriptionFilter(client: ClientInfo, resourceName: string, data: any): boolean {
-    for (const subKey of client.subscriptions) {
-      if (!subKey.startsWith(`${resourceName}:`)) continue;
-
-      const filterJson = subKey.slice(resourceName.length + 1);
-      const filter = JSON.parse(filterJson);
-
-      if (Object.keys(filter).length === 0) return true;
-
-      // Simple field matching
-      for (const [key, value] of Object.entries(filter)) {
-        if (data[key] !== value) return false;
-      }
-      return true;
-    }
-    return false;
   }
 
   /**
@@ -1244,7 +1028,6 @@ export class WebSocketServer extends EventEmitter {
     const result = { ...data };
     for (const field of resourceConfig.protected) {
       if (field.includes('.')) {
-        // Handle nested fields
         const parts = field.split('.');
         let current: any = result;
         for (let i = 0; i < parts.length - 1; i++) {
@@ -1274,7 +1057,6 @@ export class WebSocketServer extends EventEmitter {
       return allowedRoles.includes(user?.role);
     }
 
-    // More complex auth logic can be added here
     return true;
   }
 
@@ -1282,15 +1064,15 @@ export class WebSocketServer extends EventEmitter {
    * Check rate limit
    * @private
    */
-  private _checkRateLimit(clientId: string): boolean {
+  private _checkRateLimit(socketId: string): boolean {
     const now = Date.now();
     const windowMs = this.rateLimit.windowMs || 60000;
     const maxRequests = this.rateLimit.maxRequests || 100;
 
-    let state = this.rateLimitState.get(clientId);
+    let state = this.rateLimitState.get(socketId);
     if (!state || now - state.windowStart > windowMs) {
       state = { count: 0, windowStart: now };
-      this.rateLimitState.set(clientId, state);
+      this.rateLimitState.set(socketId, state);
     }
 
     state.count++;
@@ -1298,24 +1080,72 @@ export class WebSocketServer extends EventEmitter {
   }
 
   /**
-   * Send message to client
+   * Handle health check requests
    * @private
    */
-  private _send(ws: any, message: any): void {
-    if (ws.readyState === 1) { // 1 = WebSocket.OPEN
-      ws.send(JSON.stringify(message));
-      this.metrics.messagesSent++;
+  private async _handleHealthRequest(req: http.IncomingMessage, res: http.ServerResponse): Promise<boolean> {
+    const url = req.url?.split('?')[0];
+
+    if (url === '/health/live') {
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ status: 'alive', timestamp: new Date().toISOString() }));
+      return true;
     }
+
+    if (url === '/health/ready') {
+      const isHealthy = this.adapter !== null && this.database?.isConnected();
+      const status = isHealthy ? 200 : 503;
+      res.writeHead(status, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({
+        status: isHealthy ? 'healthy' : 'unhealthy',
+        timestamp: new Date().toISOString(),
+        uptime: process.uptime(),
+        checks: {
+          websocket: { status: this.adapter ? 'healthy' : 'unhealthy', clients: this.adapter?.clientCount || 0 },
+          s3db: { status: this.database?.isConnected() ? 'healthy' : 'unhealthy' }
+        }
+      }));
+      return true;
+    }
+
+    if (url === '/health') {
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({
+        status: 'ok',
+        uptime: process.uptime(),
+        timestamp: new Date().toISOString(),
+        connections: this.adapter?.clientCount || 0,
+        subscriptions: this.subscriptions.size,
+        endpoints: { liveness: '/health/live', readiness: '/health/ready' }
+      }));
+      return true;
+    }
+
+    return false;
   }
+
+  // ============================================
+  // Public API
+  // ============================================
 
   /**
    * Broadcast message to all clients
    */
-  broadcast(message: any, filter: ((client: ClientInfo) => boolean) | null = null): void {
-    for (const [clientId, client] of this.clients) {
-      if (filter && !filter(client)) continue;
-      this._send(client.ws, message);
+  broadcast(message: any, filter: ((client: any) => boolean) | null = null): void {
+    if (!this.adapter) return;
+
+    if (!filter) {
+      this.adapter.broadcast(message);
+    } else {
+      const clients = this.adapter.getClients();
+      for (const client of clients) {
+        const clientWithUser = { ...client, user: this._clientUsers.get(client.id) };
+        if (filter(clientWithUser)) {
+          this.adapter.send(client.id, message);
+        }
+      }
     }
+
     this.metrics.broadcasts++;
   }
 
@@ -1323,9 +1153,11 @@ export class WebSocketServer extends EventEmitter {
    * Send message to specific client
    */
   sendToClient(clientId: string, message: any): boolean {
-    const client = this.clients.get(clientId);
+    if (!this.adapter) return false;
+
+    const client = this.adapter.getClient(clientId);
     if (client) {
-      this._send(client.ws, message);
+      this.adapter.send(clientId, message);
       return true;
     }
     return false;
@@ -1336,14 +1168,14 @@ export class WebSocketServer extends EventEmitter {
    */
   getInfo(): any {
     return {
-      isRunning: this.wss !== null,
+      isRunning: this.adapter !== null,
       port: this.port,
       host: this.host,
-      clients: this.clients.size,
+      clients: this.adapter?.clientCount || 0,
       subscriptions: Object.fromEntries(
         Array.from(this.subscriptions.entries()).map(([k, v]) => [k, v.size])
       ),
-      channels: this.channelManager?.getStats() || null,
+      channels: this._getChannelStats(),
       metrics: { ...this.metrics }
     };
   }
@@ -1352,12 +1184,119 @@ export class WebSocketServer extends EventEmitter {
    * Get connected clients
    */
   getClients(): any[] {
-    return Array.from(this.clients.entries()).map(([id, client]) => ({
-      id,
-      user: client.user ? { id: client.user.id, role: client.user.role } : null,
-      subscriptions: Array.from(client.subscriptions),
-      connectedAt: client.connectedAt,
-      metadata: client.metadata
+    if (!this.adapter) return [];
+
+    return this.adapter.getClients().map(client => ({
+      id: client.id,
+      user: this._clientUsers.get(client.id) || null,
+      subscriptions: this.adapter?.channels?.getSubscriptions(client.id) || [],
+      connectedAt: new Date(client.connectedAt).toISOString(),
+      metadata: {
+        ip: client.remoteAddress,
+        ...client.metadata
+      }
     }));
+  }
+
+  /**
+   * Broadcast to channel members
+   */
+  _broadcastToChannel(channelName: string, message: any, excludeClientId: string | null = null): number {
+    if (!this.adapter?.channels) return 0;
+
+    const subscribers = this.adapter.channels.getSubscribers(channelName);
+    let delivered = 0;
+
+    for (const socketId of subscribers) {
+      if (excludeClientId && socketId === excludeClientId) continue;
+      this.adapter.send(socketId, message);
+      delivered++;
+    }
+
+    return delivered;
+  }
+
+  /**
+   * Get channel stats from raffel ChannelManager
+   * @private
+   */
+  private _getChannelStats(): any {
+    if (!this.adapter?.channels) return null;
+
+    const channels = this.adapter.channels.getChannels();
+    let totalMembers = 0;
+    const byType = { public: 0, private: 0, presence: 0 };
+
+    for (const ch of channels) {
+      const count = this.adapter.channels.getSubscriberCount(ch);
+      totalMembers += count;
+      if (ch.startsWith('presence-')) byType.presence++;
+      else if (ch.startsWith('private-')) byType.private++;
+      else byType.public++;
+    }
+
+    return {
+      channels: channels.length,
+      totalMembers,
+      byType,
+      clients: this.adapter.channels.getClientCount()
+    };
+  }
+
+  /**
+   * Get channel info
+   */
+  getChannelInfo(channelName: string): any | null {
+    if (!this.adapter?.channels) return null;
+    if (!this.adapter.channels.hasChannel(channelName)) return null;
+
+    const isPresence = channelName.startsWith('presence-');
+    return {
+      name: channelName,
+      type: channelName.startsWith('presence-') ? 'presence' : channelName.startsWith('private-') ? 'private' : 'public',
+      memberCount: this.adapter.channels.getSubscriberCount(channelName),
+      members: isPresence ? this.adapter.channels.getMembers(channelName) : undefined
+    };
+  }
+
+  /**
+   * List all channels
+   */
+  listChannels(options: { type?: string; prefix?: string } = {}): any[] {
+    if (!this.adapter?.channels) return [];
+
+    return this.adapter.channels.getChannels()
+      .filter(ch => {
+        if (options.type) {
+          const chType = ch.startsWith('presence-') ? 'presence' : ch.startsWith('private-') ? 'private' : 'public';
+          if (chType !== options.type) return false;
+        }
+        if (options.prefix && !ch.startsWith(options.prefix)) return false;
+        return true;
+      })
+      .map(ch => ({
+        name: ch,
+        type: ch.startsWith('presence-') ? 'presence' : ch.startsWith('private-') ? 'private' : 'public',
+        memberCount: this.adapter!.channels!.getSubscriberCount(ch)
+      }));
+  }
+
+  /**
+   * Get members of a presence channel
+   */
+  getChannelMembers(channelName: string): any[] {
+    return this.adapter?.channels?.getMembers(channelName) || [];
+  }
+
+  /**
+   * Get channel stats
+   */
+  getChannelStats(): any {
+    return this._getChannelStats() || {
+      channels: 0,
+      totalMembers: 0,
+      byType: { public: 0, private: 0, presence: 0 },
+      clients: 0
+    };
   }
 }

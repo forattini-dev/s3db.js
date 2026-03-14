@@ -49,6 +49,7 @@ export interface ApiRouteRegistryEntry {
   sourceLocation?: string;
   auth?: ApiRouteAuthMetadata;
   schema?: ApiRouteSchemaMetadata;
+  deprecated?: boolean;
 }
 
 function normalizeMethods(methods: string[]): string[] {

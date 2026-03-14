@@ -7,11 +7,11 @@
 
 import type { Context, MiddlewareHandler, HttpApp } from '#src/plugins/shared/http-runtime.js';
 import { serve } from '#src/plugins/shared/http-runtime.js';
-import type { Server } from 'node:http';
+import type { Server as HttpServer } from 'node:http';
 import type { NetworkInterfaceInfo } from 'node:os';
 import type { Socket as UdpSocket } from 'node:dgram';
 import type { IncomingMessage } from 'node:http';
-import type { Socket } from 'node:net';
+import type { Server as NetServer, Socket as NetSocket } from 'node:net';
 import type { Logger } from '../../concerns/logger.js';
 import { networkInterfaces } from 'node:os';
 import { createErrorHandler } from '../shared/error-handler.js';
@@ -49,6 +49,7 @@ export interface ApiServerOptions {
   port?: number;
   host?: string;
   listenerName?: string;
+  httpEnabled?: boolean;
   database?: DatabaseLike;
   namespace?: string | null;
   basePath?: string;
@@ -99,14 +100,21 @@ export interface ApiServerOptions {
     enabled: boolean;
     path?: string;
     maxPayloadBytes?: number;
-    onConnection?: (socket: unknown, request: unknown) => void;
-    onMessage?: (socket: unknown, message: unknown, isBinary?: boolean) => void;
-    onError?: (error: Error) => void;
+    onConnection?: (socketId: string, send: (message: unknown) => void, req: IncomingMessage) => void;
+    onMessage?: (socketId: string, raw: string | Buffer, send: (message: unknown) => void) => boolean | Promise<boolean>;
+    onClose?: (socketId: string, code: number, reason: string) => void;
   };
   udp?: {
     enabled: boolean;
     maxMessageBytes?: number;
     onMessage?: (message: Buffer, remoteInfo: { address: string; port: number; family: string; size: number }) => void;
+    onError?: (error: Error) => void;
+  };
+  tcp?: {
+    enabled: boolean;
+    onConnection?: (socket: unknown) => void;
+    onData?: (socket: unknown, data: Buffer) => void;
+    onClose?: (socket: unknown, hadError: boolean) => void;
     onError?: (error: Error) => void;
   };
   customProtocols?: Record<string, ApiListenerConfigInputProtocol | boolean>;
@@ -223,7 +231,7 @@ export class ApiServer {
   private options: Required<Pick<ApiServerOptions, 'port' | 'host'>> & ApiServerOptions;
   private logger: Logger;
   private app: HttpApp | null = null;
-  private server: Server | null = null;
+  private server: HttpServer | null = null;
   private isRunning = false;
   private initialized = false;
   private oidcMiddleware: MiddlewareHandler | null = null;
@@ -242,16 +250,28 @@ export class ApiServer {
   private _boundSigtermHandler: (() => void) | null = null;
   private _boundSigintHandler: (() => void) | null = null;
   private _metricsListeners: Map<string, (data: any) => void> = new Map();
-  private _webSocketServer: unknown | null = null;
+  private _webSocketServer: {
+    start(): Promise<void>;
+    stop(): Promise<void>;
+    readonly clientCount: number;
+    readonly channels: unknown;
+    send(socketId: string, message: unknown): void;
+    broadcast(message: unknown, except?: string): void;
+    getClient(socketId: string): { id: string; remoteAddress?: string; connectedAt: number } | undefined;
+    getClients(): Array<{ id: string; remoteAddress?: string; connectedAt: number }>;
+    disconnect(socketId: string, code?: number, reason?: string): void;
+  } | null = null;
+  private _tcpServer: NetServer | null = null;
+  private _tcpServerErrorHandler: ((error: Error) => void) | null = null;
   private _udpSocket: UdpSocket | null = null;
   private _udpSocketMessageHandler: ((message: Buffer, remoteInfo: { address: string; port: number; family: string; size: number }) => void) | null = null;
   private _udpSocketErrorHandler: ((error: Error) => void) | null = null;
-  private _webSocketUpgradeHandler: ((request: IncomingMessage, socket: Socket, head: Buffer) => void) | null = null;
 
   constructor(options: ApiServerOptions = {}) {
     this.options = {
       port: options.port || 3000,
       host: options.host || '0.0.0.0',
+      httpEnabled: options.httpEnabled !== false,
       database: options.database,
       namespace: options.namespace || null,
       basePath: options.basePath || '',
@@ -287,6 +307,7 @@ export class ApiServer {
       compression: options.compression || { enabled: false },
       websocket: options.websocket,
       udp: options.udp,
+      tcp: options.tcp,
       customProtocols: options.customProtocols || {}
     };
     this.customProtocols = this.options.customProtocols || {};
@@ -519,7 +540,12 @@ export class ApiServer {
 
     this.isRunning = true;
     if (this.options.logLevel) {
-      this.logger.info({ address: serverInfo.hostname, port: serverInfo.port }, 'Server listening');
+      this.logger.info({
+        address: serverInfo.hostname,
+        port: serverInfo.port,
+        listenerName: this.options.listenerName,
+        protocols: this._getProtocolSummary()
+      }, 'Server listening');
     }
     this._printStartupBanner(serverInfo);
 
@@ -622,6 +648,10 @@ export class ApiServer {
     return this.app;
   }
 
+  getWebSocket() {
+    return this._webSocketServer;
+  }
+
   getRegisteredRoutes() {
     return this.routeRegistry.list();
   }
@@ -657,6 +687,115 @@ export class ApiServer {
     return normalized.endsWith('/') ? normalized.slice(0, -1) : normalized;
   }
 
+  private _isProtocolEnabled(config: ApiListenerConfigInputProtocol | boolean | undefined): boolean {
+    if (config === undefined) {
+      return false;
+    }
+    if (typeof config === 'boolean') {
+      return config;
+    }
+    return config.enabled !== false;
+  }
+
+  private _normalizeCustomProtocolConfig(config: ApiListenerConfigInputProtocol | boolean | undefined): {
+    enabled: boolean;
+    path?: string;
+    maxPayloadBytes?: number;
+    maxMessageBytes?: number;
+  } {
+    if (!this._isProtocolEnabled(config)) {
+      return { enabled: false };
+    }
+
+    if (typeof config === 'boolean' || !config) {
+      return { enabled: true };
+    }
+
+    return {
+      enabled: true,
+      path: config.path,
+      maxPayloadBytes: config.maxPayloadBytes,
+      maxMessageBytes: config.maxMessageBytes
+    };
+  }
+
+  private _getProtocolSummary(): {
+    http: { enabled: boolean; path: string };
+    websocket: { enabled: boolean; path: string; maxPayloadBytes: number; hasHandlers: { onConnection: boolean; onMessage: boolean; onClose: boolean } };
+    tcp: { enabled: boolean; hasHandlers: { onConnection: boolean; onData: boolean; onClose: boolean; onError: boolean } };
+    udp: { enabled: boolean; maxMessageBytes: number; hasHandlers: { onMessage: boolean; onError: boolean } };
+    custom: Record<string, { enabled: boolean; path?: string; maxPayloadBytes?: number; maxMessageBytes?: number }>;
+  } {
+    const websocketOptions = this.options.websocket || { enabled: false } as {
+      enabled?: boolean;
+      path?: string;
+      maxPayloadBytes?: number;
+      onConnection?: (socketId: string, send: (message: unknown) => void, req: unknown) => void;
+      onMessage?: (socketId: string, raw: string | Buffer, send: (message: unknown) => void) => boolean | Promise<boolean>;
+      onClose?: (socketId: string, code: number, reason: string) => void;
+    };
+
+    const udpOptions = this.options.udp || { enabled: false } as {
+      enabled?: boolean;
+      maxMessageBytes?: number;
+      onMessage?: (message: Buffer, remoteInfo: { address: string; port: number; family: string; size: number }) => void;
+      onError?: (error: Error) => void;
+    };
+    const tcpOptions = this.options.tcp || { enabled: false } as {
+      enabled?: boolean;
+      onConnection?: (socket: unknown) => void;
+      onData?: (socket: unknown, data: Buffer) => void;
+      onClose?: (socket: unknown, hadError: boolean) => void;
+      onError?: (error: Error) => void;
+    };
+
+    const custom: Record<string, {
+      enabled: boolean;
+      path?: string;
+      maxPayloadBytes?: number;
+      maxMessageBytes?: number;
+    }> = {};
+
+    Object.entries(this.customProtocols || {}).forEach(([name, protocol]) => {
+      custom[name] = this._normalizeCustomProtocolConfig(protocol);
+    });
+
+    return {
+      http: {
+        enabled: this.options.httpEnabled !== false,
+        path: this.options.basePath || '/'
+      },
+      websocket: {
+        enabled: this._isProtocolEnabled(websocketOptions),
+        path: this._normalizeTransportPath(websocketOptions.path),
+        maxPayloadBytes: websocketOptions.maxPayloadBytes || 1024 * 1024,
+        hasHandlers: {
+          onConnection: typeof websocketOptions.onConnection === 'function',
+          onMessage: typeof websocketOptions.onMessage === 'function',
+          onClose: typeof websocketOptions.onClose === 'function'
+        }
+      },
+      tcp: {
+        enabled: this._isProtocolEnabled(tcpOptions),
+        hasHandlers: {
+          onConnection: typeof tcpOptions.onConnection === 'function',
+          onData: typeof tcpOptions.onData === 'function',
+          onClose: typeof tcpOptions.onClose === 'function',
+          onError: typeof tcpOptions.onError === 'function'
+        }
+      },
+      udp: {
+        enabled: this._isProtocolEnabled(udpOptions),
+        maxMessageBytes: udpOptions.maxMessageBytes || 65507,
+        hasHandlers: {
+          onMessage: typeof udpOptions.onMessage === 'function',
+          onError: typeof udpOptions.onError === 'function'
+        }
+      },
+      custom
+    };
+  }
+
   private _isMatchingPath(requestPath: string, protocolPath: string): boolean {
     const pathname = (() => {
       try {
@@ -671,18 +810,157 @@ export class ApiServer {
   }
 
   private async _setupProtocolBindings(): Promise<void> {
+    if (this.options.logLevel) {
+      this.logger.info({
+        listenerName: this.options.listenerName,
+        bind: {
+          host: this.options.host,
+          port: this.options.port
+        },
+        protocols: this._getProtocolSummary()
+      }, 'Preparing protocol transports');
+    }
+
+    if (this.options.tcp?.enabled) {
+      await this._setupTcpProtocol();
+      if (this.options.logLevel) {
+        this.logger.info({
+          listenerName: this.options.listenerName,
+          transport: 'tcp',
+          host: this.options.host,
+          port: this.options.port
+        }, 'TCP transport configured');
+      }
+    }
+
     if (this.options.websocket?.enabled) {
       await this._setupWebSocketProtocol();
+      if (this.options.logLevel) {
+        this.logger.info({
+          listenerName: this.options.listenerName,
+          transport: 'websocket',
+          path: this._normalizeTransportPath(this.options.websocket.path)
+        }, 'WebSocket transport configured');
+      }
     }
 
     if (this.options.udp?.enabled) {
       await this._setupUdpProtocol();
+      if (this.options.logLevel) {
+        this.logger.info({
+          listenerName: this.options.listenerName,
+          transport: 'udp',
+          host: this.options.host,
+          port: this.options.port
+        }, 'UDP transport configured');
+      }
     }
   }
 
   private async _teardownProtocolBindings(): Promise<void> {
+    await this._closeTcpProtocol();
     await this._closeUdpProtocol();
     await this._closeWebSocketProtocol();
+  }
+
+  private async _setupTcpProtocol(): Promise<void> {
+    if (!this.options.tcp?.enabled) {
+      return;
+    }
+
+    const tcpOptions = this.options.tcp;
+    const { createServer } = await import('node:net');
+    const tcpServer = createServer((socket: NetSocket) => {
+      const onConnection = tcpOptions.onConnection;
+      const onData = tcpOptions.onData;
+      const onClose = tcpOptions.onClose;
+      const onError = tcpOptions.onError;
+
+      if (typeof onConnection === 'function') {
+        onConnection(socket);
+      }
+
+      const safeDataHandler = (data: Buffer) => {
+        try {
+          onData?.(socket, data);
+        } catch (error) {
+          const err = error as Error;
+          this._loggerError('Error in TCP onData handler', err);
+        }
+      };
+
+      const safeCloseHandler = (hadError: boolean) => {
+        if (typeof onClose === 'function') {
+          onClose(socket, hadError);
+        }
+      };
+
+      if (typeof onData === 'function') {
+        socket.on('data', safeDataHandler);
+      }
+      if (typeof onClose === 'function') {
+        socket.on('close', safeCloseHandler);
+      }
+      if (typeof onError === 'function') {
+        socket.on('error', onError);
+      }
+    });
+
+    this._tcpServer = tcpServer;
+    this._tcpServerErrorHandler = (error: Error) => {
+      if (typeof tcpOptions.onError === 'function') {
+        tcpOptions.onError(error);
+      } else if (this.options.logLevel) {
+        this.logger.error({ error: error.message }, 'TCP protocol error');
+      }
+    };
+
+    tcpServer.on('error', this._tcpServerErrorHandler);
+
+    await new Promise<void>((resolve, reject) => {
+      const onTcpError = (error: Error) => {
+        tcpServer.off('error', this._tcpServerErrorHandler);
+        this._tcpServer = null;
+        this._tcpServerErrorHandler = null;
+        reject(error);
+      };
+
+      tcpServer.once('error', onTcpError);
+      tcpServer.once('listening', () => {
+        tcpServer.off('error', onTcpError);
+        tcpServer.on('error', this._tcpServerErrorHandler!);
+
+        if (this.options.logLevel) {
+          this.logger.info({
+            listenerName: this.options.listenerName,
+            transport: 'tcp',
+            host: this.options.host,
+            port: this.options.port
+          }, 'TCP transport is bound');
+        }
+        resolve();
+      });
+
+      tcpServer.listen(this.options.port, this.options.host);
+    });
+  }
+
+  private async _closeTcpProtocol(): Promise<void> {
+    if (!this._tcpServer) {
+      return;
+    }
+
+    if (this._tcpServerErrorHandler) {
+      this._tcpServer.off('error', this._tcpServerErrorHandler);
+      this._tcpServerErrorHandler = null;
+    }
+
+    await new Promise<void>((resolve) => {
+      this._tcpServer!.close(() => {
+        resolve();
+      });
+    });
+    this._tcpServer = null;
   }
 
   private async _setupWebSocketProtocol(): Promise<void> {
@@ -690,96 +968,54 @@ export class ApiServer {
       return;
     }
 
-    const websocketOptions = this.options.websocket as {
-      enabled: boolean;
-      path?: string;
-      maxPayloadBytes?: number;
-      onConnection?: (socket: unknown, request: unknown) => void;
-      onMessage?: (socket: unknown, message: unknown, isBinary?: boolean) => void;
-      onError?: (error: Error) => void;
-    };
+    const wsOpts = this.options.websocket;
+    const { createWebSocketAdapter, createRegistry, createRouter } = await import('raffel');
 
-    let WebSocketServer: any;
-    try {
-      ({ WebSocketServer } = await import('ws'));
-    } catch {
-      throw new Error('WebSocket protocol is enabled for ApiServer but dependency `ws` is missing. Install it or disable websocket.');
-    }
+    const path = this._normalizeTransportPath(wsOpts.path);
+    const registry = createRegistry();
+    const router = createRouter(registry);
 
-    this._webSocketServer = new WebSocketServer({
-      noServer: true,
-      maxPayload: websocketOptions.maxPayloadBytes || 1024 * 1024
+    const adapter = createWebSocketAdapter(router, {
+      server: this.server,
+      path,
+      maxPayloadSize: wsOpts.maxPayloadBytes || 1024 * 1024,
+      onConnection: (socketId: string, send: (message: unknown) => void, req: IncomingMessage) => {
+        if (this.options.logLevel) {
+          this.logger.info({
+            listenerName: this.options.listenerName,
+            socketId,
+            transport: 'websocket'
+          }, 'WebSocket connection established');
+        }
+        if (wsOpts.onConnection) {
+          wsOpts.onConnection(socketId, send, req);
+        }
+      },
+      onMessage: wsOpts.onMessage
+        ? (socketId: string, raw: string | Buffer, send: (message: unknown) => void) => {
+            return wsOpts.onMessage!(socketId, raw, send);
+          }
+        : undefined,
+      onClose: (socketId: string, code: number, reason: string) => {
+        if (this.options.logLevel) {
+          this.logger.debug({ socketId, code, reason }, 'WebSocket connection closed');
+        }
+        if (wsOpts.onClose) {
+          wsOpts.onClose(socketId, code, reason);
+        }
+      }
     });
 
-    const path = this._normalizeTransportPath(websocketOptions.path);
-    const onConnection = websocketOptions.onConnection;
-    const onMessage = websocketOptions.onMessage;
-    const onError = websocketOptions.onError;
-
-    const websocketErrorHandler = (error: Error) => {
-      if (typeof onError === 'function') {
-        onError(error);
-      } else if (this.options.logLevel) {
-        this.logger.error({ error: error.message }, 'WebSocket protocol error');
-      }
-    };
-
-    (this._webSocketServer as { on: (event: string, handler: (...args: any[]) => void) => void }).on('error', websocketErrorHandler);
-
-    const onUpgrade = async (request: IncomingMessage, socket: Socket, head: Buffer) => {
-      if (!request.url || !this._isMatchingPath(request.url, path)) {
-        socket.destroy();
-        return;
-      }
-
-      try {
-        (this._webSocketServer as { handleUpgrade: (req: IncomingMessage, socket: Socket, head: Buffer, cb: (client: unknown) => void) => void }).handleUpgrade(
-          request,
-          socket,
-          head,
-          (client: unknown) => {
-            if (typeof onConnection === 'function') {
-              onConnection(client, request);
-            }
-
-            const isBinaryHandler = (data: unknown, isBinary?: boolean): void => {
-              if (typeof onMessage === 'function') {
-                onMessage(client, data, isBinary);
-              }
-            };
-
-            const maybeMessageHandler = onMessage ? isBinaryHandler : null;
-            if (maybeMessageHandler && typeof (client as { on: (...args: any[]) => void }).on === 'function') {
-              (client as { on: (...args: any[]) => void }).on('message', isBinaryHandler);
-            }
-          }
-        );
-      } catch (error) {
-        this._loggerError('Error while handling WebSocket upgrade', error as Error);
-        socket.destroy();
-      }
-    };
-
-    this._webSocketUpgradeHandler = onUpgrade;
-    this.server.on('upgrade', this._webSocketUpgradeHandler);
+    this._webSocketServer = adapter;
+    await adapter.start();
   }
 
   private async _closeWebSocketProtocol(): Promise<void> {
-    if (this._webSocketUpgradeHandler && this.server) {
-      this.server.off('upgrade', this._webSocketUpgradeHandler);
-      this._webSocketUpgradeHandler = null;
-    }
-
     if (!this._webSocketServer) {
       return;
     }
 
-    await new Promise<void>((resolve) => {
-      (this._webSocketServer as { close: (callback?: () => void) => void }).close(() => {
-        resolve();
-      });
-    });
-
+    await this._webSocketServer.stop();
     this._webSocketServer = null;
   }
 
@@ -831,6 +1067,15 @@ export class ApiServer {
       socket.once('error', onBindError);
       socket.once('listening', () => {
         socket.off('error', onBindError);
+        if (this.options.logLevel) {
+          this.logger.info({
+            listenerName: this.options.listenerName,
+            transport: 'udp',
+            host: this.options.host,
+            port: this.options.port,
+            maxMessageBytes
+          }, 'UDP transport is bound');
+        }
         resolve();
       });
 

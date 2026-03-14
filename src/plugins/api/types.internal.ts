@@ -224,13 +224,15 @@ export interface ApiListenerConfigInput {
   };
   protocols?: {
     [protocol: string]: ApiListenerConfigInputProtocol | boolean | undefined;
-    http?: ApiListenerConfigInputProtocol;
-    websocket?: ApiListenerConfigInputProtocol;
-    udp?: ApiListenerConfigInputProtocol;
+    http?: ApiListenerConfigInputProtocol | undefined;
+    websocket?: ApiListenerConfigInputProtocol | undefined;
+    tcp?: ApiListenerConfigInputProtocol | undefined;
+    udp?: ApiListenerConfigInputProtocol | undefined;
   };
-  http?: ApiListenerConfigInputProtocol;
-  websocket?: ApiListenerConfigInputProtocol;
-  udp?: ApiListenerConfigInputProtocol;
+  http?: ApiListenerConfigInputProtocol | undefined;
+  websocket?: ApiListenerConfigInputProtocol | undefined;
+  tcp?: ApiListenerConfigInputProtocol | undefined;
+  udp?: ApiListenerConfigInputProtocol | undefined;
 }
 
 export interface ApiListenerHttpConfig {
@@ -244,10 +246,18 @@ export interface ApiListenerWebSocketConfig {
   maxPayloadBytes: number;
 }
 
-export type ApiListenerWebSocketProtocolHandlers = {
-  onConnection?: (socket: unknown, request: unknown) => void;
-  onMessage?: (socket: unknown, message: unknown, isBinary?: boolean) => void;
+export interface ApiListenerTcpConfig {
+  enabled: boolean;
+  onConnection?: (socket: unknown) => void;
+  onData?: (socket: unknown, data: Buffer) => void;
+  onClose?: (socket: unknown, hadError: boolean) => void;
   onError?: (error: Error) => void;
+}
+
+export type ApiListenerWebSocketProtocolHandlers = {
+  onConnection?: (socketId: string, send: (message: unknown) => void, req: unknown) => void;
+  onMessage?: (socketId: string, raw: string | Buffer, send: (message: unknown) => void) => boolean | Promise<boolean>;
+  onClose?: (socketId: string, code: number, reason: string) => void;
 };
 
 export interface ApiListenerUdpConfig {
@@ -261,6 +271,7 @@ export interface ApiListenerUdpConfig {
 export interface ApiListenerProtocolConfig {
   http: ApiListenerHttpConfig;
   websocket: ApiListenerWebSocketConfig & ApiListenerWebSocketProtocolHandlers;
+  tcp: ApiListenerTcpConfig;
   udp: ApiListenerUdpConfig;
   custom: Record<string, ApiListenerConfigInputProtocol | boolean>;
 }

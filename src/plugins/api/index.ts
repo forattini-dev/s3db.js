@@ -85,6 +85,7 @@ import type {
   ApiPluginConfig,
   ApiListenerConfigInput,
   ApiListenerConfig,
+  ApiListenerConfigInputProtocol,
   UninstallOptions,
   DatabaseLike,
   ResourceLike,
@@ -539,6 +540,20 @@ export class ApiPlugin extends Plugin {
       this.logger.info('Starting server...');
     }
 
+    if (this.config.logLevel) {
+      this.logger.info({
+        listeners: this.config.listeners.map((listener) => ({
+          name: listener.name,
+          bind: listener.bind,
+          protocols: this._buildListenerProtocolSummary(listener)
+        })),
+        httpRequestLogging: {
+          enabled: this.config.logging.enabled,
+          format: this.config.logging.format
+        }
+      }, 'API listeners resolved with protocol matrix');
+    }
+
     this._servers = this.config.listeners.map((listener) => this._createApiServer(listener));
     this.server = this._servers[0] || null;
 
@@ -547,9 +562,28 @@ export class ApiPlugin extends Plugin {
     const startedListeners: ApiServer[] = [];
 
     try {
-      for (const listenerServer of this._servers) {
+      for (let i = 0; i < this._servers.length; i += 1) {
+        const listenerServer = this._servers[i];
+        const listener = this.config.listeners[i];
+
+        if (listener && this.config.logLevel) {
+          this.logger.info({
+            listener: listener.name,
+            bind: listener.bind,
+            protocols: this._buildListenerProtocolSummary(listener)
+          }, `Starting listener ${listener.name}`);
+        }
+
         await listenerServer.start();
         startedListeners.push(listenerServer);
+
+        if (listener && this.config.logLevel) {
+          this.logger.info({
+            listener: listener.name,
+            bind: listener.bind,
+            protocolSummary: this._buildListenerProtocolSummary(listener)
+          }, `Listener ${listener.name} is up`);
+        }
       }
     } catch (err) {
       for (const startedListener of startedListeners) {
@@ -573,15 +607,23 @@ export class ApiPlugin extends Plugin {
 
     for (const listener of this.config.listeners) {
       const bindKey = `${listener.bind.host}:${listener.bind.port}`;
-      const hasTcpTransport = listener.protocols.http.enabled || listener.protocols.websocket.enabled;
+      const hasHttpOrWebSocket = listener.protocols.http.enabled || listener.protocols.websocket.enabled;
+      const hasTcpTransport = listener.protocols.tcp.enabled;
+      const hasTcpBasedTransport = hasHttpOrWebSocket || hasTcpTransport;
       const hasUdpTransport = listener.protocols.udp.enabled;
 
-      if (hasTcpTransport && !checkedTcp.has(bindKey)) {
+      if (listener.protocols.tcp.enabled && (listener.protocols.http.enabled || listener.protocols.websocket.enabled)) {
+        throw new Error(
+          `Listener "${listener.name}" cannot enable TCP together with HTTP or WebSocket on the same bind (${bindKey}). Use separate listeners for raw TCP.`
+        );
+      }
+
+      if (hasTcpBasedTransport && !checkedTcp.has(bindKey)) {
         checkedTcp.add(bindKey);
         await this._checkTcpAvailability(listener.bind.port, listener.bind.host);
       }
 
-      if (hasUdpTransport && !checkedUdp.has(bindKey) && !hasTcpTransport) {
+      if (hasUdpTransport && !checkedUdp.has(bindKey)) {
         checkedUdp.add(bindKey);
         await this._checkUdpAvailability(listener.bind.port, listener.bind.host);
       }
@@ -679,6 +721,88 @@ export class ApiPlugin extends Plugin {
     }
   }
 
+  private _isProtocolEnabled(protocolConfig: ApiListenerConfigInputProtocol | boolean | undefined): boolean {
+    if (protocolConfig === undefined) {
+      return false;
+    }
+
+    if (typeof protocolConfig === 'boolean') {
+      return protocolConfig;
+    }
+
+    return protocolConfig.enabled !== false;
+  }
+
+  private _buildListenerProtocolSummary(listener: ApiListenerConfig): {
+    http: { enabled: boolean; path: string };
+    websocket: { enabled: boolean; path: string; maxPayloadBytes: number; hasHandlers: boolean };
+    tcp: { enabled: boolean; hasHandlers: { onConnection: boolean; onData: boolean; onClose: boolean; onError: boolean } };
+    udp: { enabled: boolean; maxMessageBytes: number; hasHandlers: boolean };
+    custom: Record<string, { enabled: boolean; path?: string; maxPayloadBytes?: number; maxMessageBytes?: number }>;
+  } {
+    const custom: Record<string, { enabled: boolean; path?: string; maxPayloadBytes?: number; maxMessageBytes?: number }> = {};
+
+    Object.entries(listener.protocols.custom).forEach(([name, protocol]) => {
+      const config = this._isProtocolEnabled(protocol);
+      if (!config) {
+        return;
+      }
+
+      const details: { enabled: boolean; path?: string; maxPayloadBytes?: number; maxMessageBytes?: number } = {
+        enabled: true
+      };
+
+      if (typeof protocol === 'object' && protocol !== null) {
+        if (protocol.path) {
+          details.path = protocol.path;
+        }
+        if (protocol.maxPayloadBytes) {
+          details.maxPayloadBytes = protocol.maxPayloadBytes;
+        }
+        if (protocol.maxMessageBytes) {
+          details.maxMessageBytes = protocol.maxMessageBytes;
+        }
+      }
+
+      custom[name] = details;
+    });
+
+    return {
+      http: {
+        enabled: listener.protocols.http.enabled,
+        path: listener.protocols.http.path
+      },
+      websocket: {
+        enabled: listener.protocols.websocket.enabled,
+        path: listener.protocols.websocket.path,
+        maxPayloadBytes: listener.protocols.websocket.maxPayloadBytes,
+        hasHandlers: !!(
+          listener.protocols.websocket.onConnection
+          || listener.protocols.websocket.onMessage
+          || listener.protocols.websocket.onClose
+        )
+      },
+      tcp: {
+        enabled: listener.protocols.tcp.enabled,
+        hasHandlers: {
+          onConnection: !!listener.protocols.tcp.onConnection,
+          onData: !!listener.protocols.tcp.onData,
+          onClose: !!listener.protocols.tcp.onClose,
+          onError: !!listener.protocols.tcp.onError
+        }
+      },
+      udp: {
+        enabled: listener.protocols.udp.enabled,
+        maxMessageBytes: listener.protocols.udp.maxMessageBytes,
+        hasHandlers: !!(
+          listener.protocols.udp.onMessage
+          || listener.protocols.udp.onError
+        )
+      },
+      custom
+    };
+  }
+
   getServerInfo(): ServerInfo {
     return this.server ? this.server.getInfo() : { isRunning: false };
   }
@@ -712,11 +836,13 @@ export class ApiPlugin extends Plugin {
     const routeRegistry = new ApiRouteRegistry();
     const mergedHttpBasePath = this._mergeBasePaths(listener.protocols.http.path);
     const mergedWebSocketPath = this._mergeBasePaths(listener.protocols.websocket.path);
+    const mergedTcpEnabled = listener.protocols.tcp.enabled;
 
     return new ApiServer({
       listenerName: listener.name,
       port: listener.bind.port,
       host: listener.bind.host,
+      httpEnabled: listener.protocols.http.enabled,
       database: this.database as any,
       namespace: this.namespace,
       basePath: mergedHttpBasePath,
@@ -748,7 +874,14 @@ export class ApiPlugin extends Plugin {
         maxPayloadBytes: listener.protocols.websocket.maxPayloadBytes,
         onConnection: listener.protocols.websocket.onConnection,
         onMessage: listener.protocols.websocket.onMessage,
-        onError: listener.protocols.websocket.onError
+        onClose: listener.protocols.websocket.onClose
+      } : undefined,
+      tcp: mergedTcpEnabled ? {
+        enabled: true,
+        onConnection: listener.protocols.tcp.onConnection,
+        onData: listener.protocols.tcp.onData,
+        onClose: listener.protocols.tcp.onClose,
+        onError: listener.protocols.tcp.onError
       } : undefined,
       udp: listener.protocols.udp.enabled ? {
         enabled: true,
