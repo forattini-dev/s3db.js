@@ -209,9 +209,6 @@ importers:
       user-agents:
         specifier: ^1.0.0
         version: 1.1.673
-      ws:
-        specifier: ^8.0.0
-        version: 8.19.0
     devDependencies:
       '@babel/core':
         specifier: ^7.29.0
