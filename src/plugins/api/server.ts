@@ -9,6 +9,9 @@ import type { Context, MiddlewareHandler, HttpApp } from '#src/plugins/shared/ht
 import { serve } from '#src/plugins/shared/http-runtime.js';
 import type { Server } from 'node:http';
 import type { NetworkInterfaceInfo } from 'node:os';
+import type { Socket as UdpSocket } from 'node:dgram';
+import type { ApiListenerConfigInputProtocol } from './types.internal.js';
+import type { IncomingMessage, Socket } from 'node:http';
 import type { Logger } from '../../concerns/logger.js';
 import { networkInterfaces } from 'node:os';
 import { createErrorHandler } from '../shared/error-handler.js';
@@ -32,12 +35,20 @@ import {
   buildApiRuntimeInspectionPreview,
   type ApiRuntimeInspectionPreview
 } from './runtime-inspection.js';
-import type { AuthConfig, AuthPathRule, DocsConfig } from './types.internal.js';
+import type {
+  ApiListenerConfigInputProtocol,
+  ApiListenerWebSocketConfig,
+  ApiListenerUdpConfig,
+  AuthConfig,
+  AuthPathRule,
+  DocsConfig
+} from './types.internal.js';
 import type { AuthRule } from './auth/path-rules-middleware.js';
 
 export interface ApiServerOptions {
   port?: number;
   host?: string;
+  listenerName?: string;
   database?: DatabaseLike;
   namespace?: string | null;
   basePath?: string;
@@ -84,6 +95,21 @@ export interface ApiServerOptions {
   logger?: Logger;
   docs?: Partial<DocsConfig>;
   routeRegistry?: ApiRouteRegistry;
+  websocket?: {
+    enabled: boolean;
+    path?: string;
+    maxPayloadBytes?: number;
+    onConnection?: (socket: unknown, request: unknown) => void;
+    onMessage?: (socket: unknown, message: unknown, isBinary?: boolean) => void;
+    onError?: (error: Error) => void;
+  };
+  udp?: {
+    enabled: boolean;
+    maxMessageBytes?: number;
+    onMessage?: (message: Buffer, remoteInfo: { address: string; port: number; family: string; size: number }) => void;
+    onError?: (error: Error) => void;
+  };
+  customProtocols?: Record<string, ApiListenerConfigInputProtocol | boolean>;
 }
 
 export interface StaticConfig {
@@ -193,6 +219,7 @@ function createDefaultAuthConfig(): AuthConfig {
 }
 
 export class ApiServer {
+  public readonly customProtocols: Record<string, ApiListenerConfigInputProtocol | boolean>;
   private options: Required<Pick<ApiServerOptions, 'port' | 'host'>> & ApiServerOptions;
   private logger: Logger;
   private app: HttpApp | null = null;
@@ -215,6 +242,11 @@ export class ApiServer {
   private _boundSigtermHandler: (() => void) | null = null;
   private _boundSigintHandler: (() => void) | null = null;
   private _metricsListeners: Map<string, (data: any) => void> = new Map();
+  private _webSocketServer: unknown | null = null;
+  private _udpSocket: UdpSocket | null = null;
+  private _udpSocketMessageHandler: ((message: Buffer, remoteInfo: { address: string; port: number; family: string; size: number }) => void) | null = null;
+  private _udpSocketErrorHandler: ((error: Error) => void) | null = null;
+  private _webSocketUpgradeHandler: ((request: IncomingMessage, socket: Socket, head: Buffer) => void) | null = null;
 
   constructor(options: ApiServerOptions = {}) {
     this.options = {
@@ -252,8 +284,12 @@ export class ApiServer {
       maxBodySize: options.maxBodySize || 10 * 1024 * 1024,
       startupBanner: options.startupBanner !== false,
       rootRoute: options.rootRoute,
-      compression: options.compression || { enabled: false }
+      compression: options.compression || { enabled: false },
+      websocket: options.websocket,
+      udp: options.udp,
+      customProtocols: options.customProtocols || {}
     };
+    this.customProtocols = this.options.customProtocols || {};
 
     this.logger = options.logger!;
     this.routeRegistry = options.routeRegistry || new ApiRouteRegistry();
@@ -456,7 +492,7 @@ export class ApiServer {
       };
     }
 
-    return new Promise((resolve, reject) => {
+    const serverInfo = await new Promise<ServerInfo>((resolve, reject) => {
       try {
         this.server = serve({
           fetch: fetchHandler,
@@ -465,44 +501,55 @@ export class ApiServer {
           keepAliveTimeout: 65000,
           headersTimeout: 66000,
           onListen: ({ port, hostname }) => {
-            const info: ServerInfo = { port, hostname };
-            this.isRunning = true;
-            if (this.options.logLevel) {
-              this.logger.info({ address: info.hostname, port: info.port }, 'Server listening');
-            }
-            this._printStartupBanner(info);
-
-            const shutdownHandler = async (signal: string) => {
-              if (this.options.logLevel) {
-                this.logger.info({ signal }, 'Received shutdown signal');
-              }
-              try {
-                await this.shutdown({ timeout: 30000 });
-                process.exit(0);
-              } catch (err) {
-                if (this.options.logLevel) {
-                  this.logger.error({ error: (err as Error).message }, 'Error during shutdown');
-                }
-                process.exit(1);
-              }
-            };
-
-            if (!this._signalHandlersSetup) {
-              this._boundSigtermHandler = () => shutdownHandler('SIGTERM');
-              this._boundSigintHandler = () => shutdownHandler('SIGINT');
-              bumpProcessMaxListeners(2);
-              process.once('SIGTERM', this._boundSigtermHandler);
-              process.once('SIGINT', this._boundSigintHandler);
-              this._signalHandlersSetup = true;
-            }
-
-            resolve();
+            resolve({ port, hostname });
           }
         });
       } catch (err) {
         reject(err);
       }
     });
+
+    try {
+      await this._setupProtocolBindings();
+    } catch (err) {
+      await this._teardownProtocolBindings();
+      await this._closeHttpServer();
+      throw err;
+    }
+
+    this.isRunning = true;
+    if (this.options.logLevel) {
+      this.logger.info({ address: serverInfo.hostname, port: serverInfo.port }, 'Server listening');
+    }
+    this._printStartupBanner(serverInfo);
+
+    const shutdownHandler = async (signal: string) => {
+      if (this.options.logLevel) {
+        this.logger.info({ signal }, 'Received shutdown signal');
+      }
+      try {
+        await this.shutdown({ timeout: 30000 });
+        process.exit(0);
+      } catch (err) {
+        if (this.options.logLevel) {
+          this.logger.error({ error: (err as Error).message }, 'Error during shutdown');
+        }
+        process.exit(1);
+      }
+    };
+
+    if (!this._signalHandlersSetup) {
+      this._boundSigtermHandler = () => {
+        void shutdownHandler('SIGTERM');
+      };
+      this._boundSigintHandler = () => {
+        void shutdownHandler('SIGINT');
+      };
+      bumpProcessMaxListeners(2);
+      process.once('SIGTERM', this._boundSigtermHandler);
+      process.once('SIGINT', this._boundSigintHandler);
+      this._signalHandlersSetup = true;
+    }
   }
 
   async stop(): Promise<void> {
@@ -512,6 +559,8 @@ export class ApiServer {
       }
       return;
     }
+
+    await this._teardownProtocolBindings();
 
     if (this.server && typeof this.server.close === 'function') {
       await new Promise<void>((resolve) => {
@@ -575,6 +624,249 @@ export class ApiServer {
 
   getRegisteredRoutes() {
     return this.routeRegistry.list();
+  }
+
+  private async _closeHttpServer(): Promise<void> {
+    if (!this.server) {
+      return;
+    }
+
+    await new Promise<void>((resolve, reject) => {
+      this.server!.close((err) => {
+        if (err) {
+          reject(err);
+          return;
+        }
+        resolve();
+      });
+    });
+
+    this.server = null;
+  }
+
+  private _normalizeTransportPath(rawPath?: string): string {
+    if (!rawPath) {
+      return '/';
+    }
+
+    const normalized = rawPath.startsWith('/') ? rawPath : `/${rawPath}`;
+    if (normalized === '/') {
+      return '/';
+    }
+
+    return normalized.endsWith('/') ? normalized.slice(0, -1) : normalized;
+  }
+
+  private _isMatchingPath(requestPath: string, protocolPath: string): boolean {
+    const pathname = (() => {
+      try {
+        return new URL(requestPath, 'http://localhost').pathname;
+      } catch {
+        return requestPath;
+      }
+    })();
+
+    const normalizedRequest = this._normalizeTransportPath(pathname);
+    return normalizedRequest === protocolPath;
+  }
+
+  private async _setupProtocolBindings(): Promise<void> {
+    if (this.options.websocket?.enabled) {
+      await this._setupWebSocketProtocol();
+    }
+
+    if (this.options.udp?.enabled) {
+      await this._setupUdpProtocol();
+    }
+  }
+
+  private async _teardownProtocolBindings(): Promise<void> {
+    await this._closeUdpProtocol();
+    await this._closeWebSocketProtocol();
+  }
+
+  private async _setupWebSocketProtocol(): Promise<void> {
+    if (!this.options.websocket?.enabled || !this.server) {
+      return;
+    }
+
+    const websocketOptions = this.options.websocket as {
+      enabled: boolean;
+      path?: string;
+      maxPayloadBytes?: number;
+      onConnection?: (socket: unknown, request: unknown) => void;
+      onMessage?: (socket: unknown, message: unknown, isBinary?: boolean) => void;
+      onError?: (error: Error) => void;
+    };
+
+    let WebSocketServer: any;
+    try {
+      ({ WebSocketServer } = await import('ws'));
+    } catch {
+      throw new Error('WebSocket protocol is enabled for ApiServer but dependency `ws` is missing. Install it or disable websocket.');
+    }
+
+    this._webSocketServer = new WebSocketServer({
+      noServer: true,
+      maxPayload: websocketOptions.maxPayloadBytes || 1024 * 1024
+    });
+
+    const path = this._normalizeTransportPath(websocketOptions.path);
+    const onConnection = websocketOptions.onConnection;
+    const onMessage = websocketOptions.onMessage;
+    const onError = websocketOptions.onError;
+
+    const websocketErrorHandler = (error: Error) => {
+      if (typeof onError === 'function') {
+        onError(error);
+      } else if (this.options.logLevel) {
+        this.logger.error({ error: error.message }, 'WebSocket protocol error');
+      }
+    };
+
+    (this._webSocketServer as { on: (event: string, handler: (...args: any[]) => void) => void }).on('error', websocketErrorHandler);
+
+    const onUpgrade = async (request: IncomingMessage, socket: Socket, head: Buffer) => {
+      if (!request.url || !this._isMatchingPath(request.url, path)) {
+        socket.destroy();
+        return;
+      }
+
+      try {
+        (this._webSocketServer as { handleUpgrade: (req: IncomingMessage, socket: Socket, head: Buffer, cb: (client: unknown) => void) => void }).handleUpgrade(
+          request,
+          socket,
+          head,
+          (client: unknown) => {
+            if (typeof onConnection === 'function') {
+              onConnection(client, request);
+            }
+
+            const isBinaryHandler = (data: unknown, isBinary?: boolean): void => {
+              if (typeof onMessage === 'function') {
+                onMessage(client, data, isBinary);
+              }
+            };
+
+            const maybeMessageHandler = onMessage ? isBinaryHandler : null;
+            if (maybeMessageHandler && typeof (client as { on: (...args: any[]) => void }).on === 'function') {
+              (client as { on: (...args: any[]) => void }).on('message', isBinaryHandler);
+            }
+          }
+        );
+      } catch (error) {
+        this._loggerError('Error while handling WebSocket upgrade', error as Error);
+        socket.destroy();
+      }
+    };
+
+    this._webSocketUpgradeHandler = onUpgrade;
+    this.server.on('upgrade', this._webSocketUpgradeHandler);
+  }
+
+  private async _closeWebSocketProtocol(): Promise<void> {
+    if (this._webSocketUpgradeHandler && this.server) {
+      this.server.off('upgrade', this._webSocketUpgradeHandler);
+      this._webSocketUpgradeHandler = null;
+    }
+
+    if (!this._webSocketServer) {
+      return;
+    }
+
+    await new Promise<void>((resolve) => {
+      (this._webSocketServer as { close: (callback?: () => void) => void }).close(() => {
+        resolve();
+      });
+    });
+
+    this._webSocketServer = null;
+  }
+
+  private async _setupUdpProtocol(): Promise<void> {
+    if (!this.options.udp?.enabled || !this.options.udp) {
+      return;
+    }
+
+    const { createSocket } = await import('node:dgram');
+    const udpOptions = this.options.udp;
+    const maxMessageBytes = udpOptions.maxMessageBytes || 65507;
+    const socket = createSocket(this.options.host.includes(':') ? 'udp6' : 'udp4');
+    this._udpSocket = socket;
+
+    this._udpSocketMessageHandler = (message, remoteInfo) => {
+      if (message.length > maxMessageBytes) {
+        if (this.options.logLevel) {
+          this.logger.debug(
+            { messageLength: message.length, maxMessageBytes, address: remoteInfo.address, port: remoteInfo.port },
+            'Dropped UDP message bigger than maxMessageBytes'
+          );
+        }
+        return;
+      }
+
+      if (typeof udpOptions.onMessage === 'function') {
+        udpOptions.onMessage(message, remoteInfo);
+      }
+    };
+
+    this._udpSocketErrorHandler = (error) => {
+      if (typeof udpOptions.onError === 'function') {
+        udpOptions.onError(error);
+      } else if (this.options.logLevel) {
+        this.logger.error({ error: error.message }, 'UDP protocol error');
+      }
+    };
+
+    socket.on('message', this._udpSocketMessageHandler);
+    socket.on('error', this._udpSocketErrorHandler);
+
+    await new Promise<void>((resolve, reject) => {
+      const onBindError = (error: Error) => {
+        socket.off('error', this._udpSocketErrorHandler as (...args: unknown[]) => void);
+        this._udpSocket = null;
+        socket.close();
+        reject(error);
+      };
+      socket.once('error', onBindError);
+      socket.once('listening', () => {
+        socket.off('error', onBindError);
+        resolve();
+      });
+
+      socket.bind(this.options.port, this.options.host);
+    });
+  }
+
+  private async _closeUdpProtocol(): Promise<void> {
+    if (!this._udpSocket) {
+      return;
+    }
+
+    if (this._udpSocketMessageHandler) {
+      this._udpSocket.off('message', this._udpSocketMessageHandler);
+      this._udpSocketMessageHandler = null;
+    }
+
+    if (this._udpSocketErrorHandler) {
+      this._udpSocket.off('error', this._udpSocketErrorHandler);
+      this._udpSocketErrorHandler = null;
+    }
+
+    await new Promise<void>((resolve) => {
+      this._udpSocket!.close(() => {
+        resolve();
+      });
+    });
+    this._udpSocket = null;
+  }
+
+  private _loggerError(message: string, error: Error): void {
+    if (!this.options.logLevel) {
+      return;
+    }
+
+    this.logger.error({ error: error.message }, message);
   }
 
   async previewRuntime(): Promise<ApiRuntimeInspectionPreview> {
@@ -697,6 +989,7 @@ export class ApiServer {
     }
 
     if (this.server) {
+      await this._teardownProtocolBindings();
       await new Promise<void>((resolve, reject) => {
         this.server!.close((err) => {
           if (err) reject(err);

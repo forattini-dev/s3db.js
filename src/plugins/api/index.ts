@@ -35,12 +35,14 @@
 import type { Context, MiddlewareHandler } from '#src/plugins/shared/http-runtime.js';
 import { Plugin } from '../plugin.class.js';
 import { requirePluginDependency } from '../concerns/plugin-dependencies.js';
+import * as raffel from 'raffel';
 import tryFn from '../../concerns/try-fn.js';
 import { ApiServer } from './server.js';
 import { ApiRouteRegistry } from './route-registry.js';
 import { idGenerator } from '../../concerns/id.js';
 import { resolveResourceName } from '../concerns/resource-names.js';
 import { normalizeBasePath } from './utils/base-path.js';
+import { normalizeApiListeners } from './config/normalize-listeners.js';
 import { normalizeAuthConfig } from './config/normalize-auth.js';
 import { normalizeLoggingConfig } from './config/normalize-logging.js';
 import { normalizeRateLimitRules } from './config/normalize-ratelimit.js';
@@ -81,6 +83,8 @@ import type {
   AuthDriverDefinition,
   AuthConfig,
   ApiPluginConfig,
+  ApiListenerConfigInput,
+  ApiListenerConfig,
   UninstallOptions,
   DatabaseLike,
   ResourceLike,
@@ -93,6 +97,7 @@ export interface ApiPluginOptions {
   basePath?: string;
   startupBanner?: boolean;
   versionPrefix?: boolean | string;
+  listeners?: ApiListenerConfigInput | ApiListenerConfigInput[];
   docs?: Partial<DocsConfig>;
   auth?: Partial<AuthConfig> & {
     resource?: string;
@@ -152,10 +157,12 @@ function requiresManagedAuthResource(drivers: Array<{ driver?: string; type?: st
 
 
 export class ApiPlugin extends Plugin {
+  public readonly raffel = raffel;
   declare config: ApiPluginConfig;
   private _usersResourceDescriptor: ResourceDescriptor;
   usersResourceName: string;
   server: ApiServer | null;
+  private _servers: ApiServer[] = [];
   usersResource: ResourceLike | null;
   compiledMiddlewares: MiddlewareHandler[];
 
@@ -163,6 +170,14 @@ export class ApiPlugin extends Plugin {
     super(options as ConstructorParameters<typeof Plugin>[0]);
 
     const resourceNamesOption = options.resourceNames || {};
+    const defaultPort = options.port || 3000;
+    const defaultHost = options.host || '0.0.0.0';
+    const normalizedListeners = normalizeApiListeners(options.listeners, {
+      host: defaultHost,
+      port: defaultPort
+    });
+    const primaryListener = normalizedListeners[0];
+
     const jwtDriver = options.auth?.drivers?.find(d => d.driver === 'jwt');
     const jwtDriverResource = jwtDriver?.config?.resource;
     this._usersResourceDescriptor = {
@@ -200,12 +215,13 @@ export class ApiPlugin extends Plugin {
     normalizedAuth.createResource = options.auth?.createResource !== false;
 
     this.config = {
-      port: options.port || 3000,
-      host: options.host || '0.0.0.0',
+      port: primaryListener.bind.port,
+      host: primaryListener.bind.host,
       logLevel: this.logLevel,
       basePath: normalizeBasePath(options.basePath),
       startupBanner: options.startupBanner !== false,
       versionPrefix: options.versionPrefix !== undefined ? options.versionPrefix : false,
+      listeners: normalizedListeners,
 
       docs: {
         enabled: options.docs?.enabled !== false,
@@ -520,10 +536,27 @@ export class ApiPlugin extends Plugin {
       this.logger.info('Starting server...');
     }
 
-    this.server = this._createApiServer();
+    this._servers = this.config.listeners.map((listener) => this._createApiServer(listener));
+    this.server = this._servers[0] || null;
 
-    await this._checkPortAvailability(this.config.port, this.config.host);
-    await this.server.start();
+    await this._checkListenersAvailability();
+
+    const startedListeners: ApiServer[] = [];
+
+    try {
+      for (const listenerServer of this._servers) {
+        await listenerServer.start();
+        startedListeners.push(listenerServer);
+      }
+    } catch (err) {
+      for (const startedListener of startedListeners) {
+        await startedListener.stop();
+      }
+
+      this._servers = [];
+      this.server = null;
+      throw err;
+    }
 
     this.emit('plugin.started', {
       port: this.config.port,
@@ -531,7 +564,28 @@ export class ApiPlugin extends Plugin {
     });
   }
 
-  private async _checkPortAvailability(port: number, host: string): Promise<void> {
+  private async _checkListenersAvailability(): Promise<void> {
+    const checkedTcp = new Set<string>();
+    const checkedUdp = new Set<string>();
+
+    for (const listener of this.config.listeners) {
+      const bindKey = `${listener.bind.host}:${listener.bind.port}`;
+      const hasTcpTransport = listener.protocols.http.enabled || listener.protocols.websocket.enabled;
+      const hasUdpTransport = listener.protocols.udp.enabled;
+
+      if (hasTcpTransport && !checkedTcp.has(bindKey)) {
+        checkedTcp.add(bindKey);
+        await this._checkTcpAvailability(listener.bind.port, listener.bind.host);
+      }
+
+      if (hasUdpTransport && !checkedUdp.has(bindKey) && !hasTcpTransport) {
+        checkedUdp.add(bindKey);
+        await this._checkUdpAvailability(listener.bind.port, listener.bind.host);
+      }
+    }
+  }
+
+  private async _checkTcpAvailability(port: number, host: string): Promise<void> {
     const { createServer } = await import('net');
     return new Promise((resolve, reject) => {
       const server = createServer();
@@ -552,14 +606,35 @@ export class ApiPlugin extends Plugin {
     });
   }
 
+  private async _checkUdpAvailability(port: number, host: string): Promise<void> {
+    const { createSocket } = await import('node:dgram');
+    return new Promise((resolve, reject) => {
+      const socket = createSocket(host.includes(':') ? 'udp6' : 'udp4');
+      const onError = (err: NodeJS.ErrnoException) => {
+        if ((err as NodeJS.ErrnoException).code === 'EADDRINUSE') {
+          reject(new Error(`UDP bind on ${host}:${port} is already in use. Please choose a different port or stop the process using it.`));
+        } else {
+          reject(err);
+        }
+      };
+
+      socket.once('error', onError);
+      socket.bind(port, host, () => {
+        socket.removeListener('error', onError);
+        socket.close(() => resolve());
+      });
+    });
+  }
+
   override async onStop(): Promise<void> {
     if (this.config.logLevel) {
       this.logger.info('Stopping server...');
     }
 
-    if (this.server) {
-      await this.server.stop();
+    for (const runningServer of this._servers) {
+      await runningServer.stop();
     }
+    this._servers = [];
     this.server = null;
   }
 
@@ -577,8 +652,10 @@ export class ApiPlugin extends Plugin {
     if (this.config?.auth) {
       this.config.auth.resource = this.usersResourceName;
     }
-    if ((this.server as unknown as { failban?: { setNamespace: (ns: string) => void } })?.failban) {
-      (this.server as unknown as { failban: { setNamespace: (ns: string) => void } }).failban.setNamespace(this.namespace ?? '');
+    for (const runningServer of this._servers) {
+      if ((runningServer as unknown as { failban?: { setNamespace: (ns: string) => void } })?.failban) {
+        (runningServer as unknown as { failban: { setNamespace: (ns: string) => void } }).failban.setNamespace(this.namespace ?? '');
+      }
     }
   }
 
@@ -619,15 +696,27 @@ export class ApiPlugin extends Plugin {
     return await this._withPreviewServer((server) => server.contractTests());
   }
 
-  private _createApiServer(): ApiServer {
+  private _mergeBasePaths(listenerBasePath?: string): string {
+    const globalBasePath = normalizeBasePath(this.config.basePath);
+    const listenerBase = normalizeBasePath(listenerBasePath);
+    if (!globalBasePath) {
+      return listenerBase;
+    }
+    return `${globalBasePath}${listenerBase}`;
+  }
+
+  private _createApiServer(listener: ApiListenerConfig): ApiServer {
     const routeRegistry = new ApiRouteRegistry();
+    const mergedHttpBasePath = this._mergeBasePaths(listener.protocols.http.path);
+    const mergedWebSocketPath = this._mergeBasePaths(listener.protocols.websocket.path);
 
     return new ApiServer({
-      port: this.config.port,
-      host: this.config.host,
+      listenerName: listener.name,
+      port: listener.bind.port,
+      host: listener.bind.host,
       database: this.database as any,
       namespace: this.namespace,
-      basePath: this.config.basePath,
+      basePath: mergedHttpBasePath,
       versionPrefix: this.config.versionPrefix,
       resources: this.config.resources,
       routes: this.config.routes,
@@ -650,6 +739,21 @@ export class ApiPlugin extends Plugin {
       docs: this.config.docs,
       startupBanner: this.config.startupBanner,
       logger: this.logger,
+      websocket: listener.protocols.websocket.enabled ? {
+        enabled: true,
+        path: mergedWebSocketPath,
+        maxPayloadBytes: listener.protocols.websocket.maxPayloadBytes,
+        onConnection: listener.protocols.websocket.onConnection,
+        onMessage: listener.protocols.websocket.onMessage,
+        onError: listener.protocols.websocket.onError
+      } : undefined,
+      udp: listener.protocols.udp.enabled ? {
+        enabled: true,
+        maxMessageBytes: listener.protocols.udp.maxMessageBytes,
+        onMessage: listener.protocols.udp.onMessage,
+        onError: listener.protocols.udp.onError
+      } : undefined,
+      customProtocols: listener.protocols.custom,
       routeRegistry
     });
   }
@@ -663,7 +767,7 @@ export class ApiPlugin extends Plugin {
       throw new Error('ApiPlugin preview requires the plugin to be attached to a database via usePlugin().');
     }
 
-    const previewServer = this._createApiServer();
+    const previewServer = this._createApiServer(this.config.listeners[0]);
     return await fn(previewServer);
   }
 }

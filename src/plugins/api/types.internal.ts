@@ -208,6 +208,80 @@ export interface AuthConfig {
   [key: string]: unknown;
 }
 
+export interface ApiListenerConfigInputProtocol {
+  enabled?: boolean;
+  path?: string;
+  maxPayloadBytes?: number;
+  maxMessageBytes?: number;
+  [key: string]: unknown;
+}
+
+export interface ApiListenerConfigInput {
+  name?: string;
+  bind?: {
+    host?: string;
+    port?: number;
+  };
+  protocols?: {
+    [protocol: string]: ApiListenerConfigInputProtocol | boolean;
+    http?: ApiListenerConfigInputProtocol;
+    websocket?: ApiListenerConfigInputProtocol;
+    udp?: ApiListenerConfigInputProtocol;
+  };
+  http?: ApiListenerConfigInputProtocol;
+  websocket?: ApiListenerConfigInputProtocol;
+  udp?: ApiListenerConfigInputProtocol;
+}
+
+export interface ApiListenerHttpConfig {
+  enabled: boolean;
+  path: string;
+}
+
+export interface ApiListenerWebSocketConfig {
+  enabled: boolean;
+  path: string;
+  maxPayloadBytes: number;
+}
+
+export type ApiListenerWebSocketProtocolHandlers = {
+  onConnection?: (socket: unknown, request: unknown) => void;
+  onMessage?: (socket: unknown, message: unknown, isBinary?: boolean) => void;
+  onError?: (error: Error) => void;
+};
+
+export interface ApiListenerUdpConfig {
+  enabled: boolean;
+  maxMessageBytes: number;
+
+  onMessage?: (message: Buffer, remoteInfo: { address: string; port: number; family: string; size: number }) => void;
+  onError?: (error: Error) => void;
+}
+
+export interface ApiListenerProtocolConfig {
+  http: ApiListenerHttpConfig;
+  websocket: ApiListenerWebSocketConfig & ApiListenerWebSocketProtocolHandlers;
+  udp: ApiListenerUdpConfig;
+  custom: Record<string, ApiListenerConfigInputProtocol | boolean>;
+}
+
+export interface ApiListenerConfig {
+  name: string;
+  bind: {
+    host: string;
+    port: number;
+  };
+  protocols: ApiListenerProtocolConfig;
+}
+
+export interface ApiListenerTransportStatus {
+  enabled: boolean;
+  path?: string;
+  maxPayloadBytes?: number;
+  maxMessageBytes?: number;
+  error?: string;
+}
+
 export interface ApiPluginConfig {
   port: number;
   host: string;
@@ -236,6 +310,7 @@ export interface ApiPluginConfig {
   health: HealthConfig;
   maxBodySize: number;
   resources: Record<string, unknown>;
+  listeners: ApiListenerConfig[];
 }
 
 export interface UninstallOptions {
