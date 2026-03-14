@@ -919,7 +919,9 @@ export class ApiServer {
 
     await new Promise<void>((resolve, reject) => {
       const onTcpError = (error: Error) => {
-        tcpServer.off('error', this._tcpServerErrorHandler);
+        if (this._tcpServerErrorHandler) {
+          tcpServer.off('error', this._tcpServerErrorHandler);
+        }
         this._tcpServer = null;
         this._tcpServerErrorHandler = null;
         reject(error);

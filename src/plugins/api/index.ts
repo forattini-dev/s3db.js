@@ -563,7 +563,7 @@ export class ApiPlugin extends Plugin {
 
     try {
       for (let i = 0; i < this._servers.length; i += 1) {
-        const listenerServer = this._servers[i];
+        const listenerServer = this._servers[i]!;
         const listener = this.config.listeners[i];
 
         if (listener && this.config.logLevel) {
