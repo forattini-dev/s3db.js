@@ -177,6 +177,9 @@ export class ApiPlugin extends Plugin {
       port: defaultPort
     });
     const primaryListener = normalizedListeners[0];
+    if (!primaryListener) {
+      throw new Error('ApiPlugin could not resolve a primary listener.');
+    }
 
     const jwtDriver = options.auth?.drivers?.find(d => d.driver === 'jwt');
     const jwtDriverResource = jwtDriver?.config?.resource;
@@ -767,7 +770,11 @@ export class ApiPlugin extends Plugin {
       throw new Error('ApiPlugin preview requires the plugin to be attached to a database via usePlugin().');
     }
 
-    const previewServer = this._createApiServer(this.config.listeners[0]);
+    const primaryListener = this.config.listeners[0];
+    if (!primaryListener) {
+      throw new Error('ApiPlugin preview could not resolve a primary listener.');
+    }
+    const previewServer = this._createApiServer(primaryListener);
     return await fn(previewServer);
   }
 }

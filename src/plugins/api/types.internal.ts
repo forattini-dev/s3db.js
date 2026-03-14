@@ -223,7 +223,7 @@ export interface ApiListenerConfigInput {
     port?: number;
   };
   protocols?: {
-    [protocol: string]: ApiListenerConfigInputProtocol | boolean;
+    [protocol: string]: ApiListenerConfigInputProtocol | boolean | undefined;
     http?: ApiListenerConfigInputProtocol;
     websocket?: ApiListenerConfigInputProtocol;
     udp?: ApiListenerConfigInputProtocol;

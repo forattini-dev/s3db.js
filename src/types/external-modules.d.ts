@@ -1496,3 +1496,37 @@ declare module 'puppeteer-core' {
   export function executablePath(channel?: string): string;
   export const defaultArgs: (options?: { args?: string[]; userDataDir?: string; devtools?: boolean; headless?: boolean | 'new' }) => string[];
 }
+
+declare module 'ws' {
+  import type { IncomingMessage } from 'node:http';
+  import type { Duplex } from 'node:stream';
+
+  interface WebSocket {
+    on(event: 'message', listener: (data: unknown, isBinary?: boolean) => void): this;
+    on(event: string, listener: (...args: unknown[]) => void): this;
+  }
+
+  interface WebSocketServerOptions {
+    noServer?: boolean;
+    maxPayload?: number;
+    server?: unknown;
+    verifyClient?: unknown;
+    [key: string]: unknown;
+  }
+
+  class WebSocketServer {
+    constructor(options: WebSocketServerOptions);
+    on(event: 'error', handler: (error: Error) => void): this;
+    on(event: 'connection', handler: (socket: WebSocket) => void): this;
+    on(event: string, handler: (...args: unknown[]) => void): this;
+    handleUpgrade(
+      request: IncomingMessage,
+      socket: Duplex,
+      head: Buffer,
+      callback: (client: WebSocket) => void
+    ): void;
+    close(callback?: () => void): void;
+  }
+
+  export { WebSocketServer };
+}
