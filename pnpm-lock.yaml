@@ -201,8 +201,8 @@ importers:
         specifier: ^2.0.0
         version: 2.11.2(puppeteer-extra@3.3.6(puppeteer-core@24.39.1)(puppeteer@24.39.1(typescript@5.9.3)))
       recker:
-        specifier: 1.0.85
-        version: 1.0.85(ioredis@5.10.0)(socks@2.8.7)(ws@8.19.0)
+        specifier: 1.0.86
+        version: 1.0.86(ioredis@5.10.0)(socks@2.8.7)(ws@8.19.0)
       tuiuiu.js:
         specifier: ^1.0.57
         version: 1.0.57
@@ -4372,8 +4372,8 @@ packages:
     resolution: {integrity: sha512-/vxpCXddiX8NGfGO/mTafwjq4aFa/71pvamip0++IQk3zG8cbCj0fifNPrjjF1XMXUne91jL9OoxmdykoEtifQ==}
     engines: {node: '>= 10.13.0'}
 
-  recker@1.0.85:
-    resolution: {integrity: sha512-32MSUVr/edID81s3Uve8XhBrbJ7tuzrxW97KYwMIbr69M8cGsLBge0zSPJ0arF8Xao+r82fk/7kwhdhbTZ193g==}
+  recker@1.0.86:
+    resolution: {integrity: sha512-6LaCRK5Bxf9kPW1kW/1qLDYt0c4eqf+4HkpbBGNZCdzgH3OniSpw4D64TuvYIi92X1oEu1HJlz1v037wew4JZg==}
     engines: {node: '>=18'}
     hasBin: true
     peerDependencies:
@@ -11416,7 +11416,7 @@ snapshots:
     dependencies:
       resolve: 1.22.11
 
-  recker@1.0.85(ioredis@5.10.0)(socks@2.8.7)(ws@8.19.0):
+  recker@1.0.86(ioredis@5.10.0)(socks@2.8.7)(ws@8.19.0):
     dependencies:
       '@maxmind/geoip2-node': 6.3.4
       cli-args-parser: 1.0.6

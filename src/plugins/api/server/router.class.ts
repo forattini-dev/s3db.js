@@ -761,9 +761,9 @@ export class Router {
         }
 
         const driverConfig = (config.config || {}) as Record<string, unknown>;
-        const mountedPath = this._withBasePath(config.path);
-        const routePattern = mountedPath === '/' ? '/*' : `${mountedPath}/*`;
         const isSpaMode = config.spa || config.pwa;
+        const mountedPath = isSpaMode ? config.path : this._withBasePath(config.path);
+        const routePattern = mountedPath === '/' ? '/*' : `${mountedPath}/*`;
         const fallbackValue = isSpaMode && driverConfig.fallback === undefined ? 'index.html' : driverConfig.fallback;
         const fallbackIgnoreValue = isSpaMode
           ? this._mergeFallbackIgnoreWithDefaults(Array.isArray(driverConfig.fallbackIgnore) ? driverConfig.fallbackIgnore : [])

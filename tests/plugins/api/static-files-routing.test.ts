@@ -56,7 +56,7 @@ describe('API Plugin static file routing', () => {
     }
   });
 
-  test('serves nested assets under basePath with cache and cors headers', async () => {
+  test('serves nested assets at mount path with cache and cors headers', async () => {
     apiPlugin = new ApiPlugin({
       logLevel: 'silent',
       host: '127.0.0.1',
@@ -80,17 +80,17 @@ describe('API Plugin static file routing', () => {
     await db.usePlugin(apiPlugin);
     await waitForServer(port);
 
-    const nestedAssetResponse = await fetch(`http://127.0.0.1:${port}/api/assets/heroes/icons/icon_218103810.txt`);
+    const nestedAssetResponse = await fetch(`http://127.0.0.1:${port}/assets/heroes/icons/icon_218103810.txt`);
     expect(nestedAssetResponse.status).toBe(200);
     expect(await nestedAssetResponse.text()).toBe('icon payload');
     expect(nestedAssetResponse.headers.get('cache-control')).toBe('public, max-age=86400');
     expect(nestedAssetResponse.headers.get('access-control-allow-origin')).toBe('*');
 
-    const indexResponse = await fetch(`http://127.0.0.1:${port}/api/assets/`);
+    const indexResponse = await fetch(`http://127.0.0.1:${port}/assets/`);
     expect(indexResponse.status).toBe(200);
     expect(await indexResponse.text()).toContain('assets root');
 
-    const unprefixedResponse = await fetch(`http://127.0.0.1:${port}/assets/heroes/icons/icon_218103810.txt`);
+    const unprefixedResponse = await fetch(`http://127.0.0.1:${port}/api/assets/heroes/icons/icon_218103810.txt`);
     expect(unprefixedResponse.status).toBe(404);
   });
 
