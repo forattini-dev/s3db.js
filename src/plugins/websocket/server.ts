@@ -24,7 +24,18 @@ import type {
   WebSocketOptions,
   WebSocketMetrics,
   WebSocketSendFn,
-  WebSocketMessageHandler
+  WebSocketMessageHandler,
+  WebSocketHookContext,
+  WebSocketTicketAuthConfig,
+  WebSocketTokenRefreshConfig,
+  WebSocketRecoveryConfig,
+  WebSocketChannelRateLimits,
+  WebSocketChannelHistoryConfig,
+  WebSocketChannelTransformFn,
+  WebSocketChannelTypingConfig,
+  WebSocketChannelRestApiConfig,
+  WebSocketCompressionConfig,
+  WebSocketChannelsConfig
 } from './types.internal.js';
 
 export type {
@@ -32,8 +43,20 @@ export type {
   WebSocketAuth,
   WebSocketResourceConfig,
   WebSocketOptions,
+  WebSocketMetrics,
   WebSocketSendFn,
-  WebSocketMessageHandler
+  WebSocketMessageHandler,
+  WebSocketHookContext,
+  WebSocketTicketAuthConfig,
+  WebSocketTokenRefreshConfig,
+  WebSocketRecoveryConfig,
+  WebSocketChannelRateLimits,
+  WebSocketChannelHistoryConfig,
+  WebSocketChannelTransformFn,
+  WebSocketChannelTypingConfig,
+  WebSocketChannelRestApiConfig,
+  WebSocketCompressionConfig,
+  WebSocketChannelsConfig
 };
 
 type RaffelWebSocketAdapter = {
@@ -91,18 +114,24 @@ export class WebSocketServer extends EventEmitter {
   cors: { enabled: boolean; origin?: string };
   startupBanner: boolean;
   health: { enabled?: boolean; [key: string]: any };
-  channels: { enabled?: boolean; guards?: Record<string, Function> };
+  channels: WebSocketChannelsConfig;
+  compression: boolean | WebSocketCompressionConfig;
+  ticketAuth?: WebSocketTicketAuthConfig;
+  tokenRefresh?: WebSocketTokenRefreshConfig;
+  recovery?: WebSocketRecoveryConfig;
 
   private adapter: RaffelWebSocketAdapter | null = null;
   private httpServer: http.Server | null = null;
+  private _ticketStore: any = null;
+  private _channelRestHandler: any = null;
   subscriptions: Map<string, Set<string>>;
   private rateLimitState: Map<string, { count: number; windowStart: number }>;
   private _resourceListeners: Map<string, { insert: Function; update: Function; delete: Function }>;
   private _clientUsers: Map<string, any>;
   private _messageHandlers: Record<string, WebSocketMessageHandler>;
-  private _onMessage?: (socketId: string, raw: string | Buffer, send: WebSocketSendFn) => boolean | Promise<boolean>;
-  private _onConnection?: (socketId: string, send: WebSocketSendFn, req: any) => void | Promise<void>;
-  private _onClose?: (socketId: string, code: number, reason: string) => void | Promise<void>;
+  private _onMessage?: (socketId: string, raw: string | Buffer, send: WebSocketSendFn, ctx: WebSocketHookContext) => boolean | Promise<boolean>;
+  private _onConnection?: (socketId: string, send: WebSocketSendFn, req: any, ctx: WebSocketHookContext) => void | Promise<void>;
+  private _onClose?: (socketId: string, code: number, reason: string, ctx: WebSocketHookContext) => void | Promise<void>;
 
   metrics: WebSocketMetrics;
 
@@ -125,6 +154,10 @@ export class WebSocketServer extends EventEmitter {
     this.startupBanner = options.startupBanner !== false;
     this.health = options.health ?? { enabled: true };
     this.channels = options.channels || { enabled: true };
+    this.compression = options.compression ?? true;
+    this.ticketAuth = options.ticketAuth;
+    this.tokenRefresh = options.tokenRefresh;
+    this.recovery = options.recovery;
 
     this._messageHandlers = options.messageHandlers || {};
     this._onMessage = options.onMessage;
@@ -153,12 +186,18 @@ export class WebSocketServer extends EventEmitter {
     const { createWebSocketAdapter, createRegistry, createRouter } = await import('raffel');
     const { createServer } = await import('http');
 
-    // Create HTTP server for health endpoints
+    // Create ticket store if ticket auth is enabled
+    if (this.ticketAuth?.enabled) {
+      const { createMemoryTicketStore } = await import('raffel');
+      this._ticketStore = createMemoryTicketStore({ gcInterval: 10_000 });
+    }
+
+    // Create HTTP server for health + channel REST API endpoints
     this.httpServer = createServer(async (req, res) => {
       if (this.cors.enabled) {
         res.setHeader('Access-Control-Allow-Origin', this.cors.origin || '*');
-        res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
-        res.setHeader('Access-Control-Allow-Headers', 'Authorization, X-API-Key');
+        res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+        res.setHeader('Access-Control-Allow-Headers', 'Authorization, X-API-Key, Content-Type');
       }
 
       if (req.method === 'OPTIONS') {
@@ -169,6 +208,12 @@ export class WebSocketServer extends EventEmitter {
 
       if (this.health?.enabled !== false && req.url?.startsWith('/health')) {
         const handled = await this._handleHealthRequest(req, res);
+        if (handled) return;
+      }
+
+      // Channel REST API
+      if (this.channels?.restApi?.enabled && this._channelRestHandler && req.url?.startsWith(this.channels.restApi.path || '/channels')) {
+        const handled = await this._channelRestHandler(req, res);
         if (handled) return;
       }
 
@@ -195,7 +240,23 @@ export class WebSocketServer extends EventEmitter {
         onMemberRemoved: (channel: string, member: any) => {
           this.emit('channel.left', { clientId: member.id, channel });
         }
-      }
+      },
+      ...(this.channels.rateLimits ? { rateLimits: this.channels.rateLimits } : {}),
+      ...(this.channels.history?.enabled ? { history: this.channels.history } : {}),
+      ...(this.channels.transform ? { transform: this.channels.transform } : {}),
+      ...(this.channels.maxSubscribersPerChannel != null ? { maxSubscribersPerChannel: this.channels.maxSubscribersPerChannel } : {}),
+      ...(this.channels.typing?.enabled ? { typing: this.channels.typing } : {}),
+    } : undefined;
+
+    // Build compression config
+    const compressionConfig = typeof this.compression === 'object'
+      ? this.compression
+      : this.compression;
+
+    // Build recovery config
+    const recoveryConfig = this.recovery?.enabled ? {
+      enabled: true,
+      ttl: this.recovery.ttl || 120_000,
     } : undefined;
 
     this.adapter = createWebSocketAdapter(router, {
@@ -205,7 +266,8 @@ export class WebSocketServer extends EventEmitter {
       auth: this._buildRaffelAuth(),
       channels: channelsConfig,
       backpressure: { maxBufferedAmount: 1024 * 1024, strategy: 'drop' },
-      compression: true,
+      compression: compressionConfig,
+      recovery: recoveryConfig,
       onConnection: async (socketId, send, req) => {
         const user = (req as any)._user || null;
         this._clientUsers.set(socketId, user);
@@ -220,7 +282,7 @@ export class WebSocketServer extends EventEmitter {
         });
 
         if (this._onConnection) {
-          await this._onConnection(socketId, send, req);
+          await this._onConnection(socketId, send, req, this._getHookContext());
         }
 
         this.emit('client.connected', { clientId: socketId, user });
@@ -230,10 +292,20 @@ export class WebSocketServer extends EventEmitter {
         this._handleDisconnect(socketId, code, reason);
 
         if (this._onClose) {
-          await this._onClose(socketId, code, reason);
+          await this._onClose(socketId, code, reason, this._getHookContext());
         }
       }
     });
+
+    // Setup channel REST API if enabled
+    if (this.channels?.restApi?.enabled && this.adapter.channels) {
+      const { createChannelRestApi } = await import('raffel');
+      this._channelRestHandler = createChannelRestApi(this.adapter.channels as any, {
+        path: this.channels.restApi.path || '/channels',
+        apiKey: this.channels.restApi.apiKey,
+        auth: this.channels.restApi.auth,
+      });
+    }
 
     // Start listening
     await new Promise<void>((resolve, reject) => {
@@ -280,6 +352,13 @@ export class WebSocketServer extends EventEmitter {
     this.rateLimitState.clear();
     this._clientUsers.clear();
 
+    if (this._ticketStore?.dispose) {
+      this._ticketStore.dispose();
+      this._ticketStore = null;
+    }
+
+    this._channelRestHandler = null;
+
     if (this.logLevel) {
       this.logger?.info('WebSocket server stopped');
     }
@@ -292,12 +371,56 @@ export class WebSocketServer extends EventEmitter {
    * @private
    */
   private _buildRaffelAuth(): any {
+    // Ticket auth mode — single-use tokens generated server-side
+    if (this.ticketAuth?.enabled && this._ticketStore) {
+      const auth: any = {
+        mode: 'ticket' as const,
+        ticketStore: this._ticketStore,
+        ticketTTL: this.ticketAuth.ttl || 30_000,
+      };
+
+      if (this.tokenRefresh?.enabled) {
+        auth.refreshToken = async (token: string) => {
+          const user = await this.tokenRefresh!.validateRefreshToken(token);
+          if (!user) return null;
+          return {
+            auth: {
+              authenticated: true,
+              principal: user.id,
+              roles: [user.role],
+              scopes: user.scopes || [],
+              claims: user
+            }
+          };
+        };
+      }
+
+      return auth;
+    }
+
     const drivers = this.auth.drivers || [];
     if (drivers.length === 0 && this.auth.required === false) return undefined;
     if (drivers.length === 0) return undefined;
 
     const jwtDriver = drivers.find(d => d.driver === 'jwt');
     const apiKeyDriver = drivers.find(d => d.driver === 'apiKey');
+
+    const buildRefreshToken = () => {
+      if (!this.tokenRefresh?.enabled) return undefined;
+      return async (token: string) => {
+        const user = await this.tokenRefresh!.validateRefreshToken(token);
+        if (!user) return null;
+        return {
+          auth: {
+            authenticated: true,
+            principal: user.id,
+            roles: [user.role],
+            scopes: user.scopes || [],
+            claims: user
+          }
+        };
+      };
+    };
 
     if (jwtDriver) {
       return {
@@ -320,7 +443,8 @@ export class WebSocketServer extends EventEmitter {
               claims: user
             }
           };
-        }
+        },
+        refreshToken: buildRefreshToken()
       };
     }
 
@@ -347,7 +471,8 @@ export class WebSocketServer extends EventEmitter {
               claims: user
             }
           };
-        }
+        },
+        refreshToken: buildRefreshToken()
       };
     }
 
@@ -410,10 +535,27 @@ export class WebSocketServer extends EventEmitter {
    * Authorize channel subscription via raffel
    * @private
    */
+  private _getHookContext(): WebSocketHookContext {
+    return {
+      database: this.database,
+      server: this,
+      adapter: this.adapter,
+      getUser: (socketId: string) => this._clientUsers.get(socketId),
+    };
+  }
+
+  private _getChannelType(channel: string): string {
+    if (channel.startsWith('presence-')) return 'presence';
+    if (channel.startsWith('private-')) return 'private';
+    if (channel.startsWith('queue-')) return 'queue';
+    return 'public';
+  }
+
   private async _authorizeChannel(socketId: string, channel: string, ctx: any): Promise<boolean> {
     const isPrivate = channel.startsWith('private-');
     const isPresence = channel.startsWith('presence-');
 
+    // Public and queue channels don't require auth
     if (!isPrivate && !isPresence) return true;
 
     if (!ctx?.auth?.authenticated) return false;
@@ -458,7 +600,7 @@ export class WebSocketServer extends EventEmitter {
 
     // User-level raw interceptor — full control, can skip everything
     if (this._onMessage) {
-      const handled = await this._onMessage(socketId, raw, send);
+      const handled = await this._onMessage(socketId, raw, send, this._getHookContext());
       if (handled) return true;
     }
 
@@ -482,7 +624,7 @@ export class WebSocketServer extends EventEmitter {
       const customHandler = this._messageHandlers[type];
       if (customHandler) {
         const user = this._clientUsers.get(socketId);
-        const response = await customHandler(socketId, payload, { send, user, server: this });
+        const response = await customHandler(socketId, payload, { send, user, server: this, database: this.database, adapter: this.adapter });
         if (response !== undefined && response !== null) {
           if (requestId) response.requestId = requestId;
           send(response);
@@ -1225,13 +1367,14 @@ export class WebSocketServer extends EventEmitter {
 
     const channels = this.adapter.channels.getChannels();
     let totalMembers = 0;
-    const byType = { public: 0, private: 0, presence: 0 };
+    const byType = { public: 0, private: 0, presence: 0, queue: 0 };
 
     for (const ch of channels) {
       const count = this.adapter.channels.getSubscriberCount(ch);
       totalMembers += count;
       if (ch.startsWith('presence-')) byType.presence++;
       else if (ch.startsWith('private-')) byType.private++;
+      else if (ch.startsWith('queue-')) byType.queue++;
       else byType.public++;
     }
 
@@ -1253,7 +1396,7 @@ export class WebSocketServer extends EventEmitter {
     const isPresence = channelName.startsWith('presence-');
     return {
       name: channelName,
-      type: channelName.startsWith('presence-') ? 'presence' : channelName.startsWith('private-') ? 'private' : 'public',
+      type: this._getChannelType(channelName),
       memberCount: this.adapter.channels.getSubscriberCount(channelName),
       members: isPresence ? this.adapter.channels.getMembers(channelName) : undefined
     };
@@ -1268,15 +1411,14 @@ export class WebSocketServer extends EventEmitter {
     return this.adapter.channels.getChannels()
       .filter(ch => {
         if (options.type) {
-          const chType = ch.startsWith('presence-') ? 'presence' : ch.startsWith('private-') ? 'private' : 'public';
-          if (chType !== options.type) return false;
+          if (this._getChannelType(ch) !== options.type) return false;
         }
         if (options.prefix && !ch.startsWith(options.prefix)) return false;
         return true;
       })
       .map(ch => ({
         name: ch,
-        type: ch.startsWith('presence-') ? 'presence' : ch.startsWith('private-') ? 'private' : 'public',
+        type: this._getChannelType(ch),
         memberCount: this.adapter!.channels!.getSubscriberCount(ch)
       }));
   }
@@ -1295,8 +1437,37 @@ export class WebSocketServer extends EventEmitter {
     return this._getChannelStats() || {
       channels: 0,
       totalMembers: 0,
-      byType: { public: 0, private: 0, presence: 0 },
+      byType: { public: 0, private: 0, presence: 0, queue: 0 },
       clients: 0
     };
+  }
+
+  /**
+   * Get the ticket store (only available when ticketAuth is enabled)
+   */
+  get ticketStore(): any {
+    return this._ticketStore;
+  }
+
+  /**
+   * Generate a single-use connection ticket for a user.
+   * The client connects with ?ticket=<ticketId>.
+   * Requires ticketAuth to be enabled.
+   */
+  async generateTicket(userId: string, options?: { ttl?: number; permissions?: string[]; metadata?: Record<string, unknown> }): Promise<{ id: string; userId: string; expiresAt: number }> {
+    if (!this._ticketStore) {
+      throw new Error('Ticket auth is not enabled. Set ticketAuth: { enabled: true } in WebSocket options.');
+    }
+
+    const { generateTicket } = await import('raffel');
+    const ticket = generateTicket(userId, {
+      ttl: options?.ttl || this.ticketAuth?.ttl || 30_000,
+      permissions: options?.permissions,
+      metadata: options?.metadata,
+    });
+
+    await this._ticketStore.create(ticket);
+
+    return { id: ticket.id, userId: ticket.userId, expiresAt: ticket.expiresAt };
   }
 }

@@ -872,6 +872,12 @@ export class ApiPlugin extends Plugin {
         enabled: true,
         path: mergedWebSocketPath,
         maxPayloadBytes: listener.protocols.websocket.maxPayloadBytes,
+        heartbeatInterval: (listener.protocols.websocket as any).heartbeatInterval,
+        channels: (listener.protocols.websocket as any).channels,
+        auth: (listener.protocols.websocket as any).auth,
+        compression: (listener.protocols.websocket as any).compression,
+        backpressure: (listener.protocols.websocket as any).backpressure,
+        recovery: (listener.protocols.websocket as any).recovery,
         onConnection: listener.protocols.websocket.onConnection,
         onMessage: listener.protocols.websocket.onMessage,
         onClose: listener.protocols.websocket.onClose

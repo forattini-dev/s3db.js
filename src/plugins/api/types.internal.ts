@@ -240,10 +240,38 @@ export interface ApiListenerHttpConfig {
   path: string;
 }
 
+export interface ApiListenerWebSocketChannelsConfig {
+  authorize?: (socketId: string, channel: string, ctx: unknown) => boolean | Promise<boolean>;
+  presenceData?: (socketId: string, channel: string, ctx: unknown) => Record<string, unknown>;
+  hooks?: Record<string, (...args: unknown[]) => void | Promise<void>>;
+  rateLimits?: Record<string, unknown>;
+  history?: { enabled?: boolean; maxSize?: number; ttl?: number };
+  transform?: (channel: string, event: string, data: unknown, ctx: unknown) => unknown | null;
+  maxSubscribersPerChannel?: number | ((channel: string) => number);
+  typing?: { enabled?: boolean; timeout?: number };
+  restApi?: { enabled?: boolean; path?: string; apiKey?: string; auth?: unknown };
+  publishAuth?: (socketId: string, channel: string, event: string, data: unknown, ctx: unknown) => boolean | Promise<boolean>;
+}
+
+export interface ApiListenerWebSocketAuthConfig {
+  mode: 'ticket' | 'bearer' | 'custom';
+  ticketStore?: unknown;
+  ticketTTL?: number;
+  extractToken?: (req: unknown) => string | undefined;
+  validateToken?: (token: string) => unknown | null | Promise<unknown | null>;
+  refreshToken?: (token: string) => unknown | null | Promise<unknown | null>;
+}
+
 export interface ApiListenerWebSocketConfig {
   enabled: boolean;
   path: string;
   maxPayloadBytes: number;
+  channels?: ApiListenerWebSocketChannelsConfig;
+  auth?: ApiListenerWebSocketAuthConfig;
+  heartbeatInterval?: number;
+  compression?: boolean | { threshold?: number; level?: number };
+  backpressure?: { maxBufferedAmount?: number; strategy?: 'drop' | 'disconnect' };
+  recovery?: { enabled?: boolean; ttl?: number };
 }
 
 export interface ApiListenerTcpConfig {
@@ -254,10 +282,16 @@ export interface ApiListenerTcpConfig {
   onError?: (error: Error) => void;
 }
 
+export interface ApiWebSocketHookContext {
+  database: unknown;
+  adapter: unknown;
+  logger: unknown;
+}
+
 export type ApiListenerWebSocketProtocolHandlers = {
-  onConnection?: (socketId: string, send: (message: unknown) => void, req: unknown) => void;
-  onMessage?: (socketId: string, raw: string | Buffer, send: (message: unknown) => void) => boolean | Promise<boolean>;
-  onClose?: (socketId: string, code: number, reason: string) => void;
+  onConnection?: (socketId: string, send: (message: unknown) => void, req: unknown, ctx: ApiWebSocketHookContext) => void;
+  onMessage?: (socketId: string, raw: string | Buffer, send: (message: unknown) => void, ctx: ApiWebSocketHookContext) => boolean | Promise<boolean>;
+  onClose?: (socketId: string, code: number, reason: string, ctx: ApiWebSocketHookContext) => void;
 };
 
 export interface ApiListenerUdpConfig {

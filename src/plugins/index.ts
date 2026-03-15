@@ -200,6 +200,25 @@ export { QueueConsumerPlugin } from './queue-consumer.plugin.js';
 export { WebSocketPlugin, WebSocketServer } from './websocket/index.js';
 
 export type {
+  WebSocketOptions,
+  WebSocketAuth,
+  WebSocketAuthDriver,
+  WebSocketResourceConfig,
+  WebSocketMetrics,
+  WebSocketHookContext,
+  WebSocketTicketAuthConfig,
+  WebSocketTokenRefreshConfig,
+  WebSocketRecoveryConfig,
+  WebSocketChannelRateLimits,
+  WebSocketChannelHistoryConfig,
+  WebSocketChannelTransformFn,
+  WebSocketChannelTypingConfig,
+  WebSocketChannelRestApiConfig,
+  WebSocketCompressionConfig,
+  WebSocketChannelsConfig,
+} from './websocket/server.js';
+
+export type {
   CookieOptions,
   ChunkingOptions,
   CookieChunkOverflowDetails

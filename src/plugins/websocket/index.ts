@@ -89,10 +89,22 @@ export class WebSocketPlugin extends Plugin {
         ? options.health
         : { enabled: options.health !== false },
 
-      // Channels (presence, rooms)
+      // Channels (presence, rooms, queue, history, transformers, etc.)
       channels: typeof options.channels === 'object'
         ? options.channels
         : { enabled: options.channels !== false },
+
+      // Compression
+      compression: options.compression ?? true,
+
+      // Ticket-based auth
+      ticketAuth: options.ticketAuth,
+
+      // Token refresh
+      tokenRefresh: options.tokenRefresh,
+
+      // Connection state recovery
+      recovery: options.recovery,
 
       // Custom message handlers and hooks
       messageHandlers: options.messageHandlers || {},
@@ -155,7 +167,7 @@ export class WebSocketPlugin extends Plugin {
     this.server = new WebSocketServer({
       port: this.config.port,
       host: this.config.host,
-      database: this.config.database,
+      database: (this as any).database || this.config.database,
       namespace: this.config.namespace,
       auth: this.config.auth,
       resources: this.config.resources,
@@ -166,6 +178,14 @@ export class WebSocketPlugin extends Plugin {
       cors: this.config.cors,
       health: this.config.health,
       channels: this.config.channels,
+      compression: this.config.compression,
+      ticketAuth: this.config.ticketAuth,
+      tokenRefresh: this.config.tokenRefresh,
+      recovery: this.config.recovery,
+      messageHandlers: this.config.messageHandlers,
+      onMessage: this.config.onMessage,
+      onConnection: this.config.onConnection,
+      onClose: this.config.onClose,
       startupBanner: this.config.startupBanner,
       logLevel: this.config.logLevel,
       logger: this.config.logger
@@ -320,7 +340,7 @@ export class WebSocketPlugin extends Plugin {
   /**
    * List all channels
    */
-  listChannels(options: { type?: 'public' | 'private' | 'presence'; prefix?: string } = {}): any[] {
+  listChannels(options: { type?: 'public' | 'private' | 'presence' | 'queue'; prefix?: string } = {}): any[] {
     return this.server?.listChannels(options) || [];
   }
 
@@ -346,9 +366,45 @@ export class WebSocketPlugin extends Plugin {
     return this.server?.getChannelStats() || {
       channels: 0,
       totalMembers: 0,
-      byType: { public: 0, private: 0, presence: 0 },
+      byType: { public: 0, private: 0, presence: 0, queue: 0 },
       clients: 0
     };
+  }
+
+  // ============================================
+  // Ticket Auth Methods
+  // ============================================
+
+  /**
+   * Generate a single-use connection ticket for a user.
+   * Requires ticketAuth: { enabled: true } in plugin options.
+   *
+   * @example
+   * // In your HTTP route handler:
+   * app.post('/ws/ticket', async (req, res) => {
+   *   const ticket = await wsPlugin.generateTicket(req.user.id, {
+   *     permissions: ['private-user-' + req.user.id, 'presence-*'],
+   *     metadata: { role: req.user.role }
+   *   });
+   *   res.json({ ticket: ticket.id, expiresAt: ticket.expiresAt });
+   * });
+   *
+   * // Client connects with:
+   * // new WebSocket('ws://localhost:3001?ticket=<ticketId>')
+   */
+  async generateTicket(userId: string, options?: { ttl?: number; permissions?: string[]; metadata?: Record<string, unknown> }): Promise<{ id: string; userId: string; expiresAt: number }> {
+    if (!this.server) {
+      throw new Error('WebSocket server is not running');
+    }
+    return this.server.generateTicket(userId, options);
+  }
+
+  /**
+   * Get the ticket store instance (for advanced usage like custom revocation).
+   * Only available when ticketAuth is enabled.
+   */
+  get ticketStore(): any {
+    return this.server?.ticketStore || null;
   }
 }
 

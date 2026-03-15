@@ -168,7 +168,13 @@ function extractWebSocketCallbacks(raw: unknown) {
   return {
     onConnection: typeof source.onConnection === 'function' ? source.onConnection : undefined,
     onMessage: typeof source.onMessage === 'function' ? source.onMessage : undefined,
-    onClose: typeof source.onClose === 'function' ? source.onClose : undefined
+    onClose: typeof source.onClose === 'function' ? source.onClose : undefined,
+    channels: source.channels && typeof source.channels === 'object' ? source.channels : undefined,
+    auth: source.auth && typeof source.auth === 'object' ? source.auth : undefined,
+    heartbeatInterval: typeof source.heartbeatInterval === 'number' ? source.heartbeatInterval : undefined,
+    compression: source.compression !== undefined ? source.compression : undefined,
+    backpressure: source.backpressure && typeof source.backpressure === 'object' ? source.backpressure : undefined,
+    recovery: source.recovery && typeof source.recovery === 'object' ? source.recovery : undefined
   };
 }
 

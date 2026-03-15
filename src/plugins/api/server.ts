@@ -100,9 +100,15 @@ export interface ApiServerOptions {
     enabled: boolean;
     path?: string;
     maxPayloadBytes?: number;
-    onConnection?: (socketId: string, send: (message: unknown) => void, req: IncomingMessage) => void;
-    onMessage?: (socketId: string, raw: string | Buffer, send: (message: unknown) => void) => boolean | Promise<boolean>;
-    onClose?: (socketId: string, code: number, reason: string) => void;
+    heartbeatInterval?: number;
+    channels?: Record<string, unknown>;
+    auth?: Record<string, unknown>;
+    compression?: boolean | { threshold?: number; level?: number };
+    backpressure?: { maxBufferedAmount?: number; strategy?: 'drop' | 'disconnect' };
+    recovery?: { enabled?: boolean; ttl?: number };
+    onConnection?: (socketId: string, send: (message: unknown) => void, req: IncomingMessage, ctx: { database: unknown; adapter: unknown; logger: unknown }) => void;
+    onMessage?: (socketId: string, raw: string | Buffer, send: (message: unknown) => void, ctx: { database: unknown; adapter: unknown; logger: unknown }) => boolean | Promise<boolean>;
+    onClose?: (socketId: string, code: number, reason: string, ctx: { database: unknown; adapter: unknown; logger: unknown }) => void;
   };
   udp?: {
     enabled: boolean;
@@ -981,6 +987,12 @@ export class ApiServer {
       server: this.server,
       path,
       maxPayloadSize: wsOpts.maxPayloadBytes || 1024 * 1024,
+      heartbeatInterval: wsOpts.heartbeatInterval,
+      channels: wsOpts.channels as any,
+      auth: wsOpts.auth as any,
+      compression: wsOpts.compression,
+      backpressure: wsOpts.backpressure as any,
+      recovery: wsOpts.recovery as any,
       onConnection: (socketId: string, send: (message: unknown) => void, req: IncomingMessage) => {
         if (this.options.logLevel) {
           this.logger.info({
@@ -990,12 +1002,12 @@ export class ApiServer {
           }, 'WebSocket connection established');
         }
         if (wsOpts.onConnection) {
-          wsOpts.onConnection(socketId, send, req);
+          wsOpts.onConnection(socketId, send, req, { database: this.options.database, adapter, logger: this.logger });
         }
       },
       onMessage: wsOpts.onMessage
         ? (socketId: string, raw: string | Buffer, send: (message: unknown) => void) => {
-            return wsOpts.onMessage!(socketId, raw, send);
+            return wsOpts.onMessage!(socketId, raw, send, { database: this.options.database, adapter, logger: this.logger });
           }
         : undefined,
       onClose: (socketId: string, code: number, reason: string) => {
@@ -1003,7 +1015,7 @@ export class ApiServer {
           this.logger.debug({ socketId, code, reason }, 'WebSocket connection closed');
         }
         if (wsOpts.onClose) {
-          wsOpts.onClose(socketId, code, reason);
+          wsOpts.onClose(socketId, code, reason, { database: this.options.database, adapter, logger: this.logger });
         }
       }
     });
