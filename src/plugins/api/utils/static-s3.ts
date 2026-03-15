@@ -14,6 +14,8 @@ export interface S3HandlerConfig {
   bucket: string;
   mountPath?: string;
   prefix?: string;
+  index?: string[];
+  fallback?: string | boolean;
   fallbackIgnore?: string[];
   streaming?: boolean;
   signedUrlExpiry?: number;
@@ -51,6 +53,8 @@ export function createS3Handler(config: S3HandlerConfig): MiddlewareHandler {
     bucket,
     mountPath = '/',
     prefix = '',
+    index = ['index.html'],
+    fallback = false,
     fallbackIgnore = [],
     streaming = true,
     signedUrlExpiry = 300,
@@ -70,6 +74,36 @@ export function createS3Handler(config: S3HandlerConfig): MiddlewareHandler {
   }
 
   const normalizedFallbackIgnore = normalizeFallbackIgnore(fallbackIgnore);
+  const normalizedFallback = resolveFallbackFile(index, fallback);
+
+  const normalizeObjectKey = (requestedPath: string): string => {
+    const normalizedPrefix = prefix.replace(/^\/+/g, '').replace(/\/+$/g, '');
+    const normalizedPath = requestedPath.replace(/^\/+/, '');
+
+    if (!normalizedPrefix) {
+      return normalizedPath;
+    }
+
+    if (!normalizedPath) {
+      return normalizedPrefix;
+    }
+
+    return `${normalizedPrefix}/${normalizedPath}`;
+  };
+
+  const isPathBlocked = (targetPath: string): boolean => {
+    return targetPath.includes('..') || targetPath.includes('//');
+  };
+
+  const isNotFound = (err: Error): boolean => {
+    const s3Err = err as S3Error;
+    return s3Err.name === 'NotFound' || s3Err.$metadata?.httpStatusCode === 404;
+  };
+
+  const resolveMetadata = async (key: string): Promise<HeadObjectCommandOutput> => {
+    const headCommand = new HeadObjectCommand({ Bucket: bucket, Key: key });
+    return await s3Client.send(headCommand);
+  };
 
   return async (c: Context, next: Next = async () => {}): Promise<Response | void> => {
     const requestPath = c.req.path;
@@ -79,20 +113,34 @@ export function createS3Handler(config: S3HandlerConfig): MiddlewareHandler {
     }
 
     try {
-      const requestPath = stripStaticMountPath(c.req.path, mountPath).replace(/^\//, '');
-      const key = prefix ? `${prefix}${requestPath}` : requestPath;
+      const normalizedPath = stripStaticMountPath(c.req.path, mountPath).replace(/^\//, '');
+      let key = normalizeObjectKey(normalizedPath);
 
-      if (key.includes('..') || key.includes('//')) {
+      if (isPathBlocked(key)) {
         return c.json({ success: false, error: { message: 'Forbidden' } }, 403);
       }
 
       let metadata: HeadObjectCommandOutput;
       try {
-        const headCommand = new HeadObjectCommand({ Bucket: bucket, Key: key });
-        metadata = await s3Client.send(headCommand);
+        metadata = await resolveMetadata(key);
       } catch (err) {
-        const s3Err = err as S3Error;
-        if (s3Err.name === 'NotFound' || s3Err.$metadata?.httpStatusCode === 404) {
+        if (isNotFound(err as Error) && normalizedFallback) {
+          const fallbackKey = normalizeObjectKey(normalizedFallback);
+          if (isPathBlocked(fallbackKey)) {
+            return c.json({ success: false, error: { message: 'Forbidden' } }, 403);
+          }
+
+          try {
+            metadata = await resolveMetadata(fallbackKey);
+            key = fallbackKey;
+          } catch (fallbackErr) {
+            if (isNotFound(fallbackErr as Error)) {
+              return c.json({ success: false, error: { message: 'Not Found' } }, 404);
+            }
+
+            throw fallbackErr;
+          }
+        } else if (isNotFound(err as Error)) {
           return c.json({ success: false, error: { message: 'Not Found' } }, 404);
         }
         throw err;
@@ -207,6 +255,14 @@ export function validateS3Config(config: Partial<S3HandlerConfig>): void {
     throw new Error('S3 static "signedUrlExpiry" must be a number');
   }
 
+  if (config.index !== undefined && !Array.isArray(config.index)) {
+    throw new Error('S3 static "index" must be an array');
+  }
+
+  if (config.fallback !== undefined && typeof config.fallback !== 'string' && typeof config.fallback !== 'boolean') {
+    throw new Error('S3 static "fallback" must be a string (filename) or boolean');
+  }
+
   if (config.maxAge !== undefined && typeof config.maxAge !== 'number') {
     throw new Error('S3 static "maxAge" must be a number');
   }
@@ -252,3 +308,15 @@ export default {
   createS3Handler,
   validateS3Config
 };
+
+function resolveFallbackFile(index: string[], fallback: string | boolean): string | null {
+  if (fallback === true) {
+    return index[0] ?? null;
+  }
+
+  if (typeof fallback === 'string') {
+    return fallback;
+  }
+
+  return null;
+}

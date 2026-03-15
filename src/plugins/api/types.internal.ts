@@ -182,6 +182,8 @@ export interface StaticConfig {
     cacheControl?: string;
     contentDisposition?: string;
   };
+  spa?: boolean;
+  pwa?: boolean;
   [key: string]: unknown;
 }
 

@@ -129,6 +129,8 @@ export interface ApiServerOptions {
 export interface StaticConfig {
   path: string;
   root: string;
+  spa?: boolean;
+  pwa?: boolean;
   [key: string]: unknown;
 }
 

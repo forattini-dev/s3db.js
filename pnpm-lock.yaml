@@ -208,7 +208,7 @@ importers:
         version: 1.0.57
       user-agents:
         specifier: ^1.0.0
-        version: 1.1.673
+        version: 1.1.674
     devDependencies:
       '@babel/core':
         specifier: ^7.29.0
@@ -314,8 +314,8 @@ importers:
         specifier: ^6.2.1
         version: 6.2.1
       raffel:
-        specifier: 1.0.14
-        version: 1.0.14(ajv@8.18.0)(fastest-validator@1.19.1)(zod-to-json-schema@3.25.1(zod@4.3.6))(zod@4.3.6)
+        specifier: 1.0.18
+        version: 1.0.18(ajv@8.18.0)(fastest-validator@1.19.1)(zod-to-json-schema@3.25.1(zod@4.3.6))(zod@4.3.6)
 
 packages:
 
@@ -4316,8 +4316,8 @@ packages:
     resolution: {integrity: sha512-WuyALRjWPDGtt/wzJiadO5AXY+8hZ80hVpe6MyivgraREW751X3SbhRvG3eLKOYN+8VEvqLcf3wdnt44Z4S4SA==}
     engines: {node: '>=10'}
 
-  raffel@1.0.14:
-    resolution: {integrity: sha512-L0Cayxr9sP/WA3B/1nSA5MkEwA5QUpk47biOrDAXrBKfW4mPURaH8f5ALxaVsjjMxG1CkUPygYukV6MBUPu5+w==}
+  raffel@1.0.18:
+    resolution: {integrity: sha512-pjdU8XsL9sMPAllLdr5h187de2/DU7wwcODU/rwx6PVFgSqo0tvb+QNH4twpuuQeMZUCQmP+Lyna0Xzb76Zr8Q==}
     hasBin: true
     peerDependencies:
       ajv: 8.18.0
@@ -4928,8 +4928,8 @@ packages:
   url-parse@1.5.10:
     resolution: {integrity: sha512-WypcfiRhfeUP9vvF0j6rw0J3hrWrw6iZv3+22h6iRMJ/8z1Tj6XfLP4DsUix5MhMPnXpiHDoKyoZ/bdCkwBCiQ==}
 
-  user-agents@1.1.673:
-    resolution: {integrity: sha512-BlROBbH4BJM09t0WNNLW0MaKpW7tvKoSu6NXiQV61SmQ4y6+HXcYe0Tavj/1fT5GRqNNCrc+8rqcSRb3yJOlpA==}
+  user-agents@1.1.674:
+    resolution: {integrity: sha512-5+7gBbPkfyRb5QhGcQUf6r7Ga5GBjtLAA4a1aSB5FBNvGjGVAcbmBVmsWmgOYxIoeqY5m4O34ZZXdaWs4wW2fg==}
     engines: {node: '>=18'}
 
   util-deprecate@1.0.2:
@@ -11356,7 +11356,7 @@ snapshots:
 
   quick-lru@5.1.1: {}
 
-  raffel@1.0.14(ajv@8.18.0)(fastest-validator@1.19.1)(zod-to-json-schema@3.25.1(zod@4.3.6))(zod@4.3.6):
+  raffel@1.0.18(ajv@8.18.0)(fastest-validator@1.19.1)(zod-to-json-schema@3.25.1(zod@4.3.6))(zod@4.3.6):
     dependencies:
       '@grpc/grpc-js': 1.14.3
       '@grpc/proto-loader': 0.7.15
@@ -12045,7 +12045,7 @@ snapshots:
       querystringify: 2.2.0
       requires-port: 1.0.0
 
-  user-agents@1.1.673: {}
+  user-agents@1.1.674: {}
 
   util-deprecate@1.0.2: {}
 

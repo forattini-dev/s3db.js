@@ -61,7 +61,6 @@ describe('API Plugin static file routing', () => {
       logLevel: 'silent',
       host: '127.0.0.1',
       port,
-      basePath: '/api',
       docs: { enabled: false },
       logging: { enabled: false },
       static: [
@@ -93,5 +92,56 @@ describe('API Plugin static file routing', () => {
 
     const unprefixedResponse = await fetch(`http://127.0.0.1:${port}/assets/heroes/icons/icon_218103810.txt`);
     expect(unprefixedResponse.status).toBe(404);
+  });
+
+  test('supports SPA mode with default API fallbackIgnore so /api routes are not swallowed', async () => {
+    await db.createResource({
+      name: 'users',
+      attributes: {
+        id: 'string|required',
+        email: 'string|optional'
+      },
+      timestamps: true
+    });
+    await db.resources.users.insert({ id: 'u1', email: 'user1@example.com' });
+
+    apiPlugin = new ApiPlugin({
+      logLevel: 'silent',
+      host: '127.0.0.1',
+      port,
+      basePath: '/api',
+      docs: { enabled: false },
+      logging: { enabled: false },
+      static: [
+        {
+          driver: 'filesystem',
+          path: '/',
+          root: staticDir,
+          spa: true
+        }
+      ],
+      resources: {
+        users: {
+          versionPrefix: 'api',
+          methods: ['GET']
+        }
+      }
+    });
+
+    await db.usePlugin(apiPlugin);
+    await waitForServer(port);
+
+    const apiResponse = await fetch(`http://127.0.0.1:${port}/api/users`);
+    expect(apiResponse.status).toBe(200);
+    const apiPayload = await apiResponse.json();
+    expect(apiPayload.success).toBe(true);
+
+    const spaAssetResponse = await fetch(`http://127.0.0.1:${port}/dashboard`);
+    expect(spaAssetResponse.status).toBe(200);
+    expect(await spaAssetResponse.text()).toContain('assets root');
+
+    const spaAssetFileResponse = await fetch(`http://127.0.0.1:${port}/heroes/icons/icon_218103810.txt`);
+    expect(spaAssetFileResponse.status).toBe(200);
+    expect(await spaAssetFileResponse.text()).toBe('icon payload');
   });
 });

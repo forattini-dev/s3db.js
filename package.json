@@ -162,7 +162,7 @@
     "fuse.js": "^7.1.0",
     "glob": "^13.0.6",
     "jose": "^6.2.1",
-    "raffel": "1.0.14"
+    "raffel": "1.0.18"
   },
   "peerDependencies": {
     "@aws-sdk/client-acm": "^3.0.0",

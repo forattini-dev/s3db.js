@@ -1,6 +1,6 @@
 # 📁 Static File Serving
 
-> **Quick Jump:** [💾 Filesystem](#filesystem-driver) | [☁️ S3 Driver](#s3-driver) | [⚛️ SPA Support](#spa-single-page-application-support) | [🔐 With Auth](#combining-with-authentication) | [⚙️ Config](#configuration-options)
+> **Quick Jump:** [💾 Filesystem](#filesystem-driver) | [☁️ S3 Driver](#s3-driver) | [⚛️ SPA Support](#spa-single-page-application-support) | [📦 PWA + React Router](#pwa--react-router-production-pattern) | [🔐 With Auth](#combining-with-authentication) | [⚙️ Config](#configuration-options)
 
 > **Navigation:** [← Back to API Plugin](/plugins/api/README.md) | [Authentication →](/plugins/api/guides/authentication.md) | [Configuration →](/plugins/api/reference/configuration.md)
 
@@ -102,6 +102,85 @@ static: [
 - `fallback: true` - Serve `index.html` from root for 404s
 - `fallback: false` - Return 404 for missing files (default)
 - `fallbackIgnore` - `string[]` of route prefixes to skip static handling (e.g., `['/api', '/ws']`). Useful for API/WebSocket coexistence.
+- `spa: true` - Shorthand for SPA mode. Automatically sets `fallback` to `index.html` and applies sensible `fallbackIgnore` defaults for API/WebSocket routes.
+- `pwa: true` - Alias for `spa: true` (recommended for PWA bundles with `manifest` + `service-worker`).
+
+### Fast setup (recommended for SPA/PWA)
+
+For most SPAs, this is the smallest config you need:
+
+```javascript
+static: [
+  {
+    driver: 'filesystem',
+    path: '/',
+    root: './web/dist',
+    spa: true, // same as pwa: true
+    config: {
+      maxAge: 60 * 60 * 1000,
+      etag: true,
+      cors: true
+    }
+  }
+]
+```
+
+## PWA + React Router (production pattern)
+
+For production SPAs (React/Vue/Svelte/Angular), this is the common pattern:
+
+```javascript
+static: [
+  {
+    driver: 'filesystem',
+    path: '/',
+    root: './web/dist',
+    config: {
+      index: ['index.html'],
+      fallback: 'index.html',
+      fallbackIgnore: ['/api', '/auth', '/ws', '/socket', '/rpc'],
+      maxAge: 60 * 60 * 1000,
+      etag: true,
+      cors: true
+    }
+  }
+]
+```
+
+Keep these assets in the same build directory:
+- `/manifest.webmanifest`
+- `/service-worker.js` (or `/sw.js`)
+- Icon files (`/icons/*`)
+
+In your `index.html`, register service worker for install/update behavior:
+
+```html
+<link rel="manifest" href="/manifest.webmanifest" />
+<script>
+  if ('serviceWorker' in navigator) {
+    window.addEventListener('load', () => navigator.serviceWorker.register('/service-worker.js'));
+  }
+</script>
+```
+
+Minimal example `service-worker.js`:
+
+```javascript
+const CACHE_NAME = 'app-shell-v1';
+const SHELL_FILES = ['/index.html', '/manifest.webmanifest', '/favicon.ico'];
+
+self.addEventListener('install', (event) => {
+  event.waitUntil(
+    caches.open(CACHE_NAME).then((cache) => cache.addAll(SHELL_FILES))
+  );
+});
+
+self.addEventListener('fetch', (event) => {
+  event.respondWith(
+    caches.match(event.request).then((response) => response || fetch(event.request))
+  );
+});
+```
 
 ---
 
@@ -408,6 +487,38 @@ static: [
   }
 ]
 // GET /uploads/avatars/user123.jpg → Serves from S3
+```
+
+**4. PWA Frontend + API coexistence**
+```javascript
+static: [
+  {
+    driver: 'filesystem',
+    path: '/',
+    root: './dist',
+    config: {
+      fallback: 'index.html',
+      fallbackIgnore: ['/api', '/auth', '/ws', '/socket'],
+      cacheControl: 'public, max-age=86400'
+    }
+  }
+],
+auth: {
+  pathRules: [
+    { path: '/api/**', required: false },
+    { path: '/ws/**', required: false }
+  ]
+}
+```
+
+```html
+<!-- dist/index.html -->
+<link rel="manifest" href="/manifest.webmanifest" />
+<script>
+  if ('serviceWorker' in navigator) {
+    window.addEventListener('load', () => navigator.serviceWorker.register('/service-worker.js'));
+  }
+</script>
 ```
 
 ---

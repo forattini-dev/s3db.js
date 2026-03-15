@@ -255,7 +255,10 @@ Operational note: failban cron cleanup is created on plugin startup and cleaned 
 
 ## Static & Health
 
-- static: Array<{ path: string; driver: 'filesystem'|'s3'; root?: string; bucket?: string; prefix?: string; config?: { index?: string[]; fallback?: string|boolean; fallbackIgnore?: string[]; maxAge?: number; dotfiles?: 'ignore'|'allow'|'deny'; etag?: boolean; cors?: boolean; streaming?: boolean; signedUrlExpiry?: number; cacheControl?: string; contentDisposition?: string } }>
+- static: Array<{ path: string; driver: 'filesystem'|'s3'; root?: string; bucket?: string; prefix?: string; spa?: boolean; pwa?: boolean; config?: { index?: string[]; fallback?: string|boolean; fallbackIgnore?: string[]; maxAge?: number; dotfiles?: 'ignore'|'allow'|'deny'; etag?: boolean; cors?: boolean; streaming?: boolean; signedUrlExpiry?: number; cacheControl?: string; contentDisposition?: string } }>
+  - `fallbackIgnore` is especially important for SPA/PWA: add `['/api', '/auth', '/ws', '/socket', '/rpc']` to keep backend routes from being swallowed by fallback.
+  - `spa: true` enables SPA fallback automatically with `fallback: 'index.html'`.
+  - `pwa: true` is an alias for `spa: true`.
 - health: { enabled: boolean } | boolean
 
 ## Templates (SSR)

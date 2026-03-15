@@ -64,12 +64,14 @@ export interface StaticConfig {
   root?: string;
   bucket?: string;
   prefix?: string;
+  spa?: boolean;
+  pwa?: boolean;
   config?: {
-    index?: string;
-    fallback?: string;
+    index?: string[];
+    fallback?: string | boolean;
+    dotfiles?: 'ignore' | 'allow' | 'deny';
     fallbackIgnore?: string[];
     maxAge?: number;
-    dotfiles?: string;
     etag?: boolean;
     cors?: boolean;
     streaming?: boolean;
@@ -761,11 +763,16 @@ export class Router {
         const driverConfig = (config.config || {}) as Record<string, unknown>;
         const mountedPath = this._withBasePath(config.path);
         const routePattern = mountedPath === '/' ? '/*' : `${mountedPath}/*`;
+        const isSpaMode = config.spa || config.pwa;
+        const fallbackValue = isSpaMode && driverConfig.fallback === undefined ? 'index.html' : driverConfig.fallback;
+        const fallbackIgnoreValue = isSpaMode
+          ? this._mergeFallbackIgnoreWithDefaults(Array.isArray(driverConfig.fallbackIgnore) ? driverConfig.fallbackIgnore : [])
+          : driverConfig.fallbackIgnore;
 
         let handler: MiddlewareHandler;
 
         if (config.driver === 'filesystem') {
-          validateFilesystemConfig({ ...config, ...driverConfig });
+          validateFilesystemConfig({ ...config, ...driverConfig, fallback: fallbackValue, fallbackIgnore: fallbackIgnoreValue });
 
           const indexValue = driverConfig.index;
           const indexArray = typeof indexValue === 'string' ? [indexValue] : (indexValue as string[] | undefined);
@@ -773,8 +780,8 @@ export class Router {
             root: config.root!,
             mountPath: mountedPath,
             index: indexArray,
-            fallback: driverConfig.fallback as string | boolean | undefined,
-            fallbackIgnore: driverConfig.fallbackIgnore as string[] | undefined,
+            fallback: fallbackValue as string | boolean | undefined,
+            fallbackIgnore: fallbackIgnoreValue as string[] | undefined,
             maxAge: driverConfig.maxAge as number | undefined,
             dotfiles: driverConfig.dotfiles as 'ignore' | 'allow' | 'deny' | undefined,
             etag: driverConfig.etag as boolean | undefined,
@@ -782,7 +789,7 @@ export class Router {
           });
 
         } else if (config.driver === 's3') {
-          validateS3Config({ ...config, ...driverConfig });
+          validateS3Config({ ...config, ...driverConfig, fallback: fallbackValue, fallbackIgnore: fallbackIgnoreValue });
 
           const s3Client = (this.database as unknown as { client?: { client?: unknown } })?.client?.client;
 
@@ -795,7 +802,9 @@ export class Router {
             bucket: config.bucket!,
             mountPath: mountedPath,
             prefix: config.prefix,
-            fallbackIgnore: driverConfig.fallbackIgnore as string[] | undefined,
+            index: typeof driverConfig.index === 'string' ? [driverConfig.index] : driverConfig.index as string[] | undefined,
+            fallback: fallbackValue as string | boolean | undefined,
+            fallbackIgnore: fallbackIgnoreValue as string[] | undefined,
             streaming: driverConfig.streaming as boolean | undefined,
             signedUrlExpiry: driverConfig.signedUrlExpiry as number | undefined,
             maxAge: driverConfig.maxAge as number | undefined,
@@ -833,6 +842,42 @@ export class Router {
         throw err;
       }
     }
+  }
+
+  private _normalizeFallbackIgnorePrefix(prefix: string): string {
+    if (!prefix || prefix === '/') {
+      return '';
+    }
+
+    return `/${prefix.replace(/^\/+|\/+$/g, '')}`;
+  }
+
+  private _normalizeBasePathForFallbackIgnore(): string[] {
+    const paths = new Set<string>(['/api', '/auth', '/ws', '/socket', '/rpc', '/health', '/docs', '/.well-known']);
+
+    const normalizedBasePath = this._normalizeFallbackIgnorePrefix(this.basePath);
+    if (normalizedBasePath) {
+      paths.add(normalizedBasePath);
+      paths.add(`${normalizedBasePath}/api`);
+      paths.add(`${normalizedBasePath}/auth`);
+      paths.add(`${normalizedBasePath}/ws`);
+      paths.add(`${normalizedBasePath}/socket`);
+      paths.add(`${normalizedBasePath}/rpc`);
+      paths.add(`${normalizedBasePath}/health`);
+      paths.add(`${normalizedBasePath}/docs`);
+      paths.add(`${normalizedBasePath}/.well-known`);
+    }
+
+    return [...paths];
+  }
+
+  private _mergeFallbackIgnoreWithDefaults(fallbackIgnore: string[]): string[] {
+    const baseDefaults = this._normalizeBasePathForFallbackIgnore();
+
+    return [...new Set([
+      ...fallbackIgnore.filter((value) => typeof value === 'string' && value.trim().length > 0).map((value) => this._normalizeFallbackIgnorePrefix(value)),
+      ...baseDefaults
+    ])];
   }
 
   private mountRelationalRoutes(app: HttpAppType): void {
