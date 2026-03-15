@@ -5,7 +5,7 @@ import type { Logger } from '../../../concerns/logger.js';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { getContentType } from './mime-types.js';
 import { stripStaticMountPath } from './static-mount-path.js';
-import type { Context, MiddlewareHandler } from '#src/plugins/shared/http-runtime.js';
+import type { Context, MiddlewareHandler, Next } from '#src/plugins/shared/http-runtime.js';
 
 const logger: Logger = createLogger({ name: 'StaticS3', level: 'info' });
 
@@ -14,6 +14,7 @@ export interface S3HandlerConfig {
   bucket: string;
   mountPath?: string;
   prefix?: string;
+  fallbackIgnore?: string[];
   streaming?: boolean;
   signedUrlExpiry?: number;
   maxAge?: number;
@@ -50,6 +51,7 @@ export function createS3Handler(config: S3HandlerConfig): MiddlewareHandler {
     bucket,
     mountPath = '/',
     prefix = '',
+    fallbackIgnore = [],
     streaming = true,
     signedUrlExpiry = 300,
     maxAge = 0,
@@ -67,7 +69,15 @@ export function createS3Handler(config: S3HandlerConfig): MiddlewareHandler {
     throw new Error('S3 static handler requires "bucket" name');
   }
 
-  return async (c: Context): Promise<Response> => {
+  const normalizedFallbackIgnore = normalizeFallbackIgnore(fallbackIgnore);
+
+  return async (c: Context, next: Next = async () => {}): Promise<Response | void> => {
+    const requestPath = c.req.path;
+    if (shouldSkipFallback(requestPath, normalizedFallbackIgnore)) {
+      await next();
+      return;
+    }
+
     try {
       const requestPath = stripStaticMountPath(c.req.path, mountPath).replace(/^\//, '');
       const key = prefix ? `${prefix}${requestPath}` : requestPath;
@@ -201,6 +211,16 @@ export function validateS3Config(config: Partial<S3HandlerConfig>): void {
     throw new Error('S3 static "maxAge" must be a number');
   }
 
+  if (config.fallbackIgnore !== undefined) {
+    if (!Array.isArray(config.fallbackIgnore)) {
+      throw new Error('S3 static "fallbackIgnore" must be an array of strings');
+    }
+
+    if (config.fallbackIgnore.some((value) => typeof value !== 'string')) {
+      throw new Error('S3 static "fallbackIgnore" must contain only strings');
+    }
+  }
+
   if (config.cacheControl !== undefined && typeof config.cacheControl !== 'string') {
     throw new Error('S3 static "cacheControl" must be a string');
   }
@@ -216,6 +236,16 @@ export function validateS3Config(config: Partial<S3HandlerConfig>): void {
   if (config.cors !== undefined && typeof config.cors !== 'boolean') {
     throw new Error('S3 static "cors" must be a boolean');
   }
+}
+
+function normalizeFallbackIgnore(prefixes: string[]): string[] {
+  return [...new Set(prefixes)]
+    .map((prefix) => `/${prefix.replace(/^\/*|\/+$/g, '')}`)
+    .filter((prefix) => prefix.length > 1);
+}
+
+function shouldSkipFallback(pathname: string, ignoredPrefixes: string[]): boolean {
+  return ignoredPrefixes.some((prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`));
 }
 
 export default {

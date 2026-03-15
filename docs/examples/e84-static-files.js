@@ -199,6 +199,7 @@ async function setupAPI(db, staticDir) {
       //   root: './build',         // React build directory
       //   config: {
       //     fallback: 'index.html', // ⭐ Fallback to index.html for SPA routing!
+      //     fallbackIgnore: ['/api', '/ws'], // Keep API + WS endpoints out of SPA fallback
       //     maxAge: 3600000,       // Cache for 1 hour
       //     etag: true,
       //     cors: true

@@ -6,7 +6,7 @@ import { createReadStream } from 'fs';
 import crypto from 'crypto';
 import { getContentType } from './mime-types.js';
 import { stripStaticMountPath } from './static-mount-path.js';
-import type { Context, MiddlewareHandler } from '#src/plugins/shared/http-runtime.js';
+import type { Context, MiddlewareHandler, Next } from '#src/plugins/shared/http-runtime.js';
 
 const logger: Logger = createLogger({ name: 'StaticFilesystem', level: 'info' });
 
@@ -15,6 +15,7 @@ export interface FilesystemHandlerConfig {
   mountPath?: string;
   index?: string[];
   fallback?: string | boolean;
+  fallbackIgnore?: string[];
   maxAge?: number;
   dotfiles?: 'ignore' | 'allow' | 'deny';
   etag?: boolean;
@@ -40,12 +41,14 @@ export function createFilesystemHandler(config: FilesystemHandlerConfig): Middle
     mountPath = '/',
     index = ['index.html'],
     fallback = false,
+    fallbackIgnore = [],
     maxAge = 0,
     dotfiles = 'ignore',
     etag = true,
     cors = false
   } = config;
 
+  const normalizedFallbackIgnore = normalizeFallbackIgnore(fallbackIgnore);
   if (!root) {
     throw new Error('Filesystem static handler requires "root" directory');
   }
@@ -59,7 +62,13 @@ export function createFilesystemHandler(config: FilesystemHandlerConfig): Middle
     fallbackFile = fallback;
   }
 
-  return async (c: Context): Promise<Response> => {
+  return async (c: Context, next: Next = async () => {}): Promise<Response | void> => {
+    const requestPath = c.req.path;
+    if (shouldSkipFallback(requestPath, normalizedFallbackIgnore)) {
+      await next();
+      return;
+    }
+
     try {
       const requestPath = stripStaticMountPath(c.req.path, mountPath).replace(/^\//, '');
 
@@ -238,6 +247,26 @@ export function validateFilesystemConfig(config: Partial<FilesystemHandlerConfig
   if (config.cors !== undefined && typeof config.cors !== 'boolean') {
     throw new Error('Filesystem static "cors" must be a boolean');
   }
+
+  if (config.fallbackIgnore !== undefined) {
+    if (!Array.isArray(config.fallbackIgnore)) {
+      throw new Error('Filesystem static "fallbackIgnore" must be an array of strings');
+    }
+
+    if (config.fallbackIgnore.some((value) => typeof value !== 'string')) {
+      throw new Error('Filesystem static "fallbackIgnore" must contain only strings');
+    }
+  }
+}
+
+function normalizeFallbackIgnore(prefixes: string[]): string[] {
+  return [...new Set(prefixes)]
+    .map((prefix) => `/${prefix.replace(/^\/*|\/+$/g, '')}`)
+    .filter((prefix) => prefix.length > 1);
+}
+
+function shouldSkipFallback(pathname: string, ignoredPrefixes: string[]): boolean {
+  return ignoredPrefixes.some((prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`));
 }
 
 export default {

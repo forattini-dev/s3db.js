@@ -81,6 +81,7 @@ static: [
     root: './build',           // React build directory
     config: {
       fallback: 'index.html',  // ⭐ Serve index.html for missing files
+      fallbackIgnore: ['/api', '/ws'], // Keeps API/WebSocket routes untouched
       maxAge: 3600000,         // Cache for 1 hour
       etag: true,
       cors: true
@@ -93,12 +94,14 @@ static: [
 - `GET /app/` → serves `./build/index.html`
 - `GET /app/login` → serves `./build/index.html` (file doesn't exist, fallback kicks in)
 - `GET /app/dashboard` → serves `./build/index.html` (React Router handles routing)
+- `GET /api/ping` → does **not** fallback if `fallbackIgnore` is set
 - `GET /app/static/js/main.js` → serves `./build/static/js/main.js` (file exists, serve it)
 
 **Fallback Options:**
 - `fallback: 'index.html'` - Serve specific file for 404s
 - `fallback: true` - Serve `index.html` from root for 404s
 - `fallback: false` - Return 404 for missing files (default)
+- `fallbackIgnore` - `string[]` of route prefixes to skip static handling (e.g., `['/api', '/ws']`). Useful for API/WebSocket coexistence.
 
 ---
 
@@ -220,6 +223,7 @@ static: [
 | `root` | string | Required | Root directory to serve files from |
 | `index` | string[] | `['index.html']` | Directory index files |
 | `fallback` | string\|boolean | `false` | Fallback file for SPA routing (e.g., 'index.html') |
+| `fallbackIgnore` | string[] | `[]` | Route prefixes that should bypass static fallback (ex.: `/api`, `/ws`) |
 | `maxAge` | number | `0` | Cache max-age in milliseconds |
 | `dotfiles` | string | `'ignore'` | Handle dotfiles: 'ignore', 'allow', 'deny' |
 | `etag` | boolean | `true` | Enable ETag generation |
@@ -231,6 +235,7 @@ static: [
 |--------|------|---------|-------------|
 | `bucket` | string | Required | S3 bucket name |
 | `prefix` | string | `''` | S3 key prefix |
+| `fallbackIgnore` | string[] | `[]` | Route prefixes that should bypass static handling (ex.: `/api`, `/ws`) |
 | `streaming` | boolean | `true` | Stream through server (false = redirect to presigned URL) |
 | `signedUrlExpiry` | number | `300` | Presigned URL expiry in seconds (if streaming: false) |
 | `maxAge` | number | `0` | Cache max-age in milliseconds |
@@ -350,9 +355,12 @@ config: {
 static: [
   {
     driver: 'filesystem',
-    path: '/app',
+    path: '/',
     root: './build',
-    config: { fallback: 'index.html' }
+    config: {
+      fallback: 'index.html',
+      fallbackIgnore: ['/api', '/ws']
+    }
   }
 ],
 resources: {

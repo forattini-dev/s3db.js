@@ -255,7 +255,7 @@ Operational note: failban cron cleanup is created on plugin startup and cleaned 
 
 ## Static & Health
 
-- static: Array<{ path: string; dir?: string; s3?: { bucket, prefix } }>
+- static: Array<{ path: string; driver: 'filesystem'|'s3'; root?: string; bucket?: string; prefix?: string; config?: { index?: string[]; fallback?: string|boolean; fallbackIgnore?: string[]; maxAge?: number; dotfiles?: 'ignore'|'allow'|'deny'; etag?: boolean; cors?: boolean; streaming?: boolean; signedUrlExpiry?: number; cacheControl?: string; contentDisposition?: string } }>
 - health: { enabled: boolean } | boolean
 
 ## Templates (SSR)

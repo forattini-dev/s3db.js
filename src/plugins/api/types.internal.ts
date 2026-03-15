@@ -169,6 +169,19 @@ export interface HealthConfig {
 export interface StaticConfig {
   path: string;
   root: string;
+  config?: {
+    index?: string[];
+    fallback?: string | boolean;
+    fallbackIgnore?: string[];
+    maxAge?: number;
+    dotfiles?: 'ignore' | 'allow' | 'deny';
+    etag?: boolean;
+    cors?: boolean;
+    streaming?: boolean;
+    signedUrlExpiry?: number;
+    cacheControl?: string;
+    contentDisposition?: string;
+  };
   [key: string]: unknown;
 }
 

@@ -92,6 +92,24 @@ static: [{
 
 **[→ Static files guide](/plugins/api/guides/static-files.md)**
 
+### How do I keep API/WebSocket routes available while serving SPA from `/`?
+
+Use `fallbackIgnore` to keep protocol and API prefixes from being consumed by static fallback:
+
+```javascript
+static: [{
+  driver: 'filesystem',
+  path: '/',
+  root: './webapp',
+  config: {
+    fallback: 'index.html',
+    fallbackIgnore: ['/api', '/ws', '/auth']
+  }
+}]
+```
+
+`/dashboard`, `/login`, etc. still return `index.html`, while `/api/**` and `/ws/**` continue to hit normal handlers.
+
 ---
 
 ### What's the difference between `ctx.error()` and `c.error()`?

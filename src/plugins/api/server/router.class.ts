@@ -67,6 +67,7 @@ export interface StaticConfig {
   config?: {
     index?: string;
     fallback?: string;
+    fallbackIgnore?: string[];
     maxAge?: number;
     dotfiles?: string;
     etag?: boolean;
@@ -773,6 +774,7 @@ export class Router {
             mountPath: mountedPath,
             index: indexArray,
             fallback: driverConfig.fallback as string | boolean | undefined,
+            fallbackIgnore: driverConfig.fallbackIgnore as string[] | undefined,
             maxAge: driverConfig.maxAge as number | undefined,
             dotfiles: driverConfig.dotfiles as 'ignore' | 'allow' | 'deny' | undefined,
             etag: driverConfig.etag as boolean | undefined,
@@ -793,6 +795,7 @@ export class Router {
             bucket: config.bucket!,
             mountPath: mountedPath,
             prefix: config.prefix,
+            fallbackIgnore: driverConfig.fallbackIgnore as string[] | undefined,
             streaming: driverConfig.streaming as boolean | undefined,
             signedUrlExpiry: driverConfig.signedUrlExpiry as number | undefined,
             maxAge: driverConfig.maxAge as number | undefined,
