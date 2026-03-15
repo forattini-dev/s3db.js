@@ -772,7 +772,12 @@ export class Router {
         let handler: MiddlewareHandler;
 
         if (config.driver === 'filesystem') {
-          validateFilesystemConfig({ ...config, ...driverConfig, fallback: fallbackValue, fallbackIgnore: fallbackIgnoreValue });
+          validateFilesystemConfig({
+            ...config,
+            ...driverConfig,
+            fallback: fallbackValue as string | boolean | undefined,
+            fallbackIgnore: fallbackIgnoreValue as string[] | undefined
+          });
 
           const indexValue = driverConfig.index;
           const indexArray = typeof indexValue === 'string' ? [indexValue] : (indexValue as string[] | undefined);
@@ -789,7 +794,12 @@ export class Router {
           });
 
         } else if (config.driver === 's3') {
-          validateS3Config({ ...config, ...driverConfig, fallback: fallbackValue, fallbackIgnore: fallbackIgnoreValue });
+          validateS3Config({
+            ...config,
+            ...driverConfig,
+            fallback: fallbackValue as string | boolean | undefined,
+            fallbackIgnore: fallbackIgnoreValue as string[] | undefined
+          });
 
           const s3Client = (this.database as unknown as { client?: { client?: unknown } })?.client?.client;
 
