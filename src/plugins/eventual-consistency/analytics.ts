@@ -4,6 +4,7 @@
  */
 
 import tryFn from '../../concerns/try-fn.js';
+import { TasksPool } from '../../tasks/tasks-pool.class.js';
 import {
   ensureCohortHours,
   groupByCohort,
@@ -166,31 +167,32 @@ interface AnalyticsStats {
 
 const MAX_ANALYTICS_UPDATE_RETRIES = 5;
 const ANALYTICS_QUERY_LIMIT = 500;
+const ANALYTICS_READ_CONCURRENCY = 12;
 
 const ANALYTICS_TRANSACTION_PARTITION_BY_PERIOD: Record<AnalyticsPeriod, {
   partition: string;
-  partitionValues: (cohort: string) => Record<string, any>;
-  filter: (cohort: string) => Record<string, any>;
+  partitionValues: (cohort: string, extraFilter?: Record<string, any>) => Record<string, any>;
+  filter: (cohort: string, extraFilter?: Record<string, any>) => Record<string, any>;
 }> = {
   hour: {
     partition: 'byCohortHour',
-    partitionValues: (cohortHour) => ({ cohortHour, applied: true }),
-    filter: (cohortHour) => ({ cohortHour, applied: true })
+    partitionValues: (cohortHour, extraFilter = {}) => ({ cohortHour, ...extraFilter }),
+    filter: (cohortHour, extraFilter = {}) => ({ cohortHour, ...extraFilter })
   },
   day: {
     partition: 'byCohortDate',
-    partitionValues: (cohortDate) => ({ cohortDate, applied: true }),
-    filter: (cohortDate) => ({ cohortDate, applied: true })
+    partitionValues: (cohortDate, extraFilter = {}) => ({ cohortDate, ...extraFilter }),
+    filter: (cohortDate, extraFilter = {}) => ({ cohortDate, ...extraFilter })
   },
   week: {
     partition: 'byCohortWeek',
-    partitionValues: (cohortWeek) => ({ cohortWeek, applied: true }),
-    filter: (cohortWeek) => ({ cohortWeek, applied: true })
+    partitionValues: (cohortWeek, extraFilter = {}) => ({ cohortWeek, ...extraFilter }),
+    filter: (cohortWeek, extraFilter = {}) => ({ cohortWeek, ...extraFilter })
   },
   month: {
     partition: 'byCohortMonth',
-    partitionValues: (cohortMonth) => ({ cohortMonth, applied: true }),
-    filter: (cohortMonth) => ({ cohortMonth, applied: true })
+    partitionValues: (cohortMonth, extraFilter = {}) => ({ cohortMonth, ...extraFilter }),
+    filter: (cohortMonth, extraFilter = {}) => ({ cohortMonth, ...extraFilter })
   }
 };
 
@@ -311,19 +313,236 @@ async function queryTransactionsByPeriod(
   transactionResource: TransactionResource,
   period: AnalyticsPeriod,
   cohort: string,
-  options: QueryOptions = {}
+  options: QueryOptions = {},
+  filter: Record<string, any> = { applied: true }
 ): Promise<Transaction[]> {
   const partitionConfig = ANALYTICS_TRANSACTION_PARTITION_BY_PERIOD[period];
   return queryResourceRecords<Transaction>(
     transactionResource,
-    partitionConfig.filter(cohort),
+    partitionConfig.filter(cohort, filter),
     {
       limit: options.limit,
       offset: options.offset,
       partition: partitionConfig.partition,
-      partitionValues: partitionConfig.partitionValues(cohort)
+      partitionValues: partitionConfig.partitionValues(cohort, filter)
     }
   );
+}
+
+function getTransactionCohortField(period: AnalyticsPeriod): keyof Transaction {
+  if (period === 'hour') return 'cohortHour';
+  if (period === 'day') return 'cohortDate';
+  if (period === 'week') return 'cohortWeek';
+  return 'cohortMonth';
+}
+
+function enumerateDates(startDate: string, endDate: string): string[] {
+  const start = new Date(`${startDate}T00:00:00Z`);
+  const end = new Date(`${endDate}T00:00:00Z`);
+  const dates: string[] = [];
+
+  for (let current = new Date(start); current <= end; current.setUTCDate(current.getUTCDate() + 1)) {
+    dates.push(current.toISOString().substring(0, 10));
+  }
+
+  return dates;
+}
+
+function enumerateMonths(startMonth: string, endMonth: string): string[] {
+  const startYear = parseInt(startMonth.substring(0, 4), 10);
+  const startMonthValue = parseInt(startMonth.substring(5, 7), 10);
+  const endYear = parseInt(endMonth.substring(0, 4), 10);
+  const endMonthValue = parseInt(endMonth.substring(5, 7), 10);
+  const months: string[] = [];
+
+  for (let year = startYear; year <= endYear; year += 1) {
+    const firstMonth = year === startYear ? startMonthValue : 1;
+    const lastMonth = year === endYear ? endMonthValue : 12;
+
+    for (let month = firstMonth; month <= lastMonth; month += 1) {
+      months.push(`${year}-${String(month).padStart(2, '0')}`);
+    }
+  }
+
+  return months;
+}
+
+function getMonthDateRange(month: string): { start: string; end: string } {
+  const yearValue = parseInt(month.substring(0, 4), 10);
+  const monthValue = parseInt(month.substring(5, 7), 10);
+  const end = new Date(Date.UTC(yearValue, monthValue, 0)).toISOString().substring(0, 10);
+
+  return {
+    start: `${month}-01`,
+    end
+  };
+}
+
+function enumerateHours(startDate: string, endDate: string): string[] {
+  const start = startDate.length > 10
+    ? new Date(`${startDate}:00:00Z`)
+    : new Date(`${startDate}T00:00:00Z`);
+  const end = endDate.length > 10
+    ? new Date(`${endDate}:00:00Z`)
+    : new Date(`${endDate}T23:00:00Z`);
+  const hours: string[] = [];
+
+  for (let current = new Date(start); current <= end; current.setUTCHours(current.getUTCHours() + 1)) {
+    hours.push(current.toISOString().substring(0, 13));
+  }
+
+  return hours;
+}
+
+function enumerateWeeks(startWeek: string, endWeek: string): string[] {
+  const firstWeek = buildWeekStartDate(startWeek);
+  const lastWeek = buildWeekStartDate(endWeek);
+  if (!firstWeek || !lastWeek) {
+    return [];
+  }
+
+  const weeks: string[] = [];
+  for (let current = new Date(firstWeek); current <= lastWeek; current.setUTCDate(current.getUTCDate() + 7)) {
+    const cohort = getCohortWeekFromDate(current);
+    if (!weeks.includes(cohort)) {
+      weeks.push(cohort);
+    }
+  }
+
+  return weeks;
+}
+
+function getRequestedCohorts(
+  period: AnalyticsPeriod,
+  options: GetAnalyticsOptions | GetTopRecordsOptions
+): string[] | null {
+  const { date, startDate, endDate, month, year } = options as GetAnalyticsOptions;
+
+  if (period === 'hour') {
+    if (date) {
+      return date.length > 10 ? [date] : enumerateHours(date, date);
+    }
+    if (month) {
+      const range = getMonthDateRange(month);
+      return enumerateHours(range.start, range.end);
+    }
+    if (startDate && endDate) {
+      return enumerateHours(startDate, endDate);
+    }
+    return null;
+  }
+
+  if (period === 'day') {
+    if (date) return [date];
+    if (month) {
+      const range = getMonthDateRange(month);
+      return enumerateDates(range.start, range.end);
+    }
+    if (startDate && endDate) return enumerateDates(startDate, endDate);
+    if (year) return enumerateDates(`${year}-01-01`, `${year}-12-31`);
+    return null;
+  }
+
+  if (period === 'week') {
+    if (date) return [date];
+    if (startDate && endDate) return enumerateWeeks(startDate, endDate);
+    if (year) return enumerateWeeks(`${year}-W01`, `${year}-W53`);
+    return null;
+  }
+
+  if (date) return [date.substring(0, 7)];
+  if (month) return [month];
+  if (startDate && endDate) return enumerateMonths(startDate.substring(0, 7), endDate.substring(0, 7));
+  if (year) return enumerateMonths(`${year}-01`, `${year}-12`);
+  return null;
+}
+
+async function queryTransactionsForRequestedCohorts(
+  transactionResource: TransactionResource,
+  period: AnalyticsPeriod,
+  cohorts: string[],
+  filter: Record<string, any>
+): Promise<Transaction[]> {
+  const records: Transaction[] = [];
+  const seen = new Set<string>();
+
+  const { results } = await TasksPool.map(
+    cohorts,
+    async (cohort) => queryTransactionsByPeriod(transactionResource, period, cohort, {}, filter),
+    { concurrency: ANALYTICS_READ_CONCURRENCY }
+  );
+
+  for (const batch of results) {
+    if (!Array.isArray(batch)) continue;
+    for (const transaction of batch) {
+      pushUniqueRecord(records, seen, transaction);
+    }
+  }
+
+  return records;
+}
+
+function filterTransactionsByOptions(
+  transactions: Transaction[],
+  period: AnalyticsPeriod,
+  options: GetAnalyticsOptions | GetTopRecordsOptions
+): Transaction[] {
+  const { date, startDate, endDate, month, year } = options as GetAnalyticsOptions;
+  const cohortField = getTransactionCohortField(period);
+
+  return transactions.filter((transaction) => {
+    const cohort = transaction[cohortField];
+    if (typeof cohort !== 'string' || !cohort) {
+      return false;
+    }
+
+    if (date) {
+      if (period === 'hour' && date.length === 10) {
+        return cohort.startsWith(date);
+      }
+      return cohort === date || cohort.startsWith(date);
+    }
+
+    if (startDate && endDate) {
+      if (period === 'hour' && startDate.length === 10 && endDate.length === 10) {
+        return cohort >= `${startDate}T00` && cohort <= `${endDate}T23`;
+      }
+      return cohort >= startDate && cohort <= endDate;
+    }
+
+    if (month) {
+      return cohort.startsWith(month);
+    }
+
+    if (year) {
+      return cohort.startsWith(String(year));
+    }
+
+    return true;
+  });
+}
+
+async function queryTransactionsForAnalytics(
+  transactionResource: TransactionResource,
+  period: AnalyticsPeriod,
+  options: GetAnalyticsOptions | GetTopRecordsOptions,
+  filter: Record<string, any> = { applied: true }
+): Promise<Transaction[]> {
+  const requestedCohorts = getRequestedCohorts(period, options);
+
+  const transactions = requestedCohorts && requestedCohorts.length > 0
+    ? await queryTransactionsForRequestedCohorts(transactionResource, period, requestedCohorts, filter)
+    : await queryResourceRecords<Transaction>(
+        transactionResource,
+        filter,
+        {
+          partition: 'byApplied',
+          partitionValues: filter,
+          limit: ANALYTICS_QUERY_LIMIT
+        }
+      );
+
+  return filterTransactionsByOptions(transactions, period, options);
 }
 
 function buildWeekStartDate(weekCohort: string): Date | null {
@@ -399,7 +618,11 @@ export async function updateAnalytics(
     await Promise.all(
       effectiveHours.map(async (cohort) => {
         const summary = config.transactionResource
-          ? calculateAnalyticsStats(await queryTransactionsByPeriod(config.transactionResource, 'hour', cohort))
+          ? calculateAnalyticsStats(await getMaterializedHourlyTransactions(
+              config.transactionResource,
+              cohort,
+              transactions
+            ))
           : calculateAnalyticsStats((byHour as Record<string, Transaction[]> | null)?.[cohort] ?? []);
         const existing = await readAnalyticsRecord(analyticsResource, `hour-${cohort}`);
         await upsertAnalyticsForPeriod({
@@ -415,31 +638,6 @@ export async function updateAnalytics(
         });
       })
     );
-
-    if (config.analyticsConfig.rollupStrategy === 'incremental') {
-      const dayCohorts = new Set<string>();
-      const weekCohorts = new Set<string>();
-      const monthCohorts = new Set<string>();
-
-      for (const cohortHour of effectiveHours) {
-        const cohortDate = cohortHour.substring(0, 10);
-        dayCohorts.add(cohortDate);
-        monthCohorts.add(cohortHour.substring(0, 7));
-        weekCohorts.add(getCohortWeekFromDate(new Date(cohortDate)));
-      }
-
-      await Promise.all([
-        ...Array.from(dayCohorts).map((cohortDate) =>
-          rollupPeriod('day', cohortDate, cohortDate, analyticsResource, config)
-        ),
-        ...Array.from(weekCohorts).map((cohortWeek) =>
-          rollupPeriod('week', cohortWeek, cohortWeek, analyticsResource, config)
-        ),
-        ...Array.from(monthCohorts).map((cohortMonth) =>
-          rollupPeriod('month', cohortMonth, cohortMonth, analyticsResource, config)
-        )
-      ]);
-    }
   } catch (error: any) {
     throw new PluginError(`Analytics update failed for ${config.resource}.${config.field}: ${error.message}`, {
       pluginName: 'EventualConsistencyPlugin',
@@ -452,6 +650,72 @@ export async function updateAnalytics(
       original: error
     });
   }
+}
+
+async function getMaterializedHourlyTransactions(
+  transactionResource: TransactionResource,
+  cohortHour: string,
+  transactions: Transaction[]
+): Promise<Transaction[]> {
+  const [storedAppliedTransactions, storedPendingTransactions] = await Promise.all([
+    queryTransactionsByPeriod(
+      transactionResource,
+      'hour',
+      cohortHour,
+      {},
+      { applied: true }
+    ),
+    queryTransactionsByPeriod(
+      transactionResource,
+      'hour',
+      cohortHour,
+      {},
+      { applied: false }
+    )
+  ]);
+  const storedTransactions = [...storedAppliedTransactions, ...storedPendingTransactions];
+  const liveTransactions = transactions.filter((transaction) => transaction.cohortHour === cohortHour);
+  const liveById = new Map(
+    liveTransactions
+      .filter((transaction): transaction is Transaction & { id: string } => typeof transaction.id === 'string')
+      .map((transaction) => [
+        transaction.id,
+        {
+          ...transaction,
+          applied: true
+        }
+      ])
+  );
+  const staleCandidates = storedTransactions.filter((transaction) => {
+    return typeof transaction.id === 'string' && !liveById.has(transaction.id);
+  });
+  const { results } = await TasksPool.map(
+    staleCandidates,
+    async (transaction) => {
+      return transactionResource.get(transaction.id);
+    },
+    { concurrency: ANALYTICS_READ_CONCURRENCY }
+  );
+  const materialized: Transaction[] = [];
+  const seen = new Set<string>();
+
+  for (const storedTransaction of results) {
+    if (!storedTransaction || typeof storedTransaction.id !== 'string' || seen.has(storedTransaction.id)) {
+      continue;
+    }
+    seen.add(storedTransaction.id);
+    materialized.push(storedTransaction);
+  }
+
+  for (const liveTransaction of liveById.values()) {
+    if (typeof liveTransaction.id !== 'string' || seen.has(liveTransaction.id)) {
+      continue;
+    }
+    seen.add(liveTransaction.id);
+    materialized.push(liveTransaction);
+  }
+
+  return materialized.filter((transaction) => transaction.applied === true);
 }
 
 /**
@@ -613,9 +877,8 @@ async function tryUpdateAnalytics(
   const resource = analyticsResource as UpdatableAnalyticsResource;
 
   if (typeof etag === 'string' && typeof resource.updateConditional === 'function') {
-    const updateConditional = resource.updateConditional;
     const [ok, err, result] = await tryFn(() =>
-      updateConditional(id, mergedData, { ifMatch: etag })
+      resource.updateConditional!(id, mergedData, { ifMatch: etag })
     ) as [boolean, Error | null, { success: boolean; error?: string; data?: AnalyticsRecord } | null];
 
     if (ok) {
@@ -885,6 +1148,129 @@ export function fillGaps(
   return result;
 }
 
+function formatAnalyticsData(
+  data: AnalyticsDataPoint[],
+  breakdown: GetAnalyticsOptions['breakdown']
+): AnalyticsDataPoint[] {
+  if (breakdown === 'operations') {
+    return data.map((point) => ({
+      cohort: point.cohort,
+      count: point.count,
+      sum: point.sum,
+      avg: point.avg,
+      min: point.min,
+      max: point.max,
+      recordCount: point.recordCount,
+      ...(point.operations || {})
+    }));
+  }
+
+  return data.map((point) => ({
+    cohort: point.cohort,
+    count: point.count,
+    sum: point.sum,
+    avg: point.avg,
+    min: point.min,
+    max: point.max,
+    operations: point.operations,
+    recordCount: point.recordCount
+  }));
+}
+
+async function getHourlyAnalyticsData(
+  handler: FieldHandler,
+  options: GetAnalyticsOptions
+): Promise<AnalyticsDataPoint[]> {
+  const { date, startDate, endDate, month, year, breakdown = false } = options;
+  const analyticsResource = handler.analyticsResource!;
+  const queryOptions: QueryOptions = {
+    limit: ANALYTICS_QUERY_LIMIT,
+    partition: 'byPeriod',
+    partitionValues: { period: 'hour' }
+  };
+  const hourFilter: Record<string, any> = { period: 'hour' };
+
+  if (date && date.length > 10) {
+    queryOptions.partition = 'byPeriodCohort';
+    queryOptions.partitionValues = { period: 'hour', cohort: date };
+    hourFilter.cohort = date;
+  }
+
+  const allAnalytics = await queryAnalyticsRecords(
+    analyticsResource,
+    hourFilter,
+    queryOptions
+  );
+
+  let filtered = allAnalytics.filter((analyticsRecord) => analyticsRecord.period === 'hour');
+
+  if (date) {
+    filtered = filtered.filter((analyticsRecord) => analyticsRecord.cohort.startsWith(date));
+  } else if (startDate && endDate) {
+    const startHour = startDate.length > 10 ? startDate : `${startDate}T00`;
+    const endHour = endDate.length > 10 ? endDate : `${endDate}T23`;
+    filtered = filtered.filter((analyticsRecord) => analyticsRecord.cohort >= startHour && analyticsRecord.cohort <= endHour);
+  } else if (month) {
+    filtered = filtered.filter((analyticsRecord) => analyticsRecord.cohort.startsWith(month));
+  } else if (year) {
+    filtered = filtered.filter((analyticsRecord) => analyticsRecord.cohort.startsWith(String(year)));
+  }
+
+  const storedData: AnalyticsDataPoint[] = filtered.map((analyticsRecord) => ({
+    cohort: analyticsRecord.cohort,
+    count: analyticsRecord.transactionCount,
+    sum: analyticsRecord.totalValue,
+    avg: analyticsRecord.avgValue,
+    min: analyticsRecord.minValue,
+    max: analyticsRecord.maxValue,
+    operations: analyticsRecord.operations || {},
+    recordCount: analyticsRecord.recordCount
+  }));
+
+  if (handler.transactionResource) {
+    const requestedCohorts = getRequestedCohorts('hour', options);
+
+    if (requestedCohorts && requestedCohorts.length > 0) {
+      const presentCohorts = new Set(storedData.map((point) => point.cohort));
+      const missingCohorts = requestedCohorts.filter((cohort) => !presentCohorts.has(cohort));
+
+      if (missingCohorts.length > 0) {
+        const fallbackTransactions = await queryTransactionsForRequestedCohorts(
+          handler.transactionResource,
+          'hour',
+          missingCohorts,
+          { applied: true }
+        );
+        storedData.push(...aggregateTransactionsByCohort(fallbackTransactions, 'cohortHour'));
+      }
+    } else if (storedData.length === 0) {
+      const fallbackTransactions = await queryTransactionsForAnalytics(handler.transactionResource, 'hour', options, { applied: true });
+      storedData.push(...aggregateTransactionsByCohort(fallbackTransactions, 'cohortHour'));
+    }
+  }
+
+  storedData.sort((a, b) => a.cohort.localeCompare(b.cohort));
+  return formatAnalyticsData(storedData, breakdown);
+}
+
+async function getLazyAggregatedAnalytics(
+  handler: FieldHandler,
+  period: Exclude<AnalyticsPeriod, 'hour'>,
+  options: GetAnalyticsOptions
+): Promise<AnalyticsDataPoint[]> {
+  if (!handler.transactionResource) {
+    return [];
+  }
+
+  const transactions = await queryTransactionsForAnalytics(handler.transactionResource, period, options, { applied: true });
+  const aggregated = aggregateTransactionsByCohort(
+    transactions,
+    getTransactionCohortField(period)
+  );
+
+  return formatAnalyticsData(aggregated, options.breakdown);
+}
+
 /**
  * Get analytics for a specific period
  *
@@ -935,66 +1321,25 @@ export async function getAnalytics(
     return await getAnalyticsForRecord(resourceName, field, recordId, options, handler);
   }
 
-  let allAnalytics: AnalyticsRecord[] = [];
-  const analyticsResource = handler.analyticsResource!;
-  const queryOptions: QueryOptions = {
-    limit: ANALYTICS_QUERY_LIMIT,
-    partition: 'byPeriod',
-    partitionValues: { period }
+  const normalizedOptions = {
+    period,
+    date,
+    startDate,
+    endDate,
+    month,
+    year,
+    breakdown
   };
 
-  if (period !== 'hour' && date) {
-    queryOptions.partition = 'byPeriodCohort';
-    queryOptions.partitionValues = { period, cohort: date };
+  if (period === 'hour') {
+    return getHourlyAnalyticsData(handler, normalizedOptions);
   }
 
-  allAnalytics = await queryAnalyticsRecords(
-    analyticsResource,
-    { period, ...(period !== 'hour' && date ? { cohort: date } : {}) },
-    queryOptions
+  return getLazyAggregatedAnalytics(
+    handler,
+    period,
+    normalizedOptions
   );
-
-  let filtered = allAnalytics.filter(a => a.period === period);
-
-  if (date) {
-    if (period === 'hour') {
-      filtered = filtered.filter(a => a.cohort.startsWith(date));
-    } else {
-      filtered = filtered.filter(a => a.cohort === date);
-    }
-  } else if (startDate && endDate) {
-    filtered = filtered.filter(a => a.cohort >= startDate && a.cohort <= endDate);
-  } else if (month) {
-    filtered = filtered.filter(a => a.cohort.startsWith(month));
-  } else if (year) {
-    filtered = filtered.filter(a => a.cohort.startsWith(String(year)));
-  }
-
-  filtered.sort((a, b) => a.cohort.localeCompare(b.cohort));
-
-  if (breakdown === 'operations') {
-    return filtered.map(a => ({
-      cohort: a.cohort,
-      count: a.transactionCount,
-      sum: a.totalValue,
-      avg: a.avgValue,
-      min: a.minValue,
-      max: a.maxValue,
-      recordCount: a.recordCount,
-      ...a.operations
-    }));
-  }
-
-  return filtered.map(a => ({
-    cohort: a.cohort,
-    count: a.transactionCount,
-    sum: a.totalValue,
-    avg: a.avgValue,
-    min: a.minValue,
-    max: a.maxValue,
-    operations: a.operations,
-    recordCount: a.recordCount
-  }));
 }
 
 /**
@@ -1408,25 +1753,11 @@ export async function getTopRecords(
   }
 
   const { period = 'day', date, metric = 'transactionCount', limit = 10 } = options;
-
-  const [ok, err, transactions] = await tryFn(() =>
-    handler.transactionResource!.list()
-  ) as [boolean, Error | null, Transaction[] | null];
-
-  if (!ok || !transactions) {
-    return [];
-  }
-
-  let filtered = transactions;
-  if (date) {
-    if (period === 'hour') {
-      filtered = transactions.filter(t => t.cohortHour && t.cohortHour.startsWith(date));
-    } else if (period === 'day') {
-      filtered = transactions.filter(t => t.cohortDate === date);
-    } else if (period === 'month') {
-      filtered = transactions.filter(t => t.cohortMonth && t.cohortMonth.startsWith(date));
-    }
-  }
+  const [appliedTransactions, pendingTransactions] = await Promise.all([
+    queryTransactionsForAnalytics(handler.transactionResource!, period, { date }, { applied: true }),
+    queryTransactionsForAnalytics(handler.transactionResource!, period, { date }, { applied: false })
+  ]);
+  const filtered = [...appliedTransactions, ...pendingTransactions];
 
   const byRecord: Record<string, { count: number; sum: number }> = {};
   for (const txn of filtered) {
@@ -1435,7 +1766,7 @@ export async function getTopRecords(
       byRecord[recordId] = { count: 0, sum: 0 };
     }
     byRecord[recordId].count++;
-    byRecord[recordId].sum += txn.value;
+    byRecord[recordId].sum += txn.operation === 'sub' ? -txn.value : txn.value;
   }
 
   const records: TopRecord[] = Object.entries(byRecord).map(([recordId, stats]) => ({

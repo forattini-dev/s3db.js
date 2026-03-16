@@ -218,6 +218,7 @@ describe("EventualConsistencyPlugin - Coordinator Mode", () => {
       logLevel: 'silent',
         resources: { users: ['balance'] },
         coordinator: { ticketBatchSize: 100 },
+        analytics: { enabled: true },
         logLevel: 'silent'
       });
 
@@ -228,7 +229,7 @@ describe("EventualConsistencyPlugin - Coordinator Mode", () => {
     it("should create tickets from pending transactions", async () => {
       const handler = plugin.fieldHandlers.get('users').get('balance');
       const txResource = handler.transactionResource;
-      const cohortHour = new Date().toISOString().slice(0, 13) + ':00:00Z';
+      const cohortHour = new Date().toISOString().slice(0, 13);
 
       // Create 256 transactions
       await Promise.all(
@@ -299,7 +300,7 @@ describe("EventualConsistencyPlugin - Coordinator Mode", () => {
 
       const handler = plugin.fieldHandlers.get('users').get('balance');
       const txResource = handler.transactionResource;
-      const cohortHour = new Date().toISOString().slice(0, 13) + ':00:00Z';
+      const cohortHour = new Date().toISOString().slice(0, 13);
 
       // Create 120 transactions
       await Promise.all(
@@ -330,7 +331,7 @@ describe("EventualConsistencyPlugin - Coordinator Mode", () => {
 
     it("should return empty array when no pending transactions", async () => {
       const handler = plugin.fieldHandlers.get('users').get('balance');
-      const cohortHour = new Date().toISOString().slice(0, 13) + ':00:00Z';
+      const cohortHour = new Date().toISOString().slice(0, 13);
 
       const getCohortHours = () => [cohortHour];
       const tickets = await createTicketsForHandler(handler, plugin.config, getCohortHours);
@@ -342,7 +343,7 @@ describe("EventualConsistencyPlugin - Coordinator Mode", () => {
       const handler = plugin.fieldHandlers.get('users').get('balance');
       const txResource = handler.transactionResource;
       const ticketResource = handler.ticketResource;
-      const cohortHour = new Date().toISOString().slice(0, 13) + ':00:00Z';
+      const cohortHour = new Date().toISOString().slice(0, 13);
 
       await Promise.all(
         Array.from({ length: 256 }, (_, i) =>
@@ -693,6 +694,7 @@ describe("EventualConsistencyPlugin - Coordinator Mode", () => {
       logLevel: 'silent',
         resources: { users: ['balance'] },
         coordinator: { ticketBatchSize: 100 },
+        analytics: { enabled: true },
         logLevel: 'silent'
       });
 
@@ -704,7 +706,7 @@ describe("EventualConsistencyPlugin - Coordinator Mode", () => {
       const handler = plugin.fieldHandlers.get('users').get('balance');
       const txResource = handler.transactionResource;
       const ticketResource = handler.ticketResource;
-      const cohortHour = new Date().toISOString().slice(0, 13) + ':00:00Z';
+      const cohortHour = new Date().toISOString().slice(0, 13);
 
       // Create user
       await usersResource.insert({
@@ -759,11 +761,74 @@ describe("EventualConsistencyPlugin - Coordinator Mode", () => {
       await expect(ticketResource.get(ticket.id)).rejects.toThrow();
     });
 
+    it("should update hourly analytics and serve daily reads after ticket processing", async () => {
+      const handler = plugin.fieldHandlers.get('users').get('balance');
+      const txResource = handler.transactionResource;
+      const ticketResource = handler.ticketResource;
+      const analyticsResource = database.resources['plg_users_an_balance'];
+      const now = new Date();
+      const cohortDate = now.toISOString().slice(0, 10);
+      const cohortHour = now.toISOString().slice(0, 13);
+
+      await usersResource.insert({
+        id: 'user-analytics',
+        name: 'Analytics User',
+        balance: 0
+      });
+
+      await txResource.insert({
+        id: 'tx-analytics-1',
+        originalId: 'user-analytics',
+        field: 'balance',
+        value: 30,
+        operation: 'add',
+        timestamp: now.toISOString(),
+        cohortDate,
+        cohortHour,
+        applied: false
+      });
+
+      await txResource.insert({
+        id: 'tx-analytics-2',
+        originalId: 'user-analytics',
+        field: 'balance',
+        value: 10,
+        operation: 'sub',
+        timestamp: now.toISOString(),
+        cohortDate,
+        cohortHour,
+        applied: false
+      });
+
+      const getCohortHours = () => [cohortHour];
+      await createTicketsForHandler(handler, plugin.config, getCohortHours);
+      const claimed = await claimTickets(ticketResource, 'worker-1', plugin.config);
+
+      const result = await processTicket(claimed[0], handler, database, 'worker-1', plugin.config);
+
+      expect(result.errors).toEqual([]);
+
+      const hourlyRecords = await analyticsResource.list();
+      expect(hourlyRecords).toHaveLength(1);
+      expect(hourlyRecords[0].period).toBe('hour');
+      expect(hourlyRecords[0].transactionCount).toBe(2);
+      expect(hourlyRecords[0].totalValue).toBe(20);
+
+      const dailyAnalytics = await plugin.getAnalytics('users', 'balance', {
+        period: 'day',
+        date: cohortDate
+      });
+      expect(dailyAnalytics).toHaveLength(1);
+      expect(dailyAnalytics[0].count).toBe(2);
+      expect(dailyAnalytics[0].sum).toBe(20);
+      expect(dailyAnalytics[0].recordCount).toBe(1);
+    });
+
     it("should handle set and add operations correctly", async () => {
       const handler = plugin.fieldHandlers.get('users').get('balance');
       const txResource = handler.transactionResource;
       const ticketResource = handler.ticketResource;
-      const cohortHour = new Date().toISOString().slice(0, 13) + ':00:00Z';
+      const cohortHour = new Date().toISOString().slice(0, 13);
 
       // Create user
       await usersResource.insert({
@@ -827,9 +892,9 @@ describe("EventualConsistencyPlugin - Coordinator Mode", () => {
       const claimed = await claimTickets(ticketResource, 'worker-1', plugin.config);
       await processTicket(claimed[0], handler, database);
 
-      // Verify balance: 50 (initial) + 100 (set ignores initial) + 30 (add after set) = 180
+      // Verify balance: transactions before the last set are discarded, so 100 + 30 = 130
       const user = await usersResource.get('user-2');
-      expect(user.balance).toBe(180);
+      expect(user.balance).toBe(130);
     });
 
     it("should create record on set when it doesn't exist", async () => {
@@ -1006,7 +1071,7 @@ describe("EventualConsistencyPlugin - Coordinator Mode", () => {
       const handler = plugin.fieldHandlers.get('users').get('balance');
       const txResource = handler.transactionResource;
       const ticketResource = handler.ticketResource;
-      const cohortHour = new Date().toISOString().slice(0, 13) + ':00:00Z';
+      const cohortHour = new Date().toISOString().slice(0, 13);
 
       await usersResource.insert({
         id: 'user-1',
@@ -1022,6 +1087,7 @@ describe("EventualConsistencyPlugin - Coordinator Mode", () => {
       await createTicketsForHandler(handler, plugin.config, getCohortHours);
 
       const claimed = await claimTickets(ticketResource, 'worker-1', plugin.config);
+      expect(claimed).toHaveLength(1);
       const result = await processTicket(claimed[0], handler, database, 'worker-1', plugin.config);
       const user = await usersResource.get('user-1');
 

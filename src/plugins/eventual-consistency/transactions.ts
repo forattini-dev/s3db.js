@@ -64,29 +64,29 @@ export async function createTransaction(
     transaction.source = options.source;
   }
 
-  if (config.mode === 'sync') {
-    const [ok, err, result] = await tryFn(() =>
-      handler.transactionResource!.insert(transaction)
-    );
-
-    if (!ok) {
-      throw new Error(`Failed to create transaction: ${err?.message}`);
+  if (!handler.transactionResource) {
+    if (!handler.pendingTransactions) {
+      handler.pendingTransactions = new Map();
     }
 
-    return result as Transaction;
+    const key = `${originalId}:${field}`;
+    if (!handler.pendingTransactions.has(key)) {
+      handler.pendingTransactions.set(key, []);
+    }
+    handler.pendingTransactions.get(key)!.push(transaction as Transaction);
+
+    return transaction as Transaction;
   }
 
-  if (!handler.pendingTransactions) {
-    handler.pendingTransactions = new Map();
+  const [ok, err, result] = await tryFn(() =>
+    handler.transactionResource!.insert(transaction)
+  );
+
+  if (!ok) {
+    throw new Error(`Failed to create transaction: ${err?.message}`);
   }
 
-  const key = `${originalId}:${field}`;
-  if (!handler.pendingTransactions.has(key)) {
-    handler.pendingTransactions.set(key, []);
-  }
-  handler.pendingTransactions.get(key)!.push(transaction as Transaction);
-
-  return transaction as Transaction;
+  return result as Transaction;
 }
 
 /**

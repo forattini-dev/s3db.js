@@ -6,7 +6,7 @@
 
 ## TLDR
 
-Plugin for numeric fields with **auditable transactions** and **pre-calculated analytics** by hour/day/week/month.
+Plugin for numeric fields with **auditable transactions**, **hourly materialized analytics**, and **lazy day/week/month rollups** on read.
 
 **3 lines to get started:**
 ```javascript
@@ -18,7 +18,7 @@ await wallets.add('w1', 'balance', 100);  // Creates transaction and consolidate
 **Main features:**
 - Atomic transactions (add/sub/set) with complete history
 - Sync (immediate) or async (eventual) mode with auto-consolidation
-- Pre-calculated analytics (hour → day → week → month)
+- Minimal-write analytics with hourly materialization
 - Optimized partitions (O(1) query by originalId + applied status)
 - Nested fields support with dot notation
 - Raw event history and chart-ready rollups from the same source of truth
@@ -208,9 +208,10 @@ await wallets.consolidate('wallet-1', 'balance');
 
 ### 3. Analytics (Optional)
 
-Creates aggregations by period:
+Materializes hourly aggregations during consolidation and computes broader periods on demand:
+- Stored period: hour
+- Read-time rollups: day, week, month
 - Metrics: count, sum, avg, min, max
-- Periods: hour, day, week, month
 - Plus record-level breakdowns and raw event history queries from the transaction log
 
 ### 4. History and replay

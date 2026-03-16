@@ -224,7 +224,7 @@ export async function runConsolidation(
         analyticsConfig: config.analyticsConfig,
         cohort: config.cohort,
         logLevel: config.logLevel,
-        transactionResource: handler.transactionResource
+        transactionResource
       };
       await updateAnalytics(allTransactions, handler.analyticsResource, analyticsConfig);
     }

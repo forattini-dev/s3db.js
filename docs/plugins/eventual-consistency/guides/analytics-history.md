@@ -66,7 +66,7 @@ This is the historical audit layer.
 
 ### Analytics resource
 
-The analytics resource stores period summaries such as:
+The analytics resource stores hourly summaries such as:
 
 - `period`
 - `cohort`
@@ -84,7 +84,7 @@ This is the reporting layer.
 
 ## What Analytics Tracks
 
-Analytics records summarize applied transactions into time cohorts and operation breakdowns.
+Hourly analytics records summarize applied transactions into time cohorts and operation breakdowns.
 
 ```javascript
 {
@@ -115,7 +115,7 @@ The runtime currently works with these periods:
 - `week`
 - `month`
 
-With `analyticsConfig.rollupStrategy: 'incremental'`, higher-level periods are rolled up from lower-level ones as consolidation happens. That keeps dashboard reads cheap while still allowing replay and recalculation from the transaction layer when needed.
+The write path now materializes only `hour`. Higher-level periods (`day`, `week`, `month`) are assembled on demand from the transaction history at read time. That keeps edits cheaper and moves broader aggregation work to reads, which fits workloads where querying is cheaper than writing.
 
 ## Raw Event History
 

@@ -97,8 +97,7 @@ describe('EventualConsistencyPlugin Analytics', () => {
     await wallets.add('w2', 'balance', 50);
     await wallets.sub('w2', 'balance', 10);
 
-    // In sync mode, analytics are created immediately during add/sub
-    // No need to call consolidate() manually
+    await wallets.consolidate('w1', 'balance');
 
     // Query all analytics directly from resource
     const analyticsResource = database.resources.plg_wallets_an_balance;
@@ -128,8 +127,8 @@ describe('EventualConsistencyPlugin Analytics', () => {
     await wallets.add('w1', 'balance', 50);
     await wallets.sub('w1', 'balance', 25);
 
-    // In sync mode, analytics are created immediately during operations
-    // Query analytics resource directly
+    await wallets.consolidate('w1', 'balance');
+
     const analyticsResource = database.resources.plg_wallets_an_balance;
     const allAnalytics = await analyticsResource.list();
 
@@ -169,31 +168,31 @@ describe('EventualConsistencyPlugin Analytics', () => {
     expect(subSum).toBe(-25);
   }, 30000); // 30 second timeout for analytics operations
 
-  it('should roll up hourly to daily analytics', async () => {
+  it('should keep only hourly materialization and serve daily analytics lazily', async () => {
     // Insert wallet
     await wallets.insert({ id: 'w1', userId: 'u1', balance: 0 });
 
     // Add transactions
     await wallets.add('w1', 'balance', 100);
     await wallets.add('w1', 'balance', 50);
+    await wallets.consolidate('w1', 'balance');
 
-    // In sync mode, analytics are created immediately during operations
-    // Query analytics resource directly
     const analyticsResource = database.resources.plg_wallets_an_balance;
     const allAnalytics = await analyticsResource.list();
 
     expect(allAnalytics.length).toBeGreaterThan(0);
+    expect(allAnalytics.every(a => a.period === 'hour')).toBe(true);
 
-    // Find daily analytics
-    const dailyAnalytics = allAnalytics.filter(a => a.period === 'day');
-    expect(dailyAnalytics.length).toBeGreaterThan(0);
+    const today = new Date().toISOString().substring(0, 10);
+    const dailyAnalytics = await plugin.getAnalytics('wallets', 'balance', {
+      period: 'day',
+      date: today
+    });
 
-    // Aggregate daily analytics (may span multiple days if test runs near midnight)
-    const totalCount = dailyAnalytics.reduce((sum, a) => sum + (a.transactionCount || 0), 0);
-    const totalSum = dailyAnalytics.reduce((sum, a) => sum + (a.totalValue || 0), 0);
+    expect(dailyAnalytics.length).toBe(1);
 
-    expect(totalCount).toBe(2);
-    expect(totalSum).toBe(150);
+    expect(dailyAnalytics[0].count).toBe(2);
+    expect(dailyAnalytics[0].sum).toBe(150);
   });
 
   it('should get top records by transaction count', async () => {
@@ -216,28 +215,13 @@ describe('EventualConsistencyPlugin Analytics', () => {
     // w3: 1 transaction
     await wallets.add('w3', 'balance', 500);
 
-    // Query transaction resource directly and aggregate by recordId
-    const transactionResource = database.resources.plg_wallets_tx_balance;
-    const allTransactions = await transactionResource.list();
-
-    // Group by originalId and count transactions
-    const recordMap = new Map();
-    for (const txn of allTransactions) {
-      const recordId = txn.originalId;
-      if (!recordMap.has(recordId)) {
-        recordMap.set(recordId, { recordId, count: 0, sum: 0 });
-      }
-      const record = recordMap.get(recordId);
-      record.count++;
-      // Use signed value for sum
-      const signedValue = txn.operation === 'sub' ? -txn.value : txn.value;
-      record.sum += signedValue;
-    }
-
-    // Sort by transaction count descending
-    const topRecords = Array.from(recordMap.values())
-      .sort((a, b) => b.count - a.count)
-      .slice(0, 3);
+    const today = new Date().toISOString().substring(0, 10);
+    const topRecords = await plugin.getTopRecords('wallets', 'balance', {
+      period: 'day',
+      date: today,
+      metric: 'transactionCount',
+      limit: 3
+    });
 
     expect(topRecords.length).toBe(3);
     expect(topRecords[0].recordId).toBe('w1');
@@ -266,28 +250,13 @@ describe('EventualConsistencyPlugin Analytics', () => {
     // w3: single huge transaction
     await wallets.add('w3', 'balance', 2000);
 
-    // Query transaction resource directly and aggregate by recordId
-    const transactionResource = database.resources.plg_wallets_tx_balance;
-    const allTransactions = await transactionResource.list();
-
-    // Group by originalId and sum values
-    const recordMap = new Map();
-    for (const txn of allTransactions) {
-      const recordId = txn.originalId;
-      if (!recordMap.has(recordId)) {
-        recordMap.set(recordId, { recordId, count: 0, sum: 0 });
-      }
-      const record = recordMap.get(recordId);
-      record.count++;
-      // Use signed value for sum
-      const signedValue = txn.operation === 'sub' ? -txn.value : txn.value;
-      record.sum += signedValue;
-    }
-
-    // Sort by total value descending
-    const topRecords = Array.from(recordMap.values())
-      .sort((a, b) => b.sum - a.sum)
-      .slice(0, 3);
+    const today = new Date().toISOString().substring(0, 10);
+    const topRecords = await plugin.getTopRecords('wallets', 'balance', {
+      period: 'day',
+      date: today,
+      metric: 'totalValue',
+      limit: 3
+    });
 
     expect(topRecords.length).toBe(3);
     expect(topRecords[0].recordId).toBe('w3');
@@ -304,12 +273,12 @@ describe('EventualConsistencyPlugin Analytics', () => {
 
     // First batch
     await wallets.add('w1', 'balance', 100);
+    await wallets.consolidate('w1', 'balance');
 
     // Second batch
     await wallets.add('w1', 'balance', 50);
+    await wallets.consolidate('w1', 'balance');
 
-    // In sync mode, analytics are created immediately during operations
-    // Query analytics resource directly
     const analyticsResource = database.resources.plg_wallets_an_balance;
     const allAnalytics = await analyticsResource.list();
 
@@ -327,28 +296,31 @@ describe('EventualConsistencyPlugin Analytics', () => {
     expect(totalSum).toBe(150); // Cumulative
   });
 
-  it('should keep recordCount and rollups consistent with repeated consolidations', async () => {
+  it('should keep recordCount consistent for hourly materialization and lazy day reads', async () => {
     // Insert wallet
     await wallets.insert({ id: 'w1', userId: 'u1', balance: 0 });
 
     // First batch of two transactions in hour/day
     await wallets.add('w1', 'balance', 100);
     await wallets.add('w1', 'balance', 50);
-    await wallets.consolidate('w1', 'balance');
+    const firstConsolidation = await wallets.consolidate('w1', 'balance');
 
     // Second batch for same record (same bucket expected)
     await wallets.add('w1', 'balance', 25);
-    await wallets.consolidate('w1', 'balance');
+    const secondConsolidation = await wallets.consolidate('w1', 'balance');
 
     const analyticsResource = database.resources.plg_wallets_an_balance;
     const allAnalytics = await analyticsResource.list();
     const txResource = database.resources.plg_wallets_tx_balance;
     const txns = await txResource.list();
 
+    expect(firstConsolidation.success).toBe(true);
+    expect(secondConsolidation.success).toBe(true);
+
     const byHour = new Map<string, number>();
     const byDay = new Map<string, number>();
 
-    for (const txn of txs) {
+    for (const txn of txns) {
       byHour.set(txn.cohortHour, (byHour.get(txn.cohortHour) ?? 0) + 1);
       byDay.set(txn.cohortDate, (byDay.get(txn.cohortDate) ?? 0) + 1);
     }
@@ -361,10 +333,13 @@ describe('EventualConsistencyPlugin Analytics', () => {
     }
 
     for (const [day, expectedTransactionCount] of byDay.entries()) {
-      const dayAnalytics = allAnalytics.find(a => a.period === 'day' && a.cohort === day);
-      expect(dayAnalytics).toBeDefined();
-      expect(dayAnalytics!.recordCount).toBe(1);
-      expect(dayAnalytics!.transactionCount).toBe(expectedTransactionCount);
+      const dayAnalytics = await plugin.getAnalytics('wallets', 'balance', {
+        period: 'day',
+        date: day
+      });
+      expect(dayAnalytics).toHaveLength(1);
+      expect(dayAnalytics[0].recordCount).toBe(1);
+      expect(dayAnalytics[0].count).toBe(expectedTransactionCount);
     }
   });
 
@@ -493,7 +468,7 @@ describe('EventualConsistencyPlugin Analytics', () => {
       }
     });
 
-    expect(() => pluginNoAnalytics.getAnalytics('wallets', 'balance')).rejects.toThrow(
+    await expect(() => pluginNoAnalytics.getAnalytics('wallets', 'balance')).rejects.toThrow(
       'Analytics not enabled'
     );
   });

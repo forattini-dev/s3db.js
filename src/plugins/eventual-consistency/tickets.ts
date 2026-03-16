@@ -12,6 +12,7 @@ import {
   setNestedValue
 } from './utils.js';
 import type { NormalizedConfig } from './config.js';
+import { updateAnalytics, type UpdateAnalyticsConfig } from './analytics.js';
 
 export interface Ticket {
   id: string;
@@ -70,6 +71,8 @@ function getTicketQueryPageSize(config: NormalizedConfig): number {
   return Math.max(25, Math.min(200, config.ticketScanPageSize || 100));
 }
 
+const inFlightTicketClaims = new Set<string>();
+
 async function scanTicketsByStatus(
   ticketResource: TicketResource,
   status: Ticket['status'],
@@ -120,6 +123,43 @@ async function scanTransactionsByFilter(
 
   while (true) {
     const batch = await transactionResource.query(filter, {
+      limit: pageSize,
+      offset
+    }).catch(() => []);
+
+    if (!Array.isArray(batch) || batch.length === 0) {
+      break;
+    }
+
+    for (const transaction of batch as Transaction[]) {
+      scanned += 1;
+      const stop = await Promise.resolve(onTransaction(transaction));
+      if (stop) {
+        return scanned;
+      }
+    }
+
+    if (batch.length < pageSize) {
+      break;
+    }
+
+    offset += pageSize;
+  }
+
+  return scanned;
+}
+
+async function scanTransactionsByList(
+  transactionResource: TransactionResource,
+  config: NormalizedConfig,
+  onTransaction: (transaction: Transaction) => Promise<boolean | void> | (boolean | void)
+): Promise<number> {
+  const pageSize = getTicketQueryPageSize(config);
+  let offset = 0;
+  let scanned = 0;
+
+  while (true) {
+    const batch = await transactionResource.list({
       limit: pageSize,
       offset
     }).catch(() => []);
@@ -330,6 +370,32 @@ export async function createTicketsForHandler(
   }
 
   if (uniqueIds.length === 0) {
+    const cohortHourSet = new Set(cohortHours);
+
+    await scanTransactionsByList(
+      transactionResource,
+      config,
+      (transaction) => {
+        const originalId = transaction.originalId;
+        if (
+          transaction.applied !== false ||
+          typeof transaction.cohortHour !== 'string' ||
+          !cohortHourSet.has(transaction.cohortHour) ||
+          typeof originalId !== 'string' ||
+          !originalId ||
+          activeRecords.has(originalId) ||
+          seenOriginalIds.has(originalId)
+        ) {
+          return;
+        }
+
+        seenOriginalIds.add(originalId);
+        uniqueIds.push(originalId);
+      }
+    );
+  }
+
+  if (uniqueIds.length === 0) {
     return [];
   }
 
@@ -388,41 +454,51 @@ export async function claimTickets(
       return false;
     }
 
-    let currentTicket: Ticket;
-    try {
-      currentTicket = await ticketResource.get(ticket.id) as Ticket;
-    } catch {
+    if (inFlightTicketClaims.has(ticket.id)) {
       return false;
     }
 
-    if (shouldSkipCandidateForClaim(currentTicket, now)) {
-      return false;
-    }
-
-    if (typeof ticketResource.updateConditional !== 'function' || !currentTicket._etag) {
-      return false;
-    }
+    inFlightTicketClaims.add(ticket.id);
 
     try {
-      const claimResult = await ticketResource.updateConditional(ticket.id, {
-        status: 'processing',
-        claimedBy: workerId,
-        ticketClaimedAt: now,
-        ticketProcessingUntil: now + leaseMs
-      }, {
-        ifMatch: currentTicket._etag
-      });
+      let currentTicket: Ticket;
+      try {
+        currentTicket = await ticketResource.get(ticket.id) as Ticket;
+      } catch {
+        return false;
+      }
 
-      if (claimResult?.success) {
-        claimed.push({
-          ...currentTicket,
+      if (shouldSkipCandidateForClaim(currentTicket, now)) {
+        return false;
+      }
+
+      if (typeof ticketResource.updateConditional !== 'function' || !currentTicket._etag) {
+        return false;
+      }
+
+      try {
+        const claimResult = await ticketResource.updateConditional(ticket.id, {
           status: 'processing',
           claimedBy: workerId,
-          ticketClaimedAt: now
+          ticketClaimedAt: now,
+          ticketProcessingUntil: now + leaseMs
+        }, {
+          ifMatch: currentTicket._etag
         });
+
+        if (claimResult?.success) {
+          claimed.push({
+            ...currentTicket,
+            status: 'processing',
+            claimedBy: workerId,
+            ticketClaimedAt: now
+          });
+        }
+      } catch {
+        // ignore contention and keep scanning
       }
-    } catch {
-      // ignore contention and keep scanning
+    } finally {
+      inFlightTicketClaims.delete(ticket.id);
     }
 
     return claimed.length >= claimLimit;
@@ -618,6 +694,7 @@ export async function processTicket(
   }
 
   let hadErrors = false;
+  const processedTransactions: Transaction[] = [];
 
   for (const originalId of ticket.records) {
     try {
@@ -688,11 +765,8 @@ export async function processTicket(
       try {
         if (hasSet) {
           try {
-            const existingRecord = await targetResource.get(originalId);
-            const currentValue = handler.fieldPath
-              ? normalizeNumber(getNestedValue(existingRecord, handler.fieldPath))
-              : normalizeNumber(existingRecord[fieldName]);
-            await targetResource.update(originalId, buildUpdateData(currentValue + consolidatedValue));
+            await targetResource.get(originalId);
+            await targetResource.update(originalId, buildUpdateData(consolidatedValue));
           } catch {
             await targetResource.insert({
               id: originalId,
@@ -739,6 +813,7 @@ export async function processTicket(
         }
       }
 
+      processedTransactions.push(...transactions);
       results.recordsProcessed++;
 
     } catch (err: any) {
@@ -750,6 +825,25 @@ export async function processTicket(
   if (hadErrors) {
     await releaseTicketForRetry(ticket, ticketResource, workerId, getTicketLeaseMs(config), config);
     return results;
+  }
+
+  if (config.enableAnalytics && handler.analyticsResource && processedTransactions.length > 0) {
+    try {
+      const analyticsConfig: UpdateAnalyticsConfig = {
+        resource: resourceName,
+        field: fieldName,
+        analyticsConfig: config.analyticsConfig,
+        cohort: config.cohort,
+        logLevel: config.logLevel,
+        transactionResource
+      };
+      await updateAnalytics(processedTransactions, handler.analyticsResource, analyticsConfig);
+    } catch (err: any) {
+      results.errors.push({
+        ticketId: ticket.id,
+        error: `Failed to update analytics: ${err.message}`
+      });
+    }
   }
 
   try {

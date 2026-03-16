@@ -47,7 +47,7 @@ export interface TransactionResource {
     error?: string;
   }>;
   delete(id: string): Promise<void>;
-  list(options?: { limit?: number }): Promise<Transaction[]>;
+  list(options?: { limit?: number; offset?: number }): Promise<Transaction[]>;
   query(query: Record<string, any>, options?: { limit?: number; offset?: number }): Promise<Transaction[]>;
 }
 
@@ -55,7 +55,7 @@ export interface AnalyticsResource {
   insert(data: any): Promise<any>;
   get(id: string): Promise<any>;
   update(id: string, data: any): Promise<any>;
-  list(options?: { limit?: number }): Promise<any[]>;
+  list(options?: { limit?: number; offset?: number }): Promise<any[]>;
   updateConditional?: (
     id: string,
     data: any,
