@@ -2146,36 +2146,43 @@ export class MyPlugin extends Plugin {
 
 ### Model Context Protocol (MCP) Server
 
-S3DB includes a powerful MCP server with **28 specialized tools** for database operations, debugging, and monitoring.
+S3DB includes a built-in MCP server that works in two modes depending on whether a connection string is provided.
 
-#### Quick Start
+#### Library Mode (no credentials needed)
 
 ```bash
-# Claude CLI (one command)
-claude mcp add s3db \
-  --transport stdio \
-  -- npx -y s3db.js mcp --transport=stdio
-
-# Standalone HTTP server
-npx s3db.js mcp --transport=sse
+# Claude Code
+claude mcp add s3db -- npx -y s3db.js mcp
 ```
 
-#### Features
+Exposes documentation tools, resources, and prompts. Helps you design schemas, choose field types, configure plugins, and learn s3db — no AWS credentials required.
 
-- ✅ **28 tools** - CRUD, debugging, partitions, bulk ops, export/import, monitoring
-- ✅ **Multiple transports** - SSE for web, stdio for CLI
-- ✅ **Auto-optimization** - Cache and cost tracking enabled by default
-- ✅ **Partition-aware** - Intelligent caching with partition support
+#### Full Mode (with database connection)
 
-#### Tool Categories
+```bash
+# Claude Code
+claude mcp add s3db \
+  -e S3DB_CONNECTION_STRING=s3://KEY:SECRET@my-bucket \
+  -- npx -y s3db.js mcp
 
-1. **Connection** (3) - `dbConnect`, `dbDisconnect`, `dbStatus`
-2. **Debugging** (5) - `dbInspectResource`, `dbGetMetadata`, `resourceValidate`, `dbHealthCheck`, `resourceGetRaw`
-3. **Query** (2) - `resourceQuery`, `resourceSearch`
-4. **Partitions** (4) - `resourceListPartitions`, `dbFindOrphanedPartitions`, etc.
-5. **Bulk Ops** (3) - `resourceUpdateMany`, `resourceBulkUpsert`, `resourceDeleteAll`
-6. **Export/Import** (3) - `resourceExport`, `resourceImport`, `dbBackupMetadata`
-7. **Monitoring** (4) - `dbGetStats`, `resourceGetStats`, `cacheGetStats`, `dbClearCache`
+# HTTP transport
+S3DB_CONNECTION_STRING=s3://KEY:SECRET@my-bucket npx s3db.js mcp --transport=http
+```
+
+Adds CRUD tools, live resource introspection (`s3db://resource/{name}`), and data-aware prompts on top of everything in Library Mode.
+
+#### What's exposed per mode
+
+| | Library Mode | Full Mode |
+|---|:---:|:---:|
+| `s3dbSearchDocs` | ✅ | ✅ |
+| `s3db://core/`, `s3db://plugin/`, `s3db://guide/` resources | ✅ | ✅ |
+| Schema design & migration prompts | ✅ | ✅ |
+| CRUD tools (resourceGet, resourceList, resourceInsert…) | — | ✅ |
+| `s3db://resource/{name}` (live schema) | — | ✅ |
+| Debug & optimization prompts | — | ✅ |
+
+Library Mode can be promoted to Full Mode at runtime by calling the `dbConnect` tool — no restart needed.
 
 **Complete documentation**: [**docs/mcp.md**](./docs/mcp.md)
 

@@ -93,10 +93,28 @@ Use \`s3db://resource/{name}\` to see which partitions a resource has.
 - \`migrate_from_mongodb\` / \`migrate_from_dynamodb\` / \`migrate_from_prisma\` — migration guides
 `;
 
+/** Names of prompts available in library mode (no DB connection required). */
+const LIBRARY_MODE_PROMPTS = new Set([
+  'explain_behavior',
+  'explain_partitions',
+  'compare_clients',
+  'explain_plugin',
+  'create_resource',
+  'setup_plugin',
+  'create_partition_strategy',
+  'create_api_server',
+  'migrate_from_mongodb',
+  'migrate_from_dynamodb',
+  'migrate_from_prisma',
+]);
+
 export class S3dbMCPServer {
   private server: Server;
   private allToolHandlers: Record<string, Function>;
   private httpTransportServer: ReturnType<typeof createHttpServer> | null;
+
+  /** True when no connection string was provided at startup. Flips to false on successful dbConnect. */
+  isLibraryMode: boolean = true;
 
   constructor() {
     this.server = new Server(
@@ -125,7 +143,15 @@ export class S3dbMCPServer {
   setupToolHandlers(): Record<string, Function> {
     // List available tools — keep it simple: only essential tools are advertised.
     // All handlers remain registered so advanced tools still work if called directly.
+    // In library mode (no connection string), only docs tools are advertised.
     this.server.setRequestHandler(ListToolsRequestSchema, async () => {
+      const essentialDocs = docsSearchTools.filter(t => t.name === 's3dbSearchDocs');
+      const docsTools = essentialDocs.length > 0 ? essentialDocs : docsSearchTools.slice(0, 1);
+
+      if (this.isLibraryMode) {
+        return { tools: docsTools };
+      }
+
       const essentialCrud = crudTools.filter(t =>
         ['resourceGet', 'resourceList', 'resourcePage', 'resourceCount',
          'resourceInsert', 'resourceInsertMany', 'resourceUpdate', 'resourceDelete'].includes(t.name)
@@ -134,9 +160,6 @@ export class S3dbMCPServer {
       const essentialConnection = connectionTools.filter(t =>
         ['dbConnect', 'dbStatus'].includes(t.name)
       );
-      const essentialDocs = docsSearchTools.filter(t =>
-        ['s3dbSearchDocs'].includes(t.name)
-      );
 
       return {
         tools: [
@@ -144,7 +167,7 @@ export class S3dbMCPServer {
           ...essentialQuery,
           ...resourceManagementTools,
           ...essentialConnection,
-          ...(essentialDocs.length > 0 ? essentialDocs : docsSearchTools.slice(0, 2)),
+          ...docsTools,
         ]
       };
     });
@@ -176,6 +199,7 @@ export class S3dbMCPServer {
         // Update global database state from connection handlers
         if (result?.database instanceof S3db) {
           database = result.database;
+          this.isLibraryMode = false;
           delete result.database;
         }
         if (result?.clearDatabase) {
@@ -218,8 +242,12 @@ export class S3dbMCPServer {
   setupResourceHandlers(): void {
     // List available resource templates
     this.server.setRequestHandler(ListResourceTemplatesRequestSchema, async () => {
+      const templates = this.isLibraryMode
+        ? resourceTemplates.filter(t => t.uriTemplate !== 's3db://resource/{name}')
+        : resourceTemplates;
+
       return {
-        resourceTemplates: resourceTemplates.map((t) => ({
+        resourceTemplates: templates.map((t) => ({
           uriTemplate: t.uriTemplate,
           name: t.name,
           description: t.description,
@@ -239,6 +267,16 @@ export class S3dbMCPServer {
     this.server.setRequestHandler(ReadResourceRequestSchema, async (request) => {
       const { uri } = request.params;
 
+      if (this.isLibraryMode && uri.startsWith('s3db://resource/')) {
+        return {
+          contents: [{
+            uri,
+            mimeType: 'text/markdown',
+            text: `# Live Resource Unavailable\n\nThe \`s3db://resource/{name}\` resource requires an active database connection.\n\nSet \`S3DB_CONNECTION_STRING\` to enable full mode, or use the \`dbConnect\` tool to connect at runtime.`,
+          }],
+        };
+      }
+
       const content = readResource(uri, database);
       if (!content) {
         throw new Error(`Resource not found: ${uri}`);
@@ -253,8 +291,12 @@ export class S3dbMCPServer {
   setupPromptHandlers(): void {
     // List available prompts
     this.server.setRequestHandler(ListPromptsRequestSchema, async () => {
+      const visiblePrompts = this.isLibraryMode
+        ? prompts.filter(p => LIBRARY_MODE_PROMPTS.has(p.name))
+        : prompts;
+
       return {
-        prompts: prompts.map((p) => ({
+        prompts: visiblePrompts.map((p) => ({
           name: p.name,
           description: p.description,
           arguments: p.arguments?.map((a) => ({
@@ -633,6 +675,15 @@ export async function startServer(args?: TransportArgs): Promise<void> {
   // Resolve config: defaults < config file < env vars
   const mcpConfig = resolveConfig();
 
+  // Determine operating mode based on whether a connection string is present
+  if (mcpConfig.connectionString) {
+    server.isLibraryMode = false;
+  }
+
+  if (server.isLibraryMode) {
+    process.stderr.write('[s3db MCP] Library mode — no connection string found. Serving documentation only.\n');
+  }
+
   // Auto-connect if connection string is available
   if (mcpConfig.connectionString) {
     try {
@@ -681,6 +732,7 @@ export async function startServer(args?: TransportArgs): Promise<void> {
 
       const resourceCount = Object.keys(database.resources || {}).length;
       log(`Auto-connected to ${database.bucket} (${resourceCount} resources restored)`);
+      process.stderr.write('[s3db MCP] Full mode — connected to database.\n');
     } catch (err: any) {
       log(`Auto-connect failed: ${err.message}. Use dbConnect tool manually.`);
       database = null;
