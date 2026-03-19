@@ -44,8 +44,8 @@ export const BASE_USER_ATTRIBUTES: BaseAttributes = {
   tenantId: 'string|optional',
   active: 'boolean|default:true',
   failedLoginAttempts: 'number|default:0',
-  lockedUntil: 'string|optional',
-  lastFailedLogin: 'string|optional',
+  lockedUntil: 'datetime|optional',
+  lastFailedLogin: 'datetime|optional',
   metadata: 'object|optional'
 };
 

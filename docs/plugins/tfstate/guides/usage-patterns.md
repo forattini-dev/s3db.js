@@ -256,7 +256,7 @@ setInterval(getInfraDashboard, 5 * 60 * 1000);
 
 ```javascript
 // View all resources created in last week
-const weekAgo = Date.now() - (7 * 24 * 60 * 60 * 1000);
+const weekAgo = new Date(Date.now() - (7 * 24 * 60 * 60 * 1000)).toISOString();
 
 const recentResources = await plugin.resource.query({
   importedAt: { $gte: weekAgo }

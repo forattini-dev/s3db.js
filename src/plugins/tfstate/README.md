@@ -35,7 +35,7 @@ Stores metadata about each imported `.tfstate`.
   terraformVersion: 'string',               // e.g. '1.5.0'
   resourceCount: 'number',                  // How many resources
   sha256Hash: 'string|required',            // For dedup
-  importedAt: 'number|required',            // timestamp
+  importedAt: 'datetime|required',          // ISO 8601 timestamp
   stateVersion: 'number'                    // 3 or 4
 }
 ```
@@ -92,7 +92,7 @@ The main resource containing all infrastructure resources extracted from states.
   attributes: 'json',                       // Complete resource attributes
   dependencies: 'array',                    // Dependency list
 
-  importedAt: 'number|required'             // timestamp
+  importedAt: 'datetime|required'           // ISO 8601 timestamp
 }
 ```
 
@@ -202,7 +202,7 @@ Tracks changes between state versions.
     }
   },
 
-  calculatedAt: 'number|required'           // timestamp
+  calculatedAt: 'datetime|required'         // ISO 8601 timestamp
 }
 ```
 
@@ -359,7 +359,7 @@ async importState(filePath, options = {}) {
     terraformVersion: state.terraform_version,
     resourceCount: state.resources?.length || 0,
     sha256Hash,
-    importedAt: Date.now(),
+    importedAt: new Date().toISOString(),
     stateVersion: state.version
   });
 
@@ -406,7 +406,7 @@ async _extractResources(state, stateFileId) {
         mode: resource.mode || 'managed',
         attributes: instance.attributes || {},
         dependencies: resource.depends_on || [],
-        importedAt: Date.now()
+        importedAt: new Date().toISOString()
       };
 
       await this.resource.insert(record);
@@ -508,7 +508,7 @@ async _maybeCalculateDiff(sourceFile, newSerial) {
       newSerial: newState.serial,
       summary: diff.summary,
       changes: diff.changes,
-      calculatedAt: Date.now()
+      calculatedAt: new Date().toISOString()
     });
   }
 }
@@ -564,7 +564,7 @@ async getLatestDiff(sourceFile) {
   if (diffs.length === 0) return null;
 
   // Sort by calculatedAt desc
-  diffs.sort((a, b) => b.calculatedAt - a.calculatedAt);
+  diffs.sort((a, b) => new Date(b.calculatedAt).getTime() - new Date(a.calculatedAt).getTime());
   return diffs[0];
 }
 

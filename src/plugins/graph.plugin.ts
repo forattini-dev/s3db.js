@@ -117,6 +117,13 @@ export interface CreateEdgeOptions {
   data?: Record<string, unknown>;
 }
 
+export interface GraphPluginStats {
+  vertexResources: string[];
+  edgeResources: string[];
+  directed: boolean;
+  weighted: boolean;
+}
+
 interface HeapItem {
   id: string;
   f: number;
@@ -225,6 +232,7 @@ export class GraphPlugin extends Plugin {
               fields: { [this.config.edgeLabelField]: 'string' }
             }
           },
+          behavior: this.config.denormalize.length > 0 ? 'body-overflow' : undefined,
           createdBy: this.slug
         });
         this.logger.info({ resource: edgeName }, `Created edge resource: ${edgeName}`);
@@ -923,7 +931,7 @@ export class GraphPlugin extends Plugin {
     this._resourceGraphNamespaces.clear();
   }
 
-  getStats(): { vertexResources: string[]; edgeResources: string[]; directed: boolean; weighted: boolean } {
+  getStats(): GraphPluginStats {
     return {
       vertexResources: this.config.vertices,
       edgeResources: this.config.edges,

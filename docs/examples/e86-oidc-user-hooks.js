@@ -39,7 +39,7 @@ async function setupDatabase() {
       picture: 'string|optional',
       role: 'string|optional',
       active: 'boolean|optional',
-      lastLoginAt: 'string|optional',
+      lastLoginAt: 'datetime|optional',
       metadata: 'object|optional'
     },
     timestamps: true

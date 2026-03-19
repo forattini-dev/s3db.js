@@ -115,6 +115,7 @@ plugin.onWebhookEvent('complaint', async (event) => {
 
 plugin.onWebhookEvent('delivery', async (event) => {
   console.log(`Delivered to ${event.recipient}`);
+  console.log(`Delivered at ${event.timestamp}`);
 });
 
 // Setup webhook endpoint (Express)
@@ -345,9 +346,12 @@ const plugin = new SMTPPlugin({
   mode: 'server',
   serverPort: 25,                    // Use 2525 for unprivileged
   serverHost: '0.0.0.0',
-  serverAuth: {
-    username: 'postmaster',
-    password: process.env.SMTP_PASSWORD
+  requireAuth: true,
+  authHandler: async (auth) => {
+    if (auth.user === 'postmaster' && auth.pass === process.env.SMTP_PASSWORD) {
+      return { user: auth.user };
+    }
+    throw new Error('Invalid credentials');
   },
   emailResource: 'received_emails',
   logLevel: 'debug'
@@ -372,30 +376,35 @@ const plugin = new SMTPPlugin({
   mode: 'server',
   serverPort: 25,
   serverHost: '0.0.0.0',
-  serverAuth: {
-    username: 'postmaster',
-    password: process.env.SMTP_PASSWORD
+  requireAuth: true,
+  authHandler: async (auth) => {
+    if (auth.user === 'postmaster' && auth.pass === process.env.SMTP_PASSWORD) {
+      return { user: auth.user };
+    }
+    throw new Error('Invalid credentials');
   },
   emailResource: 'received_emails',
 
   // Validate sender
   onMailFrom: async (address) => {
-    return address.endsWith('@authorized-domain.com');
+    return address.address.endsWith('@authorized-domain.com');
   },
 
   // Validate recipient
   onRcptTo: async (address) => {
-    const user = await db.resources.users.get(address.split('@')[0]);
+    const user = await db.resources.users.get(address.address.split('@')[0]);
     return user?.enabled || false;
   },
 
   // Process before storing
-  onData: async (stream) => {
+  onData: async (stream, session) => {
     // Spam filtering, virus scanning, etc.
     return true;
   }
 });
 ```
+
+Use `onMailFrom` only when you really need sender validation at `MAIL FROM`. That callback forces s3db.js to use the legacy `smtp-server` backend. Without it, `Server Mode` runs on Raffel's SMTP adapter by default.
 
 ### Testing Server Mode
 

@@ -142,7 +142,7 @@ async function main() {
         category: "premium",
         priority: "high"
       },
-      createdAt: new Date("2024-01-15T10:30:00Z")
+      createdAt: new Date("2024-01-15T10:30:00Z").toISOString()
     },
     {
       name: "Jane Smith",
@@ -163,7 +163,7 @@ async function main() {
         category: "standard",
         priority: "medium"
       },
-      createdAt: new Date("2024-01-15T14:20:00Z")
+      createdAt: new Date("2024-01-15T14:20:00Z").toISOString()
     },
     {
       name: "Bob Wilson",
@@ -184,7 +184,7 @@ async function main() {
         category: "premium",
         priority: "high"
       },
-      createdAt: new Date("2024-01-16T09:15:00Z")
+      createdAt: new Date("2024-01-16T09:15:00Z").toISOString()
     },
     {
       name: "Alice Brown",
@@ -205,7 +205,7 @@ async function main() {
         category: "standard",
         priority: "low"
       },
-      createdAt: new Date("2024-01-16T16:45:00Z")
+      createdAt: new Date("2024-01-16T16:45:00Z").toISOString()
     },
     {
       name: "Charlie Davis",
@@ -226,7 +226,7 @@ async function main() {
         category: "premium",
         priority: "high"
       },
-      createdAt: new Date("2024-01-17T11:30:00Z")
+      createdAt: new Date("2024-01-17T11:30:00Z").toISOString()
     }
   ];
 

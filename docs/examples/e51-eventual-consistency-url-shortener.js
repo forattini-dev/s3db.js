@@ -48,7 +48,7 @@ async function main() {
       shortCode: 'string|required',
       clicks: 'number|default:0',
       views: 'number|default:0',
-      createdAt: 'string|required'
+      createdAt: 'datetime|required'
     }
   });
   console.log('✅ URLs resource created\n');
@@ -59,7 +59,7 @@ async function main() {
     attributes: {
       id: 'string|required',
       urlId: 'string|required',
-      timestamp: 'string|required',
+      timestamp: 'datetime|required',
       userAgent: 'string|optional',
       ip: 'string|optional'
     }

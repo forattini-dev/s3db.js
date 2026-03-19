@@ -807,16 +807,16 @@ export class PuppeteerPlugin extends Plugin {
         viewport: 'object',
         proxyId: 'string|optional',
         domain: 'string',
-        date: 'string',
+        date: 'dateonly',
         reputation: {
           successCount: 'number',
           failCount: 'number',
           successRate: 'number',
-          lastUsed: 'number'
+          lastUsed: 'datetime'
         },
         metadata: {
-          createdAt: 'number',
-          expiresAt: 'number',
+          createdAt: 'datetime',
+          expiresAt: 'datetime',
           requestCount: 'number',
           age: 'number'
         }
@@ -825,7 +825,7 @@ export class PuppeteerPlugin extends Plugin {
       behavior: 'body-only',
       partitions: {
         byProxy: { fields: { proxyId: 'string' } },
-        byDate: { fields: { date: 'string' } },
+        byDate: { fields: { date: 'dateonly' } },
         byDomain: { fields: { domain: 'string' } }
       }
     }));

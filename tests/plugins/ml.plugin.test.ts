@@ -514,6 +514,40 @@ describeIfTf('MLPlugin', () => {
       expect(savedModel.savedAt).toBeDefined();
     });
 
+    it('should persist version metadata and history as body-only exact-key documents', async () => {
+      const storage = persistPlugin.getStorage();
+      const setSpy = vi.spyOn(storage, 'set');
+
+      await persistPlugin.train('persistModel');
+
+      const versionKey = storage.getPluginKey('test_persist', 'metadata', 'persistModel', 'versions');
+      const activeKey = storage.getPluginKey('test_persist', 'metadata', 'persistModel', 'active');
+      const historyKey = storage.getPluginKey('test_persist', 'training', 'history', 'persistModel');
+
+      expect(setSpy).toHaveBeenCalledWith(
+        versionKey,
+        expect.any(Object),
+        expect.objectContaining({ behavior: 'body-only' })
+      );
+      expect(setSpy).toHaveBeenCalledWith(
+        activeKey,
+        expect.any(Object),
+        expect.objectContaining({ behavior: 'body-only' })
+      );
+      expect(setSpy).toHaveBeenCalledWith(
+        historyKey,
+        expect.any(Object),
+        expect.objectContaining({ behavior: 'body-only' })
+      );
+      expect(setSpy).toHaveBeenCalledWith(
+        'model_persistModel',
+        expect.any(Object),
+        expect.objectContaining({ behavior: 'body-only' })
+      );
+
+      setSpy.mockRestore();
+    });
+
     it('should save training data to S3', async () => {
       // Training data should have been saved during previous test
       const trainingData = await persistPlugin.getTrainingData('persistModel');

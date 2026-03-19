@@ -182,6 +182,50 @@ describe('TfStatePlugin - Diff Tracking, Queries, and Statistics', () => {
       expect(changes.deleted[0].address).toBe('aws_s3_bucket.bucket');
     });
 
+    test('should expose typed diff timeline summaries with semantic datetimes', async () => {
+      const filename = 'terraform.tfstate';
+
+      const stateFile1 = createStateFile(
+        tempDir,
+        1,
+        [{ mode: 'managed', type: 'aws_instance', name: 'web', instances: [{ attributes: { id: 'i-1' } }] }],
+        { fileName: filename },
+      );
+      await plugin.importState(stateFile1);
+
+      const stateFile2 = createStateFile(
+        tempDir,
+        2,
+        [
+          { mode: 'managed', type: 'aws_instance', name: 'web', instances: [{ attributes: { id: 'i-1' } }] },
+          { mode: 'managed', type: 'aws_s3_bucket', name: 'bucket', instances: [{ attributes: { id: 'bucket-1' } }] },
+        ],
+        { fileName: filename },
+      );
+      await plugin.importState(stateFile2);
+
+      const timeline = await plugin.getDiffTimeline(stateFile2);
+
+      expect(timeline.sourceFile).toBe(stateFile2);
+      expect(timeline.totalDiffs).toBe(1);
+      expect(timeline.summary.totalAdded).toBe(1);
+      expect(timeline.summary.totalModified).toBe(0);
+      expect(timeline.summary.totalDeleted).toBe(0);
+      expect(timeline.summary.serialRange).toEqual({ oldest: 1, newest: 2 });
+      expect(typeof timeline.summary.timeRange.first).toBe('string');
+      expect(typeof timeline.summary.timeRange.last).toBe('string');
+      expect(timeline.diffs[0]).toMatchObject({
+        oldSerial: 1,
+        newSerial: 2,
+        summary: {
+          addedCount: 1,
+          modifiedCount: 0,
+          deletedCount: 0
+        }
+      });
+      expect(typeof timeline.diffs[0].calculatedAt).toBe('string');
+    });
+
     test('should not track diffs when disabled', async () => {
       const noDiffPlugin = new TfStatePlugin({ logLevel: 'silent', asyncPartitions: false, trackDiffs: false });
       await noDiffPlugin.install(database);

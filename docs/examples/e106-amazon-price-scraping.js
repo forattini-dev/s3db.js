@@ -72,8 +72,8 @@ async function scrapeAmazonPrices() {
       variations: 'array|optional',         // Size, color options
 
       // Metadata
-      scrapedAt: 'string|required',
-      lastUpdated: 'string|optional'
+      scrapedAt: 'datetime|required',
+      lastUpdated: 'datetime|optional'
     }
   })
 

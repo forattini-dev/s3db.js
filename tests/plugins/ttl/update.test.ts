@@ -84,16 +84,59 @@ describe('TTLPlugin v2 - Update Hook', () => {
 
     const indexResource = db.resources[(plugin as any).indexResourceName];
     const indexId = 'subscriptions:sub-2';
-    const indexBefore = await indexResource.get(indexId) as { createdAt: number; expiresAtTimestamp: number };
+    const indexBefore = await indexResource.get(indexId) as { createdAt: string; expiresAtTimestamp: number };
 
     await subscriptions.update('sub-2', {
       userId: 'user-2-updated'
     });
 
-    const indexAfter = await indexResource.get(indexId) as { createdAt: number; expiresAtTimestamp: number };
+    const indexAfter = await indexResource.get(indexId) as { createdAt: string; expiresAtTimestamp: number };
 
     expect(indexAfter.createdAt).toBe(indexBefore.createdAt);
     expect(indexAfter.expiresAtTimestamp).toBe(indexBefore.expiresAtTimestamp);
+
+    await plugin.uninstall();
+    await db.disconnect();
+  });
+
+  test('should return typed cleanup result for a configured resource', async () => {
+    const db = createDatabaseForTest('ttl-v2-cleanup-result');
+    await db.connect();
+
+    await db.createResource({
+      name: 'sessions',
+      attributes: {
+        id: 'string|optional',
+        expiresAt: 'number|required'
+      }
+    });
+
+    const plugin = new TTLPlugin({
+      logLevel: 'silent',
+      resources: {
+        sessions: {
+          ttl: 300,
+          field: 'expiresAt',
+          onExpire: 'hard-delete',
+          granularity: 'minute'
+        }
+      }
+    });
+
+    await plugin.install(db);
+
+    const result = await plugin.cleanupResource('sessions');
+
+    expect(result).toEqual({
+      resource: 'sessions',
+      granularity: 'minute'
+    });
+
+    expect(plugin.getStats()).toMatchObject({
+      resources: 1,
+      isRunning: false,
+      cronJobs: expect.any(Number)
+    });
 
     await plugin.uninstall();
     await db.disconnect();

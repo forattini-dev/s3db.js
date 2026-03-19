@@ -114,6 +114,7 @@ export interface PrometheusConfig {
 }
 
 export interface MetricsPluginOptions {
+  enabled?: boolean;
   resourceNames?: {
     metrics?: string;
     errors?: string;
@@ -131,6 +132,7 @@ export interface MetricsPluginOptions {
 }
 
 interface MetricsConfig {
+  enabled: boolean;
   collectPerformance: boolean;
   collectErrors: boolean;
   collectUsage: boolean;
@@ -276,6 +278,7 @@ export class MetricsPlugin extends Plugin {
 
     const metricsOptions = this.options as MetricsPluginOptions;
     const {
+      enabled,
       resourceNames = {},
       collectPerformance,
       collectErrors,
@@ -313,6 +316,7 @@ export class MetricsPlugin extends Plugin {
     this.resourceNames = this._resolveResourceNames();
 
     this.config = {
+      enabled: enabled !== false,
       collectPerformance: collectPerformance !== false,
       collectErrors: collectErrors !== false,
       collectUsage: collectUsage !== false,
@@ -373,6 +377,7 @@ export class MetricsPlugin extends Plugin {
 
   override async onInstall(): Promise<void> {
     if (typeof process !== 'undefined' && process.env.NODE_ENV === 'test') return;
+    if (this.config.enabled === false) return;
 
     const [ok] = await tryFn(async () => {
       const [ok1, , metricsResource] = await tryFn(() => this.database.createResource({
@@ -386,12 +391,12 @@ export class MetricsPlugin extends Plugin {
           totalTime: 'number|required',
           errors: 'number|required',
           avgTime: 'number|required',
-          timestamp: 'string|required',
+          timestamp: 'datetime|required',
           metadata: 'json',
-          createdAt: 'string|required'
+          createdAt: 'dateonly|required'
         },
         partitions: {
-          byDate: { fields: { createdAt: 'string|maxlength:10' } }
+          byDate: { fields: { createdAt: 'dateonly' } }
         },
         behavior: 'body-overflow'
       }));
@@ -406,12 +411,12 @@ export class MetricsPlugin extends Plugin {
           resourceName: 'string|required',
           operation: 'string|required',
           error: 'string|required',
-          timestamp: 'string|required',
+          timestamp: 'datetime|required',
           metadata: 'json',
-          createdAt: 'string|required'
+          createdAt: 'dateonly|required'
         },
         partitions: {
-          byDate: { fields: { createdAt: 'string|maxlength:10' } }
+          byDate: { fields: { createdAt: 'dateonly' } }
         },
         behavior: 'body-overflow'
       }));
@@ -426,12 +431,12 @@ export class MetricsPlugin extends Plugin {
           resourceName: 'string|required',
           operation: 'string|required',
           duration: 'number|required',
-          timestamp: 'string|required',
+          timestamp: 'datetime|required',
           metadata: 'json',
-          createdAt: 'string|required'
+          createdAt: 'dateonly|required'
         },
         partitions: {
-          byDate: { fields: { createdAt: 'string|maxlength:10' } }
+          byDate: { fields: { createdAt: 'dateonly' } }
         },
         behavior: 'body-overflow'
       }));

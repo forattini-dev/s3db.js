@@ -114,7 +114,7 @@ describe('TTLPlugin v2 - Hard Delete Strategy', () => {
       expiresAtCohort: now.toISOString().substring(0, 16),
       expiresAtTimestamp: now.getTime() - 1000,
       granularity: 'minute',
-      createdAt: Date.now()
+      createdAt: now.toISOString()
     });
 
     const before = await indexResource.get(staleEntryId).catch(() => null);
@@ -161,7 +161,7 @@ describe('TTLPlugin v2 - Hard Delete Strategy', () => {
       expiresAtCohort: now.toISOString().substring(0, 16),
       expiresAtTimestamp: now.getTime() - 1000,
       granularity: 'minute',
-      createdAt: Date.now()
+      createdAt: now.toISOString()
     });
 
     const originalResource = scopedDb.resources.ephemeral_files;

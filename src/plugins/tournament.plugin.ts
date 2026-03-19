@@ -380,8 +380,8 @@ export class TournamentPlugin extends Plugin {
         currentPhase: 'string|optional',
         currentRound: 'number|optional|default:0',
         metadata: 'object|optional',
-        startedAt: 'number|optional',
-        completedAt: 'number|optional'
+        startedAt: 'datetime|optional',
+        completedAt: 'datetime|optional'
       },
       partitions: {
         byOrganizer: { fields: { organizerId: 'string' } },
@@ -389,7 +389,7 @@ export class TournamentPlugin extends Plugin {
         byFormat: { fields: { format: 'string' } }
       },
       timestamps: true,
-      behavior: 'body-overflow'
+      behavior: 'body-only'
     });
 
     this.matchesResource = await (this.database as any).createResource({
@@ -412,8 +412,8 @@ export class TournamentPlugin extends Plugin {
         nextMatchId: 'string|optional',
         loserNextMatchId: 'string|optional',
         scheduledAt: 'number|optional',
-        startedAt: 'number|optional',
-        completedAt: 'number|optional',
+        startedAt: 'datetime|optional',
+        completedAt: 'datetime|optional',
         metadata: 'object|optional'
       },
       partitions: {
@@ -423,7 +423,7 @@ export class TournamentPlugin extends Plugin {
       },
       asyncPartitions: false,
       timestamps: true,
-      behavior: 'body-overflow'
+      behavior: 'body-only'
     });
 
     this.registrationsResource = await (this.database as any).createResource({
@@ -433,9 +433,9 @@ export class TournamentPlugin extends Plugin {
         participantId: 'string|required',
         seed: 'number|optional',
         status: 'string|required',
-        registeredAt: 'number|optional',
-        confirmedAt: 'number|optional',
-        checkedInAt: 'number|optional',
+        registeredAt: 'datetime|optional',
+        confirmedAt: 'datetime|optional',
+        checkedInAt: 'datetime|optional',
         metadata: 'object|optional'
       },
       partitions: {

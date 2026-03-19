@@ -330,7 +330,7 @@ async function example4_productionSetup() {
 
   // Find recently updated states
   const recentlyUpdated = await statsResource.query({
-    lastImportedAt: { $gte: Date.now() - 86400000 } // Last 24 hours
+    lastImportedAt: { $gte: new Date(Date.now() - 86400000).toISOString() } // Last 24 hours
   });
   console.log(`State files updated in last 24h: ${recentlyUpdated.length}`);
 
@@ -344,7 +344,7 @@ async function example4_productionSetup() {
   // Analyze changes over time
   const diffsResource = await database.getResource('infrastructure_changes');
   const recentChanges = await diffsResource.query({
-    calculatedAt: { $gte: Date.now() - 604800000 } // Last 7 days
+    calculatedAt: { $gte: new Date(Date.now() - 604800000).toISOString() } // Last 7 days
   });
 
   let totalAdded = 0;

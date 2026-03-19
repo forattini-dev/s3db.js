@@ -758,7 +758,7 @@ function requirePolicies(...policyNames) {
       user: req.user,
       resource: req.resource,  // Needs to be populated before (via requireOwnership or similar)
       request: req,
-      timestamp: new Date()
+      timestamp: new Date().toISOString()
     };
 
     const result = await policyEngine.evaluate(policyNames, context);

@@ -140,22 +140,25 @@ describe('Identity Plugin Integration Features', () => {
     });
 
     it('should include token_type=service in service account tokens', async () => {
-      const decoded = await identityPlugin.oauth2Server.keyManager.verifyToken(token.access_token);
-      expect(decoded.token_use).toBe('service');
+      const verified = await identityPlugin.oauth2Server.keyManager.verifyToken(token.access_token);
+      expect(verified).not.toBeNull();
+      expect(verified.payload.token_use).toBe('service');
     });
 
     it('should include service_account claim with metadata', async () => {
-      const decoded = await identityPlugin.oauth2Server.keyManager.verifyToken(token.access_token);
-      expect(decoded.service_account).toBeDefined();
-      expect(decoded.service_account.clientId).toBe('test-service-account');
-      expect(decoded.service_account.name).toBe('Test Service Account');
-      expect(decoded.service_account.scopes).toContain('read:api');
-      expect(decoded.service_account.scopes).toContain('write:api');
+      const verified = await identityPlugin.oauth2Server.keyManager.verifyToken(token.access_token);
+      expect(verified).not.toBeNull();
+      expect(verified.payload.service_account).toBeDefined();
+      expect(verified.payload.service_account.clientId).toBe('test-service-account');
+      expect(verified.payload.service_account.name).toBe('Test Service Account');
+      expect(verified.payload.service_account.scopes).toContain('read:api');
+      expect(verified.payload.service_account.scopes).toContain('write:api');
     });
 
     it('should format subject as sa:clientId for service accounts', async () => {
-      const decoded = await identityPlugin.oauth2Server.keyManager.verifyToken(token.access_token);
-      expect(decoded.sub).toBe('sa:test-service-account');
+      const verified = await identityPlugin.oauth2Server.keyManager.verifyToken(token.access_token);
+      expect(verified).not.toBeNull();
+      expect(verified.payload.sub).toBe('sa:test-service-account');
     });
   });
 
@@ -235,24 +238,28 @@ describe('Identity Plugin Integration Features', () => {
     });
 
     it('should include token_type=user in user tokens', async () => {
-      const decoded = await identityPlugin.oauth2Server.keyManager.verifyToken(token.access_token);
-      expect(decoded.token_use).toBe('user');
+      const verified = await identityPlugin.oauth2Server.keyManager.verifyToken(token.access_token);
+      expect(verified).not.toBeNull();
+      expect(verified.payload.token_use).toBe('user');
     });
 
     it('should include email claim for user tokens', async () => {
-      const decoded = await identityPlugin.oauth2Server.keyManager.verifyToken(token.access_token);
-      expect(decoded.email).toBe('testuser@example.com');
+      const verified = await identityPlugin.oauth2Server.keyManager.verifyToken(token.access_token);
+      expect(verified).not.toBeNull();
+      expect(verified.payload.email).toBe('testuser@example.com');
     });
 
     it('should include tenantId claim for user tokens', async () => {
-      const decoded = await identityPlugin.oauth2Server.keyManager.verifyToken(token.access_token);
-      expect(decoded.tenantId).toBe(tenantId);
+      const verified = await identityPlugin.oauth2Server.keyManager.verifyToken(token.access_token);
+      expect(verified).not.toBeNull();
+      expect(verified.payload.tenantId).toBe(tenantId);
     });
 
     it('should use user ID as subject for user tokens', async () => {
-      const decoded = await identityPlugin.oauth2Server.keyManager.verifyToken(token.access_token);
-      expect(decoded.sub).toBe(userId);
-      expect(decoded.sub).not.toMatch(/^sa:/);  // Should not have service account prefix
+      const verified = await identityPlugin.oauth2Server.keyManager.verifyToken(token.access_token);
+      expect(verified).not.toBeNull();
+      expect(verified.payload.sub).toBe(userId);
+      expect(verified.payload.sub).not.toMatch(/^sa:/);  // Should not have service account prefix
     });
   });
 });

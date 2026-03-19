@@ -178,7 +178,7 @@ async function main() {
         sendToSlack({ text: 'Terraform state updated!' })
       ]);
 
-      return { success: true, timestamp: new Date() };
+      return { success: true, timestamp: new Date().toISOString() };
     },
     outputType: 'custom'
   }

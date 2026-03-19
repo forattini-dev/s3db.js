@@ -94,17 +94,40 @@ export interface Persona {
   quality: {
     score: number;
     rating: 'low' | 'medium' | 'high';
-    lastCalculated: number;
+    lastCalculated: string;
   };
   metadata: {
-    createdAt: number;
-    lastUsed: number | null;
-    expiresAt: number;
+    createdAt: string;
+    lastUsed: string | null;
+    expiresAt: string;
     age: number;
     warmupCompleted: boolean;
     retired: boolean;
   };
   id?: string; // Added because it's inserted into resource
+}
+
+export interface CookieFarmStats {
+  total: number;
+  active: number;
+  retired: number;
+  byQuality: Record<Persona['quality']['rating'], number>;
+  byProxy: Record<string, number>;
+  warmupCompleted: number;
+  averageQualityScore: number;
+  averageSuccessRate: number;
+  totalRequests: number;
+}
+
+interface RawPersona extends Omit<Persona, 'quality' | 'metadata'> {
+  quality: Omit<Persona['quality'], 'lastCalculated'> & {
+    lastCalculated: string | number;
+  };
+  metadata: Omit<Persona['metadata'], 'createdAt' | 'lastUsed' | 'expiresAt'> & {
+    createdAt: string | number;
+    lastUsed: string | number | null;
+    expiresAt: string | number;
+  };
 }
 
 export class CookieFarmPlugin extends Plugin {
@@ -115,8 +138,69 @@ export class CookieFarmPlugin extends Plugin {
   };
   puppeteerPlugin: PuppeteerPlugin | null;
   stealthManager: any | null; // Placeholder for StealthManager
-  personaPool: Map<string, Persona>; // personaId -> persona object
+  personaPool: Map<string, RawPersona>; // personaId -> persona object
   initialized: boolean;
+
+  private _getTimestamp(value: string | number | null | undefined): number | null {
+    if (typeof value === 'number') return value;
+    if (typeof value === 'string') return new Date(value).getTime();
+    return null;
+  }
+
+  private _normalizePersona(persona: any): RawPersona {
+    return {
+      ...persona,
+      id: persona.id || persona.personaId,
+      quality: {
+        ...persona.quality,
+        lastCalculated: this._getTimestamp(persona.quality?.lastCalculated) || Date.now()
+      },
+      metadata: {
+        ...persona.metadata,
+        createdAt: this._getTimestamp(persona.metadata?.createdAt) || Date.now(),
+        lastUsed: this._getTimestamp(persona.metadata?.lastUsed),
+        expiresAt: this._getTimestamp(persona.metadata?.expiresAt) || Date.now(),
+        age: persona.metadata?.age || 0,
+        warmupCompleted: !!persona.metadata?.warmupCompleted,
+        retired: !!persona.metadata?.retired
+      }
+    };
+  }
+
+  private _toPublicPersona(persona: RawPersona): Persona {
+    return {
+      ...persona,
+      quality: {
+        ...persona.quality,
+        lastCalculated: new Date(this._getTimestamp(persona.quality.lastCalculated) || Date.now()).toISOString()
+      },
+      metadata: {
+        ...persona.metadata,
+        createdAt: new Date(this._getTimestamp(persona.metadata.createdAt) || Date.now()).toISOString(),
+        lastUsed: persona.metadata.lastUsed === null
+          ? null
+          : new Date(this._getTimestamp(persona.metadata.lastUsed) || Date.now()).toISOString(),
+        expiresAt: new Date(this._getTimestamp(persona.metadata.expiresAt) || Date.now()).toISOString()
+      }
+    };
+  }
+
+  private _toStoredPersona(persona: RawPersona): Record<string, unknown> {
+    return {
+      ...persona,
+      id: persona.id || persona.personaId,
+      quality: {
+        ...persona.quality,
+        lastCalculated: new Date(persona.quality.lastCalculated).toISOString()
+      },
+      metadata: {
+        ...persona.metadata,
+        createdAt: new Date(persona.metadata.createdAt).toISOString(),
+        ...(persona.metadata.lastUsed !== null ? { lastUsed: new Date(persona.metadata.lastUsed).toISOString() } : {}),
+        expiresAt: new Date(persona.metadata.expiresAt).toISOString()
+      }
+    };
+  }
 
   constructor(options: CookieFarmPluginOptions = {}) {
     super(options as any);
@@ -373,7 +457,7 @@ export class CookieFarmPlugin extends Plugin {
         },
         cookies: 'array',
         fingerprint: {
-          proxy: 'string',
+          proxy: 'string|optional',
           userAgent: 'string',
           viewport: 'string'
         },
@@ -386,12 +470,12 @@ export class CookieFarmPlugin extends Plugin {
         quality: {
           score: 'number',
           rating: 'string',
-          lastCalculated: 'number'
+          lastCalculated: 'datetime'
         },
         metadata: {
-          createdAt: 'number',
-          lastUsed: 'number',
-          expiresAt: 'number',
+          createdAt: 'datetime',
+          lastUsed: 'datetime|optional',
+          expiresAt: 'datetime',
           age: 'number',
           warmupCompleted: 'boolean',
           retired: 'boolean'
@@ -429,7 +513,8 @@ export class CookieFarmPlugin extends Plugin {
     const personas = await storage.list({ limit: 1000 });
 
     for (const persona of personas) {
-      this.personaPool.set(persona.personaId, persona);
+      const normalizedPersona = this._normalizePersona(persona);
+      this.personaPool.set(normalizedPersona.personaId, normalizedPersona);
     }
 
     this.emit('cookieFarm.personasLoaded', {
@@ -453,7 +538,7 @@ export class CookieFarmPlugin extends Plugin {
 
     for (let i = 0; i < count; i++) {
       const persona = await this._createPersona(proxies);
-      generatedPersonas.push(persona);
+      generatedPersonas.push(this._toPublicPersona(persona));
 
       this.emit('cookieFarm.personaCreated', {
         personaId: persona.personaId,
@@ -479,7 +564,7 @@ export class CookieFarmPlugin extends Plugin {
    * @param proxies - Available proxies
    * @returns
    */
-  private async _createPersona(proxies: any[] = []): Promise<Persona> {
+  private async _createPersona(proxies: any[] = []): Promise<RawPersona> {
     const personaId = `persona_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
     const sessionId = `session_${personaId}`;
 
@@ -506,7 +591,8 @@ export class CookieFarmPlugin extends Plugin {
       fingerprint.proxy = proxyId as any;
     }
 
-    const persona: Persona = {
+    const persona: RawPersona = {
+      id: personaId,
       personaId,
       sessionId,
       proxyId,
@@ -536,8 +622,8 @@ export class CookieFarmPlugin extends Plugin {
     };
 
     // Save to storage
-    const storage = (this as any).database.getResource(this.config.storage.resource);
-    await storage.insert(persona);
+    const storage = await (this as any).database.getResource(this.config.storage.resource);
+    await storage.insert(this._toStoredPersona(persona));
 
     // Add to pool
     this.personaPool.set(personaId, persona);
@@ -642,7 +728,7 @@ export class CookieFarmPlugin extends Plugin {
    * Visit a site with persona
    * @private
    */
-  private async _visitSite(persona: Persona, url: string): Promise<void> {
+  private async _visitSite(persona: RawPersona, url: string): Promise<void> {
     if (!this.puppeteerPlugin) {
       throw new CookieFarmError('PuppeteerPlugin not initialized');
     }
@@ -696,7 +782,7 @@ export class CookieFarmPlugin extends Plugin {
    * Calculate quality score for persona
    * @private
    */
-  private async _calculateQuality(persona: Persona): Promise<void> {
+  private async _calculateQuality(persona: RawPersona): Promise<void> {
     if (!this.config.quality.enabled) {
       return;
     }
@@ -743,11 +829,12 @@ export class CookieFarmPlugin extends Plugin {
    * Save persona to storage
    * @private
    */
-  private async _savePersona(persona: Persona): Promise<void> {
-    persona.metadata.age = Date.now() - persona.metadata.createdAt;
+  private async _savePersona(persona: RawPersona): Promise<void> {
+    persona.metadata.age = Date.now() - (this._getTimestamp(persona.metadata.createdAt) || Date.now());
+    persona.id = persona.id || persona.personaId;
 
-    const storage = (this as any).database.getResource(this.config.storage.resource);
-    await storage.update(persona.id, persona);
+    const storage = await (this as any).database.getResource(this.config.storage.resource);
+    await storage.update(persona.id, this._toStoredPersona(persona));
   }
 
   /**
@@ -794,7 +881,7 @@ export class CookieFarmPlugin extends Plugin {
     // Sort by quality score descending
     candidates.sort((a, b) => b.quality.score - a.quality.score);
 
-    return candidates[0] ?? null;
+    return candidates[0] ? this._toPublicPersona(candidates[0]) : null;
   }
 
   /**
@@ -842,13 +929,13 @@ export class CookieFarmPlugin extends Plugin {
    * Check if persona should be retired
    * @private
    */
-  private _shouldRetire(persona: Persona): boolean {
+  private _shouldRetire(persona: RawPersona): boolean {
     if (!this.config.rotation.enabled) {
       return false;
     }
 
     // Check age
-    if (Date.now() > persona.metadata.expiresAt) {
+    if (Date.now() > (this._getTimestamp(persona.metadata.expiresAt) || 0)) {
       return true;
     }
 
@@ -893,15 +980,15 @@ export class CookieFarmPlugin extends Plugin {
    * Get statistics
    * @returns
    */
-  async getStats(): Promise<any> {
+  async getStats(): Promise<CookieFarmStats> {
     const personas = Array.from(this.personaPool.values());
 
-    const stats = {
+    const stats: CookieFarmStats = {
       total: personas.length,
       active: 0,
       retired: 0,
       byQuality: { high: 0, medium: 0, low: 0 },
-      byProxy: {} as Record<string, number>,
+      byProxy: {},
       warmupCompleted: 0,
       averageQualityScore: 0,
       averageSuccessRate: 0,
@@ -950,7 +1037,8 @@ export class CookieFarmPlugin extends Plugin {
     const { includeRetired = false, format = this.config.export.format } = options;
 
     const personas = Array.from(this.personaPool.values())
-      .filter(persona => includeRetired || !persona.metadata.retired);
+      .filter(persona => includeRetired || !persona.metadata.retired)
+      .map(persona => this._toPublicPersona(persona));
 
     // Mask credentials if needed
     if (!this.config.export.includeCredentials) {

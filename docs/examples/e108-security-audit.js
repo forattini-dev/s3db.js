@@ -84,7 +84,7 @@ async function securityAudit() {
       securityScore: 'object|optional',    // Score + recommendations
 
       // Metadata
-      auditedAt: 'string|required',
+      auditedAt: 'datetime|required',
       auditVersion: 'string|optional'
     }
   })

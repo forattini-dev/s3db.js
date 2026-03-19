@@ -36,7 +36,7 @@ async function main() {
     name: 'clicks',
     attributes: {
       urlId: 'string|required',
-      timestamp: 'string|required',
+      timestamp: 'datetime|required',
       ip: 'string|optional'
     }
   });

@@ -41,62 +41,37 @@ partitions: {
 **Additional Fields Needed**:
 - `domain: 'string'` - Primary cookie domain
 - `date: 'string'` - YYYY-MM-DD for temporal partitioning
-- `expiresAt: 'number'` - Expiration timestamp
+- `expiresAt: 'datetime'` - Expiration timestamp in ISO format
 
 ---
 
 ### 2. **network_sessions** (Network Metadata)
-**Location**: `network-monitor.js:81`
+**Location**: `network-monitor.ts`
 
 **Current Schema**:
 ```javascript
 {
   sessionId: 'string|required',
-  url: 'string|required',
-  domain: 'string|required',
-  date: 'string|required',
-  startTime: 'number|required',
-  endTime: 'number',
-  duration: 'number',
-  totalRequests: 'number',
-  successfulRequests: 'number',
-  failedRequests: 'number',
-  totalBytes: 'number',
-  transferredBytes: 'number',
-  cachedBytes: 'number',
-  byType: 'object',
-  performance: 'object',
-  userAgent: 'string'
+  startTime: 'datetime|required',
+  endTime: 'datetime',
+  requestCount: 'number',
+  errorCount: 'number',
+  totalSize: 'number'
 }
 ```
 
-**Current Partitions**: ✅ `byUrl`, `byDate`, `byDomain`
+**Current Partitions**: none
 
 **Extra Query Patterns**:
-- 🔍 Sessions with many failures (failedRequests > threshold)
-- 🔍 Heavy sessions (totalBytes > threshold)
-- 🔍 Filter by performance score
-- 🔍 Group by user agent (bot detection)
+- 🔍 Sessions with many errors (`errorCount > threshold`)
+- 🔍 Heavy sessions (`totalSize > threshold`)
 
-**Recommended Additional Partitions**:
-```javascript
-partitions: {
-  byUrl: { fields: { url: 'string' } },                 // ✅ Already present
-  byDate: { fields: { date: 'string' } },               // ✅ Already present
-  byDomain: { fields: { domain: 'string' } },           // ✅ Already present
-  byQuality: { fields: { quality: 'string' } },         // 🆕 good/medium/poor (score-based)
-  byUserAgent: { fields: { userAgentType: 'string' } }  // 🆕 desktop/mobile/bot
-}
-```
-
-**Additional Fields Needed**:
-- `quality: 'string'` - Classification (good/medium/poor) based on score
-- `userAgentType: 'string'` - Device class (desktop/mobile/tablet/bot)
+This resource is intentionally compact and session-scoped. The heavier per-request detail lives in `network_requests`.
 
 ---
 
 ### 3. **network_requests** (Detailed Requests)
-**Location**: `network-monitor.js:125`
+**Location**: `network-monitor.ts`
 
 **Current Schema**:
 ```javascript
@@ -104,59 +79,38 @@ partitions: {
   requestId: 'string|required',
   sessionId: 'string|required',
   url: 'string|required',
-  domain: 'string|required',
-  path: 'string',
-  type: 'string|required',
-  statusCode: 'number',
+  method: 'string|required',
+  resourceType: 'string',
+  status: 'number',
   statusText: 'string',
-  method: 'string',
+  mimeType: 'string',
+  requestTimestamp: 'datetime',
+  responseTimestamp: 'datetime',
+  responseTime: 'number',
   size: 'number',
-  transferredSize: 'number',
-  resourceSize: 'number',
-  fromCache: 'boolean',
-  timing: 'object',
-  startTime: 'number',
-  endTime: 'number',
-  duration: 'number',
   requestHeaders: 'object',
   responseHeaders: 'object',
-  compression: 'string',
-  cacheControl: 'string',
-  expires: 'string',
-  failed: 'boolean',
-  errorText: 'string',
-  blockedReason: 'string',
-  redirected: 'boolean',
-  redirectUrl: 'string',
-  cdn: 'string',
-  cdnDetected: 'boolean',
-  mimeType: 'string',
-  priority: 'string'
+  body: 'string',
+  compressed: 'boolean'
 }
 ```
 
-**Current Partitions**: ✅ `bySession`, `byType`, `byStatus`, `bySize`, `byDomain`
+**Current Partitions**: ✅ `bySession`, `byType`, `byStatus`
 
 **Extra Query Patterns**:
-- 🔍 Slow requests (duration > threshold)
-- 🔍 Group by CDN provider (`cdn`)
-- 🔍 Cached responses (`fromCache = true`)
+- 🔍 Slow requests (`responseTime > threshold`)
 - 🔍 Compression types
 - 🔍 HTTP method
-- 🔍 Redirect tracking
+- 🔍 MIME-type groupings
 
 **Recommended Additional Partitions**:
 ```javascript
 partitions: {
   bySession: { fields: { sessionId: 'string' } },       // ✅ Already present
-  byType: { fields: { type: 'string' } },               // ✅ Already present
-  byStatus: { fields: { statusCode: 'number' } },       // ✅ Already present
-  bySize: { fields: { size: 'number' } },               // ✅ Already present
-  byDomain: { fields: { domain: 'string' } },           // ✅ Already present
-  byCDN: { fields: { cdn: 'string' } },                 // 🆕 cloudflare/cloudfront/etc
-  byCompression: { fields: { compression: 'string' } }, // 🆕 gzip/brotli/none
+  byType: { fields: { resourceType: 'string' } },       // ✅ Already present
+  byStatus: { fields: { status: 'number' } },           // ✅ Already present
   byMethod: { fields: { method: 'string' } },           // 🆕 GET/POST/PUT/etc
-  byPerformance: { fields: { performance: 'string' } }  // 🆕 fast/medium/slow (duration-based)
+  byMimeType: { fields: { mimeType: 'string' } }        // 🆕 content groupings
 }
 ```
 
@@ -204,8 +158,8 @@ partitions: {
   url: 'string|required',
   domain: 'string|required',
   date: 'string|required',
-  startTime: 'number|required',
-  endTime: 'number',
+  startTime: 'datetime|required',
+  endTime: 'datetime',
   duration: 'number',
   totalMessages: 'number',
   errorCount: 'number',
@@ -248,39 +202,33 @@ partitions: {
 **Current Schema**:
 ```javascript
 {
-  messageId: 'string|required',
   sessionId: 'string|required',
-  timestamp: 'number|required',
-  date: 'string|required',
-  type: 'string|required',
+  level: 'string|required',
+  timestamp: 'datetime|required',
   text: 'string|required',
-  args: 'array',
-  source: 'object',
-  stackTrace: 'object',
   url: 'string',
-  domain: 'string'
+  location: 'object',
+  stackTrace: 'array',
 }
 ```
 
-**Current Partitions**: ✅ `bySession`, `byType`, `byDate`, `byDomain`
+**Current Partitions**: ✅ `bySession`, `byLevel`
 
 **Extra Query Patterns**:
-- 🔍 Messages from a specific script (`source.url`)
+- 🔍 Messages from a specific URL
 - 🔍 Text pattern search (message contains)
 
 **Recommended Additional Partitions**:
 ```javascript
 partitions: {
-  bySession: { fields: { sessionId: 'string' } },       // ✅ Already present
-  byType: { fields: { type: 'string' } },               // ✅ Already present
-  byDate: { fields: { date: 'string' } },               // ✅ Already present
-  byDomain: { fields: { domain: 'string' } },           // ✅ Already present
-  bySource: { fields: { sourceUrl: 'string' } }         // 🆕 script URL
+  bySession: { fields: { sessionId: 'string' } },  // ✅ Already present
+  byLevel: { fields: { level: 'string' } },        // ✅ Already present
+  byUrl: { fields: { url: 'string' } }             // 🆕 useful for page/script grouping
 }
 ```
 
 **Additional Fields Needed**:
-- `sourceUrl: 'string'` - Script URL extracted from `source.url`
+- none required for current storage model
 
 ---
 
@@ -290,49 +238,41 @@ partitions: {
 **Current Schema**:
 ```javascript
 {
-  errorId: 'string|required',
   sessionId: 'string|required',
-  messageId: 'string|required',
-  timestamp: 'number|required',
-  date: 'string|required',
-  errorType: 'string',
   message: 'string|required',
-  stackTrace: 'object',
-  url: 'string',
-  lineNumber: 'number',
-  columnNumber: 'number',
-  pageUrl: 'string',
-  domain: 'string',
-  isUncaught: 'boolean',
-  isPromiseRejection: 'boolean',
-  isNetworkError: 'boolean',
-  isSyntaxError: 'boolean'
+  stack: 'string',
+  timestamp: 'datetime|required',
+  url: 'string'
 }
 ```
 
-**Current Partitions**: ✅ `bySession`, `byErrorType`, `byDate`, `byDomain`
+**Current Partitions**: ✅ `bySession`
 
 **Extra Query Patterns**:
-- 🔍 Uncaught exceptions (`isUncaught = true`)
-- 🔍 Promise rejections (`isPromiseRejection = true`)
-- 🔍 Network errors (`isNetworkError = true`)
-- 🔍 Filter by script URL
+- 🔍 Errors by page URL
+- 🔍 Group by page/domain
+- 🔍 Separate uncaught vs promise/network/syntax failures
+- 🔍 Filter by script URL when stack parsing is available
 
 **Recommended Additional Partitions**:
 ```javascript
 partitions: {
-  bySession: { fields: { sessionId: 'string' } },       // ✅ Already present
-  byErrorType: { fields: { errorType: 'string' } },     // ✅ Already present
-  byDate: { fields: { date: 'string' } },               // ✅ Already present
-  byDomain: { fields: { domain: 'string' } },           // ✅ Already present
-  byScript: { fields: { scriptUrl: 'string' } },        // 🆕 script causing error
-  byCategory: { fields: { category: 'string' } }        // 🆕 uncaught/promise/network/syntax
+  bySession: { fields: { sessionId: 'string' } },  // ✅ Already present
+  byUrl: { fields: { url: 'string' } },            // 🆕 page-level grouping
+  byDomain: { fields: { domain: 'string' } },      // 🆕 domain dashboards
+  byCategory: { fields: { category: 'string' } },  // 🆕 uncaught/promise/network/syntax
+  byScript: { fields: { scriptUrl: 'string' } }    // 🆕 script causing error
 }
 ```
 
 **Additional Fields Needed**:
-- `scriptUrl: 'string'` - Script URL causing the error (derived from `url`)
-- `category: 'string'` - Category (uncaught/promise/network/syntax/other)
+- `domain: 'string'` - Derived from `url`
+- `scriptUrl: 'string'` - Best-effort extraction from stack traces
+- `category: 'string'` - Derived bucket (`uncaught`, `promise`, `network`, `syntax`, `other`)
+- `isUncaught: 'boolean'`
+- `isPromiseRejection: 'boolean'`
+- `isNetworkError: 'boolean'`
+- `isSyntaxError: 'boolean'`
 
 ---
 

@@ -936,8 +936,8 @@ export class CloudInventoryPlugin extends Plugin {
           latestDigest: 'string|required',
           latestVersion: 'number|required',
           latestSnapshotId: 'string|required',
-          lastSeenAt: 'string|required',
-          firstSeenAt: 'string|required',
+          lastSeenAt: 'datetime|required',
+          firstSeenAt: 'datetime|required',
           changelogSize: 'number|default:0',
           metadata: 'json|optional'
         },
@@ -976,12 +976,12 @@ export class CloudInventoryPlugin extends Plugin {
           driver: 'string|required',
           version: 'number|required',
           digest: 'string|required',
-          capturedAt: 'string|required',
+          capturedAt: 'datetime|required',
           configuration: 'json|required',
           summary: 'json|optional',
           raw: 'json|optional'
         },
-        behavior: 'body-overflow',
+        behavior: 'body-only',
         timestamps: true,
         partitions: {
           byResourceKey: {
@@ -1009,9 +1009,9 @@ export class CloudInventoryPlugin extends Plugin {
           toDigest: 'string|required',
           diff: 'json|required',
           summary: 'json|optional',
-          capturedAt: 'string|required'
+          capturedAt: 'datetime|required'
         },
-        behavior: 'body-overflow',
+        behavior: 'body-only',
         timestamps: true,
         partitions: {
           byResourceKey: {
@@ -1032,10 +1032,10 @@ export class CloudInventoryPlugin extends Plugin {
           id: 'string|required',
           driver: 'string|required',
           status: 'string|default:idle',
-          lastRunAt: 'string|optional',
+          lastRunAt: 'datetime|optional',
           lastRunId: 'string|optional',
-          lastSuccessAt: 'string|optional',
-          lastErrorAt: 'string|optional',
+          lastSuccessAt: 'datetime|optional',
+          lastErrorAt: 'datetime|optional',
           lastError: 'string|optional',
           totalResources: 'number|default:0',
           totalVersions: 'number|default:0',
@@ -1044,14 +1044,14 @@ export class CloudInventoryPlugin extends Plugin {
           metadata: 'json|optional',
           schedule: 'json|optional',
           checkpoint: 'json|optional',
-          checkpointUpdatedAt: 'string|optional',
+          checkpointUpdatedAt: 'datetime|optional',
           rateLimit: 'json|optional',
-          rateLimitUpdatedAt: 'string|optional',
+          rateLimitUpdatedAt: 'datetime|optional',
           state: 'json|optional',
-          stateUpdatedAt: 'string|optional',
+          stateUpdatedAt: 'datetime|optional',
           progress: 'json|optional'
         },
-        behavior: 'body-overflow',
+        behavior: 'body-only',
         timestamps: true
       }
     ];

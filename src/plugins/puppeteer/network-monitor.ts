@@ -5,6 +5,21 @@ import type { PuppeteerPlugin } from '../puppeteer.plugin.js';
 const gzipAsync = promisify(gzip);
 const gunzipAsync = promisify(gunzip);
 
+const toIsoString = (timestamp?: number | string): string | undefined => {
+  if (typeof timestamp === 'string') return timestamp;
+  if (typeof timestamp === 'number') return new Date(timestamp).toISOString();
+  return undefined;
+};
+
+const toEpochMs = (timestamp?: number | string): number | undefined => {
+  if (typeof timestamp === 'number') return timestamp;
+  if (typeof timestamp === 'string') {
+    const parsed = new Date(timestamp).getTime();
+    return Number.isNaN(parsed) ? undefined : parsed;
+  }
+  return undefined;
+};
+
 export interface NetworkMonitorConfig {
   enabled: boolean;
   persist: boolean;
@@ -27,7 +42,7 @@ export interface NetworkRequest {
   url: string;
   method: string;
   resourceType: string;
-  timestamp: number;
+  timestamp: string;
   requestHeaders?: Record<string, string>;
   postData?: string;
 }
@@ -39,7 +54,7 @@ export interface NetworkResponse {
   statusText: string;
   headers: Record<string, string>;
   mimeType: string;
-  timestamp: number;
+  timestamp: string;
   responseTime: number;
   size?: number;
   body?: string | Buffer;
@@ -50,16 +65,29 @@ export interface NetworkError {
   requestId: string;
   url: string;
   errorText: string;
-  timestamp: number;
+  timestamp: string;
 }
 
 export interface NetworkSession {
   sessionId: string;
-  startTime: number;
-  endTime?: number;
+  startTime: string;
+  endTime?: string;
   requestCount: number;
   errorCount: number;
   totalSize: number;
+}
+
+interface RawNetworkRequest extends Omit<NetworkRequest, 'timestamp'> {
+  timestamp: string | number;
+}
+
+interface RawNetworkResponse extends Omit<NetworkResponse, 'timestamp'> {
+  timestamp: string | number;
+}
+
+interface RawNetworkSession extends Omit<NetworkSession, 'startTime' | 'endTime'> {
+  startTime: string | number;
+  endTime?: string | number;
 }
 
 export interface NetworkStats {
@@ -139,9 +167,9 @@ interface LoadingFailedParams {
 export class NetworkMonitor {
   plugin: PuppeteerPlugin;
   config: NetworkMonitorConfig;
-  requests: Map<string, Map<string, NetworkRequest>>;
-  responses: Map<string, Map<string, NetworkResponse>>;
-  sessions: Map<string, NetworkSession>;
+  requests: Map<string, Map<string, RawNetworkRequest>>;
+  responses: Map<string, Map<string, RawNetworkResponse>>;
+  sessions: Map<string, RawNetworkSession>;
   cdpSessions: Map<string, CDPSession>;
 
   constructor(plugin: PuppeteerPlugin) {
@@ -178,8 +206,8 @@ export class NetworkMonitor {
         name: resourceNames.networkSessions,
         attributes: {
           sessionId: 'string|required',
-          startTime: 'number|required',
-          endTime: 'number',
+          startTime: 'datetime|required',
+          endTime: 'datetime',
           requestCount: 'number',
           errorCount: 'number',
           totalSize: 'number'
@@ -203,8 +231,8 @@ export class NetworkMonitor {
           status: 'number',
           statusText: 'string',
           mimeType: 'string',
-          requestTimestamp: 'number',
-          responseTimestamp: 'number',
+          requestTimestamp: 'datetime',
+          responseTimestamp: 'datetime',
           responseTime: 'number',
           size: 'number',
           requestHeaders: 'object',
@@ -232,7 +260,7 @@ export class NetworkMonitor {
           requestId: 'string|required',
           url: 'string|required',
           errorText: 'string|required',
-          timestamp: 'number|required'
+          timestamp: 'datetime|required'
         },
         timestamps: true,
         behavior: 'body-only',
@@ -243,8 +271,16 @@ export class NetworkMonitor {
     }
   }
 
+  private _normalizeSession(session: RawNetworkSession): NetworkSession {
+    return {
+      ...session,
+      startTime: toIsoString(session.startTime)!,
+      endTime: toIsoString(session.endTime)
+    };
+  }
+
   startSession(sessionId: string): NetworkSession {
-    const session: NetworkSession = {
+    const session: RawNetworkSession = {
       sessionId,
       startTime: Date.now(),
       requestCount: 0,
@@ -258,7 +294,7 @@ export class NetworkMonitor {
 
     this.plugin.emit('networkMonitor.sessionStarted', { sessionId });
 
-    return session;
+    return this._normalizeSession(session);
   }
 
   async attachToPage(page: Page, sessionId: string): Promise<void> {
@@ -287,7 +323,7 @@ export class NetworkMonitor {
         return;
       }
 
-      const request: NetworkRequest = {
+      const request: RawNetworkRequest = {
         requestId: p.requestId,
         url: p.request.url,
         method: p.request.method,
@@ -319,7 +355,7 @@ export class NetworkMonitor {
         return;
       }
 
-      const response: NetworkResponse = {
+      const response: RawNetworkResponse = {
         requestId: p.requestId,
         url: p.response.url,
         status: p.response.status,
@@ -327,7 +363,7 @@ export class NetworkMonitor {
         headers: p.response.headers,
         mimeType: p.response.mimeType,
         timestamp: p.timestamp * 1000,
-        responseTime: (p.timestamp * 1000) - request.timestamp
+        responseTime: (p.timestamp * 1000) - (toEpochMs(request.timestamp) || 0)
       };
 
       responses.set(p.requestId, response);
@@ -398,7 +434,7 @@ export class NetworkMonitor {
         requestId: p.requestId,
         url: request?.url || 'unknown',
         errorText: p.errorText,
-        timestamp: p.timestamp * 1000
+        timestamp: new Date(p.timestamp * 1000).toISOString()
       };
 
       this.plugin.emit('networkMonitor.error', {
@@ -437,7 +473,7 @@ export class NetworkMonitor {
       totalSize: session.totalSize
     });
 
-    return session;
+    return this._normalizeSession(session);
   }
 
   private async _persistSession(sessionId: string): Promise<void> {
@@ -454,8 +490,8 @@ export class NetworkMonitor {
     if (sessionsResource) {
       await sessionsResource.insert({
         sessionId: session.sessionId,
-        startTime: session.startTime,
-        endTime: session.endTime,
+        startTime: toIsoString(session.startTime),
+        endTime: toIsoString(session.endTime),
         requestCount: session.requestCount,
         errorCount: session.errorCount,
         totalSize: session.totalSize
@@ -477,8 +513,8 @@ export class NetworkMonitor {
           status: response?.status,
           statusText: response?.statusText,
           mimeType: response?.mimeType,
-          requestTimestamp: request.timestamp,
-          responseTimestamp: response?.timestamp,
+          requestTimestamp: toIsoString(request.timestamp),
+          responseTimestamp: toIsoString(response?.timestamp),
           responseTime: response?.responseTime,
           size: response?.size,
           requestHeaders: request.requestHeaders,

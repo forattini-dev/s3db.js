@@ -1,3 +1,4 @@
+import { Readable } from 'node:stream';
 import { ConnectionError, AuthenticationError, SMTPError, RateLimitError } from './errors.js';
 
 export type SMTPMode = 'relay' | 'server';
@@ -32,12 +33,12 @@ export type SMTPAuthHandler = (
 export type SMTPAddressHandler = (
   address: { address: string },
   session: SMTPSession
-) => Promise<void>;
+) => Promise<void | boolean>;
 
 export type SMTPDataHandler = (
   stream: NodeJS.ReadableStream,
   session: SMTPSession
-) => Promise<void>;
+) => Promise<void | boolean>;
 
 export interface SMTPConnectionOptions {
   mode?: SMTPMode;
@@ -80,7 +81,7 @@ export interface SendResult {
 export interface ConnectionStatus {
   mode: SMTPMode;
   isConnected: boolean;
-  transportType: 'nodemailer' | 'smtp-server' | null;
+  transportType: 'nodemailer' | 'smtp-server' | 'raffel-smtp' | null;
 }
 
 interface NodemailerModule {
@@ -112,12 +113,36 @@ interface SMTPServerInstance {
   server?: { closed?: boolean };
 }
 
+interface RaffelRegistry {
+  procedure: (name: string, handler: (input: unknown) => unknown | Promise<unknown>) => void;
+}
+
+interface RaffelRouter {}
+
+interface RaffelSmtpAdapter {
+  start: () => Promise<void>;
+  stop: () => Promise<void>;
+  server: { listening?: boolean } | null;
+}
+
+interface RaffelModule {
+  createRegistry: () => RaffelRegistry;
+  createRouter: (registry: RaffelRegistry) => RaffelRouter;
+  createSmtpAdapter: (router: RaffelRouter, options: Record<string, unknown>) => RaffelSmtpAdapter;
+}
+
+interface ServerTransport {
+  kind: 'smtp-server' | 'raffel-smtp';
+  close: () => Promise<void>;
+  verify: () => boolean;
+}
+
 export class SMTPConnectionManager {
   public mode: SMTPMode;
   public options: SMTPConnectionOptions;
   private _nodemailer: NodemailerModule | null;
   private _transport: NodemailerTransport | null;
-  private _server: SMTPServerInstance | null;
+  private _serverTransport: ServerTransport | null;
   private _isConnected: boolean;
 
   constructor(options: SMTPConnectionOptions = {}) {
@@ -125,7 +150,7 @@ export class SMTPConnectionManager {
     this.options = options;
     this._nodemailer = null;
     this._transport = null;
-    this._server = null;
+    this._serverTransport = null;
     this._isConnected = false;
   }
 
@@ -208,6 +233,148 @@ export class SMTPConnectionManager {
   }
 
   private async _initializeServer(): Promise<void> {
+    const {
+      secure = false,
+      requireAuth = false,
+      authHandler = null,
+      onMailFrom = null,
+      onRcptTo = null,
+      onData = null
+    } = this.options;
+
+    if (!onMailFrom) {
+      const initialized = await this._initializeRaffelServer({
+        secure,
+        requireAuth,
+        authHandler,
+        onRcptTo,
+        onData
+      });
+      if (initialized) {
+        return;
+      }
+    }
+
+    await this._initializeLegacyServer();
+  }
+
+  private async _initializeRaffelServer(options: {
+    secure: boolean;
+    requireAuth: boolean;
+    authHandler: SMTPAuthHandler | null;
+    onRcptTo: SMTPAddressHandler | null;
+    onData: SMTPDataHandler | null;
+  }): Promise<boolean> {
+    try {
+      const raffel = await import('raffel') as unknown as RaffelModule;
+      const registry = raffel.createRegistry();
+      const router = raffel.createRouter(registry);
+
+      const {
+        port = 25,
+        host = '0.0.0.0',
+        secure,
+        requireAuth,
+        authHandler,
+        onRcptTo,
+        onData
+      } = {
+        ...this.options,
+        ...options
+      };
+
+      registry.procedure('mail.receive', async (input: unknown) => {
+        const payload = (input || {}) as {
+          sender?: string;
+          recipients?: string[];
+          rawMessage?: string;
+          headers?: Record<string, string>;
+          body?: string;
+          size?: number;
+          authenticated?: boolean;
+          authenticatedUser?: string;
+          tlsActive?: boolean;
+          smtpUtf8?: boolean;
+          bodyType?: string;
+        };
+
+        if (onData) {
+          const stream = Readable.from([payload.rawMessage || '']);
+          const accepted = await onData(stream, {
+            sender: payload.sender || null,
+            recipients: payload.recipients || [],
+            headers: payload.headers || {},
+            body: payload.body || '',
+            size: payload.size || 0,
+            authenticated: payload.authenticated || false,
+            authenticatedUser: payload.authenticatedUser,
+            tlsActive: payload.tlsActive || false,
+            smtpUtf8: payload.smtpUtf8 || false,
+            bodyType: payload.bodyType || '7BIT'
+          });
+
+          if (accepted === false) {
+            return { rejected: true, message: 'Message rejected by onData handler' };
+          }
+        }
+
+        return { queued: true };
+      });
+
+      const adapter = raffel.createSmtpAdapter(router, {
+        port,
+        host,
+        requireAuth,
+        authRequiresTls: secure,
+        authVerifier: authHandler ? async (
+          username: string,
+          password: string,
+          info: { remoteAddress: string; remotePort: number; tlsActive: boolean }
+        ) => {
+          try {
+            const result = await authHandler(
+              { user: username, pass: password, username, password } as SMTPAuth,
+              info as unknown as SMTPSession
+            );
+            return Boolean(result?.user);
+          } catch {
+            return false;
+          }
+        } : undefined,
+        recipientValidator: onRcptTo ? async (
+          recipient: string,
+          sender: string,
+          info: { remoteAddress: string; authenticated: boolean; authenticatedUser?: string }
+        ) => {
+          try {
+            const result = await onRcptTo(
+              { address: recipient },
+              { sender, ...info } as unknown as SMTPSession
+            ) as unknown;
+            return result !== false;
+          } catch (err) {
+            throw err as Error;
+          }
+        } : undefined
+      });
+
+      await adapter.start();
+
+      this._serverTransport = {
+        kind: 'raffel-smtp',
+        close: async () => {
+          await adapter.stop();
+        },
+        verify: () => Boolean(adapter.server)
+      };
+
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  private async _initializeLegacyServer(): Promise<void> {
     try {
       const SMTPServer = await import('smtp-server') as SMTPServerModule;
       const ServerClass = SMTPServer.SMTPServer;
@@ -224,7 +391,7 @@ export class SMTPConnectionManager {
         ...otherConfig
       } = this.options;
 
-      this._server = new ServerClass({
+      const server = new ServerClass({
         port,
         host,
         secure,
@@ -260,7 +427,12 @@ export class SMTPConnectionManager {
         ) => {
           if (onMailFrom) {
             try {
-              await onMailFrom(address, session);
+              const accepted = await onMailFrom(address, session);
+              if (accepted === false) {
+                return callback(new SMTPError('Sender rejected by onMailFrom handler', {
+                  retriable: false
+                }));
+              }
             } catch (err) {
               return callback(err as Error);
             }
@@ -275,7 +447,12 @@ export class SMTPConnectionManager {
         ) => {
           if (onRcptTo) {
             try {
-              await onRcptTo(address, session);
+              const accepted = await onRcptTo(address, session);
+              if (accepted === false) {
+                return callback(new SMTPError('Recipient rejected by onRcptTo handler', {
+                  retriable: false
+                }));
+              }
             } catch (err) {
               return callback(err as Error);
             }
@@ -290,7 +467,12 @@ export class SMTPConnectionManager {
         ) => {
           if (onData) {
             try {
-              await onData(stream, session);
+              const accepted = await onData(stream, session);
+              if (accepted === false) {
+                return callback(new SMTPError('Message rejected by onData handler', {
+                  retriable: false
+                }));
+              }
             } catch (err) {
               return callback(err as Error);
             }
@@ -300,11 +482,21 @@ export class SMTPConnectionManager {
       });
 
       await new Promise<void>((resolve, reject) => {
-        this._server!.listen(port as number, host as string, (err?: Error) => {
+        server.listen(port as number, host as string, (err?: Error) => {
           if (err) reject(err);
           else resolve();
         });
       });
+
+      this._serverTransport = {
+        kind: 'smtp-server',
+        close: async () => {
+          await new Promise<void>((resolve) => {
+            server.close(() => resolve());
+          });
+        },
+        verify: () => !!(server && server.server && !server.server.closed)
+      };
     } catch (err) {
       throw new ConnectionError(`Failed to initialize SMTP server: ${(err as Error).message}`, {
         originalError: err as Error,
@@ -364,7 +556,7 @@ export class SMTPConnectionManager {
         return false;
       }
     } else if (this.mode === 'server') {
-      return !!(this._server && this._server.server && !this._server.server.closed);
+      return this._serverTransport?.verify() ?? false;
     }
     return false;
   }
@@ -373,11 +565,9 @@ export class SMTPConnectionManager {
     if (this.mode === 'relay' && this._transport) {
       this._transport.close();
       this._transport = null;
-    } else if (this.mode === 'server' && this._server) {
-      await new Promise<void>((resolve) => {
-        this._server!.close(() => resolve());
-      });
-      this._server = null;
+    } else if (this.mode === 'server' && this._serverTransport) {
+      await this._serverTransport.close();
+      this._serverTransport = null;
     }
     this._isConnected = false;
   }
@@ -386,7 +576,7 @@ export class SMTPConnectionManager {
     return {
       mode: this.mode,
       isConnected: this._isConnected,
-      transportType: this._transport ? 'nodemailer' : (this._server ? 'smtp-server' : null)
+      transportType: this._transport ? 'nodemailer' : (this._serverTransport?.kind ?? null)
     };
   }
 }

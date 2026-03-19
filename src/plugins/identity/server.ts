@@ -141,6 +141,13 @@ interface ServerInfo {
   port: number;
 }
 
+export interface IdentityPluginServerInfo {
+  isRunning: boolean;
+  port?: number;
+  host?: string;
+  issuer?: string;
+}
+
 function createExpressStyleResponse(c: AppContext): ExpressStyleResponse {
   let statusCode = 200;
 
@@ -719,7 +726,7 @@ export class IdentityServer {
     }
   }
 
-  getInfo(): { isRunning: boolean; port: number; host: string; issuer: string } {
+  getInfo(): IdentityPluginServerInfo {
     return {
       isRunning: this.isRunning,
       port: this.options.port,

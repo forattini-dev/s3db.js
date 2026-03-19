@@ -26,15 +26,14 @@ describe('ReconPlugin - Behavior Modes', () => {
       expect(plugin.config.concurrency).toBe(2);
       expect(plugin.config.features.dns).toBe(true);
       expect(plugin.config.features.certificate).toBe(false);
-      expect(plugin.config.features.http.curl).toBe(false);
+      expect(plugin.config.features.http).toBe(false);
       expect(plugin.config.features.latency.ping).toBe(false);
       expect(plugin.config.features.latency.traceroute).toBe(false);
-      expect(plugin.config.features.subdomains.crtsh).toBe(true);
-      expect(plugin.config.features.subdomains.amass).toBe(false);
-      expect(plugin.config.features.subdomains.subfinder).toBe(false);
-      expect(plugin.config.features.ports.nmap).toBe(false);
-      expect(plugin.config.features.ports.masscan).toBe(false);
-      expect(plugin.config.features.osint.theHarvester).toBe(true);
+      expect(plugin.config.features.subdomains.enabled).toBe(true);
+      expect(plugin.config.features.subdomains.checkTakeover).toBe(false);
+      expect(plugin.config.features.subdomains.maxSubdomains).toBe(20);
+      expect(plugin.config.features.ports.enabled).toBe(false);
+      expect(plugin.config.features.osint.emails).toBe(true);
       expect(plugin.config.rateLimit.enabled).toBe(false);
     });
 
@@ -71,7 +70,7 @@ describe('ReconPlugin - Behavior Modes', () => {
       });
 
       expect(plugin.config.features.certificate).toBe(true);
-      expect(plugin.config.features.http.curl).toBe(false); // still passive
+      expect(plugin.config.features.http).toBe(false); // still passive
     });
   });
 
@@ -87,19 +86,18 @@ describe('ReconPlugin - Behavior Modes', () => {
       expect(plugin.config.concurrency).toBe(1);
       expect(plugin.config.features.dns).toBe(true);
       expect(plugin.config.features.certificate).toBe(true);
-      expect(plugin.config.features.http.curl).toBe(true);
+      expect(plugin.config.features.http).toBe(true);
       expect(plugin.config.features.latency.ping).toBe(true);
       expect(plugin.config.features.latency.traceroute).toBe(false); // noisy
-      expect(plugin.config.features.subdomains.subfinder).toBe(true);
-      expect(plugin.config.features.subdomains.amass).toBe(false); // too noisy
-      expect(plugin.config.features.ports.nmap).toBe(true);
-      expect(plugin.config.features.ports.masscan).toBe(false);
-      expect(plugin.config.features.vulnerability.nikto).toBe(false);
+      expect(plugin.config.features.subdomains.enabled).toBe(true);
+      expect(plugin.config.features.subdomains.checkTakeover).toBe(true);
+      expect(plugin.config.features.subdomains.maxSubdomains).toBe(30);
+      expect(plugin.config.features.ports.enabled).toBe(true);
+      expect(plugin.config.features.ports.topPorts).toBe(20);
+      expect(plugin.config.features.vulnerability.enabled).toBe(false);
       expect(plugin.config.rateLimit.enabled).toBe(true);
       expect(plugin.config.rateLimit.requestsPerMinute).toBe(10);
       expect(plugin.config.rateLimit.delayBetweenStages).toBe(5000);
-      expect(plugin.config.nmap.extraArgs).toContain('-T2');
-      expect(plugin.config.curl.userAgent).toContain('Mozilla');
     });
 
     test('has rate limiting configuration enabled', () => {
@@ -128,29 +126,25 @@ describe('ReconPlugin - Behavior Modes', () => {
       expect(plugin.config.concurrency).toBe(8);
       expect(plugin.config.features.dns).toBe(true);
       expect(plugin.config.features.certificate).toBe(true);
-      expect(plugin.config.features.http.curl).toBe(true);
+      expect(plugin.config.features.http).toBe(true);
       expect(plugin.config.features.latency.ping).toBe(true);
       expect(plugin.config.features.latency.traceroute).toBe(true);
-      expect(plugin.config.features.subdomains.amass).toBe(true);
-      expect(plugin.config.features.subdomains.subfinder).toBe(true);
-      expect(plugin.config.features.subdomains.assetfinder).toBe(true);
-      expect(plugin.config.features.ports.nmap).toBe(true);
-      expect(plugin.config.features.ports.masscan).toBe(true);
-      expect(plugin.config.features.web.ffuf).toBe(true);
-      expect(plugin.config.features.web.feroxbuster).toBe(true);
-      expect(plugin.config.features.web.gobuster).toBe(true);
+      expect(plugin.config.features.subdomains.enabled).toBe(true);
+      expect(plugin.config.features.subdomains.checkTakeover).toBe(true);
+      expect(plugin.config.features.subdomains.maxSubdomains).toBe(100);
+      expect(plugin.config.features.ports.enabled).toBe(true);
+      expect(plugin.config.features.ports.topPorts).toBe(1000);
+      expect(plugin.config.features.web.enabled).toBe(true);
       expect(plugin.config.features.web.threads).toBe(100);
-      expect(plugin.config.features.vulnerability.nikto).toBe(true);
-      expect(plugin.config.features.vulnerability.wpscan).toBe(true);
-      expect(plugin.config.features.tlsAudit.sslyze).toBe(true);
-      expect(plugin.config.features.tlsAudit.testssl).toBe(true);
-      expect(plugin.config.features.fingerprint.whatweb).toBe(true);
-      expect(plugin.config.features.screenshots.aquatone).toBe(true);
+      expect(plugin.config.features.vulnerability.enabled).toBe(true);
+      expect(plugin.config.features.vulnerability.aggressive).toBe(true);
+      expect(plugin.config.features.tlsAudit.enabled).toBe(true);
+      expect(plugin.config.features.fingerprint.enabled).toBe(true);
+      expect(plugin.config.features.fingerprint.intel).toBe(true);
+      expect(plugin.config.features.screenshots.enabled).toBe(false);
+      expect(plugin.config.features.googleDorks.enabled).toBe(true);
+      expect(plugin.config.features.googleDorks.maxResults).toBe(20);
       expect(plugin.config.rateLimit.enabled).toBe(false);
-      expect(plugin.config.nmap.topPorts).toBe(100);
-      expect(plugin.config.nmap.extraArgs).toContain('-T4');
-      expect(plugin.config.masscan.ports).toBe('1-65535');
-      expect(plugin.config.masscan.rate).toBe(5000);
     });
 
     test('has rate limiting disabled', () => {
@@ -176,8 +170,8 @@ describe('ReconPlugin - Behavior Modes', () => {
       expect(plugin.config.behavior).toBe('default');
       expect(plugin.config.concurrency).toBe(4);
       expect(plugin.config.features.dns).toBe(true);
-      expect(plugin.config.features.subdomains.amass).toBe(true);
-      expect(plugin.config.features.ports.nmap).toBe(true);
+      expect(plugin.config.features.subdomains.enabled).toBe(true);
+      expect(plugin.config.features.ports.enabled).toBe(true);
     });
   });
 

@@ -52,6 +52,9 @@ const costs = db.client.costs;
 console.log('Total USD:', costs.total);
 console.log('Requests by method:', costs.requests.counts);
 console.log('Usage by resource:', costs.usage.byResource);
+
+const publicCosts = db.plugins.CostsPlugin.getCosts();
+console.log('Latest usage point timestamp:', publicCosts.usage.points[0]?.timestamp);
 ```
 
 ---
@@ -66,6 +69,7 @@ tracked bytes, GB, and estimated monthly storage subtotal.
 `inBytes`/`outBytes` and transfer subtotal (with optional free-tier mode).
 4. Usage dimensions:
 history points by timestamp with `resource`, `plugin`, `method`, `command`.
+`getCosts()` normalizes these timestamps to ISO 8601 strings for public consumption.
 5. Estimation:
 window snapshots and forward projections with optional plugin-level estimates.
 

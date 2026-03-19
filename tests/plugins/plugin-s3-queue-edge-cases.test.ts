@@ -304,6 +304,7 @@ describe('S3QueuePlugin - Edge Cases', () => {
 
       const queueResource = database.resources['tasks_queue'];
       const deadLetterResource = database.resources['tasks_dead'];
+      expect(deadLetterResource.behavior).toBe('body-only');
 
       await deadLetterResource.insert({
         id: 'dl-1',

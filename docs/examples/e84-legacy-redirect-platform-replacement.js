@@ -202,7 +202,7 @@ async function main() {
       role: 'string|default:user',
       scopes: 'array|items:string|default:["openid", "profile", "email"]',
       active: 'boolean|default:true',  // Active status check
-      lastLoginAt: 'string|optional',
+      lastLoginAt: 'datetime|optional',
       metadata: 'object|optional'
     },
     behavior: 'body-overflow',

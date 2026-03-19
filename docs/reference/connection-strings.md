@@ -54,6 +54,19 @@ file:///home/user/data/mybucket/prefix
 file://./data
 ```
 
+### sqlite:/// (SQLite)
+
+```javascript
+// Absolute path
+sqlite:///home/user/data/s3db.sqlite
+
+// Relative path
+sqlite://./data/s3db.sqlite
+
+// Memory database
+sqlite:///:memory:
+```
+
 ### memory:// (In-Memory)
 
 ```javascript
@@ -73,6 +86,9 @@ memory://mybucket/prefix/path
 | `region` | string | AWS region (default: us-east-1) |
 | `forcePathStyle` | boolean | Force path-style URLs |
 | `sessionToken` | string | Optional session token for temporary credentials |
+| `maxMemoryMB` | number | Max in-memory write/read byte budget for SQLite backend |
+| `maxObjectSize` | number | Max object size in bytes for all backends |
+| `enforceLimits` | boolean | Validate metadata and object-size constraints before writes |
 
 ### Compression Options
 
@@ -177,6 +193,9 @@ https://keyId:applicationKey@s3.us-west-000.backblazeb2.com/mybucket
 // Memory (fastest, no persistence)
 memory://testbucket
 
+// SQLite (persistent local)
+sqlite:///tmp/s3db.sqlite
+
 // FileSystem (persisted to disk)
 file:///tmp/s3db-test
 
@@ -271,7 +290,7 @@ console.log(conn.clientOptions); // { region: "us-east-1" }
 | `endpoint` | S3 endpoint URL |
 | `keyPrefix` | Key prefix (path after bucket) |
 | `forcePathStyle` | Path-style URLs flag |
-| `clientType` | `'s3'`, `'filesystem'`, or `'memory'` |
+| `clientType` | `'s3'`, `'filesystem'`, `'memory'`, or `'sqlite'` |
 | `basePath` | Base path (filesystem only) |
 | `clientOptions` | Parsed query parameters |
 

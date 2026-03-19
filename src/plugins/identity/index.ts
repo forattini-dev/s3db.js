@@ -56,7 +56,7 @@ import type { EmailService } from './email-service.js';
 import type { FailbanManager } from '../../concerns/failban-manager.js';
 import type { AuditPlugin } from '../audit.plugin.js';
 import type { MFAManager } from './concerns/mfa-manager.js';
-import type { IdentityServer } from './server.js';
+import type { IdentityServer, IdentityPluginServerInfo } from './server.js';
 import type {
   IdentityCorsConfig as CorsConfig,
   ContentSecurityPolicyConfig,
@@ -93,8 +93,6 @@ import type {
   Database,
   IdentityPluginConfig,
 } from './types.internal.js';
-import type { ServerInfo } from '../shared/types.js';
-
 export interface IdentityPluginOptions {
   port?: number;
   host?: string;
@@ -666,7 +664,7 @@ export class IdentityPlugin extends Plugin {
           algorithm: 'string|default:RS256',
           use: 'string|default:sig',
           active: 'boolean|default:true',
-          createdAt: 'string|optional'
+          createdAt: 'datetime|optional'
         },
         behavior: 'body-overflow',
         timestamps: true,
@@ -697,11 +695,11 @@ export class IdentityPlugin extends Plugin {
           userId: 'string|required',
           redirectUri: 'string|required',
           scope: 'string|optional',
-          expiresAt: 'string|required',
+          expiresAt: 'datetime|required',
           used: 'boolean|default:false',
           codeChallenge: 'string|optional',
           codeChallengeMethod: 'string|optional',
-          createdAt: 'string|optional'
+          createdAt: 'datetime|optional'
         },
         behavior: 'body-overflow',
         timestamps: true,
@@ -728,11 +726,11 @@ export class IdentityPlugin extends Plugin {
         name: names.sessions,
         attributes: {
           userId: 'string|required',
-          expiresAt: 'string|required',
+          expiresAt: 'datetime|required',
           ipAddress: 'ip4|optional',
           userAgent: 'string|optional',
           metadata: 'object|optional',
-          createdAt: 'string|optional'
+          createdAt: 'datetime|optional'
         },
         behavior: 'body-overflow',
         timestamps: true,
@@ -760,9 +758,9 @@ export class IdentityPlugin extends Plugin {
         attributes: {
           userId: 'string|required',
           token: 'string|required',
-          expiresAt: 'string|required',
+          expiresAt: 'datetime|required',
           used: 'boolean|default:false',
-          createdAt: 'string|optional'
+          createdAt: 'datetime|optional'
         },
         behavior: 'body-overflow',
         timestamps: true,
@@ -794,8 +792,8 @@ export class IdentityPlugin extends Plugin {
             secret: 'secret|required',
             verified: 'boolean|default:false',
             backupCodes: 'array|items:string',
-            enrolledAt: 'string',
-            lastUsedAt: 'string|optional',
+            enrolledAt: 'datetime',
+            lastUsedAt: 'datetime|optional',
             deviceName: 'string|optional',
             metadata: 'object|optional'
           },
@@ -1496,7 +1494,7 @@ export class IdentityPlugin extends Plugin {
     }
   }
 
-  getServerInfo(): ServerInfo {
+  getServerInfo(): IdentityPluginServerInfo {
     return this.server ? this.server.getInfo() : { isRunning: false };
   }
 

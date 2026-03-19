@@ -681,10 +681,10 @@ export class KubernetesInventoryPlugin extends Plugin {
         latestDigest: 'string|required',
         latestVersion: 'number|required|integer|min:1',
         changelogSize: 'number|required|integer|min:0',
-        firstSeenAt: 'string|required',
-        lastSeenAt: 'string|required',
-        createdAt: 'string|required',
-        updatedAt: 'string|required',
+        firstSeenAt: 'datetime|required',
+        lastSeenAt: 'datetime|required',
+        createdAt: 'datetime|required',
+        updatedAt: 'datetime|required',
       },
       partitions: {
         byClusterId: { fields: { clusterId: 'string' } },
@@ -706,7 +706,7 @@ export class KubernetesInventoryPlugin extends Plugin {
         namespace: 'string',
         version: 'number|required|integer|min:1',
         digest: 'string|required',
-        capturedAt: 'string|required',
+        capturedAt: 'datetime|required',
         configuration: 'object|required',
         summary: 'object',
         raw: 'object',
@@ -718,6 +718,7 @@ export class KubernetesInventoryPlugin extends Plugin {
         byClusterId: { fields: { clusterId: 'string' } },
       },
       timestamps: true,
+      behavior: 'body-only',
     });
 
     this._resourceHandles.changes = await database.createResource({
@@ -737,6 +738,7 @@ export class KubernetesInventoryPlugin extends Plugin {
         },
         byClusterId: { fields: { clusterId: 'string' } },
       },
+      behavior: 'body-only',
       timestamps: true,
     });
 
@@ -747,7 +749,7 @@ export class KubernetesInventoryPlugin extends Plugin {
         id: 'string|required',
         name: 'string|required',
         status: 'string|required|enum:idle,running,error',
-        lastRunAt: 'string',
+        lastRunAt: 'datetime',
         lastResult: 'object',
         checkpoint: 'object',
         state: 'object',

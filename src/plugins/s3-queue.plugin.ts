@@ -60,7 +60,7 @@ interface QueueEntry {
   error?: string | null;
   result?: unknown;
   createdAt: string;
-  completedAt?: number | null;
+  completedAt?: string | null;
   _etag?: string;
   _queuedAt?: number;
 }
@@ -211,13 +211,26 @@ interface TicketData {
   originalId?: string;
   queuedAt?: number;
   orderIndex: number;
-  publishedAt: number;
+  publishedAt: string;
   publishedBy: string;
   status: 'available' | 'claimed' | 'processed';
   claimedBy: string | null;
   claimedAt: number | null;
   ticketTTL?: number;
   _ttl?: number;
+}
+
+function normalizeTicketPublishedAt(value: unknown): string | null {
+  if (typeof value === 'string') {
+    const parsed = new Date(value);
+    return Number.isNaN(parsed.getTime()) ? null : parsed.toISOString();
+  }
+
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return new Date(value).toISOString();
+  }
+
+  return null;
 }
 
 function asTicketData(value: unknown): TicketData | null {
@@ -227,18 +240,22 @@ function asTicketData(value: unknown): TicketData | null {
 
   const record = value as Record<string, unknown>;
   const status = record.status;
+  const publishedAt = normalizeTicketPublishedAt(record.publishedAt);
 
   if (typeof record.ticketId !== 'string'
     || typeof record.messageId !== 'string'
     || typeof record.orderIndex !== 'number'
-    || typeof record.publishedAt !== 'number'
+    || !publishedAt
     || typeof record.publishedBy !== 'string'
     || (status !== 'available' && status !== 'claimed' && status !== 'processed')
   ) {
     return null;
   }
 
-  return record as unknown as TicketData;
+  return {
+    ...record,
+    publishedAt
+  } as unknown as TicketData;
 }
 
 interface FailureStrategy {
@@ -555,15 +572,14 @@ export class S3QueuePlugin extends CoordinatorPlugin<S3QueuePluginOptions> {
           queuedAt: 'number|required',
           error: 'string|optional',
           result: 'json|optional',
-          createdAt: 'string|required',
-          completedAt: 'number|optional'
+          createdAt: 'datetime|required',
+          completedAt: 'datetime|optional'
         },
         behavior: 'body-overflow',
         timestamps: true,
         asyncPartitions: true,
         partitions: {
-          byStatus: { fields: { status: 'string' } },
-          byDate: { fields: { createdAt: 'string|maxlength:10' } }
+          byStatus: { fields: { status: 'string' } }
         }
       })
     );
@@ -1789,7 +1805,7 @@ export class S3QueuePlugin extends CoordinatorPlugin<S3QueuePluginOptions> {
   async completeMessage(message: ClaimedMessage, result: unknown): Promise<void> {
     await this._updateQueueEntryWithLock(message, {
       status: 'completed',
-      completedAt: Date.now(),
+      completedAt: new Date().toISOString(),
       result,
       claimedBy: this.workerId,
       claimedAt: Date.now(),
@@ -1955,9 +1971,9 @@ export class S3QueuePlugin extends CoordinatorPlugin<S3QueuePluginOptions> {
           data: 'json|required',
           error: 'string|required',
           attempts: 'number|required',
-          createdAt: 'string|required'
+          createdAt: 'datetime|required'
         },
-        behavior: 'body-overflow',
+        behavior: 'body-only',
         timestamps: true
       })
     );
@@ -2687,7 +2703,7 @@ export class S3QueuePlugin extends CoordinatorPlugin<S3QueuePluginOptions> {
         originalId: msg.originalId,
         queuedAt: msg._queuedAt || msg.queuedAt,
         orderIndex: i,
-        publishedAt: now,
+        publishedAt: new Date(now).toISOString(),
         publishedBy: this.workerId,
         status: 'available',
         claimedBy: null,

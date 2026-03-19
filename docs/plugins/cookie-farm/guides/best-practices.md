@@ -730,7 +730,7 @@ const suite = new CookieFarmPlugin({
 // Option 2: Manual cleanup
 const personas = await db.getResource('persona_personas');
 const old = await personas.query({
-  createdAt: { $lt: Date.now() - 86400000 * 30 }  // Older than 30 days
+  createdAt: { $lt: new Date(Date.now() - 86400000 * 30).toISOString() }  // Older than 30 days
 });
 
 for (const persona of old.items) {

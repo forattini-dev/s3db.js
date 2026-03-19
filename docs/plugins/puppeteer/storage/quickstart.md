@@ -100,7 +100,7 @@ The captured storage returns a single object:
       storeName: [ records ]
     }
   },
-  timestamp: 1731611400000,
+  timestamp: '2024-11-14T12:30:00.000Z',
   sessionId: 'session-123',
   url: 'https://example.com',
   domain: 'example.com'

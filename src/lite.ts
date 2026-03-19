@@ -46,6 +46,7 @@ export { ConnectionString } from './connection-string.class.js';
 
 export { MemoryClient } from './clients/memory-client.class.js';
 export { FileSystemClient } from './clients/filesystem-client.class.js';
+export { SqliteClient } from './clients/sqlite-client.class.js';
 
 // =============================================================================
 // Errors

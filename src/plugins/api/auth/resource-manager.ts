@@ -274,7 +274,7 @@ export class JWTResourceManager extends AuthResourceManager {
       role: 'string|default:user',
       scopes: 'array|items:string|optional',
       active: 'boolean|default:true',
-      lastLoginAt: 'string|optional'
+      lastLoginAt: 'datetime|optional'
     };
   }
 }
@@ -289,7 +289,7 @@ export class APIKeyResourceManager extends AuthResourceManager {
       active: 'boolean|default:true',
       name: 'string|optional',
       scopes: 'array|items:string|optional',
-      lastUsedAt: 'string|optional'
+      lastUsedAt: 'datetime|optional'
     };
   }
 }
@@ -336,7 +336,7 @@ export class OIDCResourceManager extends AuthResourceManager {
       active: 'boolean|default:true',
       provider: 'string|optional',
       providerId: 'string|optional',
-      lastLoginAt: 'string|optional',
+      lastLoginAt: 'datetime|optional',
       metadata: 'json|optional'
     };
   }

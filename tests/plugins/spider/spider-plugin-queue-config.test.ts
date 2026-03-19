@@ -49,6 +49,92 @@ describe('SpiderPlugin queue backend configuration', () => {
     expect(result.id).toBe('insert-record');
   });
 
+  test('should expose typed activity catalog helpers', () => {
+    const spider = new SpiderPlugin();
+
+    const activities = spider.getAvailableActivities();
+    const categories = spider.getActivityCategories();
+    const presets = spider.getActivityPresets();
+    const preset = spider.getPresetByName('security');
+    const validation = spider.validateActivityList(['security_headers', 'missing_activity']);
+
+    expect(Array.isArray(activities)).toBe(true);
+    expect(activities[0]).toMatchObject({
+      name: expect.any(String),
+      category: expect.any(String),
+      enabled: expect.any(Boolean)
+    });
+
+    expect(categories).toHaveProperty('security');
+    expect(categories.security).toMatchObject({
+      name: expect.any(String),
+      activities: expect.any(Array)
+    });
+
+    expect(presets.security).toMatchObject({
+      name: 'security',
+      activities: expect.any(Array)
+    });
+    expect(preset).toEqual(presets.security);
+
+    expect(validation.valid).toBe(false);
+    expect(validation.invalid).toContain('missing_activity');
+  });
+
+  test('should expose discovery and persistence helper shapes without any', () => {
+    const spider = new SpiderPlugin({
+      persistence: {
+        enabled: true,
+        saveResults: true,
+        saveSEOAnalysis: false,
+        saveTechFingerprint: true,
+        saveSecurityAnalysis: true,
+        saveScreenshots: false,
+        savePerformanceMetrics: true
+      }
+    });
+
+    expect(spider.getDiscoveryStats()).toEqual({ enabled: false });
+    expect(spider.getPersistenceConfig()).toEqual({
+      enabled: true,
+      saveResults: true,
+      saveSEOAnalysis: false,
+      saveTechFingerprint: true,
+      saveSecurityAnalysis: true,
+      saveScreenshots: false,
+      savePerformanceMetrics: true
+    });
+  });
+
+  test('should normalize s3 queue status to include backend and running', async () => {
+    const spider = new SpiderPlugin();
+    spider.queueBackend = 's3';
+    spider.queuePlugin = {
+      isRunning: true,
+      getStats: vi.fn().mockResolvedValue({
+        total: 4,
+        pending: 2,
+        processing: 1,
+        completed: 1,
+        failed: 0,
+        dead: 0
+      })
+    } as any;
+
+    const status = await spider.getQueueStatus();
+
+    expect(status).toEqual({
+      backend: 's3',
+      running: true,
+      total: 4,
+      pending: 2,
+      processing: 1,
+      completed: 1,
+      failed: 0,
+      dead: 0
+    });
+  });
+
   test('should expose curl-impersonate helper methods', async () => {
     const spider = new SpiderPlugin();
 

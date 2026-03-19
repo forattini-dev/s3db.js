@@ -19,7 +19,7 @@ interface Resource {
   patch(id: string, data: Record<string, unknown>): Promise<unknown>;
   delete(id: string): Promise<void>;
   get(id: string): Promise<StateRecord | null>;
-  query(filter: Record<string, unknown>, options?: QueryOptions): Promise<TransitionRecord[]>;
+  query(filter: Record<string, unknown>, options?: QueryOptions): Promise<RawTransitionRecord[]>;
   on(event: string, handler: (...args: unknown[]) => void): void;
 }
 
@@ -47,8 +47,12 @@ interface TransitionRecord {
   toState: string;
   event: string;
   context: Record<string, unknown>;
-  timestamp: number;
+  timestamp: string;
   createdAt: string;
+}
+
+interface RawTransitionRecord extends Omit<TransitionRecord, 'timestamp'> {
+  timestamp: string | number;
 }
 
 interface PluginStorage {
@@ -536,13 +540,13 @@ export class StateMachinePlugin extends Plugin {
         toState: 'string|required',
         event: 'string|required',
         context: 'json',
-        timestamp: 'number|required',
-        createdAt: 'string|required'
+        timestamp: 'datetime|required',
+        createdAt: 'dateonly|required'
       },
-      behavior: 'body-overflow',
+      behavior: 'body-only',
       partitions: {
         byMachine: { fields: { machineId: 'string' } },
-        byDate: { fields: { createdAt: 'string|maxlength:10' } }
+        byDate: { fields: { createdAt: 'dateonly' } }
       }
     }));
 
@@ -563,9 +567,9 @@ export class StateMachinePlugin extends Plugin {
         context: 'json|default:{}',
         lastTransition: 'string|default:null',
         triggerCounts: 'json|default:{}',
-        updatedAt: 'string|required'
+        updatedAt: 'datetime|required'
       },
-      behavior: 'body-overflow'
+      behavior: 'body-only'
     }));
 
     if (!stateOk && !this._getStateResource()) {
@@ -806,7 +810,7 @@ export class StateMachinePlugin extends Plugin {
     event: string,
     context: Record<string, unknown>
   ): Promise<void> {
-    const timestamp = Date.now();
+    const timestamp = new Date().toISOString();
     const now = new Date().toISOString();
 
     const machine = this.machines.get(machineId)!;
@@ -1152,14 +1156,14 @@ export class StateMachinePlugin extends Plugin {
       return [];
     }
 
-    const [ok, err, transitions] = await tryFn<TransitionRecord[]>(() =>
+    const [ok, err, transitions] = await tryFn<RawTransitionRecord[]>(() =>
       transitionLogResource.query({
         machineId,
         entityId
       }, {
         limit,
         offset
-      }) as unknown as Promise<TransitionRecord[]>
+      })
     );
 
     if (!ok) {
@@ -1167,14 +1171,20 @@ export class StateMachinePlugin extends Plugin {
       return [];
     }
 
-    const sorted = (transitions || []).sort((a, b) => b.timestamp - a.timestamp);
+    const toEpoch = (value: string | number): number => {
+      if (typeof value === 'number') return value;
+      const epoch = new Date(value).getTime();
+      return Number.isNaN(epoch) ? 0 : epoch;
+    };
+
+    const sorted = (transitions || []).sort((a, b) => toEpoch(b.timestamp) - toEpoch(a.timestamp));
 
     return sorted.map(t => ({
       from: t.fromState,
       to: t.toState,
       event: t.event,
       context: t.context,
-      timestamp: new Date(t.timestamp).toISOString()
+      timestamp: new Date(toEpoch(t.timestamp)).toISOString()
     }));
   }
 

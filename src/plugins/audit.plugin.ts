@@ -143,8 +143,8 @@ export class AuditPlugin extends Plugin {
         operation: 'string|required',
         recordId: 'string|required',
         userId: 'string|optional',
-        timestamp: 'string|required',
-        createdAt: 'string|required',
+        timestamp: 'datetime|required',
+        createdAt: 'dateonly|required',
         oldData: 'string|optional',
         newData: 'string|optional',
         partition: 'string|optional',
@@ -152,7 +152,7 @@ export class AuditPlugin extends Plugin {
         metadata: 'string|optional'
       },
       partitions: {
-        byDate: { fields: { createdAt: 'string|maxlength:10' } },
+        byDate: { fields: { createdAt: 'dateonly' } },
         byResource: { fields: { resourceName: 'string' } }
       },
       behavior: 'body-overflow'

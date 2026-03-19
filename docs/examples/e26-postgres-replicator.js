@@ -85,7 +85,7 @@ async function main() {
       id: 'string|required',
       name: 'string|required',
       email: 'string|required',
-      createdAt: 'string|required'
+      createdAt: 'datetime|required'
     }
   });
 

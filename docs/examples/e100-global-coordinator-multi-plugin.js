@@ -42,7 +42,7 @@ async function main() {
       subject: 'string|required',
       body: 'string|required',
       status: 'string|default:pending',
-      createdAt: 'number|required'
+      createdAt: 'datetime|required'
     },
     timestamps: true
   });
@@ -55,7 +55,7 @@ async function main() {
       title: 'string|required',
       schedule: 'string|required',
       status: 'string|default:active',
-      createdAt: 'number|required'
+      createdAt: 'datetime|required'
     },
     timestamps: true
   });
@@ -68,7 +68,7 @@ async function main() {
       key: 'string|required',
       value: 'string|required',
       ttl: 'number|required',
-      createdAt: 'number|required'
+      createdAt: 'datetime|required'
     },
     timestamps: true
   });

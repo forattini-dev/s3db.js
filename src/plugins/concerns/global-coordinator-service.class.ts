@@ -20,6 +20,20 @@ export interface ContentionConfig {
   rateLimitMs?: number;
 }
 
+export interface LifecycleEvent {
+  namespace: string;
+  workerId: string;
+  previousLeader: string | null;
+  leaderId: string | null;
+  epoch: number;
+  timestamp: number;
+}
+
+export interface LifecycleHooks {
+  onPromote?: (coordinator: GlobalCoordinatorService) => Promise<void> | void;
+  onDemote?: (coordinator: GlobalCoordinatorService) => Promise<void> | void;
+}
+
 export interface GlobalCoordinatorConfig {
   heartbeatInterval?: number;
   heartbeatJitter?: number;
@@ -27,6 +41,11 @@ export interface GlobalCoordinatorConfig {
   workerTimeout?: number;
   diagnosticsEnabled?: boolean | string;
   warnSlowRegisterWorkerLogs?: boolean;
+  electionStrategy?: 'timestamp' | 'alphabetical';
+  checkpoint?: {
+    enabled?: boolean;
+    threshold?: number;
+  };
   circuitBreaker?: CircuitBreakerConfig;
   contention?: ContentionConfig;
   metricsBufferSize?: number;
@@ -153,6 +172,9 @@ export interface NormalizedConfig {
   workerTimeout: number;
   warnSlowRegisterWorkerLogs: boolean;
   diagnosticsEnabled: boolean;
+  electionStrategy: 'timestamp' | 'alphabetical';
+  checkpointEnabled: boolean;
+  checkpointThreshold: number;
   contentionEnabled: boolean;
   contentionThreshold: number;
   contentionRateLimitMs: number;
@@ -173,8 +195,12 @@ export class GlobalCoordinatorService extends EventEmitter {
 
   isRunning: boolean;
   isLeader: boolean;
+  get isPrimary(): boolean {
+    return this.isLeader;
+  }
   currentLeaderId: string | null;
   currentEpoch: number;
+  _lastKnownEpoch: number;
 
   config: NormalizedConfig;
 
@@ -192,6 +218,7 @@ export class GlobalCoordinatorService extends EventEmitter {
   protected _heartbeatMutexTimeoutMs: number;
   protected _warnSlowCoordinatorLogs: boolean;
   protected _warnSlowRegisterWorkerLogs: boolean;
+  protected _lifecycleHooks: Map<string, LifecycleHooks>;
 
   protected _cachedState: LeaderState | null;
   protected _stateCacheTime: number;
@@ -224,6 +251,7 @@ export class GlobalCoordinatorService extends EventEmitter {
     this.isLeader = false;
     this.currentLeaderId = null;
     this.currentEpoch = 0;
+    this._lastKnownEpoch = 0;
     const gcoordProfile = this._getPerfThresholdMs('S3DB_GCOORD_SLOW_PROFILE', 0);
     const gcoordDefaults = gcoordProfile === 2
       ? {
@@ -252,6 +280,7 @@ export class GlobalCoordinatorService extends EventEmitter {
     this.electionTimer = null;
 
     this.subscribedPlugins = new Map();
+    this._lifecycleHooks = new Map();
 
     this.metrics = {
       heartbeatCount: 0,
@@ -308,11 +337,14 @@ export class GlobalCoordinatorService extends EventEmitter {
       this.storage = this._getStorage();
 
       await this._initializeMetadata();
+      await this._restoreCheckpoint();
+      this.currentEpoch = this._lastKnownEpoch;
 
       this.isRunning = true;
       this.metrics.startTime = Date.now();
 
       this._log('Service started');
+      await this._heartbeatCycle();
 
       this._startLoop();
 
@@ -345,6 +377,8 @@ export class GlobalCoordinatorService extends EventEmitter {
     if (!this.isRunning) return;
 
     try {
+      const wasPrimary = this.currentLeaderId === this.workerId;
+      const previousLeaderId = this.currentLeaderId;
       this.isRunning = false;
       this.isLeader = false;
       this.currentLeaderId = null;
@@ -361,7 +395,12 @@ export class GlobalCoordinatorService extends EventEmitter {
 
       await this._unregisterWorker();
 
+      if (wasPrimary) {
+        await this._handleLeadershipTransition(previousLeaderId, null, this.currentEpoch);
+      }
+
       this.subscribedPlugins.clear();
+      this._lifecycleHooks.clear();
 
       this._log('Service stopped');
 
@@ -392,6 +431,18 @@ export class GlobalCoordinatorService extends EventEmitter {
     this.logger.debug({ namespace: this.namespace, pluginName, totalMs }, `[SUBSCRIBE] complete`);
   }
 
+  registerLifecycleHooks(pluginName: string, hooks: LifecycleHooks): void {
+    if (!pluginName || !hooks) {
+      return;
+    }
+
+    this._lifecycleHooks.set(pluginName, hooks);
+  }
+
+  unregisterLifecycleHooks(pluginName: string): void {
+    this._lifecycleHooks.delete(pluginName);
+  }
+
   unsubscribePlugin(pluginName: string): void {
     this.subscribedPlugins.delete(pluginName);
     this._log(`Plugin unsubscribed: ${pluginName}`);
@@ -415,10 +466,12 @@ export class GlobalCoordinatorService extends EventEmitter {
   async getActiveWorkers(): Promise<WorkerData[]> {
     if (!this.storage) return [];
 
-    return await this.storage.listActiveWorkers(
+    const workers = await this.storage.listActiveWorkers(
       this._getWorkersPrefix(),
       this.config.workerTimeout
     );
+
+    return workers.map((worker) => this._toWorkerHandle(worker) as unknown as WorkerData);
   }
 
   getMetrics(): EnhancedCoordinatorMetrics {
@@ -510,7 +563,8 @@ export class GlobalCoordinatorService extends EventEmitter {
       if (previousLeaderId !== newLeaderId) {
         this.metrics.leaderChanges++;
         this.logger.debug({ namespace: this.namespace, from: previousLeaderId, to: newLeaderId }, `[HEARTBEAT] leader changed, notifying plugins`);
-        this._notifyLeaderChange(previousLeaderId, newLeaderId);
+        await this._notifyLeaderChange(previousLeaderId, newLeaderId);
+        await this._handleLeadershipTransition(previousLeaderId, newLeaderId, this.currentEpoch);
       }
 
       const durationMs = Date.now() - startMs;
@@ -521,6 +575,8 @@ export class GlobalCoordinatorService extends EventEmitter {
       this._circuitBreakerSuccess();
 
       this._checkContention(durationMs);
+
+      await this._writeCheckpoint(this.currentEpoch);
 
       if (this._warnSlowCoordinatorLogs && durationMs > this._slowHeartbeatMs) {
         this.logger.warn({ namespace: this.namespace, durationMs }, `[PERF] SLOW HEARTBEAT detected`);
@@ -584,15 +640,47 @@ export class GlobalCoordinatorService extends EventEmitter {
       const pluginWorkerIds = workerIds.filter(id => !id.startsWith('gcs-'));
       this.logger.debug({ namespace: this.namespace, pluginWorkers: pluginWorkerIds?.length, allWorkers: workerIds?.length }, `[ELECTION] filtered workers`);
 
-      const candidateIds = pluginWorkerIds.length > 0 ? pluginWorkerIds : workerIds;
-
+      let candidateIds = pluginWorkerIds.length > 0 ? pluginWorkerIds : workerIds;
       if (candidateIds.length === 0) {
+        candidateIds = [this.workerId];
+      }
+
+      let elected: string | null = null;
+      const baseEpoch = Math.max(previousEpoch, this.currentEpoch, this._lastKnownEpoch);
+
+      if (this.config.electionStrategy === 'timestamp' && candidateIds.length > 1) {
+        const workers = await this.storage!.listActiveWorkers(
+          this._getWorkersPrefix(),
+          this.config.workerTimeout
+        );
+        const candidates = workers
+          .filter((worker) => candidateIds.includes(worker.workerId))
+          .sort((a, b) => {
+            const aTime = typeof a.startTime === 'number' ? a.startTime : Number.MAX_SAFE_INTEGER;
+            const bTime = typeof b.startTime === 'number' ? b.startTime : Number.MAX_SAFE_INTEGER;
+
+            if (aTime !== bTime) {
+              return aTime - bTime;
+            }
+
+            return a.workerId.localeCompare(b.workerId);
+          });
+
+        elected = candidates[0]?.workerId ?? candidateIds[0] ?? null;
+      } else {
+        elected = candidateIds[0] ?? null;
+      }
+
+      if (!elected && candidateIds.length > 0) {
+        elected = candidateIds[0]!;
+      }
+
+      if (!elected) {
         this.logger.debug({ namespace: this.namespace }, `[ELECTION] no workers available`);
         this._log('No workers available for election');
         return { leaderId: null, epoch: previousEpoch };
       }
 
-      const elected = candidateIds[0] ?? null;
       const stateKey = this._getStateKey();
       const maxAttempts = 8;
       const stateCache = { state: null as LeaderState | null, version: null as string | null };
@@ -600,7 +688,10 @@ export class GlobalCoordinatorService extends EventEmitter {
       const attemptState = async (): Promise<ElectionResult> => {
         const now = Date.now();
         const leaseEnd = now + this.config.leaseTimeout;
-        const nextEpoch = Math.max((stateCache.state?.epoch ?? previousEpoch) + 1, previousEpoch + 1);
+        const nextEpoch = Math.max(
+          (stateCache.state?.epoch ?? baseEpoch) + 1,
+          baseEpoch + 1
+        );
 
         const candidateState: LeaderState = {
           leaderId: elected,
@@ -695,6 +786,7 @@ export class GlobalCoordinatorService extends EventEmitter {
       for (let attempt = 0; attempt < maxAttempts; attempt++) {
         const electionResult = await attemptState();
         if (electionResult.leaderId) {
+          this._lastKnownEpoch = electionResult.epoch;
           return electionResult;
         }
 
@@ -836,6 +928,13 @@ export class GlobalCoordinatorService extends EventEmitter {
       return null;
     }
 
+    if (isLeaderState(data as unknown)) {
+      const stateData = data as LeaderState;
+      if (typeof stateData.epoch === 'number' && stateData.epoch > this._lastKnownEpoch) {
+        this._lastKnownEpoch = stateData.epoch;
+      }
+    }
+
     if (this._stateCacheTtl > 0) {
       this._cachedState = data as LeaderState | null;
       this._stateCacheTime = now;
@@ -848,6 +947,122 @@ export class GlobalCoordinatorService extends EventEmitter {
   protected _invalidateStateCache(): void {
     this._cachedState = null;
     this._stateCacheTime = 0;
+  }
+
+  protected _toWorkerHandle(worker: WorkerData): string {
+    const value = new String(worker.workerId) as string & WorkerData;
+
+    Object.assign(value, worker);
+
+    return value;
+  }
+
+  protected async _restoreCheckpoint(): Promise<void> {
+    if (!this.storage || !this.config.checkpointEnabled) return;
+
+    const [ok, , checkpoint] = await tryFn(() =>
+      this.storage!.get(this._getCheckpointKey())
+    );
+
+    if (!ok || !checkpoint || typeof checkpoint !== 'object') {
+      return;
+    }
+
+    const candidate = checkpoint as Record<string, unknown>;
+    const epochCandidate = candidate.epoch;
+    if (typeof epochCandidate === 'number' && Number.isFinite(epochCandidate) && epochCandidate > 0) {
+      this._lastKnownEpoch = Math.max(this._lastKnownEpoch, epochCandidate);
+      this.currentEpoch = this._lastKnownEpoch;
+    }
+  }
+
+  protected async _writeCheckpoint(epoch: number): Promise<void> {
+    if (!this.storage || !this.config.checkpointEnabled) return;
+
+    const checkpoint = {
+      namespace: this.namespace,
+      leaderId: this.currentLeaderId,
+      epoch,
+      generatedAt: Date.now(),
+      updatedBy: this.workerId
+    };
+
+    const [ok, err] = await tryFn(() =>
+      this.storage!.set(
+        this._getCheckpointKey(),
+        checkpoint as Record<string, unknown>,
+        {
+          ttl: Math.ceil(this.config.leaseTimeout / 1000) + 60,
+          behavior: 'body-only'
+        }
+      )
+    );
+
+    if (!ok) {
+      this._logError('Failed to persist coordinator checkpoint', err as Error);
+    }
+  }
+
+  protected _getCheckpointKey(): string {
+    return this.storage!.getPluginKey(null, `namespace=${this.namespace}`, 'checkpoint.json');
+  }
+
+  protected async _notifyLifecycleTransition(
+    previousLeaderId: string | null,
+    newLeaderId: string | null,
+    epoch: number
+  ): Promise<void> {
+    const previousPrimary = previousLeaderId === this.workerId;
+    const currentPrimary = newLeaderId === this.workerId;
+
+    if (previousPrimary === currentPrimary) return;
+
+    const event: LifecycleEvent = {
+      namespace: this.namespace,
+      workerId: this.workerId,
+      previousLeader: previousLeaderId,
+      leaderId: newLeaderId,
+      epoch,
+      timestamp: Date.now()
+    };
+
+    if (currentPrimary) {
+      this.emit('coordinator:promoted', event);
+      await this._executeLifecycleHooks('onPromote', event);
+    } else {
+      this.emit('coordinator:demoted', event);
+      await this._executeLifecycleHooks('onDemote', event);
+    }
+  }
+
+  protected async _executeLifecycleHooks(
+    hookName: keyof LifecycleHooks,
+    event: LifecycleEvent
+  ): Promise<void> {
+    if (this._lifecycleHooks.size === 0) return;
+
+    const hooks = Array.from(this._lifecycleHooks.values());
+
+    for (const hook of hooks) {
+      const handler = hook[hookName];
+      if (!handler) {
+        continue;
+      }
+
+      try {
+        await handler(this);
+      } catch (err) {
+        this._logError(`Lifecycle hook failed (${hookName})`, err as Error);
+      }
+    }
+  }
+
+  protected _handleLeadershipTransition(
+    previousLeaderId: string | null,
+    newLeaderId: string | null,
+    epoch: number
+  ): Promise<void> {
+    return this._notifyLifecycleTransition(previousLeaderId, newLeaderId, epoch);
   }
 
   protected async _initializeMetadata(): Promise<void> {
@@ -1038,6 +1253,9 @@ export class GlobalCoordinatorService extends EventEmitter {
   }
 
   protected _normalizeConfig(config: GlobalCoordinatorConfig): NormalizedConfig {
+    const checkpointThreshold = config.checkpoint?.threshold;
+    const normalizedThreshold = Number.isFinite(checkpointThreshold as number) ? checkpointThreshold! : 0.1;
+
     return {
       heartbeatInterval: Math.max(1000, config.heartbeatInterval || 5000),
       heartbeatJitter: Math.max(0, config.heartbeatJitter || 1000),
@@ -1045,6 +1263,9 @@ export class GlobalCoordinatorService extends EventEmitter {
       workerTimeout: Math.max(5000, config.workerTimeout || 20000),
       warnSlowRegisterWorkerLogs: config.warnSlowRegisterWorkerLogs ?? true,
       diagnosticsEnabled: Boolean(config.diagnosticsEnabled ?? false),
+      electionStrategy: config.electionStrategy === 'alphabetical' ? 'alphabetical' : 'timestamp',
+      checkpointEnabled: config.checkpoint?.enabled ?? true,
+      checkpointThreshold: Math.max(0, Math.min(normalizedThreshold, 1)),
       contentionEnabled: config.contention?.enabled ?? true,
       contentionThreshold: config.contention?.threshold ?? 2.0,
       contentionRateLimitMs: config.contention?.rateLimitMs ?? 30000,

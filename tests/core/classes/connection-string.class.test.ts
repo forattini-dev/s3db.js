@@ -340,3 +340,45 @@ describe('ConnectionString FileSystem (file://)', () => {
     expect(conn.endpoint).toBe('file:///tmp/s3db');
   });
 });
+
+describe('ConnectionString Sqlite (sqlite://)', () => {
+  test('absolute path - simple file', () => {
+    const conn = new ConnectionString('sqlite:///tmp/s3db.sqlite');
+    expect(conn.clientType).toBe('sqlite');
+    expect(conn.basePath).toBe('/tmp/s3db.sqlite');
+    expect(conn.bucket).toBe('s3db');
+    expect(conn.keyPrefix).toBe('');
+    expect(conn.region).toBe('sqlite');
+    expect(conn.forcePathStyle).toBe(true);
+  });
+
+  test('relative path with ./ prefix', () => {
+    const conn = new ConnectionString('sqlite://./tmp/s3db.sqlite');
+    expect(conn.clientType).toBe('sqlite');
+    expect(conn.basePath).toMatch(/tmp\/s3db\.sqlite$/);
+    expect(conn.bucket).toBe('s3db');
+    expect(conn.keyPrefix).toBe('');
+  });
+
+  test('path with URL-encoded characters', () => {
+    const conn = new ConnectionString('sqlite:///tmp/my%20data/s3db.sqlite');
+    expect(conn.basePath).toBe('/tmp/my data/s3db.sqlite');
+    expect(conn.bucket).toBe('s3db');
+  });
+
+  test('path with query parameters', () => {
+    const conn = new ConnectionString('sqlite:///tmp/s3db.sqlite?enforceLimits=true&maxObjectSize=1024');
+    expect(conn.basePath).toBe('/tmp/s3db.sqlite');
+    expect(conn.clientOptions.enforceLimits).toBe(true);
+    expect(conn.clientOptions.maxObjectSize).toBe(1024);
+  });
+
+  test('empty path throws error', () => {
+    expect(() => new ConnectionString('sqlite://')).toThrow(/requires a path/);
+  });
+
+  test('endpoint is synthetic sqlite:// URL', () => {
+    const conn = new ConnectionString('sqlite:///tmp/s3db.sqlite');
+    expect(conn.endpoint).toBe('sqlite:///tmp/s3db.sqlite');
+  });
+});

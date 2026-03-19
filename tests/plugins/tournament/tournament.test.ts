@@ -140,6 +140,29 @@ describe('TournamentPlugin', () => {
       const team1 = participants.find(p => p.participantId === 'team-1');
       expect(team1.seed).toBe(1);
     });
+
+    it('should persist datetime fields compactly while preserving numeric API timestamps', async () => {
+      await tournament.openRegistration(tournamentId);
+
+      const registration = await tournament.register(tournamentId, 'team-storage-check');
+      expect(typeof registration.registeredAt).toBe('number');
+
+      const storedRegistration = await tournament.registrationsResource.get(registration.id);
+      expect(typeof storedRegistration.registeredAt).toBe('string');
+
+      await tournament.confirmRegistration(tournamentId, 'team-storage-check');
+      await tournament.checkIn(tournamentId, 'team-storage-check');
+
+      const checkedIn = (await tournament.getParticipants(tournamentId))
+        .find(p => p.participantId === 'team-storage-check');
+
+      expect(typeof checkedIn.confirmedAt).toBe('number');
+      expect(typeof checkedIn.checkedInAt).toBe('number');
+
+      const storedCheckedIn = await tournament.registrationsResource.get(registration.id);
+      expect(typeof storedCheckedIn.confirmedAt).toBe('string');
+      expect(typeof storedCheckedIn.checkedInAt).toBe('string');
+    });
   });
 
   describe('Single Elimination Tournament', () => {
@@ -189,10 +212,20 @@ describe('TournamentPlugin', () => {
 
       expect(result.status).toBe('completed');
       expect(result.winnerId).toBe(match.participant1Id);
+      expect(typeof result.completedAt).toBe('number');
+
+      const storedMatch = await tournament.matchesResource.get(match.id);
+      expect(typeof storedMatch.completedAt).toBe('string');
     });
 
     it('should complete tournament after final match', async () => {
       await tournament.startTournament(tournamentId);
+
+      const startedTournament = await tournament.get(tournamentId);
+      expect(typeof startedTournament.startedAt).toBe('number');
+
+      const storedStartedTournament = await tournament.tournamentsResource.get(tournamentId);
+      expect(typeof storedStartedTournament.startedAt).toBe('string');
 
       // Play all matches
       let pendingMatches = await tournament.getMatches(tournamentId, { status: 'pending' });
@@ -211,6 +244,10 @@ describe('TournamentPlugin', () => {
 
       const t = await tournament.get(tournamentId);
       expect(t.status).toBe('completed');
+      expect(typeof t.completedAt).toBe('number');
+
+      const storedTournament = await tournament.tournamentsResource.get(tournamentId);
+      expect(typeof storedTournament.completedAt).toBe('string');
     });
   });
 

@@ -1,6 +1,7 @@
 import { Database } from '../../src/database.class.js';
 import { MemoryClient } from '../../src/clients/memory-client.class.js';
 import { IdentityPlugin } from '../../src/plugins/identity/index.js';
+import { OnboardingManager } from '../../src/plugins/identity/concerns/onboarding-manager.js';
 
 // Helper to prevent HTTP server from binding in tests
 function disableServerBinding(plugin) {
@@ -15,6 +16,7 @@ describe('Identity Onboarding - Config Mode', () => {
   let db;
 
   beforeEach(async () => {
+    OnboardingManager.resetCache();
     db = new Database({
       client: new MemoryClient({
         bucket: `test-identity-onboarding-config-${Date.now()}-${Math.random().toString(36).slice(2,7)}`,
@@ -25,6 +27,7 @@ describe('Identity Onboarding - Config Mode', () => {
   });
 
   afterEach(async () => {
+    OnboardingManager.resetCache();
     if (db) {
       await db.disconnect();
     }

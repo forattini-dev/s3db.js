@@ -332,7 +332,7 @@ async function main() {
     name: 'performance_metrics',
     attributes: {
       url: 'string|required',
-      timestamp: 'number|required',
+      timestamp: 'datetime|required',
       score: 'number|required',
       lcp: 'number',
       fid: 'number',

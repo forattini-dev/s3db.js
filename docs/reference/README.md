@@ -43,6 +43,9 @@ memory://bucket/prefix
 
 # Filesystem
 file:///path/to/data
+
+# SQLite
+sqlite:///path/to/database.db
 ```
 
 ### [Errors Reference](errors.md)

@@ -62,7 +62,7 @@ async function main() {
       tags: 'array|items:string|optional',
       views: 'number|default:0',
       likes: 'number|default:0',
-      publishedAt: 'string|optional'
+      publishedAt: 'datetime|optional'
     },
     timestamps: true,
     partitions: {

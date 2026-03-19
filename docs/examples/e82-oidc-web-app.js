@@ -37,7 +37,7 @@ async function setupWebApp() {
       title: 'string|required',
       content: 'string|required',
       authorId: 'string|required',
-      createdAt: 'string|optional'
+      createdAt: 'datetime|optional'
     },
     timestamps: true
   });

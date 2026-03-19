@@ -84,7 +84,7 @@ smtpPlugin.onWebhookEvent('complaint', async (event) => {
 smtpPlugin.onWebhookEvent('delivery', async (event) => {
   console.log(`✅ Delivery confirmed:`);
   console.log(`   Recipient: ${event.recipient}`);
-  console.log(`   Timestamp: ${new Date(event.timestamp * 1000).toISOString()}\n`);
+  console.log(`   Timestamp: ${event.timestamp}\n`);
 });
 
 // Handle opens
@@ -319,7 +319,7 @@ console.log(JSON.stringify(sendgridHandlers, null, 2));
 const eventLog = smtpPlugin.getWebhookEventLog(5);
 console.log(`\nLatest webhook events (${eventLog.length}):`);
 for (const event of eventLog) {
-  console.log(`  - ${event.type}: ${event.recipient} (${new Date(event.loggedAt).toISOString()})`);
+  console.log(`  - ${event.type}: ${event.recipient} (${event.loggedAt})`);
 }
 
 // ============================================================================

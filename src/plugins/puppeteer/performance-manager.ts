@@ -117,7 +117,7 @@ export interface Recommendation {
 
 export interface PerformanceReport {
   url: string;
-  timestamp: number;
+  timestamp: string;
   collectionTime: number;
   score: number | null;
   scores: Record<string, number | null>;
@@ -144,15 +144,15 @@ export interface CollectMetricsOptions {
 }
 
 export interface ComparisonResult {
-  timestamp: number;
+  timestamp: string;
   baseline: {
     url: string;
-    timestamp: number;
+    timestamp: string;
     score: number | null;
   };
   current: {
     url: string;
-    timestamp: number;
+    timestamp: string;
     score: number | null;
   };
   scoreDelta: number | null;
@@ -268,7 +268,7 @@ export class PerformanceManager {
 
       const report: PerformanceReport = {
         url: page.url(),
-        timestamp: Date.now(),
+        timestamp: new Date().toISOString(),
         collectionTime,
         score: scores.overall,
         scores: scores.individual,
@@ -728,7 +728,7 @@ export class PerformanceManager {
 
   compareReports(baseline: PerformanceReport, current: PerformanceReport): ComparisonResult {
     const comparison: ComparisonResult = {
-      timestamp: Date.now(),
+      timestamp: new Date().toISOString(),
       baseline: {
         url: baseline.url,
         timestamp: baseline.timestamp,

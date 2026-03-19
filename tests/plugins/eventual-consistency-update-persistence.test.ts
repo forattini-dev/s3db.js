@@ -8,6 +8,22 @@
 import { EventualConsistencyPlugin } from '../../src/plugins/eventual-consistency/index.js';
 import { createDatabaseForTest } from '../config.js';
 
+async function waitFor(assertion, timeoutMs = 5000, intervalMs = 100) {
+  const deadline = Date.now() + timeoutMs;
+  let lastError;
+
+  while (Date.now() < deadline) {
+    try {
+      return await assertion();
+    } catch (error) {
+      lastError = error;
+      await new Promise(resolve => setTimeout(resolve, intervalMs));
+    }
+  }
+
+  throw lastError;
+}
+
 describe('EventualConsistencyPlugin - Update Persistence', () => {
   let database;
 
@@ -62,25 +78,15 @@ describe('EventualConsistencyPlugin - Update Persistence', () => {
     expect(beforeConsolidate.clicks).toBe(0);
 
     // Consolidate
-    const consolidatedValue = await urls.consolidate('url-001', 'clicks');
-    expect(consolidatedValue).toBe(3);
+    const consolidation = await urls.consolidate('url-001', 'clicks');
+    expect(consolidation.success).toBe(true);
+    expect(consolidation.transactionsApplied).toBe(3);
 
-    // Get IMMEDIATELY after consolidation
-    const afterConsolidate = await urls.get('url-001');
-
-    // Check if it's correct
-    if (afterConsolidate.clicks === 3) {
-    } else {
-
-      // Wait 3 seconds and try again
-      await new Promise(resolve => setTimeout(resolve, 3000));
-
-      const afterWait = await urls.get('url-001');
-
-      if (afterWait.clicks === 3) {
-      } else {
-      }
-    }
+    const afterConsolidate = await waitFor(async () => {
+      const record = await urls.get('url-001');
+      expect(record.clicks).toBe(3);
+      return record;
+    });
 
     expect(afterConsolidate.clicks).toBe(3);
   }, 30000);
@@ -174,24 +180,36 @@ describe('EventualConsistencyPlugin - Update Persistence', () => {
     expect(pendingBefore.length).toBe(5);
 
     // Consolidate
-    await urls.consolidate('url-003', 'clicks');
+    const consolidation = await urls.consolidate('url-003', 'clicks');
+    expect(consolidation.success).toBe(true);
+    expect(consolidation.transactionsApplied).toBe(5);
 
-    // Check applied transactions
-    const appliedAfter = await database.resources.plg_urls_tx_clicks.query({
-      originalId: 'url-003',
-      applied: true
+    const appliedAfter = await waitFor(async () => {
+      const records = await database.resources.plg_urls_tx_clicks.query({
+        originalId: 'url-003',
+        applied: true
+      });
+      expect(records.length).toBe(5);
+      return records;
     });
+
+    const pendingAfter = await waitFor(async () => {
+      const records = await database.resources.plg_urls_tx_clicks.query({
+        originalId: 'url-003',
+        applied: false
+      });
+      expect(records.length).toBe(0);
+      return records;
+    });
+
+    const url = await waitFor(async () => {
+      const record = await urls.get('url-003');
+      expect(record.clicks).toBe(5);
+      return record;
+    });
+
     expect(appliedAfter.length).toBe(5);
-
-    // Check pending transactions
-    const pendingAfter = await database.resources.plg_urls_tx_clicks.query({
-      originalId: 'url-003',
-      applied: false
-    });
     expect(pendingAfter.length).toBe(0);
-
-    // Verify URL was updated
-    const url = await urls.get('url-003');
     expect(url.clicks).toBe(5);
 
   }, 30000);

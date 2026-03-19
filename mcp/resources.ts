@@ -42,7 +42,7 @@ export const resourceTemplates: MCPResourceTemplate[] = [
   {
     uriTemplate: 's3db://client/{name}',
     name: 'Storage Client',
-    description: 'Storage client documentation: s3, memory, filesystem',
+    description: 'Storage client documentation: s3, sqlite, memory, filesystem',
     mimeType: 'text/markdown',
   },
   {
@@ -258,6 +258,7 @@ Transform AWS S3 into a powerful document database with ORM-like interface.
 \`\`\`
 s3://KEY:SECRET@bucket?region=us-east-1     # AWS S3
 http://KEY:SECRET@localhost:9000/bucket      # MinIO
+sqlite:///tmp/s3db.sqlite                      # SQLite (persistent local file)
 memory://bucket/path                         # MemoryClient (testing)
 file:///tmp/s3db                             # FileSystemClient (testing)
 \`\`\`
@@ -718,13 +719,17 @@ db.use(new CachePlugin({
 
 | Client | Use Case | Notes |
 |--------|----------|-------|
-| \`FileSystemClient\` | **Default for tests** | Safe parallelism, isolated directories |
+| \`FileSystemClient\` | Default for tests | Safe parallelism, isolated directories |
+| \`SqliteClient\` | Integration and long-running tests | Persistent local DB, single-process |
 | \`MemoryClient\` | Single-file tests only | RAM explosion risk with many objects |
 | \`S3Client\` | Integration tests | Real S3/MinIO connection |
 
 \`\`\`javascript
 // Test with FileSystemClient
 const db = new Database({ connectionString: 'file:///tmp/test-db' });
+
+// Test with SQLite (persistent local DB)
+const db = new Database({ connectionString: 'sqlite:///tmp/test-db.sqlite' });
 
 // Test with MemoryClient (single test only)
 const db = new Database({ connectionString: 'memory://test-bucket' });
@@ -1283,7 +1288,7 @@ function getCategoryDescription(category: string): string {
     streaming: 'Streaming large datasets for memory-efficient processing.',
     hooks: 'Lifecycle hooks for validation, timestamps, versioning.',
     replication: 'Data replication to PostgreSQL, BigQuery, SQS.',
-    testing: 'Testing patterns with MemoryClient and FilesystemClient.',
+    testing: 'Testing patterns with MemoryClient, SqliteClient, and FileSystemClient.',
   };
 
   return descriptions[category] || 'Examples for this category.';

@@ -31,7 +31,7 @@ describe('API Plugin - Auth Drivers', () => {
           role: 'string|optional',
           scopes: 'array|items:string|optional',
           active: 'boolean|default:true',
-          lastLoginAt: 'string|optional'
+          lastLoginAt: 'datetime|optional'
         },
         behavior: 'body-overflow',
         timestamps: true

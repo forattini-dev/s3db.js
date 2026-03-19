@@ -19,6 +19,10 @@ import {
   AVAILABLE_ACTIVITIES,
   ACTIVITY_CATEGORIES,
   ACTIVITY_PRESETS,
+  type Activity,
+  type ActivityCategoryWithActivities,
+  type ActivityPreset,
+  type ValidationResult,
   getActivitiesByCategory,
   getAllActivities,
   getCategoriesWithActivities,
@@ -27,8 +31,8 @@ import {
 } from './spider/task-activities.js';
 import { analyzeIFrames, detectTrackingPixels } from './spider/content-analyzer.js';
 import { analyzeAllStorage } from './spider/storage-analyzer.js';
-import { URLPatternMatcher } from './spider/url-pattern-matcher.js';
-import { LinkDiscoverer } from './spider/link-discoverer.js';
+import { URLPatternMatcher, type FilteredUrl } from './spider/url-pattern-matcher.js';
+import { LinkDiscoverer, type DiscoveryStats } from './spider/link-discoverer.js';
 import { DeepDiscovery } from './spider/deep-discovery.js';
 
 type SpiderQueueBackend = 's3' | 'queue-consumer';
@@ -79,7 +83,7 @@ class SpiderQueueConsumerBridge extends QueueConsumerPlugin {
     });
   }
 
-  async getStatus(): Promise<Record<string, any>> {
+  async getStatus(): Promise<SpiderQueueStatus> {
     return {
       backend: 'queue-consumer',
       activeConsumers: this.consumers.length,
@@ -197,6 +201,32 @@ export interface SpiderPluginConfig {
     [key: string]: any;
   };
   logger?: any;
+}
+
+export type SpiderDiscoveryStatus =
+  | { enabled: false }
+  | ({ enabled: true } & DiscoveryStats);
+
+export interface SpiderQueueStatus {
+  backend: SpiderQueueBackend;
+  running: boolean;
+  activeConsumers?: number;
+  total?: number;
+  pending?: number;
+  processing?: number;
+  completed?: number;
+  failed?: number;
+  dead?: number;
+}
+
+export interface SpiderPersistenceConfig {
+  enabled: boolean;
+  saveResults: boolean;
+  saveSEOAnalysis: boolean;
+  saveTechFingerprint: boolean;
+  saveSecurityAnalysis: boolean;
+  saveScreenshots: boolean;
+  savePerformanceMetrics: boolean;
 }
 
 export class SpiderPlugin extends Plugin {
@@ -645,7 +675,7 @@ export class SpiderPlugin extends Plugin {
           metadata: 'object',
           activities: 'array|items:string',
           activityPreset: 'string',
-          createdAt: 'number'
+          createdAt: 'datetime'
         },
         behavior: 'body-overflow',
         timestamps: true
@@ -662,10 +692,10 @@ export class SpiderPlugin extends Plugin {
           performanceMetrics: 'object',
           screenshot: 'string',
           error: 'string',
-          createdAt: 'number',
+          createdAt: 'datetime',
           processingTime: 'number'
         },
-        behavior: 'body-overflow',
+        behavior: 'body-only',
         timestamps: true
       },
       seoAnalysis: {
@@ -677,9 +707,9 @@ export class SpiderPlugin extends Plugin {
           openGraph: 'object',
           twitterCard: 'object',
           assets: 'object',
-          createdAt: 'number'
+          createdAt: 'datetime'
         },
-        behavior: 'body-overflow',
+        behavior: 'body-only',
         timestamps: true
       },
       techFingerprint: {
@@ -694,9 +724,9 @@ export class SpiderPlugin extends Plugin {
           webServers: 'array|items:string',
           cms: 'array|items:string',
           libraries: 'array|items:string',
-          createdAt: 'number'
+          createdAt: 'datetime'
         },
-        behavior: 'body-overflow',
+        behavior: 'body-only',
         timestamps: true
       },
       securityAnalysis: {
@@ -712,9 +742,9 @@ export class SpiderPlugin extends Plugin {
           websockets: 'object',
           vulnerabilities: 'array',
           securityScore: 'number',
-          createdAt: 'number'
+          createdAt: 'datetime'
         },
-        behavior: 'body-overflow',
+        behavior: 'body-only',
         timestamps: true
       },
       screenshots: {
@@ -728,9 +758,9 @@ export class SpiderPlugin extends Plugin {
           height: 'number',
           format: 'string',
           quality: 'number',
-          capturedAt: 'number'
+          capturedAt: 'datetime'
         },
-        behavior: 'body-overflow',
+        behavior: 'body-only',
         timestamps: true
       },
       contentAnalysis: {
@@ -740,9 +770,9 @@ export class SpiderPlugin extends Plugin {
           url: 'string|required',
           iframes: 'object',
           trackingPixels: 'object',
-          createdAt: 'number'
+          createdAt: 'datetime'
         },
-        behavior: 'body-overflow',
+        behavior: 'body-only',
         timestamps: true
       },
       storageAnalysis: {
@@ -754,9 +784,9 @@ export class SpiderPlugin extends Plugin {
           sessionStorage: 'object',
           indexedDB: 'object',
           summary: 'object',
-          createdAt: 'number'
+          createdAt: 'datetime'
         },
-        behavior: 'body-overflow',
+        behavior: 'body-only',
         timestamps: true
       },
       assetsAnalysis: {
@@ -770,9 +800,9 @@ export class SpiderPlugin extends Plugin {
           videos: 'array',
           audios: 'array',
           summary: 'object',
-          createdAt: 'number'
+          createdAt: 'datetime'
         },
-        behavior: 'body-overflow',
+        behavior: 'body-only',
         timestamps: true
       }
     };
@@ -810,7 +840,7 @@ export class SpiderPlugin extends Plugin {
     }
 
     const categoryActivities = getActivitiesByCategory(category);
-    return categoryActivities.some((activity: any) => task.activities.includes(activity.name));
+    return categoryActivities.some((activity) => task.activities.includes(activity.name));
   }
 
   /**
@@ -819,13 +849,13 @@ export class SpiderPlugin extends Plugin {
   _getRequestedActivities(task: any, category: string): string[] {
     if (!task.activities || task.activities.length === 0) {
       // Return all activities from category
-      return getActivitiesByCategory(category).map((a: any) => a.name);
+      return getActivitiesByCategory(category).map((activity) => activity.name);
     }
 
     const categoryActivities = getActivitiesByCategory(category);
     return categoryActivities
-      .filter((activity: any) => task.activities.includes(activity.name))
-      .map((a: any) => a.name);
+      .filter((activity) => task.activities.includes(activity.name))
+      .map((activity) => activity.name);
   }
 
   /**
@@ -976,6 +1006,8 @@ export class SpiderPlugin extends Plugin {
           }
         }
 
+        const persistedAt = new Date().toISOString();
+
         // Create result record
         const result = {
           targetId: task.id,
@@ -987,6 +1019,7 @@ export class SpiderPlugin extends Plugin {
           performanceMetrics,
           securityAnalysis,
           screenshot: screenshotData ? screenshotData.screenshot : null,
+          createdAt: persistedAt,
           processingTime: Date.now() - startTime
         };
 
@@ -1007,7 +1040,8 @@ export class SpiderPlugin extends Plugin {
               return await seoResource.insert({
                 targetId: task.id,
                 url: task.url,
-                ...seoAnalysis
+                ...seoAnalysis,
+                createdAt: persistedAt
               });
             });
           }
@@ -1019,7 +1053,8 @@ export class SpiderPlugin extends Plugin {
               return await techResource.insert({
                 targetId: task.id,
                 url: task.url,
-                ...techFingerprint
+                ...techFingerprint,
+                createdAt: persistedAt
               });
             });
           }
@@ -1031,7 +1066,8 @@ export class SpiderPlugin extends Plugin {
               return await securityResource.insert({
                 targetId: task.id,
                 url: task.url,
-                ...securityAnalysis
+                ...securityAnalysis,
+                createdAt: persistedAt
               });
             });
           }
@@ -1044,7 +1080,7 @@ export class SpiderPlugin extends Plugin {
                 targetId: task.id,
                 url: task.url,
                 ...screenshotData,
-                capturedAt: Date.now()
+                capturedAt: persistedAt
               });
             });
           }
@@ -1063,7 +1099,8 @@ export class SpiderPlugin extends Plugin {
               return await contentResource.insert({
                 targetId: task.id,
                 url: task.url,
-                ...contentAnalysis
+                ...contentAnalysis,
+                createdAt: persistedAt
               });
             });
           }
@@ -1075,7 +1112,8 @@ export class SpiderPlugin extends Plugin {
               return await storageResource.insert({
                 targetId: task.id,
                 url: task.url,
-                ...storageAnalysis
+                ...storageAnalysis,
+                createdAt: persistedAt
               });
             });
           }
@@ -1087,7 +1125,8 @@ export class SpiderPlugin extends Plugin {
               return await assetsResource.insert({
                 targetId: task.id,
                 url: task.url,
-                ...assetsAnalysis
+                ...assetsAnalysis,
+                createdAt: persistedAt
               });
             });
           }
@@ -1209,7 +1248,8 @@ export class SpiderPlugin extends Plugin {
       pattern: patternMatch?.pattern || null,
       params: patternMatch?.params || {},
       depth: target.depth || 0,
-      status: 'pending'
+      status: 'pending',
+      createdAt: new Date().toISOString()
     };
 
     // Mark as queued in discoverer (if enabled)
@@ -1494,7 +1534,7 @@ export class SpiderPlugin extends Plugin {
   /**
    * Filter URLs that match specific patterns
    */
-  filterUrlsByPattern(urls: string[], patternNames: string[] = []): Array<{ url: string; match: any }> {
+  filterUrlsByPattern(urls: string[], patternNames: string[] = []): FilteredUrl[] {
     if (!this.patternMatcher) {
       return [];
     }
@@ -1508,7 +1548,7 @@ export class SpiderPlugin extends Plugin {
   /**
    * Get discovery statistics
    */
-  getDiscoveryStats(): any {
+  getDiscoveryStats(): SpiderDiscoveryStatus {
     if (!this.linkDiscoverer) {
       return { enabled: false };
     }
@@ -1557,16 +1597,20 @@ export class SpiderPlugin extends Plugin {
   /**
    * Get queue status
    */
-  async getQueueStatus(): Promise<any> {
+  async getQueueStatus(): Promise<SpiderQueueStatus | null> {
     if (!this.queuePlugin) return null;
-    return await (this.queuePlugin as any).getStatus?.()
+
+    const status = await (this.queuePlugin as any).getStatus?.()
       ?? await (this.queuePlugin as any).getStats?.()
-      ?? {
-        backend: this.queueBackend,
-        running: this.queueBackend === 'queue-consumer'
-          ? (this.queuePlugin as SpiderQueueConsumerBridge).consumers.length > 0
-          : false
-      };
+      ?? {};
+
+    return {
+      ...status,
+      backend: this.queueBackend,
+      running: this.queueBackend === 'queue-consumer'
+        ? (status.running ?? (this.queuePlugin as SpiderQueueConsumerBridge).consumers.length > 0)
+        : (status.running ?? (this.queuePlugin as S3QueuePlugin).isRunning)
+    };
   }
 
   /**
@@ -1600,7 +1644,7 @@ export class SpiderPlugin extends Plugin {
   /**
    * Get persistence configuration
    */
-  getPersistenceConfig(): any {
+  getPersistenceConfig(): SpiderPersistenceConfig {
     return {
       enabled: this.config.persistence.enabled,
       saveResults: this.config.persistence.saveResults,
@@ -1645,42 +1689,42 @@ export class SpiderPlugin extends Plugin {
   /**
    * Get all available activities
    */
-  getAvailableActivities(): any[] {
+  getAvailableActivities(): Activity[] {
     return getAllActivities();
   }
 
   /**
    * Get activities by category
    */
-  getActivitiesByCategory(category: string): any[] {
+  getActivitiesByCategory(category: string): Activity[] {
     return getActivitiesByCategory(category);
   }
 
   /**
    * Get all activity categories with their activities
    */
-  getActivityCategories(): any {
+  getActivityCategories(): Record<string, ActivityCategoryWithActivities> {
     return getCategoriesWithActivities();
   }
 
   /**
    * Get all available activity presets
    */
-  getActivityPresets(): Record<string, any> {
+  getActivityPresets(): Record<string, ActivityPreset> {
     return ACTIVITY_PRESETS;
   }
 
   /**
    * Get a specific preset by name
    */
-  getPresetByName(presetName: string): any | null {
+  getPresetByName(presetName: string): ActivityPreset | null {
     return getPreset(presetName);
   }
 
   /**
    * Validate a list of activity names
    */
-  validateActivityList(activityNames: string[]): { valid: boolean; message?: string; invalidActivities?: string[] } {
+  validateActivityList(activityNames: string[]): ValidationResult {
     return validateActivities(activityNames);
   }
 

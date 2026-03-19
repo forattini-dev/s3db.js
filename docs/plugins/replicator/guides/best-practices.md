@@ -337,7 +337,7 @@ replicatorPlugin.on('plg:replicator:error', (error) => {
     recordId: error.recordId,
     operation: error.operation,
     error: error.message,
-    timestamp: Date.now(),
+    timestamp: new Date().toISOString(),
     retryCount: error.retryCount
   });
 
@@ -393,7 +393,7 @@ const logs = await db.resources.plg_replicator_logs;
 // Get errors from last hour
 const errors = await logs.query({
   status: 'failed',
-  timestamp: { $gte: Date.now() - 3600000 }
+  timestamp: { $gte: new Date(Date.now() - 3600000).toISOString() }
 });
 
 // Errors by resource

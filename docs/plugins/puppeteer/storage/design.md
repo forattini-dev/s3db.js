@@ -118,7 +118,7 @@ async _persistData(page, sessionId, data) {
   // Insert into resource
   await this.recordsResource.insert({
     sessionId,
-    timestamp: Date.now(),
+    timestamp: new Date().toISOString(),
     data: data
   });
 }
@@ -256,7 +256,7 @@ export class StorageManager {
       localStorage: null,
       indexedDB: null,
       sessionStorage: null,
-      timestamp: Date.now(),
+      timestamp: new Date().toISOString(),
       sessionId,
       url: page.url(),
       domain: new URL(page.url()).hostname
@@ -390,7 +390,7 @@ export class StorageManager {
       // ...
     }
   },
-  timestamp: 1731611400000,
+  timestamp: '2024-11-14T12:30:00.000Z',
   sessionId: 'session-123',
   url: 'https://example.com/page',
   domain: 'example.com'

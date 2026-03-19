@@ -14,7 +14,7 @@ export interface BackupDriverConfig {
 
 export interface BackupManifest {
   type?: string;
-  timestamp?: number;
+  timestamp?: string;
   resources?: string[];
   compression?: string;
   encrypted?: boolean;

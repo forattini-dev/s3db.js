@@ -94,7 +94,7 @@ S3Queue creates three S3DB resources for each queue:
 7️⃣  COMPLETE
     │
     └─► Update queue entry:
-        { status: 'completed', result: {...}, completedAt: now }
+        { status: 'completed', result: {...}, completedAt: new Date().toISOString() }
 
 8️⃣  RETRY (if failed)
     │

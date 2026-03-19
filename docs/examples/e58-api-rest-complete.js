@@ -88,7 +88,7 @@ const posts = await database.createResource({
       required: true,
       enum: ['draft', 'published', 'archived']
     },
-    publishedAt: 'string|optional',
+    publishedAt: 'datetime|optional',
     tags: 'array|optional|items:string',
     category: 'string|optional',
     featuredImage: 'string|optional|url',

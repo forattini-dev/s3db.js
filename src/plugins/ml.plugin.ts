@@ -66,6 +66,15 @@ export interface ModelInstance {
   getStats: () => ModelStats;
 }
 
+export interface MLPluginStats {
+  totalTrainings: number;
+  totalPredictions: number;
+  totalErrors: number;
+  startedAt: string | null;
+  models: number;
+  trainedModels: number;
+}
+
 export class MLPlugin extends Plugin {
   config: Required<MLPluginOptions> & { models: Record<string, ModelConfig> };
   models: Record<string, ModelInstance>;
@@ -1280,7 +1289,7 @@ export class MLPlugin extends Plugin {
    * Get plugin statistics
    * @returns Plugin stats
    */
-  getStats(): any {
+  getStats(): MLPluginStats {
     return {
       ...this.stats,
       models: Object.keys(this.models).length,
@@ -1400,7 +1409,7 @@ export class MLPlugin extends Plugin {
           latestVersion: versionInfo.latestVersion,
           updatedAt: new Date().toISOString()
         },
-        { behavior: 'body-overflow' }
+        { behavior: 'body-only' }
       );
 
       this.logger.debug(
@@ -1466,7 +1475,7 @@ export class MLPlugin extends Plugin {
             type: 'reference',
             updatedAt: new Date().toISOString()
           },
-          { behavior: 'body-overflow' } // Small metadata
+          { behavior: 'body-only' } // Exact-key metadata reference
         );
 
         this.logger.debug(
@@ -1522,7 +1531,7 @@ export class MLPlugin extends Plugin {
           },
           savedAt: timestamp
         },
-        { behavior: enableVersioning ? 'body-overflow' : 'body-only' }
+        { behavior: 'body-only' }
       );
     } catch (error: any) {
       this.logger.error(`[MLPlugin] Failed to save model "${modelName}":`, error.message);
@@ -1626,7 +1635,7 @@ export class MLPlugin extends Plugin {
             history, // Array of metadata entries (not full data)
             updatedAt: new Date().toISOString()
           },
-          { behavior: 'body-overflow' } // History metadata
+          { behavior: 'body-only' } // Exact-key history document
         );
 
         this.logger.debug(
@@ -2019,7 +2028,7 @@ export class MLPlugin extends Plugin {
       version,
       type: 'reference',
       updatedAt: new Date().toISOString()
-    });
+    }, { behavior: 'body-only' });
 
     this.logger.debug({ modelName, version }, `Set model "${modelName}" active version to v${version}`);
 

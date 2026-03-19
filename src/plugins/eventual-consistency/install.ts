@@ -137,8 +137,8 @@ export async function completeFieldSetup(
         fieldPath: 'string|optional',
         value: 'number|required',
         operation: 'string|required',
-        timestamp: 'string|required',
-        cohortDate: 'string|required',
+        timestamp: 'datetime|required',
+        cohortDate: 'dateonly|required',
         cohortHour: 'string|required',
         cohortWeek: 'string|optional',
         cohortMonth: 'string|optional',
@@ -205,10 +205,10 @@ async function createAnalyticsResource(
         maxValue: 'number|required',
         operations: 'object|optional',
         recordCount: 'number|required',
-        consolidatedAt: 'string|required',
-        updatedAt: 'string|required'
+        consolidatedAt: 'datetime|required',
+        updatedAt: 'datetime|required'
       },
-      behavior: 'body-overflow',
+      behavior: 'body-only',
       timestamps: false,
       asyncPartitions: true,
       partitions: {

@@ -180,7 +180,12 @@ async function example() {
   // Strategy 5: Manual warmup
   console.log('📄 Strategy 5: Manual Warmup');
 
-  const unwarmPersona = Array.from(cookieFarm.personaPool.values())
+  const personasForWarmup = await cookieFarm.exportPersonas({
+    includeRetired: true,
+    format: 'json'
+  });
+
+  const unwarmPersona = personasForWarmup
     .find(p => !p.metadata.warmupCompleted && !p.metadata.retired);
 
   if (unwarmPersona) {
@@ -203,12 +208,19 @@ async function example() {
   console.log(`  First persona sample:`);
   console.log(`    ID: ${exportedPersonas[0].personaId}`);
   console.log(`    Quality: ${exportedPersonas[0].quality.rating}`);
-  console.log(`    Requests: ${exportedPersonas[0].reputation.totalRequests}\n`);
+  console.log(`    Requests: ${exportedPersonas[0].reputation.totalRequests}`);
+  console.log(`    Created At: ${exportedPersonas[0].metadata.createdAt}`);
+  console.log(`    Expires At: ${exportedPersonas[0].metadata.expiresAt}\n`);
 
   // Strategy 7: Retirement simulation
   console.log('📄 Strategy 7: Persona Retirement');
 
-  const personaToRetire = Array.from(cookieFarm.personaPool.values())
+  const personasForRetirement = await cookieFarm.exportPersonas({
+    includeRetired: true,
+    format: 'json'
+  });
+
+  const personaToRetire = personasForRetirement
     .find(p => !p.metadata.retired);
 
   if (personaToRetire) {

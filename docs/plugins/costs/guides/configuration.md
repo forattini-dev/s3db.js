@@ -67,6 +67,8 @@ Use this when:
 - your contract has custom pricing
 - you want tighter internal forecasting
 
+`getCosts()` preserves live references for pricing tables, so runtime adjustments still apply.
+
 ---
 
 ## Data Structure
@@ -75,6 +77,12 @@ Main access point:
 
 ```javascript
 const costs = db.client.costs;
+```
+
+Normalized public accessor:
+
+```javascript
+const publicCosts = db.plugins.CostsPlugin.getCosts();
 ```
 
 Top-level fields:
@@ -90,6 +98,8 @@ Top-level fields:
 - `byPlugin`
 - `points` (windowed history entries)
 - `lastUpdatedAt`
+
+When using `getCosts()`, `usage.points[*].timestamp` and `usage.lastUpdatedAt` are ISO 8601 strings.
 
 ---
 

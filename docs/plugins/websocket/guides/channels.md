@@ -190,7 +190,7 @@ ws.send(JSON.stringify({
   event: 'new-message',    // Custom event name
   data: {
     text: 'Hello everyone!',
-    timestamp: Date.now()
+    timestamp: new Date().toISOString()
   }
 }
 

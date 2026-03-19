@@ -76,7 +76,7 @@ function createS3DBSessionStore(config: S3DBStoreConfig, database?: DatabaseLike
     throw new Error(
       `S3DB session store resource not found: "${resourceName}". ` +
       `Create it first with: ` +
-      `await db.createResource({ name: '${resourceName}', attributes: { expiresAt: 'string|required' } })`
+      `await db.createResource({ name: '${resourceName}', attributes: { expiresAt: 'datetime|required' } })`
     );
   }
 

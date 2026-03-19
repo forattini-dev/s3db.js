@@ -36,7 +36,7 @@ await db.createResource({
     id: 'string|required',
     urlId: 'string|required',
     userId: 'string|optional',
-    timestamp: 'string|required',
+    timestamp: 'datetime|required',
     country: 'string|optional'
   },
   behavior: 'body-overflow'

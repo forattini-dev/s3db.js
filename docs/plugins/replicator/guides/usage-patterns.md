@@ -350,7 +350,7 @@ const logs = await db.resources.plg_replicator_logs;
 // Recent errors
 const errors = await logs.query({
   status: 'failed',
-  timestamp: { $gte: Date.now() - 3600000 }  // Last hour
+  timestamp: { $gte: new Date(Date.now() - 3600000).toISOString() }  // Last hour
 });
 console.log(`${errors.length} errors in last hour`);
 
@@ -365,7 +365,7 @@ console.log(`Orders: ${orderErrors.length} failed replications`);
 app.get('/health/replication', async (req, res) => {
   const recentErrors = await logs.query({
     status: 'failed',
-    timestamp: { $gte: Date.now() - 300000 }  // Last 5 minutes
+    timestamp: { $gte: new Date(Date.now() - 300000).toISOString() }  // Last 5 minutes
   });
 
   if (recentErrors.length > 5) {
@@ -563,7 +563,7 @@ app.get('/health/replication', async (req, res) => {
   // Check errors in last 5 minutes
   const recentErrors = await logs.query({
     status: 'failed',
-    timestamp: { $gte: Date.now() - 300000 }
+    timestamp: { $gte: new Date(Date.now() - 300000).toISOString() }
   });
 
   // Check errors by destination

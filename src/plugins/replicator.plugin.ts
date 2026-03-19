@@ -72,14 +72,18 @@ interface Replicator {
     beforeData?: Record<string, unknown> | null
   ): Promise<unknown>;
   shouldReplicateResource(resourceName: string, operation?: string): boolean;
-  getStatus(): Promise<ReplicatorStatus>;
+  getStatus(): Promise<RawReplicatorStatus>;
   stop?(): Promise<void>;
 }
 
 interface ReplicatorStatus {
   healthy: boolean;
-  lastSync?: Date;
+  lastSync?: string;
   errorCount?: number;
+}
+
+interface RawReplicatorStatus extends Omit<ReplicatorStatus, 'lastSync'> {
+  lastSync?: string | Date;
 }
 
 interface ReplicatorConfig {
@@ -121,6 +125,23 @@ interface ReplicatorStats {
   lastSync: string | null;
 }
 
+export interface ReplicatorStatusEntry {
+  id: string;
+  driver: string;
+  config: Record<string, unknown>;
+  status: ReplicatorStatus;
+}
+
+export interface ReplicatorPluginStatsResult {
+  replicators: ReplicatorStatusEntry[];
+  stats: ReplicatorStats;
+  lastSync: string | null;
+}
+
+export interface ReplicatorRetryResult {
+  retried: number;
+}
+
 interface LogEntry {
   id?: string;
   replicator?: string;
@@ -130,11 +151,15 @@ interface LogEntry {
   action?: string;
   operation?: string;
   data?: Record<string, unknown> | null;
-  timestamp?: number;
+  timestamp?: string;
   createdAt?: string;
   status?: string;
   error?: string | null;
   retryCount?: number;
+}
+
+interface RawLogEntry extends Omit<LogEntry, 'timestamp'> {
+  timestamp?: string | number;
 }
 
 interface ReplicatorItem {
@@ -150,7 +175,7 @@ interface ReplicatorItem {
   status?: string;
   error?: string | null;
   retryCount?: number;
-  timestamp?: number;
+  timestamp?: string | number;
   createdAt?: string;
 }
 
@@ -430,16 +455,16 @@ export class ReplicatorPlugin extends Plugin {
           resource: 'string|required',
           action: 'string|required',
           data: 'json',
-          timestamp: 'number|required',
-          createdAt: 'string|required',
+          timestamp: 'datetime|required',
+          createdAt: 'dateonly|required',
           status: 'string|required',
           error: 'string|optional'
         },
-        behavior: 'truncate-data',
+        behavior: 'body-only',
         partitions: {
           byDate: {
             fields: {
-              createdAt: 'string|maxlength:10'
+              createdAt: 'dateonly'
             }
           }
         }
@@ -602,9 +627,36 @@ export class ReplicatorPlugin extends Plugin {
     return `repl-${Date.now()}-${random}`;
   }
 
-  private _normalizeLogEntry(entry: LogEntry, options: { assignId?: boolean; ensureTimestamp?: boolean } = {}): LogEntry {
+  private _toEpochTimestamp(value: unknown): number | null {
+    if (typeof value === 'number' && Number.isFinite(value)) {
+      return value;
+    }
+
+    if (typeof value === 'string') {
+      const epoch = new Date(value).getTime();
+      return Number.isNaN(epoch) ? null : epoch;
+    }
+
+    return null;
+  }
+
+  private _toStoredTimestamp(value: unknown): string {
+    const epoch = this._toEpochTimestamp(value);
+    return new Date(epoch ?? Date.now()).toISOString();
+  }
+
+  private _hydrateLogEntry(entry: Record<string, unknown>): Record<string, unknown> {
+    const epoch = this._toEpochTimestamp(entry.timestamp);
+
+    return {
+      ...entry,
+      timestamp: epoch === null ? entry.timestamp : new Date(epoch).toISOString()
+    };
+  }
+
+  private _normalizeLogEntry(entry: RawLogEntry, options: { assignId?: boolean; ensureTimestamp?: boolean } = {}): LogEntry {
     if (!entry || typeof entry !== 'object') {
-      return entry;
+      return entry as LogEntry;
     }
 
     const { assignId = false, ensureTimestamp = false } = options;
@@ -613,26 +665,21 @@ export class ReplicatorPlugin extends Plugin {
       entry.id = this._generateLogEntryId();
     }
 
-    const numericTimestamp = Number(entry.timestamp);
-    const hasNumericTimestamp = Number.isFinite(numericTimestamp);
-    if (hasNumericTimestamp) {
-      entry.timestamp = numericTimestamp;
-    }
+    const epochTimestamp = this._toEpochTimestamp(entry.timestamp);
+    const hasTimestamp = epochTimestamp !== null;
 
-    if (ensureTimestamp && !hasNumericTimestamp) {
-      entry.timestamp = Date.now();
-    } else if (!ensureTimestamp && entry.timestamp !== undefined && !hasNumericTimestamp) {
-      entry.timestamp = Date.now();
+    if (ensureTimestamp && !hasTimestamp) {
+      entry.timestamp = new Date().toISOString();
+    } else if (entry.timestamp !== undefined || ensureTimestamp) {
+      entry.timestamp = this._toStoredTimestamp(entry.timestamp);
     }
 
     if (!entry.createdAt && entry.timestamp) {
-      const iso = new Date(entry.timestamp).toISOString();
-      entry.createdAt = iso.slice(0, 10);
+      entry.createdAt = this._toStoredTimestamp(entry.timestamp).slice(0, 10);
     }
 
     if (ensureTimestamp && !entry.createdAt) {
-      const iso = new Date().toISOString();
-      entry.createdAt = iso.slice(0, 10);
+      entry.createdAt = new Date().toISOString().slice(0, 10);
     }
 
     if (entry.resourceName || entry.resource) {
@@ -676,7 +723,7 @@ export class ReplicatorPlugin extends Plugin {
       entry.error = null;
     }
 
-    return entry;
+    return entry as LogEntry;
   }
 
   async logError(
@@ -932,8 +979,10 @@ export class ReplicatorPlugin extends Plugin {
       error: item.error || null,
       retryCount: item.retryCount || 0
     };
-    if (typeof item.timestamp === 'number') {
-      logItem.timestamp = item.timestamp;
+    if (item.timestamp !== undefined) {
+      logItem.timestamp = typeof item.timestamp === 'number'
+        ? new Date(item.timestamp).toISOString()
+        : item.timestamp;
     }
     if (item.createdAt) {
       logItem.createdAt = item.createdAt;
@@ -964,18 +1013,20 @@ export class ReplicatorPlugin extends Plugin {
     }
   }
 
-  async getReplicatorStats(): Promise<{
-    replicators: Array<{ id: string; driver: string; config: Record<string, unknown>; status: ReplicatorStatus }>;
-    stats: ReplicatorStats;
-    lastSync: string | null;
-  }> {
+  async getReplicatorStats(): Promise<ReplicatorPluginStatsResult> {
     const entries = this.replicators.map((replicator, index) => ({ replicator, index }));
-    const replicatorStats: Array<{ id: string; driver: string; config: Record<string, unknown>; status: ReplicatorStatus }> = new Array(entries.length);
+    const replicatorStats: ReplicatorStatusEntry[] = new Array(entries.length);
 
     const poolResult = await TasksPool.map(
       entries,
       async ({ replicator, index }) => {
-        const status = await replicator.getStatus();
+        const rawStatus = await replicator.getStatus();
+        const status: ReplicatorStatus = {
+          ...rawStatus,
+          lastSync: rawStatus.lastSync
+            ? (rawStatus.lastSync instanceof Date ? rawStatus.lastSync.toISOString() : new Date(rawStatus.lastSync).toISOString())
+            : undefined
+        };
         const info = {
           id: replicator.id,
           driver: replicator.driver,
@@ -1008,7 +1059,7 @@ export class ReplicatorPlugin extends Plugin {
     };
   }
 
-  async getReplicatorLogs(options: ReplicatorLogsOptions = {}): Promise<Array<Record<string, unknown>>> {
+  async getReplicatorLogs(options: ReplicatorLogsOptions = {}): Promise<LogEntry[]> {
     if (!this.replicatorLog) {
       return [];
     }
@@ -1037,10 +1088,10 @@ export class ReplicatorPlugin extends Plugin {
 
     const logs = await this.replicatorLog.query(filter, { limit, offset });
 
-    return logs || [];
+    return (logs || []).map(log => this._hydrateLogEntry(log) as LogEntry);
   }
 
-  async retryFailedReplicators(): Promise<{ retried: number }> {
+  async retryFailedReplicators(): Promise<ReplicatorRetryResult> {
     if (!this.replicatorLog) {
       return { retried: 0 };
     }

@@ -39,7 +39,7 @@ export interface CreateSessionData {
 
 export interface CreateSessionResult {
   sessionId: string;
-  expiresAt: number;
+  expiresAt: string;
   session: SessionRecord;
 }
 
@@ -146,10 +146,11 @@ export class SessionManager {
 
     const sessionId = generateSessionId();
     const expiresAt = calculateExpiration(duration || this.config.sessionExpiry);
+    const expiresAtIso = new Date(expiresAt).toISOString();
 
     const sessionData = {
       userId,
-      expiresAt: new Date(expiresAt).toISOString(),
+      expiresAt: expiresAtIso,
       ipAddress: ipAddress || null,
       userAgent: userAgent || null,
       metadata,
@@ -173,7 +174,7 @@ export class SessionManager {
 
     return {
       sessionId: session.id,
-      expiresAt,
+      expiresAt: session.expiresAt || expiresAtIso,
       session
     };
   }
@@ -316,14 +317,27 @@ export class SessionManager {
     return activeSessions;
   }
 
-  setSessionCookie(res: HttpResponse, sessionId: string, expiresAt: number): void {
-    const expires = new Date(expiresAt);
+  setSessionCookie(res: HttpResponse, sessionId: string, expiresAt: string | number): void {
+    const expiresAtMs = typeof expiresAt === 'string' ? new Date(expiresAt).getTime() : expiresAt;
+
+    if (!Number.isFinite(expiresAtMs)) {
+      throw new PluginError('Invalid expiresAt value for session cookie', {
+        pluginName: 'IdentityPlugin',
+        operation: 'SessionManager.setSessionCookie',
+        statusCode: 400,
+        retriable: false,
+        suggestion: 'Pass a valid ISO datetime string or epoch-millisecond timestamp for expiresAt.',
+        metadata: { expiresAt }
+      });
+    }
+
+    const expires = new Date(expiresAtMs);
 
     const cookieOptions: string[] = [
       `${this.config.cookieName}=${sessionId}`,
       `Path=${this.config.cookiePath}`,
       `Expires=${expires.toUTCString()}`,
-      `Max-Age=${Math.floor((expiresAt - Date.now()) / 1000)}`
+      `Max-Age=${Math.floor((expiresAtMs - Date.now()) / 1000)}`
     ];
 
     if (this.config.cookieHttpOnly) {

@@ -54,7 +54,7 @@ const users = await db.createResource({
     provider: 'string',            // google, azure, etc.
     providerId: 'string',
     scopes: 'string',
-    createdAt: 'string|required'
+    createdAt: 'datetime|required'
   },
   timestamps: true
 });
@@ -69,7 +69,7 @@ const posts = await db.createResource({
     status: 'string|default:draft',  // draft, published, archived
     tags: 'string',                   // comma-separated or JSON
     published: 'boolean|default:false',
-    createdAt: 'string|required'
+    createdAt: 'datetime|required'
   },
   timestamps: true
 });
@@ -82,7 +82,7 @@ const comments = await db.createResource({
     authorId: 'string|required',
     body: 'string|required|minlength:1',
     approved: 'boolean|default:false',
-    createdAt: 'string|required'
+    createdAt: 'datetime|required'
   },
   timestamps: true
 });
@@ -91,7 +91,7 @@ const comments = await db.createResource({
 const sessions = await db.createResource({
   name: 'oidc_sessions',
   attributes: {
-    expiresAt: 'string|required',
+    expiresAt: 'datetime|required',
     userId: 'string',
     email: 'string'
   }
@@ -106,7 +106,7 @@ const analytics = await db.createResource({
     data: 'string',
     userAgent: 'string',
     ip: 'ip4',
-    timestamp: 'string|required'
+    timestamp: 'datetime|required'
   }
 });
 

@@ -152,6 +152,8 @@ onMailFrom: async (address, session) => {
 }
 ```
 
+`onMailFrom` is the one callback that currently requires the legacy `smtp-server` fallback. If you only need auth, recipient validation, or message inspection, prefer the default Raffel SMTP backend.
+
 ---
 
 ## Performance Tips
@@ -249,6 +251,7 @@ console.log('Status:', email.status);  // pending, delivered, bounced
 // Check recent events
 const events = plugin.getWebhookEventLog(100);
 console.log(events);
+console.log('Latest event time:', events.at(-1)?.loggedAt);
 ```
 
 ### Issue 2: Bounces Not Being Processed

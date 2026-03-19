@@ -202,6 +202,27 @@ export interface FileSystemClientConfig {
   stats?: StatsConfig;
 }
 
+export interface SqliteClientConfig {
+  id?: string;
+  logLevel?: string;
+  logger?: Logger;
+  taskExecutor?: TaskManager;
+  taskExecutorMonitoring?: MonitoringConfig | null;
+  concurrency?: number;
+  retries?: number;
+  retryDelay?: number;
+  timeout?: number;
+  retryableErrors?: string[];
+  basePath?: string;
+  bucket?: string;
+  keyPrefix?: string;
+  region?: string;
+  enforceLimits?: boolean;
+  metadataLimit?: number;
+  maxObjectSize?: number;
+  maxMemoryMB?: number;
+}
+
 export interface CompressionConfig {
   enabled?: boolean;
   threshold?: number;

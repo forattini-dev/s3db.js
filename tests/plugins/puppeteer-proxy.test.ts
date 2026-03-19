@@ -195,6 +195,8 @@ describe('PuppeteerPlugin - Proxy Pool & Binding', () => {
       expect(stats[0]).toHaveProperty('successRate');
       expect(stats[0]).toHaveProperty('healthy');
       expect(stats[0]).toHaveProperty('boundSessions');
+      expect(stats[0].lastUsed).toBeNull();
+      expect(typeof stats[0].createdAt).toBe('string');
     });
   });
 
@@ -341,10 +343,12 @@ describe('PuppeteerPlugin - Proxy Pool & Binding', () => {
       puppeteerPlugin.proxyManager.recordProxyUsage(proxyId, true);
 
       const stats = puppeteerPlugin.proxyManager.proxyStats.get(proxyId);
+      const publicStats = puppeteerPlugin.getProxyStats();
 
       expect(stats.requests).toBe(1);
       expect(stats.failures).toBe(0);
       expect(stats.successRate).toBeGreaterThan(0.9);
+      expect(typeof publicStats[0].lastUsed).toBe('string');
     });
 
     it('should record failed proxy usage', () => {

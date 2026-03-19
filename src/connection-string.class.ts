@@ -5,7 +5,7 @@ import { ConnectionStringError } from './errors.js';
 export const S3_DEFAULT_REGION = 'us-east-1';
 export const S3_DEFAULT_ENDPOINT = 'https://s3.us-east-1.amazonaws.com';
 
-export type ClientType = 'filesystem' | 'memory' | 's3' | 'custom';
+export type ClientType = 'filesystem' | 'memory' | 's3' | 'sqlite' | 'custom';
 
 export interface ClientOptions {
   [key: string]: unknown;
@@ -49,6 +49,7 @@ export class ConnectionString {
     if (uri.protocol === 's3:') this.defineFromS3(uri);
     else if (uri.protocol === 'file:') this.defineFromFileUri(uri);
     else if (uri.protocol === 'memory:') this.defineFromMemoryUri(uri);
+    else if (uri.protocol === 'sqlite:') this.defineFromSqliteUri(uri);
     else this.defineFromCustomUri(uri);
 
     // Parse querystring parameters (supports nested dot notation)
@@ -270,6 +271,62 @@ export class ConnectionString {
     // Set synthetic endpoint for compatibility
     this.endpoint = 'memory://localhost';
     this.region = 'us-east-1';
+  }
+
+  private defineFromSqliteUri(uri: URL): void {
+    this.clientType = 'sqlite';
+    this.forcePathStyle = true;
+
+    // No credentials needed for sqlite
+    this.accessKeyId = undefined;
+    this.secretAccessKey = undefined;
+
+    let pathname = uri.pathname || '';
+    let isRelativePath = false;
+
+    if (uri.hostname && uri.hostname.match(/^[a-zA-Z]$/)) {
+      pathname = `${uri.hostname}:${pathname}`;
+    } else if (uri.hostname === '.' || uri.hostname === '..') {
+      pathname = `${uri.hostname}${pathname}`;
+      isRelativePath = true;
+    } else if (uri.hostname === 'localhost') {
+      pathname = `${pathname}`;
+    }
+
+    const [okPath, errPath, decodedPath] = tryFnSync(() => decodeURIComponent(pathname));
+    if (!okPath) {
+      throw new ConnectionStringError('Invalid path in sqlite:// connection string', {
+        original: errPath,
+        input: pathname
+      });
+    }
+
+    if (!decodedPath || decodedPath === '/' || decodedPath === '') {
+      throw new ConnectionStringError('sqlite:// connection string requires a path', {
+        input: uri.href,
+        suggestion: 'Use sqlite:///absolute/path/filename.db'
+      });
+    }
+
+    if (decodedPath === '/:memory:' || decodedPath === ':memory:') {
+      this.basePath = ':memory:';
+      this.bucket = 's3db';
+      this.keyPrefix = '';
+      this.region = 'sqlite';
+      this.endpoint = 'sqlite:///:memory:';
+      return;
+    }
+
+    if (isRelativePath || decodedPath.startsWith('./') || decodedPath.startsWith('../')) {
+      this.basePath = path.resolve(decodedPath);
+    } else {
+      this.basePath = path.resolve(decodedPath);
+    }
+
+    this.bucket = 's3db';
+    this.keyPrefix = '';
+    this.region = 'sqlite';
+    this.endpoint = `sqlite:///${encodeURI(this.basePath).replace(/^\//, '')}`;
   }
 }
 

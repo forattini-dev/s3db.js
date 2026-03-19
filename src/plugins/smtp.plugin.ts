@@ -1,5 +1,10 @@
 import { Plugin } from './plugin.class.js';
-import { SMTPConnectionManager } from './smtp/connection-manager.js';
+import {
+  SMTPConnectionManager,
+  type SMTPAuthHandler,
+  type SMTPAddressHandler,
+  type SMTPDataHandler
+} from './smtp/connection-manager.js';
 import { SMTPTemplateEngine, type CustomTemplateFunction } from './smtp/template-engine.js';
 import { WebhookReceiver, type WebhookProvider as InternalWebhookProvider } from './smtp/webhook-receiver.js';
 import { createDriver, getAvailableDrivers, MultiRelayManager } from './smtp/drivers/index.js';
@@ -62,6 +67,10 @@ export interface SMTPPluginOptions {
   requireAuth?: boolean;
   serverPort?: number;
   serverHost?: string;
+  authHandler?: SMTPAuthHandler | null;
+  onMailFrom?: SMTPAddressHandler | null;
+  onRcptTo?: SMTPAddressHandler | null;
+  onData?: SMTPDataHandler | null;
   [key: string]: unknown;
 }
 
@@ -105,15 +114,15 @@ export interface EmailRecord {
   errorMessage?: string;
   attempts: number;
   maxAttempts: number;
-  nextRetryAt?: number;
-  sentAt?: number;
-  failedAt?: number;
+  nextRetryAt?: string;
+  sentAt?: string;
+  failedAt?: string;
   bounceType?: BounceType;
   complaintType?: ComplaintType;
   messageId?: string;
   metadata: Record<string, unknown>;
-  createdAt: number;
-  updatedAt: number;
+  createdAt: string;
+  updatedAt: string;
 }
 
 export interface SendResult {
@@ -298,7 +307,12 @@ export class SMTPPlugin extends Plugin {
       mode: 'server',
       port: smtpOptions.serverPort ?? 25,
       host: smtpOptions.serverHost ?? '0.0.0.0',
-      requireAuth: smtpOptions.requireAuth ?? false
+      secure: smtpOptions.secure ?? false,
+      requireAuth: smtpOptions.requireAuth ?? false,
+      authHandler: smtpOptions.authHandler ?? null,
+      onMailFrom: smtpOptions.onMailFrom ?? null,
+      onRcptTo: smtpOptions.onRcptTo ?? null,
+      onData: smtpOptions.onData ?? null
     }) as unknown as SMTPConnectionManagerInstance;
 
     await this.connectionManager.initialize();
@@ -318,7 +332,7 @@ export class SMTPPlugin extends Plugin {
 
     return await this.database.createResource({
       name: this.emailResource,
-      behavior: 'body-overflow',
+      behavior: 'body-only',
       timestamps: true,
       attributes: {
         from: 'string|required',
@@ -336,9 +350,11 @@ export class SMTPPlugin extends Plugin {
         errorMessage: 'string',
         attempts: 'number|min:0',
         maxAttempts: 'number|min:1',
-        nextRetryAt: 'number',
-        sentAt: 'number',
-        failedAt: 'number',
+        nextRetryAt: 'datetime',
+        sentAt: 'datetime',
+        failedAt: 'datetime',
+        openedAt: 'datetime',
+        clickedAt: 'datetime',
         bounceType: 'string|enum:hard,soft',
         complaintType: 'string|enum:abuse,fraud,general,not-spam',
         messageId: 'string',
@@ -431,7 +447,7 @@ export class SMTPPlugin extends Plugin {
 
         await this._updateEmailStatus(emailRecord.id, 'sent', {
           messageId: result.messageId,
-          sentAt: Date.now(),
+          sentAt: new Date().toISOString(),
           relayUsed: result.relayUsed || null
         });
 
@@ -582,13 +598,13 @@ export class SMTPPlugin extends Plugin {
       }
 
       const updates: Record<string, unknown> = {
-        updatedAt: Date.now()
+        updatedAt: new Date().toISOString()
       };
 
       if (event.type === 'bounce') {
         updates.status = event.bounceType === 'hard' ? 'failed' : 'pending';
         updates.bounceType = event.bounceType;
-        updates.failedAt = Date.now();
+        updates.failedAt = new Date().toISOString();
         updates.errorMessage = event.reason;
       } else if (event.type === 'complaint') {
         updates.status = 'complained';
@@ -597,14 +613,14 @@ export class SMTPPlugin extends Plugin {
         updates.metadata = { unsubscribed: true, reason: 'complaint' };
       } else if (event.type === 'delivery') {
         updates.status = 'sent';
-        updates.sentAt = Math.floor(event.timestamp * 1000);
+        updates.sentAt = event.timestamp;
       } else if (event.type === 'open') {
         updates.status = 'opened';
-        updates.openedAt = Math.floor(event.timestamp * 1000);
+        updates.openedAt = event.timestamp;
         updates.metadata = { userAgent: event.userAgent, ip: event.ip };
       } else if (event.type === 'click') {
         updates.status = 'clicked';
-        updates.clickedAt = Math.floor(event.timestamp * 1000);
+        updates.clickedAt = event.timestamp;
         updates.metadata = { url: event.url, userAgent: event.userAgent, ip: event.ip };
       }
 
@@ -682,8 +698,8 @@ export class SMTPPlugin extends Plugin {
       status: 'pending',
       attempts: 0,
       maxAttempts: this.retryPolicy.maxAttempts,
-      createdAt: Date.now(),
-      updatedAt: Date.now()
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString()
     }) as unknown as EmailRecord;
   }
 
@@ -692,7 +708,7 @@ export class SMTPPlugin extends Plugin {
 
     return await resource.update(emailId, {
       status,
-      updatedAt: Date.now(),
+      updatedAt: new Date().toISOString(),
       ...updates
     });
   }
@@ -713,13 +729,13 @@ export class SMTPPlugin extends Plugin {
 
     if (isRetryable && (updates.attempts as number) < this.retryPolicy.maxAttempts) {
       const delay = this._calculateBackoff(updates.attempts as number);
-      updates.nextRetryAt = Date.now() + delay;
+      updates.nextRetryAt = new Date(Date.now() + delay).toISOString();
     } else if (isRetryable && (updates.attempts as number) >= this.retryPolicy.maxAttempts) {
       updates.status = 'failed';
-      updates.failedAt = Date.now();
+      updates.failedAt = new Date().toISOString();
     } else {
       updates.status = 'failed';
-      updates.failedAt = Date.now();
+      updates.failedAt = new Date().toISOString();
     }
 
     await this._updateEmailStatus(emailId, updates.status as EmailStatus, updates);

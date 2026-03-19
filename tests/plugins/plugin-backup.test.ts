@@ -156,6 +156,7 @@ describe('BackupPlugin (New Driver API)', () => {
       expect(result.driverInfo.path).toBeDefined();
       const backupExists = await access(result.driverInfo.path).then(() => true).catch(() => false);
       expect(backupExists).toBe(true);
+      expect(database.resources[plugin.config.backupMetadataResource].behavior).toBe('body-only');
     });
 
     it('should create an incremental backup', async () => {

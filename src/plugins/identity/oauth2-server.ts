@@ -60,8 +60,8 @@ export interface ClientResource {
 }
 
 export interface AuthCodeResource {
-  query: (filter: Record<string, any>) => Promise<AuthCodeRecord[]>;
-  insert: (data: Record<string, any>) => Promise<AuthCodeRecord>;
+  query: (filter: Record<string, any>) => Promise<RawAuthCodeRecord[]>;
+  insert: (data: Record<string, any>) => Promise<RawAuthCodeRecord>;
   delete: (id: string) => Promise<void>;
 }
 
@@ -120,12 +120,16 @@ export interface AuthCodeRecord {
   userId: string;
   redirectUri: string;
   scope: string;
-  expiresAt: string | number;
+  expiresAt: string;
   used: boolean;
   codeChallenge?: string;
   codeChallengeMethod?: string;
   nonce?: string;
   audience?: string;
+}
+
+interface RawAuthCodeRecord extends Omit<AuthCodeRecord, 'expiresAt'> {
+  expiresAt: string | number;
 }
 
 export interface ExpressStyleRequest {

@@ -7,6 +7,7 @@ s3db.js supports multiple storage backends through a unified client interface.
 | Client | Use Case | Performance | Dependencies |
 |--------|----------|-------------|--------------|
 | [S3Client](s3-client.md) | Production with AWS S3, MinIO, R2 | Standard | `@aws-sdk/client-s3` |
+| [SqliteClient](sqlite-client.md) | Local persistence, integration tests, single-process workloads | Very fast | None |
 | [MemoryClient](memory-client.md) | Testing, development | 100-1000x faster | None |
 | [FilesystemClient](filesystem-client.md) | Local development, edge cases | Fast | None |
 
@@ -32,6 +33,27 @@ const db = new Database({
 // Cloudflare R2
 const db = new Database({
   connectionString: 'https://ACCESS_KEY:SECRET_KEY@ACCOUNT_ID.r2.cloudflarestorage.com/my-bucket'
+});
+```
+
+### SqliteClient
+
+Persistent embedded SQLite backend for local environments and CI.
+
+```javascript
+import { Database } from 's3db.js';
+
+const db = new Database({
+  connectionString: 'sqlite:///tmp/s3db.sqlite'
+});
+
+// Or explicit configuration
+import { SqliteClient } from 's3db.js';
+
+const client = new SqliteClient({
+  basePath: '/tmp/s3db.sqlite',
+  maxObjectSize: 5 * 1024 * 1024,
+  maxMemoryMB: 256
 });
 ```
 
@@ -83,6 +105,9 @@ All clients use a unified connection string format:
 protocol://[credentials@]host[:port]/bucket[/prefix][?options]
 ```
 
+SQLite does not use credentials. Use `sqlite:///absolute/path/to/file.db` or
+`sqlite://./relative/path/file.db`.
+
 ### Examples
 
 ```bash
@@ -95,11 +120,21 @@ http://minioadmin:minioadmin@localhost:9000/my-bucket
 # MinIO (with path style)
 http://minioadmin:minioadmin@localhost:9000/my-bucket?forcePathStyle=true
 
+# SQLite (persistent local)
+sqlite:///tmp/s3db.sqlite
+
 # Memory (testing)
 memory://test-bucket/test-db
 
 # Filesystem
 file:///home/user/data/s3db
+```
+
+### SQLite Query Parameters
+
+```javascript
+// Enforce limits from URI options
+sqlite:///tmp/s3db.sqlite?enforceLimits=true&maxObjectSize=5242880&maxMemoryMB=256
 ```
 
 ### URL Encoding
@@ -140,6 +175,13 @@ const connStr = `s3://AKID:${encoded}@bucket?region=us-east-1`;
       │ Zero deps  │  │ or MinIO   │  │ AWS/MinIO  │
       │ Super fast │  │            │  │ R2/Spaces  │
       └────────────┘  └────────────┘  └────────────┘
+                         │
+                         ▼
+                     ┌────────────┐
+                     │SqliteClient│
+                     │Persistent  │
+                     │Local Disk  │
+                     └────────────┘
 ```
 
 ## Client Interface
@@ -184,6 +226,7 @@ await users.insert({ ... });
 ## Next Steps
 
 - [S3Client](s3-client.md) - Full AWS S3 documentation
+- [SqliteClient](sqlite-client.md) - SQLite persistence and limits
 - [MemoryClient](memory-client.md) - Testing patterns
 - [FilesystemClient](filesystem-client.md) - Local storage
 - [Connection Strings](/reference/connection-strings.md) - Complete reference

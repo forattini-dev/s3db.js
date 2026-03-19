@@ -1,7 +1,10 @@
 import { afterEach, describe, expect, it } from 'vitest';
+import { rm } from 'fs/promises';
+import path from 'path';
 
 import { Database } from '../../../src/database.class.js';
 import { MemoryClient } from '../../../src/clients/memory-client.class.js';
+import { createTemporaryPathForTest } from '#tests/config.js';
 
 describe('Database Client Initialization', () => {
   const databases: Database[] = [];
@@ -51,5 +54,40 @@ describe('Database Client Initialization', () => {
     expect(db.client).toBe(client);
     expect(db.bucket).toBe('custom-client-bucket');
     expect(db.keyPrefix).toBe('custom-prefix');
+  });
+
+  it('supports sqlite:// filename connection strings', async () => {
+    const tempDir = await createTemporaryPathForTest('s3db-sqlite-init');
+    const dbPath = path.join(tempDir, 's3db.sqlite');
+    const sqliteConnectionString = `sqlite://${dbPath}`;
+
+    const db = new Database({
+      connectionString: sqliteConnectionString,
+      logLevel: 'silent',
+      deferMetadataWrites: true
+    });
+    databases.push(db);
+
+    expect(db.connectionString).toBe(sqliteConnectionString);
+    expect(db.client).toBeUndefined();
+    expect(db.bucket).toBe('s3db');
+    expect(db.keyPrefix).toBe('');
+
+    await db.connect();
+
+    expect(db.client).toBeTruthy();
+
+    await db.client.putObject({
+      key: 'sqlite-check',
+      body: 'ok',
+      contentType: 'text/plain'
+    });
+
+    const response = await db.client.getObject('sqlite-check');
+    expect(response.ContentType).toBe('text/plain');
+
+    await db.disconnect();
+
+    await rm(tempDir, { force: true, recursive: true });
   });
 });

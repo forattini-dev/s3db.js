@@ -832,6 +832,7 @@ A: Use `getJobStatus`:
 ```javascript
 const status = schedulerPlugin.getJobStatus('cleanup');
 // Returns: name, enabled, schedule, lastRun, nextRun, isRunning, statistics
+// Timestamps are ISO 8601 strings
 ```
 
 **Q: How to query execution history?**
@@ -842,6 +843,7 @@ const history = await schedulerPlugin.getJobHistory('cleanup', {
   limit: 50,
   status: 'failed'  // or 'success', 'timeout'
 });
+// history[*].startTime and history[*].endTime are ISO 8601 strings
 ```
 
 **Q: How to get status of all jobs?**
@@ -849,8 +851,8 @@ const history = await schedulerPlugin.getJobHistory('cleanup', {
 A: Use `getAllJobsStatus`:
 ```javascript
 const allStatus = schedulerPlugin.getAllJobsStatus();
-Object.entries(allStatus).forEach(([name, status]) => {
-  console.log(`${name}: next run at ${new Date(status.nextRun)}`);
+allStatus.forEach((status) => {
+  console.log(`${status.name}: next run at ${status.nextRun}`);
 });
 ```
 

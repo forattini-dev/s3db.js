@@ -75,9 +75,9 @@ export const RESOURCE_CONFIGS: Record<ResourceName, ResourceConfig> = {
         vulnerabilities: 'object|optional',
         headers: 'object|optional'
       },
-      lastScan: 'string|required',
+      lastScan: 'datetime|required',
       scanCount: 'number|default:1',
-      firstSeen: 'string|required',
+      firstSeen: 'datetime|required',
       riskLevel: 'string|enum:low,medium,high,critical|default:low'
     },
     partitions: {
@@ -102,8 +102,8 @@ export const RESOURCE_CONFIGS: Record<ResourceName, ResourceConfig> = {
         port: 'number|optional',
         path: 'string|optional'
       },
-      timestamp: 'string|required',
-      timestampDay: 'string|required',
+      timestamp: 'datetime|required',
+      timestampDay: 'dateonly|required',
       duration: 'number|required',
       status: 'string|enum:completed,failed,partial|required',
       results: 'object|required',
@@ -132,11 +132,11 @@ export const RESOURCE_CONFIGS: Record<ResourceName, ResourceConfig> = {
       },
       byDay: {
         fields: {
-          timestampDay: 'string'
+          timestampDay: 'dateonly'
         }
       }
     },
-    behavior: 'body-overflow',
+    behavior: 'body-only',
     timestamps: true
   },
 
@@ -146,8 +146,8 @@ export const RESOURCE_CONFIGS: Record<ResourceName, ResourceConfig> = {
       reportId: 'string|required',
       stageName: 'string|required',
       host: 'string|required',
-      timestamp: 'string|required',
-      timestampDay: 'string|required',
+      timestamp: 'datetime|required',
+      timestampDay: 'dateonly|required',
       duration: 'number|required',
       status: 'string|enum:ok,error,skipped,empty,unavailable|required',
       toolsUsed: 'array|items:string|optional',
@@ -164,7 +164,7 @@ export const RESOURCE_CONFIGS: Record<ResourceName, ResourceConfig> = {
       },
       byDay: {
         fields: {
-          timestampDay: 'string'
+          timestampDay: 'dateonly'
         }
       }
     },
@@ -176,7 +176,7 @@ export const RESOURCE_CONFIGS: Record<ResourceName, ResourceConfig> = {
     name: 'plg_recon_diffs',
     attributes: {
       host: 'string|required',
-      timestamp: 'string|required',
+      timestamp: 'datetime|required',
       previousScan: 'string|required',
       currentScan: 'string|required',
       changes: {
@@ -208,7 +208,7 @@ export const RESOURCE_CONFIGS: Record<ResourceName, ResourceConfig> = {
         }
       }
     },
-    behavior: 'body-overflow',
+    behavior: 'body-only',
     timestamps: true
   },
 
@@ -219,7 +219,7 @@ export const RESOURCE_CONFIGS: Record<ResourceName, ResourceConfig> = {
       subdomains: 'array|items:string|required',
       total: 'number|required',
       sources: 'object|optional',
-      lastScanAt: 'string|required'
+      lastScanAt: 'datetime|required'
     },
     partitions: {
       byHost: {
@@ -228,7 +228,7 @@ export const RESOURCE_CONFIGS: Record<ResourceName, ResourceConfig> = {
         }
       }
     },
-    behavior: 'body-overflow',
+    behavior: 'body-only',
     timestamps: true
   },
 
@@ -239,7 +239,7 @@ export const RESOURCE_CONFIGS: Record<ResourceName, ResourceConfig> = {
       paths: 'array|items:string|required',
       total: 'number|required',
       sources: 'object|optional',
-      lastScanAt: 'string|required'
+      lastScanAt: 'datetime|required'
     },
     partitions: {
       byHost: {
@@ -248,7 +248,7 @@ export const RESOURCE_CONFIGS: Record<ResourceName, ResourceConfig> = {
         }
       }
     },
-    behavior: 'body-overflow',
+    behavior: 'body-only',
     timestamps: true
   },
 
@@ -263,8 +263,8 @@ export const RESOURCE_CONFIGS: Record<ResourceName, ResourceConfig> = {
       schedule: 'string|optional',
       enabled: 'boolean|default:true',
       scanConfig: 'object|optional',
-      lastScan: 'string|optional',
-      nextScan: 'string|optional',
+      lastScan: 'datetime|optional',
+      nextScan: 'datetime|optional',
       scanCount: 'number|default:0',
       tags: 'array|items:string|optional',
       description: 'string|optional'

@@ -14,7 +14,7 @@ import { Plugin, type PluginConfig } from '../plugin.class.js';
 
 // Managers
 import { StorageManager } from './managers/storage-manager.js';
-import { TargetManager } from './managers/target-manager.js';
+import { TargetManager, type TargetRecord } from './managers/target-manager.js';
 import { SchedulerManager } from './managers/scheduler-manager.js';
 import { DependencyManager } from './managers/dependency-manager.js';
 
@@ -521,9 +521,13 @@ export class ReconPlugin extends Plugin {
     return SecurityAnalyzer.generateMarkdownReport(audit as any);
   }
 
-  async addTarget(target: string | Target, schedule: string | null = null): Promise<any> {
+  async addTarget(target: string | Target, schedule: string | null = null): Promise<TargetRecord | null> {
     if (!this.targetManager) return null;
-    return (this.targetManager as any).addTarget(target, schedule);
+    const targetValue = typeof target === 'string'
+      ? target
+      : target.original || target.host;
+
+    return await this.targetManager.add(targetValue, { schedule });
   }
 
   async removeTarget(targetId: string): Promise<boolean> {
@@ -531,14 +535,14 @@ export class ReconPlugin extends Plugin {
     return (this.targetManager as any).removeTarget(targetId);
   }
 
-  async listTargets(): Promise<any[]> {
+  async listTargets(): Promise<TargetRecord[]> {
     if (!this.targetManager) return [];
-    return (this.targetManager as any).listTargets();
+    return await this.targetManager.list();
   }
 
-  async updateTargetSchedule(targetId: string, schedule: string): Promise<any> {
+  async updateTargetSchedule(targetId: string, schedule: string): Promise<TargetRecord | null> {
     if (!this.targetManager) return null;
-    return (this.targetManager as any).updateSchedule(targetId, schedule);
+    return await this.targetManager.update(targetId, { schedule });
   }
 
   async getToolStatus(): Promise<Record<string, boolean>> {
@@ -549,9 +553,9 @@ export class ReconPlugin extends Plugin {
     return (this.commandRunner as any).isAvailable(toolName);
   }
 
-  async runScheduledSweep(): Promise<any> {
-    if (!this.schedulerManager) return null;
-    return (this.schedulerManager as any).runSweep();
+  async runScheduledSweep(): Promise<void> {
+    if (!this.schedulerManager) return;
+    await this.schedulerManager.triggerSweep('manual');
   }
 
   async getLatestDiff(host: string): Promise<DiffResult | null> {
@@ -618,7 +622,7 @@ export class ReconPlugin extends Plugin {
     return this.uptimeBehavior.getAllStatuses();
   }
 
-  async loadUptimeStatus(host: string): Promise<any> {
+  async loadUptimeStatus(host: string): Promise<UptimeStatus | null> {
     if (!this.uptimeBehavior) {
       throw new Error('Uptime behavior is not enabled');
     }

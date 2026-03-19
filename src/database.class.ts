@@ -349,6 +349,18 @@ export class Database extends SafeEventEmitter {
             }, mergedClientOptions as any) as any);
             return new FileSystemClient(filesystemOptions) as Client;
           };
+        } else if (url.protocol === 'sqlite:') {
+          this._clientFactory = async () => {
+            const { SqliteClient } = await import('./clients/sqlite-client.class.js');
+            const sqliteOptions = this._applyTaskExecutorMonitoring(this._deepMerge({
+              basePath: (connStr as any)?.basePath,
+              bucket: (connStr as any)?.bucket,
+              keyPrefix: (connStr as any)?.keyPrefix,
+              logLevel: this.logger.level,
+              region: (connStr as any)?.region,
+            }, mergedClientOptions as any) as any);
+            return new SqliteClient(sqliteOptions) as unknown as Client;
+          };
         } else {
           this._clientFactory = async () => {
             const { S3Client } = await import('./clients/s3-client.class.js');
@@ -716,6 +728,16 @@ export class Database extends SafeEventEmitter {
         : '';
       const prefixPath = encodedPrefix ? `/${encodedPrefix}` : '';
       return `memory://${bucket}${prefixPath}`;
+    }
+
+    if (candidate?.region === 'sqlite' || candidate?.dbPath) {
+      if (candidate.connectionString) {
+        return candidate.connectionString;
+      }
+
+      if (candidate.dbPath) {
+        return `sqlite:///${encodeURI(candidate.dbPath).replace(/^\//, '')}`;
+      }
     }
 
     if (typeof candidate?.basePath === 'string') {

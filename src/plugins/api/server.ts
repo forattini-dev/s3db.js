@@ -151,6 +151,13 @@ export interface ServerInfo {
   hostname: string;
 }
 
+export interface ApiPluginServerInfo {
+  isRunning: boolean;
+  port?: number;
+  host?: string;
+  resources?: number;
+}
+
 export interface RouteSummary {
   path: string;
   methods: string[];
@@ -643,7 +650,7 @@ export class ApiServer {
     this.inFlightRequests.clear();
   }
 
-  getInfo(): { isRunning: boolean; port: number; host: string; resources: number } {
+  getInfo(): ApiPluginServerInfo {
     return {
       isRunning: this.isRunning,
       port: this.options.port,

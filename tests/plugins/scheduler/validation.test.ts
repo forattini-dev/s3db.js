@@ -122,6 +122,7 @@ describe('SchedulerPlugin - Validation & Setup', () => {
 
     it('should create job history resource when persistence enabled', async () => {
       expect(database.resources[plugin.config.jobHistoryResource]).toBeDefined();
+      expect(database.resources[plugin.config.jobHistoryResource].behavior).toBe('body-only');
     });
 
     it('should initialize job statistics', () => {

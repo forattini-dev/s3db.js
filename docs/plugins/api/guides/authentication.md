@@ -481,7 +481,7 @@ await db.createResource({
     key: 'secret|required',      // Encrypted storage
     name: 'string',              // Key description
     scopes: 'array|items:string',
-    expiresAt: 'string',
+    expiresAt: 'datetime',
     active: 'boolean'
   }
 });

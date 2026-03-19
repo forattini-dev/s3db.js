@@ -100,8 +100,8 @@ Session metadata for each monitored page:
   url: 'https://example.com',
   domain: 'example.com',
   date: '2025-10-31',  // YYYY-MM-DD for partitioning
-  startTime: 1730000000000,
-  endTime: 1730000010000,
+  startTime: '2025-10-31T12:00:00.000Z',
+  endTime: '2025-10-31T12:00:10.000Z',
   duration: 10000,
 
   // Statistics
@@ -169,8 +169,8 @@ Detailed information for each request:
     response: 89,
     total: 350
   },
-  startTime: 1730000001000,
-  endTime: 1730000001350,
+  requestTimestamp: '2025-10-31T12:00:01.000Z',
+  responseTimestamp: '2025-10-31T12:00:01.350Z',
   duration: 350,
 
   // Headers (compressed - cookies removed)

@@ -623,6 +623,49 @@ as a current benchmark contract.
 
 ---
 
+### 🗄️ SqliteClient - Local Persistent Storage
+
+For workloads that need persistence without S3 infrastructure (single-process local dev,
+CI, migration drills), use `SqliteClient`.
+
+**Why SqliteClient?**
+- 🧰 **Simple local deployment** - file-based storage, no object storage setup
+- 📈 **Predictable performance** - consistent local latency
+- 🧪 **Reliable integration tests** - data persists between test steps
+- 🔐 **Memory budget controls** - `maxMemoryMB` to avoid OOM in heavy writes
+
+**Quick Start (Connection String):**
+
+```javascript
+import { S3db } from 's3db.js';
+
+const db = new S3db({
+  connectionString: 'sqlite:///tmp/s3db.sqlite'
+});
+
+await db.connect();
+```
+
+**Example with options:**
+
+```javascript
+import { S3db, SqliteClient } from 's3db.js';
+
+const client = new SqliteClient({
+  basePath: '/tmp/s3db.sqlite',
+  bucket: 'myapp',
+  maxObjectSize: 5 * 1024 * 1024,
+  maxMemoryMB: 256,
+});
+
+const db = new S3db({ client });
+await db.connect();
+```
+
+📚 [**Full SqliteClient Documentation**](./docs/clients/sqlite-client.md)
+
+---
+
 ### S3 Bucket Structure
 
 When you create a database, s3db.js organizes your data in a structured way within your S3 bucket:

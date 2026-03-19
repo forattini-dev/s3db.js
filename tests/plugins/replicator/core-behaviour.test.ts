@@ -187,6 +187,10 @@ describe('Replication execution and logging', () => {
 
     await plugin.logReplicator({ resource: 'users', operation: 'insert', recordId: '1' });
     expect(insert).toHaveBeenCalled();
+    expect(insert).toHaveBeenCalledWith(expect.objectContaining({
+      timestamp: expect.any(String),
+      createdAt: expect.stringMatching(/^\d{4}-\d{2}-\d{2}$/)
+    }));
   });
 
   test('retryWithBackoff retries on failure and returns result', async () => {
@@ -244,6 +248,26 @@ describe('Replication execution and logging', () => {
     expect(logs).toEqual(records);
   });
 
+  test('getReplicatorStats normalizes lastSync to ISO string', async () => {
+    const plugin = new ReplicatorPlugin({ replicators: [minimalReplicator] });
+    plugin.replicators = [{
+      ...minimalReplicator,
+      id: 'rep-1',
+      initialize: vi.fn(),
+      replicate: vi.fn(),
+      shouldReplicateResource: vi.fn().mockReturnValue(true),
+      getStatus: vi.fn().mockResolvedValue({
+        healthy: true,
+        lastSync: new Date('2026-03-19T12:00:00.000Z'),
+        errorCount: 0
+      })
+    }];
+
+    const stats = await plugin.getReplicatorStats();
+
+    expect(stats.replicators[0].status.lastSync).toBe('2026-03-19T12:00:00.000Z');
+  });
+
   test('retryFailedReplicators processes and updates log entries', async () => {
     const plugin = new ReplicatorPlugin({ replicators: [minimalReplicator] });
     const failed = [{ operation: 'insert', resourceName: 'users', recordId: '1', data: { id: '1' }, id: 'log-1', retryCount: 0 }];
@@ -251,7 +275,8 @@ describe('Replication execution and logging', () => {
     plugin.processReplicatorEvent = vi.fn().mockResolvedValue([{ status: 'fulfilled' }]);
     plugin.updateReplicatorLog = vi.fn();
 
-    await plugin.retryFailedReplicators();
+    const successResult = await plugin.retryFailedReplicators();
+    expect(successResult).toEqual({ retried: 1 });
     expect(plugin.processReplicatorEvent).toHaveBeenCalledWith('insert', 'users', '1', { id: '1' }, null);
     expect(plugin.updateReplicatorLog).toHaveBeenCalledWith(
       'log-1',
@@ -259,7 +284,8 @@ describe('Replication execution and logging', () => {
     );
 
     plugin.processReplicatorEvent.mockResolvedValue([{ status: 'rejected', reason: new Error('still broken') }]);
-    await plugin.retryFailedReplicators();
+    const failedResult = await plugin.retryFailedReplicators();
+    expect(failedResult).toEqual({ retried: 0 });
     expect(plugin.updateReplicatorLog).toHaveBeenCalledWith(
       'log-1',
       expect.objectContaining({ status: 'failed' })

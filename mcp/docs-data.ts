@@ -812,6 +812,14 @@ export const clients: ClientDoc[] = [
     dependencies: ['@aws-sdk/client-s3'],
   },
   {
+    name: 'SqliteClient',
+    description: 'Embedded SQLite backend with local durability and explicit memory budgets.',
+    connectionString: 'sqlite:///absolute/path/to/data.db',
+    useCase: 'Single-process persistence, local pipelines, and reproducible integration tests',
+    performance: 'Very fast local I/O, bounded by SQLite and disk speed',
+    dependencies: [],
+  },
+  {
     name: 'MemoryClient',
     description: 'In-memory storage for blazing-fast tests. Data lost on process exit.',
     connectionString: 'memory://bucket/prefix',

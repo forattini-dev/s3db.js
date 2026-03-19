@@ -187,7 +187,7 @@ export class FullTextPlugin extends Plugin {
         word: 'string|required',
         recordIds: 'json|required',
         count: 'number|required',
-        lastUpdated: 'string|required'
+        lastUpdated: 'datetime|required'
       },
       partitions: {
         byResource: { fields: { resourceName: 'string' } }

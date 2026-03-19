@@ -33,7 +33,7 @@ async function main() {
       email: 'string|required|email',
       status: 'string|optional',
       loginCount: 'number|default:0',
-      lastLoginAt: 'string|optional'
+      lastLoginAt: 'datetime|optional'
     },
     behavior: 'body-overflow',
     timestamps: true
@@ -49,7 +49,7 @@ async function main() {
       userId: 'string|optional',
       action: 'string|required',
       metadata: 'object|optional',
-      timestamp: 'string|required'
+      timestamp: 'datetime|required'
     },
     behavior: 'body-overflow',
     timestamps: true

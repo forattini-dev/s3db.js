@@ -15,7 +15,7 @@ export interface QueueItem {
   id: string;
   operation: PartitionOperation;
   retries: number;
-  createdAt: Date;
+  createdAt: string;
   status: QueueItemStatus;
   lastError?: Error;
 }
@@ -86,7 +86,7 @@ export class PartitionQueue extends EventEmitter {
       id: `${Date.now()}-${Math.random()}`,
       operation,
       retries: 0,
-      createdAt: new Date(),
+      createdAt: new Date().toISOString(),
       status: 'pending'
     };
 

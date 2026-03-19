@@ -64,7 +64,7 @@ class MonitoringPlugin extends Plugin {
         attributes: {
           metricName: 'string|required',
           value: 'number|required',
-          timestamp: 'string|required',
+          timestamp: 'datetime|required',
           tags: 'object|optional'
         },
         behavior: 'body-overflow',
@@ -80,7 +80,7 @@ class MonitoringPlugin extends Plugin {
           alertType: 'string|required',
           severity: 'string|required',
           message: 'string|required',
-          timestamp: 'string|required',
+          timestamp: 'datetime|required',
           resolved: 'boolean|required'
         },
         behavior: 'enforce-limits'

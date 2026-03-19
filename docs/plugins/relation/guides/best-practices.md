@@ -47,7 +47,7 @@ partitions: {
   byUserAndDate: {
     fields: {
       userId: 'string',
-      createdAt: 'number'
+      createdAt: 'datetime'
     }
   }
 }

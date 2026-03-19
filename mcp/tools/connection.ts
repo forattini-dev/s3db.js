@@ -7,13 +7,13 @@ import { resolveConfig } from '../config.js';
 export const connectionTools = [
   {
     name: 'dbConnect',
-    description: 'Connect to S3DB database manually. Usually NOT needed — the server auto-connects via S3DB_CONNECTION_STRING env var. Use only to connect to a different database or if auto-connect is not configured. Formats: s3://key:secret@bucket (AWS S3), http://key:secret@host:9000/bucket (MinIO), memory://bucket (testing), file:///path (testing).',
+    description: 'Connect to S3DB database manually. Usually NOT needed — the server auto-connects via S3DB_CONNECTION_STRING env var. Use only to connect to a different database or if auto-connect is not configured. Formats: s3://key:secret@bucket (AWS S3), http://key:secret@host:9000/bucket (MinIO), sqlite:///absolute/path/to/file.db (SQLite), memory://bucket (testing), file:///path (testing).',
     inputSchema: {
       type: 'object',
       properties: {
         connectionString: {
           type: 'string',
-          description: 'S3DB connection string (e.g., s3://key:secret@bucket/path)'
+          description: 'S3DB connection string (e.g., s3://key:secret@bucket/path, sqlite:///tmp/s3db.sqlite, memory://bucket)'
         },
         verbose: {
           type: 'boolean',

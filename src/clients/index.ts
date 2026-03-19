@@ -12,6 +12,7 @@ export { MemoryClient } from './memory-client.class.js';
 export { MemoryStorage } from './memory-storage.class.js';
 export { FileSystemClient } from './filesystem-client.class.js';
 export { FileSystemStorage } from './filesystem-storage.class.js';
+export { SqliteClient } from './sqlite-client.class.js';
 export { ReckerHttpHandler } from './recker-http-handler.js';
 export { HTTP_CLIENT_PROFILES } from './types.js';
 
@@ -21,6 +22,7 @@ export type {
   S3ClientConfig,
   MemoryClientConfig,
   FileSystemClientConfig,
+  SqliteClientConfig,
   S3Object,
   PutObjectParams,
   PutObjectResponse,

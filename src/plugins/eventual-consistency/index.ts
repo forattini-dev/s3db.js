@@ -99,6 +99,33 @@ interface WorkerLoopSummary {
   handlerErrors: number;
 }
 
+export interface EventualConsistencyWorkerStatus {
+  enabled: boolean;
+  active: boolean;
+  running: boolean;
+  leader: string | null;
+  isLeader: boolean;
+  runs: number;
+  failures: number;
+  lastRunAt: number | null;
+  lastRunDurationMs: number | null;
+  lastError: string | null;
+  total: WorkerLoopSummary;
+  lastSummary: WorkerLoopSummary | null;
+}
+
+export interface EventualConsistencyPluginStatus {
+  name: 'EventualConsistencyPlugin';
+  version: '1.0.0';
+  mode: NormalizedConfig['mode'];
+  enableCoordinator: boolean;
+  enableAnalytics: boolean;
+  consolidationInterval: number;
+  worker: EventualConsistencyWorkerStatus;
+  handlers: Record<string, string[]>;
+  workerId: string;
+}
+
 export class EventualConsistencyPlugin extends CoordinatorPlugin<EventualConsistencyPluginOptions> {
   declare config: NormalizedConfig;
   private fieldHandlers: FieldHandlers = new Map();
@@ -490,7 +517,7 @@ export class EventualConsistencyPlugin extends CoordinatorPlugin<EventualConsist
     return summary;
   }
 
-  private _getWorkerStatus(): Record<string, any> {
+  private _getWorkerStatus(): EventualConsistencyWorkerStatus {
     return {
       enabled: !!this.config.enableCoordinator,
       active: this.config.enableCoordinator ? !!this._workerHandle : false,
@@ -732,7 +759,7 @@ export class EventualConsistencyPlugin extends CoordinatorPlugin<EventualConsist
   /**
    * Get plugin status
    */
-  getStatus(): Record<string, any> {
+  getStatus(): EventualConsistencyPluginStatus {
     const handlers: Record<string, string[]> = {};
 
     for (const [resourceName, resourceHandlers] of this.fieldHandlers) {

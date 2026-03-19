@@ -7,7 +7,28 @@ vi.mock('../../src/plugins/concerns/plugin-dependencies.js', () => ({
 }));
 
 import { PuppeteerPlugin } from '../../src/plugins/puppeteer.plugin.js';
-import { CookieManager } from '../../src/plugins/puppeteer/cookie-manager.js';
+
+const createMockPage = (options: {
+  cookies?: Array<Record<string, unknown>>;
+  url?: string;
+  setCookie?: ReturnType<typeof vi.fn>;
+  goto?: ReturnType<typeof vi.fn>;
+  evaluate?: ReturnType<typeof vi.fn>;
+  $$?: ReturnType<typeof vi.fn>;
+  userAgent?: string;
+  viewport?: { width: number; height: number; deviceScaleFactor?: number };
+  proxyId?: string;
+} = {}) => ({
+  cookies: vi.fn().mockResolvedValue(options.cookies ?? []),
+  setCookie: options.setCookie ?? vi.fn().mockResolvedValue(undefined),
+  url: vi.fn().mockReturnValue(options.url ?? 'https://example.com/path'),
+  goto: options.goto ?? vi.fn().mockResolvedValue(undefined),
+  evaluate: options.evaluate ?? vi.fn().mockResolvedValue(undefined),
+  $$: options.$$ ?? vi.fn().mockResolvedValue([]),
+  _userAgent: options.userAgent ?? 'Mozilla/5.0 Test',
+  _viewport: options.viewport ?? { width: 1920, height: 1080, deviceScaleFactor: 1 },
+  _proxyId: options.proxyId
+});
 
 describe('PuppeteerPlugin - CookieManager', () => {
   let db;
@@ -15,14 +36,14 @@ describe('PuppeteerPlugin - CookieManager', () => {
   let cookieManager;
 
   beforeAll(async () => {
-    // Use real Database with MemoryClient - no more MockDatabase!
     db = new Database({
       client: new MemoryClient()
     });
     await db.connect();
+
     puppeteerPlugin = new PuppeteerPlugin({
       logLevel: 'silent',
-      namespace: null, // Disable namespace to use exact resource name
+      namespace: null,
       cookies: {
         enabled: true,
         storage: {
@@ -33,12 +54,12 @@ describe('PuppeteerPlugin - CookieManager', () => {
           warmup: {
             enabled: true,
             pages: ['https://www.google.com'],
-            timePerPage: { min: 1000, max: 2000 }
+            timePerPage: { min: 10, max: 20 }
           },
           rotation: {
             enabled: true,
             requestsPerCookie: 10,
-            maxAge: 60000, // 1 minute
+            maxAge: 60000,
             poolSize: 5
           },
           reputation: {
@@ -55,7 +76,6 @@ describe('PuppeteerPlugin - CookieManager', () => {
     puppeteerPlugin._warmupBrowserPool = vi.fn().mockResolvedValue();
 
     await db.usePlugin(puppeteerPlugin);
-
     cookieManager = puppeteerPlugin.cookieManager;
   });
 
@@ -67,344 +87,153 @@ describe('PuppeteerPlugin - CookieManager', () => {
   });
 
   beforeEach(async () => {
-    // Clear cookie pool before each test
-    cookieManager.cookiePool.clear();
+    cookieManager.sessions.clear();
 
-    // Clear storage if it exists
     try {
       const storage = await db.getResource('test_cookie_manager');
-      const cookies = await storage.list({ limit: 100 });
-      for (const cookie of cookies) {
-        await storage.remove(cookie.id);
+      const sessions = await storage.list({ limit: 100 });
+      for (const session of sessions) {
+        await storage.remove(session.id);
       }
-    } catch (err) {
-      // Resource doesn't exist yet, ignore
+    } catch {
+      // Resource not available yet
     }
   });
 
-  describe('Initialization', () => {
-    it('should initialize with correct storage', () => {
-      expect(cookieManager.storage).toBeDefined();
-      // Storage name may include namespace prefix if plugin applies it
-      expect(cookieManager.storage.name).toMatch(/test_cookie_manager/);
-    });
-
-    it('should have empty cookie pool initially', () => {
-      expect(cookieManager.cookiePool.size).toBe(0);
-    });
-
-    it('should have correct config', () => {
-      expect(cookieManager.config.enabled).toBe(true);
-      expect(cookieManager.config.farming.enabled).toBe(true);
-      expect(cookieManager.config.farming.reputation.enabled).toBe(true);
-    });
+  it('initializes cookie storage and starts with no sessions', () => {
+    expect(cookieManager.storage).toBeDefined();
+    expect(cookieManager.storage.name).toMatch(/test_cookie_manager/);
+    expect(cookieManager.sessions.size).toBe(0);
   });
 
-  describe('Session Management', () => {
-    it('should create new session when saving', async () => {
-      const sessionId = 'test_session_1';
-
-      // Mock page object
-      const mockPage = {
-        cookies: vi.fn().mockResolvedValue([
-          { name: 'cookie1', value: 'value1', domain: '.example.com' },
-          { name: 'cookie2', value: 'value2', domain: '.example.com' }
-        ]),
-        _userAgent: 'Mozilla/5.0 Test',
-        _viewport: { width: 1920, height: 1080 }
-      };
-
-      await cookieManager.saveSession(mockPage, sessionId, { success: true });
-
-      // Check pool
-      expect(cookieManager.cookiePool.has(sessionId)).toBe(true);
-      const session = cookieManager.cookiePool.get(sessionId);
-
-      expect(session.sessionId).toBe(sessionId);
-      expect(session.cookies.length).toBe(2);
-      expect(session.userAgent).toBe('Mozilla/5.0 Test');
-      expect(session.reputation.successCount).toBe(1);
-      expect(session.reputation.failCount).toBe(0);
+  it('saves sessions with datetime/dateonly fields in storage', async () => {
+    const sessionId = 'test_session_1';
+    const page = createMockPage({
+      cookies: [
+        { name: 'cookie1', value: 'value1', domain: '.example.com' },
+        { name: 'cookie2', value: 'value2', domain: '.example.com' }
+      ]
     });
 
-    it('should update existing session', async () => {
-      const sessionId = 'test_session_2';
+    const session = await cookieManager.saveSession(page, sessionId, { success: true });
 
-      // Create initial session
-      const mockPage1 = {
-        cookies: vi.fn().mockResolvedValue([
-          { name: 'cookie1', value: 'value1' }
-        ]),
-        _userAgent: 'Test UA',
-        _viewport: { width: 1920, height: 1080 }
-      };
+    expect(cookieManager.hasSession(sessionId)).toBe(true);
+    expect(session.sessionId).toBe(sessionId);
+    expect(session.cookies).toHaveLength(2);
+    expect(session.domain).toBe('example.com');
+    expect(session.date).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+    expect(typeof session.reputation.lastUsed).toBe('string');
+    expect(typeof session.metadata.createdAt).toBe('string');
+    expect(typeof session.metadata.expiresAt).toBe('string');
 
-      await cookieManager.saveSession(mockPage1, sessionId, { success: true });
+    const stored = (await cookieManager.storage.list({ limit: 10 }))
+      .find(entry => entry.sessionId === sessionId);
 
-      // Update with new cookies
-      const mockPage2 = {
-        cookies: vi.fn().mockResolvedValue([
-          { name: 'cookie1', value: 'value1' },
-          { name: 'cookie2', value: 'value2' }
-        ]),
-        _userAgent: 'Test UA',
-        _viewport: { width: 1920, height: 1080 }
-      };
-
-      await cookieManager.saveSession(mockPage2, sessionId, { success: true });
-
-      const session = cookieManager.cookiePool.get(sessionId);
-      expect(session.cookies.length).toBe(2);
-      expect(session.reputation.successCount).toBe(2);
-    });
-
-    it('should track reputation correctly', async () => {
-      const sessionId = 'test_session_3';
-
-      const mockPage = {
-        cookies: vi.fn().mockResolvedValue([]),
-        _userAgent: 'Test',
-        _viewport: {}
-      };
-
-      // 3 successes
-      await cookieManager.saveSession(mockPage, sessionId, { success: true });
-      await cookieManager.saveSession(mockPage, sessionId, { success: true });
-      await cookieManager.saveSession(mockPage, sessionId, { success: true });
-
-      // 1 failure
-      await cookieManager.saveSession(mockPage, sessionId, { success: false });
-
-      const session = cookieManager.cookiePool.get(sessionId);
-
-      expect(session.reputation.successCount).toBe(3);
-      expect(session.reputation.failCount).toBe(1);
-      expect(session.reputation.successRate).toBe(0.75);
-    });
+    expect(stored).toBeDefined();
+    expect(stored.date).toBe(session.date);
+    expect(typeof stored.reputation.lastUsed).toBe('string');
+    expect(typeof stored.metadata.createdAt).toBe('string');
+    expect(typeof stored.metadata.expiresAt).toBe('string');
   });
 
-  describe('Cookie Rotation', () => {
-    it('should remove expired cookies', async () => {
-      const sessionId = 'expired_session';
-
-      const mockPage = {
-        cookies: vi.fn().mockResolvedValue([]),
-        _userAgent: 'Test',
-        _viewport: {}
-      };
-
-      await cookieManager.saveSession(mockPage, sessionId);
-
-      // Manually set expiration to past
-      const session = cookieManager.cookiePool.get(sessionId);
-      session.metadata.expiresAt = Date.now() - 1000;
-
-      const removed = await cookieManager.rotateCookies();
-
-      expect(removed).toBe(1);
-      expect(cookieManager.cookiePool.has(sessionId)).toBe(false);
+  it('updates an existing session and keeps age/request metadata numeric', async () => {
+    const sessionId = 'test_session_2';
+    const firstPage = createMockPage({
+      cookies: [{ name: 'cookie1', value: 'value1' }]
+    });
+    const secondPage = createMockPage({
+      cookies: [
+        { name: 'cookie1', value: 'value1' },
+        { name: 'cookie2', value: 'value2' }
+      ]
     });
 
-    it('should remove overused cookies', async () => {
-      const sessionId = 'overused_session';
+    await cookieManager.saveSession(firstPage, sessionId, { success: true });
+    const session = await cookieManager.saveSession(secondPage, sessionId, { success: false });
 
-      const mockPage = {
-        cookies: vi.fn().mockResolvedValue([]),
-        _userAgent: 'Test',
-        _viewport: {}
-      };
-
-      await cookieManager.saveSession(mockPage, sessionId);
-
-      // Manually set request count to max
-      const session = cookieManager.cookiePool.get(sessionId);
-      session.metadata.requestCount = cookieManager.config.farming.rotation.requestsPerCookie;
-
-      const removed = await cookieManager.rotateCookies();
-
-      expect(removed).toBe(1);
-      expect(cookieManager.cookiePool.has(sessionId)).toBe(false);
-    });
-
-    it('should remove low reputation cookies', async () => {
-      const sessionId = 'bad_session';
-
-      const mockPage = {
-        cookies: vi.fn().mockResolvedValue([]),
-        _userAgent: 'Test',
-        _viewport: {}
-      };
-
-      await cookieManager.saveSession(mockPage, sessionId);
-
-      // Manually set low reputation
-      const session = cookieManager.cookiePool.get(sessionId);
-      session.reputation.successRate = 0.3; // Below 0.5 threshold
-
-      const removed = await cookieManager.rotateCookies();
-
-      expect(removed).toBe(1);
-      expect(cookieManager.cookiePool.has(sessionId)).toBe(false);
-    });
-
-    it('should keep healthy cookies', async () => {
-      const sessionId = 'healthy_session';
-
-      const mockPage = {
-        cookies: vi.fn().mockResolvedValue([]),
-        _userAgent: 'Test',
-        _viewport: {}
-      };
-
-      await cookieManager.saveSession(mockPage, sessionId, { success: true });
-
-      const removed = await cookieManager.rotateCookies();
-
-      expect(removed).toBe(0);
-      expect(cookieManager.cookiePool.has(sessionId)).toBe(true);
-    });
+    expect(session.cookies).toHaveLength(2);
+    expect(session.reputation.successCount).toBe(1);
+    expect(session.reputation.failCount).toBe(1);
+    expect(session.reputation.successRate).toBe(0.5);
+    expect(typeof session.metadata.age).toBe('number');
+    expect(session.metadata.age).toBeGreaterThanOrEqual(0);
   });
 
-  describe('Best Cookie Selection', () => {
-    beforeEach(async () => {
-      // Create 3 sessions with different reputations
-      const mockPage = {
-        cookies: vi.fn().mockResolvedValue([]),
-        _userAgent: 'Test',
-        _viewport: {}
-      };
-
-      // Session 1: 100% success rate, new
-      await cookieManager.saveSession(mockPage, 'session_1', { success: true });
-      await cookieManager.saveSession(mockPage, 'session_1', { success: true });
-
-      // Session 2: 75% success rate, older
-      await cookieManager.saveSession(mockPage, 'session_2', { success: true });
-      await cookieManager.saveSession(mockPage, 'session_2', { success: true });
-      await cookieManager.saveSession(mockPage, 'session_2', { success: true });
-      await cookieManager.saveSession(mockPage, 'session_2', { success: false });
-      const session2 = cookieManager.cookiePool.get('session_2');
-      session2.metadata.age = 3600000; // 1 hour old
-
-      // Session 3: 50% success rate, newest
-      await cookieManager.saveSession(mockPage, 'session_3', { success: true });
-      await cookieManager.saveSession(mockPage, 'session_3', { success: false });
+  it('loads an existing session into a page and increments request count', async () => {
+    const sessionId = 'test_session_3';
+    const savePage = createMockPage({
+      cookies: [
+        { name: 'cookie1', value: 'value1', domain: '.example.com' }
+      ]
     });
+    const setCookie = vi.fn().mockResolvedValue(undefined);
+    const loadPage = createMockPage({ setCookie });
 
-    it('should select cookie with best score', async () => {
-      const bestCookie = await cookieManager.getBestCookie();
+    await cookieManager.saveSession(savePage, sessionId, { success: true });
 
-      expect(bestCookie).toBeDefined();
-      // Session 2 should win due to age boost despite lower success rate
-      expect(['session_1', 'session_2']).toContain(bestCookie.sessionId);
-    });
+    const loaded = await cookieManager.loadSession(loadPage, sessionId);
+    const session = cookieManager.getSession(sessionId);
 
-    it('should exclude expired cookies', async () => {
-      // Expire all sessions except one
-      const session1 = cookieManager.cookiePool.get('session_1');
-      session1.metadata.expiresAt = Date.now() - 1000;
+    expect(loaded).toBe(true);
+    expect(setCookie).toHaveBeenCalledTimes(1);
+    expect(session.metadata.requestCount).toBe(2);
+    expect(typeof session.reputation.lastUsed).toBe('string');
+  });
 
-      const session2 = cookieManager.cookiePool.get('session_2');
-      session2.metadata.expiresAt = Date.now() - 1000;
+  it('reports cookie stats through the plugin API', async () => {
+    await cookieManager.saveSession(createMockPage({
+      url: 'https://example.com/a'
+    }), 'session_1', { success: true });
 
-      const bestCookie = await cookieManager.getBestCookie();
+    await cookieManager.saveSession(createMockPage({
+      url: 'https://api.example.com/b'
+    }), 'session_2', { success: false });
 
-      expect(bestCookie).toBeDefined();
-      expect(bestCookie.sessionId).toBe('session_3');
-    });
+    const stats = await puppeteerPlugin.getCookieStats();
 
-    it('should return null when no healthy cookies', async () => {
-      // Expire all sessions
-      for (const [sessionId, session] of cookieManager.cookiePool) {
-        session.metadata.expiresAt = Date.now() - 1000;
+    expect(stats.total).toBe(2);
+    expect(stats.healthy).toBe(1);
+    expect(stats.unhealthy).toBe(1);
+    expect(stats.averageSuccessRate).toBeGreaterThanOrEqual(0);
+    expect(stats.byDomain['example.com']).toBe(1);
+    expect(stats.byDomain['api.example.com']).toBe(1);
+  });
+
+  it('rotates a session and resets reputation counters on the new session', async () => {
+    const sessionId = 'test_session_4';
+    await cookieManager.saveSession(createMockPage(), sessionId, { success: true });
+
+    const newSessionId = await cookieManager.rotateSession(sessionId);
+    const rotated = cookieManager.getSession(newSessionId);
+
+    expect(newSessionId).not.toBe(sessionId);
+    expect(rotated).toBeDefined();
+    expect(rotated.sessionId).toBe(newSessionId);
+    expect(rotated.reputation.successCount).toBe(0);
+    expect(rotated.reputation.failCount).toBe(0);
+    expect(rotated.reputation.successRate).toBe(1);
+    expect(typeof rotated.reputation.lastUsed).toBe('string');
+    expect(typeof rotated.metadata.createdAt).toBe('string');
+  });
+
+  it('throws when farming is disabled', async () => {
+    const disabledPlugin = new PuppeteerPlugin({
+      logLevel: 'silent',
+      cookies: {
+        enabled: true,
+        farming: {
+          enabled: false
+        }
       }
-
-      const bestCookie = await cookieManager.getBestCookie();
-
-      expect(bestCookie).toBeNull();
-    });
-  });
-
-  describe('Statistics', () => {
-    it('should return empty stats when no cookies', async () => {
-      const stats = await cookieManager.getStats();
-
-      expect(stats.total).toBe(0);
-      expect(stats.healthy).toBe(0);
-      expect(stats.averageAge).toBe(0);
-      expect(stats.averageSuccessRate).toBe(0);
     });
 
-    it('should calculate stats correctly', async () => {
-      const mockPage = {
-        cookies: vi.fn().mockResolvedValue([]),
-        _userAgent: 'Test',
-        _viewport: {}
-      };
+    disabledPlugin._importDependencies = vi.fn().mockResolvedValue();
+    disabledPlugin._warmupBrowserPool = vi.fn().mockResolvedValue();
 
-      // Create 2 healthy sessions
-      await cookieManager.saveSession(mockPage, 'session_1', { success: true });
-      await cookieManager.saveSession(mockPage, 'session_2', { success: true });
-      await cookieManager.saveSession(mockPage, 'session_2', { success: false });
+    await db.usePlugin(disabledPlugin);
 
-      // Create 1 expired session
-      await cookieManager.saveSession(mockPage, 'expired_session');
-      const expired = cookieManager.cookiePool.get('expired_session');
-      expired.metadata.expiresAt = Date.now() - 1000;
-
-      const stats = await cookieManager.getStats();
-
-      expect(stats.total).toBe(3);
-      expect(stats.healthy).toBe(2);
-      expect(stats.expired).toBe(1);
-      expect(stats.averageSuccessRate).toBeGreaterThan(0);
-    });
-  });
-
-  describe('Error Handling', () => {
-    it('should throw error when farming is disabled', async () => {
-      const disabledPlugin = new PuppeteerPlugin({
-      logLevel: 'silent',
-        cookies: {
-          enabled: true,
-          farming: {
-            enabled: false
-          }
-        }
-      });
-
-      disabledPlugin._importDependencies = vi.fn().mockResolvedValue();
-      disabledPlugin._warmupBrowserPool = vi.fn().mockResolvedValue();
-
-      await db.usePlugin(disabledPlugin);
-
-
-      await expect(disabledPlugin.farmCookies('test')).rejects.toThrow(
-        'Cookie farming is not enabled'
-      );
-
-    });
-
-    it('should throw error when getting best cookie with farming disabled', async () => {
-      const disabledPlugin = new PuppeteerPlugin({
-      logLevel: 'silent',
-        cookies: {
-          enabled: true,
-          farming: {
-            enabled: false
-          }
-        }
-      });
-
-      disabledPlugin._importDependencies = vi.fn().mockResolvedValue();
-      disabledPlugin._warmupBrowserPool = vi.fn().mockResolvedValue();
-
-      await db.usePlugin(disabledPlugin);
-
-      await expect(disabledPlugin.cookieManager.getBestCookie()).rejects.toThrow(
-        'Cookie farming reputation must be enabled to select best cookies'
-      );
-
-    });
+    await expect(disabledPlugin.farmCookies('test')).rejects.toThrow(
+      'Cookie farming is not enabled'
+    );
   });
 });

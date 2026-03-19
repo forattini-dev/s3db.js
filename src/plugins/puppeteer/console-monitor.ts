@@ -15,7 +15,7 @@ export interface ConsoleMonitorConfig {
 export interface ConsoleMessage {
   level: string;
   text: string;
-  timestamp: number;
+  timestamp: string;
   url?: string;
   location?: {
     url: string;
@@ -27,8 +27,8 @@ export interface ConsoleMessage {
 
 export interface ConsoleSession {
   sessionId: string;
-  startTime: number;
-  endTime?: number;
+  startTime: string;
+  endTime?: string;
   messageCount: number;
   errorCount: number;
   warningCount: number;
@@ -118,8 +118,8 @@ export class ConsoleMonitor {
         name: resourceNames.consoleSessions,
         attributes: {
           sessionId: 'string|required',
-          startTime: 'number|required',
-          endTime: 'number',
+          startTime: 'datetime|required',
+          endTime: 'datetime',
           messageCount: 'number',
           errorCount: 'number',
           warningCount: 'number'
@@ -138,7 +138,7 @@ export class ConsoleMonitor {
           sessionId: 'string|required',
           level: 'string|required',
           text: 'string|required',
-          timestamp: 'number|required',
+          timestamp: 'datetime|required',
           url: 'string',
           location: 'object',
           stackTrace: 'array'
@@ -161,7 +161,7 @@ export class ConsoleMonitor {
           sessionId: 'string|required',
           message: 'string|required',
           stack: 'string',
-          timestamp: 'number|required',
+          timestamp: 'datetime|required',
           url: 'string'
         },
         timestamps: true,
@@ -176,7 +176,7 @@ export class ConsoleMonitor {
   startSession(sessionId: string): ConsoleSession {
     const session: ConsoleSession = {
       sessionId,
-      startTime: Date.now(),
+      startTime: new Date().toISOString(),
       messageCount: 0,
       errorCount: 0,
       warningCount: 0
@@ -218,7 +218,7 @@ export class ConsoleMonitor {
       const message: ConsoleMessage = {
         level,
         text,
-        timestamp: Date.now(),
+        timestamp: new Date().toISOString(),
         url: page.url()
       };
 
@@ -262,7 +262,7 @@ export class ConsoleMonitor {
       const errorMessage: ConsoleMessage = {
         level: 'pageerror',
         text: error.message,
-        timestamp: Date.now(),
+        timestamp: new Date().toISOString(),
         url: page.url()
       };
 
@@ -284,7 +284,7 @@ export class ConsoleMonitor {
     const session = this.sessions.get(sessionId);
     if (!session) return null;
 
-    session.endTime = Date.now();
+    session.endTime = new Date().toISOString();
 
     if (this.config.persist) {
       await this._persistSession(sessionId);

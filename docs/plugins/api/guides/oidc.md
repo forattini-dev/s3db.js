@@ -966,7 +966,7 @@ await db.connect();
 await db.createResource({
   name: 'oidc_sessions',
   attributes: {
-    expiresAt: 'string|required',  // Required for TTL cleanup
+    expiresAt: 'datetime|required',  // Required for TTL cleanup
     userId: 'string',
     email: 'string'
   }
@@ -2320,7 +2320,7 @@ const config = {
       userId: claims.sub,
       sessionIds,
       loggedOut,
-      timestamp: new Date()
+      timestamp: new Date().toISOString()
     });
 
     // Notify user (email, push notification)

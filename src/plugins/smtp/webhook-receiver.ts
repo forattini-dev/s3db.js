@@ -27,7 +27,7 @@ export interface WebhookEvent {
   type: EventType;
   messageId?: string;
   recipient?: string;
-  timestamp: number;
+  timestamp: string;
   bounceType?: BounceType;
   bounceSubType?: string;
   complaintType?: ComplaintType;
@@ -42,7 +42,7 @@ export interface WebhookEvent {
 }
 
 export interface LoggedEvent extends WebhookEvent {
-  loggedAt: number;
+  loggedAt: string;
 }
 
 export interface HandlerResult {
@@ -63,10 +63,28 @@ export interface ProcessWebhookResult {
 
 export type EventHandler = (event: WebhookEvent) => Promise<unknown>;
 
+function toIsoTimestamp(value?: number | string | Date | null): string {
+  if (value instanceof Date) {
+    return value.toISOString();
+  }
+
+  if (typeof value === 'string') {
+    const parsed = new Date(value);
+    return Number.isNaN(parsed.getTime()) ? new Date().toISOString() : parsed.toISOString();
+  }
+
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    const ms = value > 1e12 ? value : value * 1000;
+    return new Date(ms).toISOString();
+  }
+
+  return new Date().toISOString();
+}
+
 interface SendGridEventData {
   sg_message_id?: string;
   email?: string;
-  timestamp?: number;
+  timestamp?: number | string;
   event?: string;
   bounce_type?: string;
   bounce_subtype?: string;
@@ -98,29 +116,29 @@ interface AwsSesMessage {
       status?: string;
       diagnosticCode?: string;
     }>;
-    timestamp?: number;
+    timestamp?: number | string;
   };
   complaint?: {
     complaintFeedbackType?: string;
     complainedRecipients?: Array<{ emailAddress?: string }>;
-    timestamp?: number;
+    timestamp?: number | string;
   };
   delivery?: {
     recipients?: string[];
-    timestamp?: number;
+    timestamp?: number | string;
   };
   open?: {
     recipient?: string;
     userAgent?: string;
     ip?: string;
-    timestamp?: number;
+    timestamp?: number | string;
   };
   click?: {
     recipient?: string;
     userAgent?: string;
     ip?: string;
     link?: string;
-    timestamp?: number;
+    timestamp?: number | string;
   };
 }
 
@@ -129,7 +147,7 @@ interface MailgunEventBody {
     event?: string;
     recipient?: string;
     message?: { id?: string };
-    timestamp?: number;
+    timestamp?: number | string;
     severity?: string;
     reason?: string;
     code?: string;
@@ -140,7 +158,7 @@ interface MailgunEventBody {
   event?: string;
   recipient?: string;
   'message-id'?: string;
-  timestamp?: number;
+  timestamp?: number | string;
 }
 
 interface PostmarkBody {
@@ -176,14 +194,14 @@ interface GenericEventBody {
     bounce_type?: string;
     complaintType?: string;
     complaint_type?: string;
-    timestamp?: number;
+    timestamp?: number | string;
   }>;
   type?: string;
   messageId?: string;
   message_id?: string;
   recipient?: string;
   email?: string;
-  timestamp?: number;
+  timestamp?: number | string;
   [key: string]: unknown;
 }
 
@@ -362,7 +380,7 @@ export class WebhookReceiver {
         provider: 'sendgrid',
         messageId: item.sg_message_id || item.email,
         recipient: item.email,
-        timestamp: item.timestamp || Date.now() / 1000,
+        timestamp: toIsoTimestamp(item.timestamp),
         rawEvent: item,
         type: item.event || 'unknown'
       };
@@ -424,7 +442,7 @@ export class WebhookReceiver {
           bounceSubType: recipient.bounceSubType,
           status: recipient.status,
           reason: recipient.diagnosticCode || 'Bounce',
-          timestamp: bounce.timestamp || Date.now() / 1000,
+          timestamp: toIsoTimestamp(bounce.timestamp),
           rawEvent: message
         });
       }
@@ -441,7 +459,7 @@ export class WebhookReceiver {
           recipient: recipient.emailAddress,
           complaintType,
           reason: `Complaint: ${complaintType}`,
-          timestamp: complaint.timestamp || Date.now() / 1000,
+          timestamp: toIsoTimestamp(complaint.timestamp),
           rawEvent: message
         });
       }
@@ -454,7 +472,7 @@ export class WebhookReceiver {
           type: 'delivery',
           messageId: mail.messageId,
           recipient,
-          timestamp: delivery.timestamp || Date.now() / 1000,
+          timestamp: toIsoTimestamp(delivery.timestamp),
           rawEvent: message
         });
       }
@@ -469,7 +487,7 @@ export class WebhookReceiver {
         userAgent: message.open?.userAgent || message.click?.userAgent,
         ip: message.open?.ip || message.click?.ip,
         link: message.click?.link,
-        timestamp: message.open?.timestamp || message.click?.timestamp || Date.now() / 1000,
+        timestamp: toIsoTimestamp(message.open?.timestamp || message.click?.timestamp),
         rawEvent: message
       });
     }
@@ -491,7 +509,7 @@ export class WebhookReceiver {
       type: eventType || 'unknown',
       messageId,
       recipient,
-      timestamp,
+      timestamp: toIsoTimestamp(timestamp),
       rawEvent: body
     };
 
@@ -545,7 +563,7 @@ export class WebhookReceiver {
           bounceType: bounce.Type === 'SoftBounce' ? 'soft' : 'hard',
           bounceSubType: bounce.BounceSubType,
           reason: bounce.Description || 'Bounce',
-          timestamp: new Date(bounce.BouncedAt || Date.now()).getTime() / 1000,
+          timestamp: toIsoTimestamp(bounce.BouncedAt),
           rawEvent: bounce
         });
       }
@@ -560,7 +578,7 @@ export class WebhookReceiver {
           recipient: complaint.Email,
           complaintType: 'abuse',
           reason: complaint.Description || 'Complaint',
-          timestamp: new Date(complaint.ComplainedAt || Date.now()).getTime() / 1000,
+          timestamp: toIsoTimestamp(complaint.ComplainedAt),
           rawEvent: complaint
         });
       }
@@ -573,7 +591,7 @@ export class WebhookReceiver {
           type: 'delivery',
           messageId: delivery.MessageID,
           recipient: delivery.Email,
-          timestamp: new Date(delivery.DeliveredAt || Date.now()).getTime() / 1000,
+          timestamp: toIsoTimestamp(delivery.DeliveredAt),
           rawEvent: delivery
         });
       }
@@ -588,7 +606,7 @@ export class WebhookReceiver {
         provider: 'generic' as const,
         ...(evt as Record<string, unknown>),
         type: (evt as { type?: string }).type || 'unknown',
-        timestamp: (evt as { timestamp?: number }).timestamp || Date.now() / 1000,
+        timestamp: toIsoTimestamp((evt as { timestamp?: number | string }).timestamp),
         rawEvent: evt
       }));
     }
@@ -603,7 +621,7 @@ export class WebhookReceiver {
         recipient: evt.recipient || evt.email,
         bounceType: (evt.bounceType || evt.bounce_type) as BounceType | undefined,
         complaintType: (evt.complaintType || evt.complaint_type) as ComplaintType | undefined,
-        timestamp: evt.timestamp || Date.now() / 1000,
+        timestamp: toIsoTimestamp(evt.timestamp),
         rawEvent: evt
       }));
     }
@@ -614,7 +632,7 @@ export class WebhookReceiver {
         type: genericBody.type || 'unknown',
         messageId: genericBody.messageId || genericBody.message_id,
         recipient: genericBody.recipient || genericBody.email,
-        timestamp: genericBody.timestamp || Date.now() / 1000,
+        timestamp: toIsoTimestamp(genericBody.timestamp),
         rawEvent: genericBody
       }
     ];
@@ -650,7 +668,7 @@ export class WebhookReceiver {
   private _addEventLog(event: WebhookEvent): void {
     this._eventLog.push({
       ...event,
-      loggedAt: Date.now()
+      loggedAt: new Date().toISOString()
     });
 
     if (this._eventLog.length > this.maxEventLogSize) {

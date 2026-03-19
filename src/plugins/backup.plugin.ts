@@ -93,7 +93,7 @@ export interface BackupPluginConfig {
 export interface BackupMetadataRecord {
   id: string;
   type: BackupType;
-  timestamp: number;
+  timestamp: string;
   resources: string[];
   driverInfo: UploadResult | UploadResult[];
   size: number;
@@ -106,13 +106,16 @@ export interface BackupMetadataRecord {
   createdAt: string;
 }
 
+const toEpoch = (value: string | number): number =>
+  typeof value === 'number' ? value : new Date(value).getTime();
+
 export interface BackupResult {
   id: string;
   type: BackupType;
   size: number;
   duration: number;
   checksum: string;
-  driverInfo: UploadResult;
+  driverInfo: UploadResult | UploadResult[];
 }
 
 export interface RestoredResourceInfo {
@@ -280,7 +283,7 @@ export class BackupPlugin extends Plugin {
       attributes: {
         id: 'string|required',
         type: 'string|required',
-        timestamp: 'number|required',
+        timestamp: 'datetime|required',
         resources: 'json|required',
         driverInfo: 'json|required',
         size: 'number|default:0',
@@ -290,9 +293,9 @@ export class BackupPlugin extends Plugin {
         status: 'string|required',
         error: 'string|default:null',
         duration: 'number|default:0',
-        createdAt: 'string|required'
+        createdAt: 'dateonly|required'
       },
-      behavior: 'body-overflow',
+      behavior: 'body-only',
       timestamps: true
     }));
 
@@ -398,7 +401,7 @@ export class BackupPlugin extends Plugin {
           size: totalSize,
           duration,
           checksum,
-          driverInfo: Array.isArray(uploadResult) ? uploadResult[0]! : uploadResult
+          driverInfo: uploadResult
         };
 
       } finally {
@@ -435,7 +438,7 @@ export class BackupPlugin extends Plugin {
     const metadata: BackupMetadataRecord = {
       id: backupId,
       type,
-      timestamp: Date.now(),
+      timestamp: now.toISOString(),
       resources: [],
       driverInfo: {},
       size: 0,
@@ -475,7 +478,7 @@ export class BackupPlugin extends Plugin {
 
     return {
       type,
-      timestamp: Date.now(),
+      timestamp: new Date().toISOString(),
       resources: filteredResources,
       compression: this.config.compression,
       encrypted: !!this.config.encryption,
@@ -965,7 +968,7 @@ export class BackupPlugin extends Plugin {
       };
 
       for (const backup of (allBackups as unknown as BackupMetadataRecord[])) {
-        const age = now - backup.timestamp;
+        const age = now - toEpoch(backup.timestamp);
 
         if (age <= msPerDay * this.config.retention.daily) {
           categorized.daily!.push(backup);
@@ -984,7 +987,7 @@ export class BackupPlugin extends Plugin {
 
       const weeklyByWeek = new Map<number, BackupMetadataRecord>();
       for (const backup of categorized.weekly!) {
-        const weekNum = Math.floor((now - backup.timestamp) / msPerWeek);
+        const weekNum = Math.floor((now - toEpoch(backup.timestamp)) / msPerWeek);
         if (!weeklyByWeek.has(weekNum)) {
           weeklyByWeek.set(weekNum, backup);
           toKeep.add(backup.id);
@@ -993,7 +996,7 @@ export class BackupPlugin extends Plugin {
 
       const monthlyByMonth = new Map<number, BackupMetadataRecord>();
       for (const backup of categorized.monthly!) {
-        const monthNum = Math.floor((now - backup.timestamp) / msPerMonth);
+        const monthNum = Math.floor((now - toEpoch(backup.timestamp)) / msPerMonth);
         if (!monthlyByMonth.has(monthNum)) {
           monthlyByMonth.set(monthNum, backup);
           toKeep.add(backup.id);
@@ -1002,7 +1005,7 @@ export class BackupPlugin extends Plugin {
 
       const yearlyByYear = new Map<number, BackupMetadataRecord>();
       for (const backup of categorized.yearly!) {
-        const yearNum = Math.floor((now - backup.timestamp) / msPerYear);
+        const yearNum = Math.floor((now - toEpoch(backup.timestamp)) / msPerYear);
         if (!yearlyByYear.has(yearNum)) {
           yearlyByYear.set(yearNum, backup);
           toKeep.add(backup.id);

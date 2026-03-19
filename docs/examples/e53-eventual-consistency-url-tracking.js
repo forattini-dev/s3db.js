@@ -30,7 +30,7 @@ async function main() {
       id: 'string|required',           // short code (e.g., 'abc123')
       url: 'string|required',          // original URL
       clicksCount: 'number|default:0', // total clicks (managed by plugin)
-      createdAt: 'string|required',
+      createdAt: 'datetime|required',
       createdBy: 'string|optional'
     }
   });
@@ -60,7 +60,7 @@ async function main() {
       ip: 'string|optional',
       userAgent: 'string|optional',
       referer: 'string|optional',
-      timestamp: 'string|required'
+      timestamp: 'datetime|required'
     },
     hooks: {
       // ⚠️ IMPORTANT: Use function (not arrow) to access 'this'

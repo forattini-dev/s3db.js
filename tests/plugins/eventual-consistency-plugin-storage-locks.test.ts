@@ -48,6 +48,8 @@ describe('EventualConsistencyPlugin - PluginStorage Locks', () => {
       // Create record and add clicks
       await urls.insert({ id: 'url1', clicks: 100 });
       await urls.add('url1', 'clicks', 50);
+      const consolidation = await urls.consolidate('url1', 'clicks');
+      expect(consolidation.transactionsApplied).toBe(1);
 
       // Get storage instance
       const storage = plugin.getStorage();
@@ -374,7 +376,7 @@ describe('EventualConsistencyPlugin - PluginStorage Locks', () => {
 
       // The important thing: GC should work
       const handler = plugin.fieldHandlers.get('urls').get('clicks');
-      await plugin._runGarbageCollectionForHandler(handler, 'urls', 'clicks');
+      await plugin._runGC(handler, 'urls', 'clicks');
 
       // GC should complete without errors
       expect(true).toBe(true);
@@ -460,6 +462,8 @@ describe('EventualConsistencyPlugin - PluginStorage Locks', () => {
       ];
 
       await Promise.all(operations);
+      const consolidation = await urls.consolidate('url1', 'clicks');
+      expect(consolidation.transactionsApplied).toBe(3);
 
       // Wait for async consolidation to complete (locks + processing)
       await new Promise(resolve => setTimeout(resolve, 500));

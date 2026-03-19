@@ -41,7 +41,7 @@ export interface RelayConfig {
 export interface WebhookEvent {
   type: string;
   messageId: string;
-  timestamp: number;
+  timestamp: string;
   bounceType?: BounceType;
   complaintType?: ComplaintType;
   reason?: string;

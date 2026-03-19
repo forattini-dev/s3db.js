@@ -72,7 +72,7 @@ async function analyzeSEO() {
       seoScore: 'object|optional',         // Score + recommendations
 
       // Metadata
-      analyzedAt: 'string|required',
+      analyzedAt: 'datetime|required',
       analysisVersion: 'string|optional'
     }
   })

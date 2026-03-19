@@ -16,7 +16,7 @@ const main = async () => {
       attributes: {
         name: 'string|required',
         email: 'string|required',
-        createdAt: 'string|optional'
+        createdAt: 'datetime|optional'
       },
       idGenerator: uuidv4 // Pass the uuid function directly
     });

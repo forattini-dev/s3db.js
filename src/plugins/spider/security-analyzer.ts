@@ -91,8 +91,8 @@ export interface WebSocketInfo {
   protocols: string[];
   messageCount: number;
   readyState: number;
-  messages: Array<{ type: string; data: string; timestamp: number }>;
-  timestamp: number;
+  messages: Array<{ type: string; data: string; timestamp: string }>;
+  timestamp: string;
 }
 
 export interface WebSocketAnalysis {
@@ -730,7 +730,7 @@ export class SecurityAnalyzer {
                 protocols: Array.isArray(protocols) ? protocols : protocols ? [protocols] : [],
                 messages: [],
                 readyState: this.readyState,
-                timestamp: Date.now()
+                timestamp: new Date().toISOString()
               };
               wsConnections.push(wsInfo);
 
@@ -739,7 +739,7 @@ export class SecurityAnalyzer {
                 wsInfo.messages.push({
                   type: 'sent',
                   data: typeof data === 'string' ? data : '[binary data]',
-                  timestamp: Date.now()
+                  timestamp: new Date().toISOString()
                 });
                 return originalSend(data);
               };
@@ -748,7 +748,7 @@ export class SecurityAnalyzer {
                 wsInfo.messages.push({
                   type: 'received',
                   data: typeof event.data === 'string' ? event.data : '[binary data]',
-                  timestamp: Date.now()
+                  timestamp: new Date().toISOString()
                 });
               });
 

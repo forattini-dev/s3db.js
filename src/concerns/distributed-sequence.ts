@@ -11,9 +11,9 @@ export interface SequenceDefaults {
 export interface SequenceData {
   value: number;
   name: string;
-  createdAt: number;
-  updatedAt?: number;
-  resetAt?: number;
+  createdAt: string;
+  updatedAt?: string;
+  resetAt?: string;
   [key: string]: unknown;
 }
 
@@ -96,7 +96,7 @@ export class DistributedSequence {
         await this.storage.set(valueKey, {
           value: initialValue + increment,
           name,
-          createdAt: Date.now(),
+          createdAt: new Date().toISOString(),
           ...metadata
         }, { behavior: 'body-only' });
         return initialValue;
@@ -106,7 +106,7 @@ export class DistributedSequence {
       await this.storage.set(valueKey, {
         ...data,
         value: currentValue + increment,
-        updatedAt: Date.now()
+        updatedAt: new Date().toISOString()
       }, { behavior: 'body-only' });
 
       return currentValue;
@@ -144,9 +144,9 @@ export class DistributedSequence {
       await this.storage.set(valueKey, {
         value,
         name,
-        createdAt: data?.createdAt || Date.now(),
-        updatedAt: Date.now(),
-        resetAt: Date.now(),
+        createdAt: data?.createdAt || new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+        resetAt: new Date().toISOString(),
         ...metadata
       }, { behavior: 'body-only' });
 

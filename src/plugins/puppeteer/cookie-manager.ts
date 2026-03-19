@@ -28,13 +28,23 @@ export interface SessionData {
     successCount: number;
     failCount: number;
     successRate: number;
-    lastUsed: number;
+    lastUsed: string;
   };
   metadata: {
-    createdAt: number;
-    expiresAt: number;
+    createdAt: string;
+    expiresAt: string;
     requestCount: number;
     age: number;
+  };
+}
+
+interface RawSessionData extends Omit<SessionData, 'reputation' | 'metadata'> {
+  reputation: SessionData['reputation'] & {
+    lastUsed: string | number;
+  };
+  metadata: SessionData['metadata'] & {
+    createdAt: string | number;
+    expiresAt: string | number;
   };
 }
 
@@ -105,10 +115,10 @@ interface Database {
 
 interface Resource {
   name: string;
-  get(id: string): Promise<SessionData | null>;
-  insert(data: Record<string, unknown>): Promise<SessionData>;
-  patch(id: string, data: Record<string, unknown>): Promise<SessionData>;
-  list(options: { limit: number }): Promise<SessionData[]>;
+  get(id: string): Promise<RawSessionData | null>;
+  insert(data: Record<string, unknown>): Promise<RawSessionData>;
+  patch(id: string, data: Record<string, unknown>): Promise<RawSessionData>;
+  list(options: { limit: number }): Promise<RawSessionData[]>;
 }
 
 interface Page {
@@ -172,13 +182,40 @@ export class CookieManager {
     });
   }
 
+  private _getTimestamp(value: string | number | undefined): number {
+    if (typeof value === 'number') return value;
+    if (typeof value === 'string') return new Date(value).getTime();
+    return 0;
+  }
+
+  private _normalizeSession(session: RawSessionData): SessionData {
+    return {
+      ...session,
+      reputation: {
+        ...session.reputation,
+        lastUsed: typeof session.reputation.lastUsed === 'number'
+          ? new Date(session.reputation.lastUsed).toISOString()
+          : session.reputation.lastUsed
+      },
+      metadata: {
+        ...session.metadata,
+        createdAt: typeof session.metadata.createdAt === 'number'
+          ? new Date(session.metadata.createdAt).toISOString()
+          : session.metadata.createdAt,
+        expiresAt: typeof session.metadata.expiresAt === 'number'
+          ? new Date(session.metadata.expiresAt).toISOString()
+          : session.metadata.expiresAt
+      }
+    };
+  }
+
   private async _loadAllSessions(): Promise<void> {
     if (!this.storage) return;
 
     const sessions = await this.storage.list({ limit: 10000 });
 
     for (const session of sessions) {
-      this.sessions.set(session.sessionId, session);
+      this.sessions.set(session.sessionId, this._normalizeSession(session));
     }
   }
 
@@ -189,6 +226,7 @@ export class CookieManager {
       try {
         session = await this.storage.get(sessionId) || undefined;
         if (session) {
+          session = this._normalizeSession(session);
           this.sessions.set(sessionId, session);
         }
       } catch {
@@ -204,7 +242,7 @@ export class CookieManager {
     await page.setCookie(...session.cookies);
 
     // Update last used
-    session.reputation.lastUsed = Date.now();
+    session.reputation.lastUsed = new Date().toISOString();
     session.metadata.requestCount++;
 
     this.plugin.emit('cookieManager.sessionLoaded', {
@@ -219,8 +257,10 @@ export class CookieManager {
     const cookies = await page.cookies();
     const url = new URL(page.url());
     const domain = url.hostname;
-    const now = Date.now();
-    const date = new Date().toISOString().split('T')[0];
+    const now = new Date();
+    const nowMs = now.getTime();
+    const nowIso = now.toISOString();
+    const date = nowIso.split('T')[0]!;
 
     let session = this.sessions.get(sessionId);
 
@@ -228,8 +268,8 @@ export class CookieManager {
       // Update existing session
       session.cookies = cookies;
       session.domain = domain;
-      session.date = date as string;
-      session.metadata.age = now - session.metadata.createdAt;
+      session.date = date;
+      session.metadata.age = nowMs - this._getTimestamp(session.metadata.createdAt);
 
       if (options.success !== undefined) {
         if (options.success) {
@@ -258,18 +298,21 @@ export class CookieManager {
           successCount: options.success ? 1 : 0,
           failCount: options.success === false ? 1 : 0,
           successRate: options.success ? 1 : (options.success === false ? 0 : 1),
-          lastUsed: now
+          lastUsed: nowIso
         },
         metadata: {
-          createdAt: now,
-          expiresAt: now + (this.config.farming.rotation.maxAge || 86400000),
+          createdAt: nowIso,
+          expiresAt: new Date(nowMs + (this.config.farming.rotation.maxAge || 86400000)).toISOString(),
           requestCount: 1,
           age: 0
         }
       };
 
       if (this.storage) {
-        await this.storage.insert(session as unknown as Record<string, unknown>);
+        await this.storage.insert({
+          id: sessionId,
+          ...(session as unknown as Record<string, unknown>)
+        });
       }
 
       this.sessions.set(sessionId, session);
@@ -459,21 +502,24 @@ export class CookieManager {
         sessionId: newSessionId,
         metadata: {
           ...oldSession.metadata,
-          createdAt: Date.now(),
+          createdAt: new Date().toISOString(),
           age: 0
         },
         reputation: {
           successCount: 0,
           failCount: 0,
           successRate: 1,
-          lastUsed: Date.now()
+          lastUsed: new Date().toISOString()
         }
       };
 
       this.sessions.set(newSessionId, newSession);
 
       if (this.storage) {
-        await this.storage.insert(newSession as unknown as Record<string, unknown>);
+        await this.storage.insert({
+          id: newSessionId,
+          ...(newSession as unknown as Record<string, unknown>)
+        });
       }
     }
 

@@ -144,8 +144,8 @@ reports: {
 // config/resources.js - DEPOIS (CORRETO)
 reports: {
   attributes: {
-    timestamp: 'string|required',
-    timestampDay: 'string|required',  // ✅ "2025-01-01" for partitioning
+    timestamp: 'datetime|required',
+    timestampDay: 'dateonly|required',  // ✅ "2025-01-01" for partitioning
     // ...
     summary: {  // ✅ Queryable metadata
       totalIPs: 'number|default:0',
@@ -156,7 +156,7 @@ reports: {
   },
   partitions: {
     byHost: { fields: { 'target.host': 'string' } },
-    byDay: { fields: { timestampDay: 'string' } }  // ✅ Partition by day
+    byDay: { fields: { timestampDay: 'dateonly' } }  // ✅ Partition by day
   },
   behavior: 'body-overflow'  // ✅ Metadata stays queryable
 }
@@ -164,13 +164,13 @@ reports: {
 // Same adjustment for the stages resource
 stages: {
   attributes: {
-    timestamp: 'string|required',
-    timestampDay: 'string|required',  // ✅ Day partition
+    timestamp: 'datetime|required',
+    timestampDay: 'dateonly|required',  // ✅ Day partition
     // ...
   },
   partitions: {
     byStage: { fields: { stageName: 'string' } },
-    byDay: { fields: { timestampDay: 'string' } }  // ✅ Efficient time-series lookup
+    byDay: { fields: { timestampDay: 'dateonly' } }  // ✅ Efficient time-series lookup
   }
 }
 ```

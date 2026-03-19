@@ -70,7 +70,7 @@ interface StoredGame {
   score1: number;
   score2: number;
   winner: string | null;
-  reportedAt: number;
+  reportedAt: string | number;
   metadata?: Record<string, unknown>;
 }
 
@@ -85,6 +85,25 @@ export class MatchManager {
 
   get resource() {
     return this.plugin.matchesResource;
+  }
+
+  private _toEpoch(value: string | number | null | undefined): number | null | undefined {
+    if (value === undefined) return undefined;
+    if (value === null) return null;
+    if (typeof value === 'number') return value;
+
+    const epoch = new Date(value).getTime();
+    return Number.isNaN(epoch) ? null : epoch;
+  }
+
+  private _normalizeMatch(match: MatchRecord | null): MatchRecord | null {
+    if (!match) return null;
+
+    return {
+      ...match,
+      startedAt: this._toEpoch(match.startedAt) ?? null,
+      completedAt: this._toEpoch(match.completedAt) ?? null
+    };
   }
 
   async create(data: MatchCreateData): Promise<MatchRecord> {
@@ -135,7 +154,7 @@ export class MatchManager {
 
     this.plugin.emit('plg:tournament:match-created', { match });
 
-    return match;
+    return this._normalizeMatch(match)!;
   }
 
   _determineInitialStatus(p1: string | null | undefined, p2: string | null | undefined): string {
@@ -145,17 +164,17 @@ export class MatchManager {
   }
 
   async get(id: string): Promise<MatchRecord | null> {
-    return this.resource.get(id);
+    return this._normalizeMatch(await this.resource.get(id));
   }
 
   async getByTournament(tournamentId: string, filters: MatchFilters = {}): Promise<MatchRecord[]> {
     const { phase, round, status, limit = 1000 } = filters;
 
-    let matches = await this.resource.listPartition({
+    let matches = (await this.resource.listPartition({
       partition: 'byTournament',
       partitionValues: { tournamentId },
       limit
-    });
+    })).map(match => this._normalizeMatch(match)!);
 
     if (phase) matches = matches.filter(m => m.phase === phase);
     if (round) matches = matches.filter(m => m.round === round);
@@ -213,7 +232,7 @@ export class MatchManager {
 
     await this.resource.update(matchId, {
       status: 'in-progress',
-      startedAt: Date.now()
+      startedAt: new Date().toISOString()
     });
 
     this.plugin.emit('plg:tournament:match-started', {
@@ -268,7 +287,7 @@ export class MatchManager {
       winnerId,
       loserId,
       status: 'completed',
-      completedAt: Date.now(),
+      completedAt: new Date().toISOString(),
       metadata: { ...existingMetadata, ...metadata }
     });
 
@@ -298,7 +317,7 @@ export class MatchManager {
       await this._advanceToMatch(match.loserNextMatchId, loserId, 'loser', match.tournamentId);
     }
 
-    return updatedMatch;
+    return this._normalizeMatch(updatedMatch)!;
   }
 
   async reportWalkover(matchId: string, winnerId: string, reason = ''): Promise<MatchRecord> {
@@ -318,7 +337,7 @@ export class MatchManager {
       winnerId,
       loserId,
       status: 'walkover',
-      completedAt: Date.now(),
+      completedAt: new Date().toISOString(),
       metadata: { ...existingMetadata, walkoverReason: reason }
     });
 
@@ -342,7 +361,7 @@ export class MatchManager {
       await this._advanceToMatch(match.loserNextMatchId, loserId, 'loser', match.tournamentId);
     }
 
-    return updatedMatch;
+    return this._normalizeMatch(updatedMatch)!;
   }
 
   async reportGame(matchId: string, game: GameResult): Promise<MatchRecord> {
@@ -362,7 +381,7 @@ export class MatchManager {
       score1,
       score2,
       winner: score1 > score2 ? match.participant1Id : (score2 > score1 ? match.participant2Id : null),
-      reportedAt: Date.now(),
+      reportedAt: new Date().toISOString(),
       metadata
     };
 
@@ -397,7 +416,7 @@ export class MatchManager {
     });
 
     const result = await this.resource.get(matchId);
-    return result!;
+    return this._normalizeMatch(result)!;
   }
 
   async getUpcoming(tournamentId: string, limit = 10): Promise<MatchRecord[]> {

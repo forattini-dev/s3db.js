@@ -387,7 +387,7 @@ const metrics = await puppeteerPlugin.performanceManager.collectMetrics(page);
 // Store in database
 await db.getResource('seo_metrics').insert({
   url: page.url(),
-  timestamp: Date.now(),
+  timestamp: metrics.timestamp,
   lcp: metrics.coreWebVitals.lcp,
   cls: metrics.coreWebVitals.cls,
   fid: metrics.coreWebVitals.fid,
@@ -587,7 +587,8 @@ const perfResource = await db.createResource({
   name: 'performance_history',
   attributes: {
     url: 'string|required',
-    timestamp: 'number|required',
+    timestamp: 'datetime|required',
+    date: 'dateonly|required',
     score: 'number',
     lcp: 'number',
     cls: 'number',
@@ -595,7 +596,7 @@ const perfResource = await db.createResource({
   },
   partitions: {
     byUrl: { fields: { url: 'string' } },
-    byDate: { fields: { date: 'string' } }
+    byDate: { fields: { date: 'dateonly' } }
   }
 });
 ```

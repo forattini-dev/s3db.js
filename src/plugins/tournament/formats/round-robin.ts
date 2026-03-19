@@ -93,7 +93,8 @@ export class RoundRobinFormat extends BaseFormat {
 
   onMatchComplete(bracket: Bracket, completedMatch: Match): OnMatchCompleteResult {
     const newMatches: Match[] = [];
-    const allMatches = bracket.schedule!.flatMap(round => round.matches);
+    const schedule = bracket.schedule || [];
+    const allMatches = schedule.flatMap(round => round.matches);
 
     const matchKey = (completedMatch.metadata?.matchRef as string) || completedMatch.id;
     const scheduleMatch = allMatches.find(m => m.id === matchKey);
@@ -104,15 +105,15 @@ export class RoundRobinFormat extends BaseFormat {
       scheduleMatch.score2 = completedMatch.score2;
     }
 
-    const currentRoundMatches = allMatches.filter(m => m.round === bracket.currentRound);
+    const currentRound = bracket.currentRound || 1;
+    const currentRoundMatches = allMatches.filter(m => m.round === currentRound);
     const completedInRound = currentRoundMatches.filter(m =>
       m.status === 'completed' || m.id === matchKey
     );
 
-    if (completedInRound.length === currentRoundMatches.length) {
-      const nextRoundIndex = bracket.currentRound!;
-      if (nextRoundIndex < bracket.schedule!.length) {
-        bracket.currentRound = bracket.currentRound! + 1;
+    if (currentRoundMatches.length > 0 && completedInRound.length === currentRoundMatches.length) {
+      if (currentRound < schedule.length) {
+        bracket.currentRound = currentRound + 1;
       }
     }
 
@@ -121,7 +122,7 @@ export class RoundRobinFormat extends BaseFormat {
 
   override getNextMatches(bracket: Bracket, completedMatches: Match[]): Match[] {
     const completedIds = new Set(completedMatches.map(m => m.id));
-    const allMatches = bracket.schedule!.flatMap(round => round.matches);
+    const allMatches = (bracket.schedule || []).flatMap(round => round.matches);
 
     return allMatches
       .filter(m => !completedIds.has(m.id) && m.round === bracket.currentRound)
@@ -166,7 +167,8 @@ export class RoundRobinFormat extends BaseFormat {
   }
 
   isComplete(bracket: Bracket, matches: Match[]): boolean {
-    const totalMatchesExpected = bracket.schedule!.flatMap(r => r.matches).length;
+    const scheduledMatches = (bracket.schedule || []).flatMap(r => r.matches);
+    const totalMatchesExpected = scheduledMatches.length || matches.length;
     const completedMatches = matches.filter(m => m.status === 'completed');
 
     return completedMatches.length >= totalMatchesExpected;

@@ -10,13 +10,13 @@ async function ensureFailbanResources(database, manager) {
         ip: 'string|required',
         reason: 'string',
         violations: 'number',
-        bannedAt: 'string',
-        expiresAt: 'string|required',
+        bannedAt: 'datetime',
+        expiresAt: 'datetime|required',
         expiresAtCohort: 'string|optional',
         metadata: {
           userAgent: 'string',
           path: 'string',
-          lastViolation: 'string'
+          lastViolation: 'datetime'
         }
       },
       behavior: 'body-overflow',
@@ -35,7 +35,7 @@ async function ensureFailbanResources(database, manager) {
       name: violationsName,
       attributes: {
         ip: 'string|required',
-        timestamp: 'string|required',
+        timestamp: 'datetime|required',
         type: 'string',
         path: 'string',
         userAgent: 'string'

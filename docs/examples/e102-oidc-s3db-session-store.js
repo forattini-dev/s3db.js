@@ -54,8 +54,8 @@ try {
       name: 'oidc_sessions',
       attributes: {
         // Session metadata
-        expiresAt: 'string|required',      // Expiration time (ISO 8601)
-        lastActivity: 'string',             // For rolling session duration
+        expiresAt: 'datetime|required',     // Expiration time (ISO 8601)
+        lastActivity: 'datetime',           // For rolling session duration
 
         // User info (from OIDC token claims)
         userId: 'string',

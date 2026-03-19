@@ -9,9 +9,9 @@ import type {
   AssetsAnalysis
 } from './seo-analyzer.js';
 
-type ReckerSeoReport = {
+type RawReckerSeoReport = {
   url: string;
-  timestamp: Date;
+  timestamp: Date | string;
   grade: string;
   score: number;
   summary: {
@@ -165,7 +165,11 @@ type ReckerAnalyzeSeo = (html: string, options?: {
     excludeRules?: string[];
     minSeverity?: 'error' | 'warning' | 'info';
   };
-}) => Promise<ReckerSeoReport>;
+}) => Promise<RawReckerSeoReport>;
+
+export interface ReckerSeoReport extends Omit<RawReckerSeoReport, 'timestamp'> {
+  timestamp: string;
+}
 
 const ACTIVITY_TO_CATEGORY: Record<string, string> = {
   'seo_meta_tags': 'meta',
@@ -283,7 +287,7 @@ export class ReckerSEOAdapter {
     return Array.from(categories);
   }
 
-  private _mapReckerToAnalysisResult(report: ReckerSeoReport, baseUrl: string): AnalysisResult {
+  private _mapReckerToAnalysisResult(report: RawReckerSeoReport, baseUrl: string): AnalysisResult {
     const metaTags: Record<string, string> = {};
 
     if (report.title?.text) {
@@ -339,7 +343,7 @@ export class ReckerSEOAdapter {
     };
   }
 
-  private _mapOnPageSEO(report: ReckerSeoReport): OnPageSEOAnalysis | null {
+  private _mapOnPageSEO(report: RawReckerSeoReport): OnPageSEOAnalysis | null {
     const recommendations: string[] = [];
 
     for (const issue of report.summary.topIssues) {
@@ -425,7 +429,7 @@ export class ReckerSEOAdapter {
     };
   }
 
-  private _mapAccessibility(report: ReckerSeoReport): AccessibilityAnalysis | null {
+  private _mapAccessibility(report: RawReckerSeoReport): AccessibilityAnalysis | null {
     const recommendations: string[] = [];
 
     const accessibilityChecks = report.checks.filter(c => c.category === 'accessibility');
@@ -486,7 +490,7 @@ export class ReckerSEOAdapter {
     };
   }
 
-  private _mapInternalLinks(report: ReckerSeoReport): InternalLinksAnalysis | null {
+  private _mapInternalLinks(report: RawReckerSeoReport): InternalLinksAnalysis | null {
     const recommendations: string[] = [];
 
     const linkChecks = report.checks.filter(c => c.category === 'links');
@@ -546,7 +550,7 @@ export class ReckerSEOAdapter {
     };
   }
 
-  private _mapKeywordOptimization(report: ReckerSeoReport): KeywordOptimizationAnalysis | null {
+  private _mapKeywordOptimization(report: RawReckerSeoReport): KeywordOptimizationAnalysis | null {
     const recommendations: string[] = [];
 
     const contentChecks = report.checks.filter(c => c.category === 'content');
@@ -576,7 +580,7 @@ export class ReckerSEOAdapter {
     };
   }
 
-  private _mapSEOScore(report: ReckerSeoReport): SEOScore {
+  private _mapSEOScore(report: RawReckerSeoReport): SEOScore {
     return {
       score: report.score,
       maxScore: 100,
@@ -588,6 +592,15 @@ export class ReckerSEOAdapter {
     return null;
   }
 
+  private _normalizeDetailedReport(report: RawReckerSeoReport): ReckerSeoReport {
+    return {
+      ...report,
+      timestamp: report.timestamp instanceof Date
+        ? report.timestamp.toISOString()
+        : new Date(report.timestamp).toISOString()
+    };
+  }
+
   async getDetailedReport(html: string, baseUrl: string): Promise<ReckerSeoReport | null> {
     const isReckerAvailable = await this._checkReckerAvailability();
 
@@ -595,10 +608,12 @@ export class ReckerSEOAdapter {
       return null;
     }
 
-    return this.analyzeSeo(html, {
+    const report = await this.analyzeSeo(html, {
       baseUrl,
       analyzeContent: true
     });
+
+    return this._normalizeDetailedReport(report);
   }
 }
 

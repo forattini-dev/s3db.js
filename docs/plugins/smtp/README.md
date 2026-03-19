@@ -73,7 +73,7 @@ console.log(`Email sent with ID: ${result.id}`);
 pnpm install nodemailer
 ```
 
-**Optional (for Server Mode):**
+**Optional (for advanced Server Mode fallback):**
 ```bash
 pnpm install mailparser smtp-server
 ```
@@ -82,7 +82,7 @@ pnpm install mailparser smtp-server
 |------------|---------|---------|
 | `nodemailer` | `^6.9.0` | SMTP connection handling |
 | `mailparser` | `^3.6.0` | Parse incoming emails (server mode) |
-| `smtp-server` | `^3.13.0` | In-process SMTP listener (server mode) |
+| `smtp-server` | `^3.13.0` | Legacy SMTP server backend used only when `onMailFrom` callback support is needed |
 
 ---
 
@@ -151,6 +151,7 @@ await plugin.processWebhook(payload, headers);
 // Register webhook handler
 plugin.onWebhookEvent('bounce', async (event) => {
   console.log(`Bounced: ${event.recipient}`);
+  console.log(`At: ${event.timestamp}`);
 });
 
 // Register template
@@ -219,17 +220,22 @@ new SMTPPlugin({
   mode: 'server',
   serverPort: 25,
   serverHost: '0.0.0.0',
-  serverAuth: {
-    username: 'postmaster',
-    password: process.env.SMTP_PASSWORD
+  requireAuth: true,
+  authHandler: async (auth) => {
+    if (auth.user === 'postmaster' && auth.pass === process.env.SMTP_PASSWORD) {
+      return { user: auth.user };
+    }
+    throw new Error('Invalid credentials');
   },
   emailResource: 'received_emails',
   onRcptTo: async (address) => {
-    const user = await db.resources.users.get(address);
+    const user = await db.resources.users.get(address.address);
     return user?.enabled || false;
   }
 })
 ```
+
+By default, `Server Mode` uses Raffel's SMTP adapter. If you configure `onMailFrom`, s3db.js falls back to the legacy `smtp-server` backend because Raffel does not currently expose a sender-validation hook at `MAIL FROM`.
 
 ---
 

@@ -59,6 +59,62 @@ export type {
   WebSocketChannelsConfig
 };
 
+export interface WebSocketClientInfo {
+  id: string;
+  user: unknown;
+  subscriptions: string[];
+  connectedAt: string;
+  metadata: Record<string, unknown>;
+}
+
+export interface WebSocketPresenceMember {
+  id: string;
+  userId?: string;
+  info: Record<string, unknown>;
+  joinedAt: string;
+}
+
+export interface WebSocketChannelInfo {
+  name: string;
+  type: string;
+  memberCount: number;
+  members?: WebSocketPresenceMember[];
+}
+
+export interface WebSocketChannelStats {
+  channels: number;
+  totalMembers: number;
+  byType: {
+    public: number;
+    private: number;
+    presence: number;
+    queue: number;
+  };
+  clients: number;
+}
+
+export interface WebSocketChannelSummary {
+  name: string;
+  type: string;
+  memberCount: number;
+}
+
+export interface WebSocketServerInfo {
+  isRunning: boolean;
+  port: number;
+  host: string;
+  clients: number;
+  subscriptions: Record<string, number>;
+  channels: WebSocketChannelStats | null;
+  metrics: WebSocketMetrics;
+}
+
+export interface WebSocketTicket {
+  id: string;
+  userId: string;
+  expiresAt: number;
+}
+
 type RaffelWebSocketAdapter = {
   start(): Promise<void>;
   stop(): Promise<void>;
@@ -1308,7 +1364,7 @@ export class WebSocketServer extends EventEmitter {
   /**
    * Get server info
    */
-  getInfo(): any {
+  getInfo(): WebSocketServerInfo {
     return {
       isRunning: this.adapter !== null,
       port: this.port,
@@ -1325,7 +1381,7 @@ export class WebSocketServer extends EventEmitter {
   /**
    * Get connected clients
    */
-  getClients(): any[] {
+  getClients(): WebSocketClientInfo[] {
     if (!this.adapter) return [];
 
     return this.adapter.getClients().map(client => ({
@@ -1362,7 +1418,7 @@ export class WebSocketServer extends EventEmitter {
    * Get channel stats from raffel ChannelManager
    * @private
    */
-  private _getChannelStats(): any {
+  private _getChannelStats(): WebSocketChannelStats | null {
     if (!this.adapter?.channels) return null;
 
     const channels = this.adapter.channels.getChannels();
@@ -1386,10 +1442,17 @@ export class WebSocketServer extends EventEmitter {
     };
   }
 
+  private _normalizePresenceMember(member: { id: string; userId?: string; info: Record<string, unknown>; joinedAt: number }): WebSocketPresenceMember {
+    return {
+      ...member,
+      joinedAt: new Date(member.joinedAt).toISOString()
+    };
+  }
+
   /**
    * Get channel info
    */
-  getChannelInfo(channelName: string): any | null {
+  getChannelInfo(channelName: string): WebSocketChannelInfo | null {
     if (!this.adapter?.channels) return null;
     if (!this.adapter.channels.hasChannel(channelName)) return null;
 
@@ -1398,14 +1461,16 @@ export class WebSocketServer extends EventEmitter {
       name: channelName,
       type: this._getChannelType(channelName),
       memberCount: this.adapter.channels.getSubscriberCount(channelName),
-      members: isPresence ? this.adapter.channels.getMembers(channelName) : undefined
+      members: isPresence
+        ? this.adapter.channels.getMembers(channelName).map(member => this._normalizePresenceMember(member))
+        : undefined
     };
   }
 
   /**
    * List all channels
    */
-  listChannels(options: { type?: string; prefix?: string } = {}): any[] {
+  listChannels(options: { type?: string; prefix?: string } = {}): WebSocketChannelSummary[] {
     if (!this.adapter?.channels) return [];
 
     return this.adapter.channels.getChannels()
@@ -1426,14 +1491,14 @@ export class WebSocketServer extends EventEmitter {
   /**
    * Get members of a presence channel
    */
-  getChannelMembers(channelName: string): any[] {
-    return this.adapter?.channels?.getMembers(channelName) || [];
+  getChannelMembers(channelName: string): WebSocketPresenceMember[] {
+    return this.adapter?.channels?.getMembers(channelName).map(member => this._normalizePresenceMember(member)) || [];
   }
 
   /**
    * Get channel stats
    */
-  getChannelStats(): any {
+  getChannelStats(): WebSocketChannelStats {
     return this._getChannelStats() || {
       channels: 0,
       totalMembers: 0,
@@ -1454,7 +1519,7 @@ export class WebSocketServer extends EventEmitter {
    * The client connects with ?ticket=<ticketId>.
    * Requires ticketAuth to be enabled.
    */
-  async generateTicket(userId: string, options?: { ttl?: number; permissions?: string[]; metadata?: Record<string, unknown> }): Promise<{ id: string; userId: string; expiresAt: number }> {
+  async generateTicket(userId: string, options?: { ttl?: number; permissions?: string[]; metadata?: Record<string, unknown> }): Promise<WebSocketTicket> {
     if (!this._ticketStore) {
       throw new Error('Ticket auth is not enabled. Set ticketAuth: { enabled: true } in WebSocket options.');
     }

@@ -753,7 +753,7 @@ console.log(stats);
   age: 86400000,           // 24 hours
   requestCount: 150,
   successRate: 0.95,       // 95% success
-  lastUsed: Date,
+  lastUsed: '2024-11-14T12:30:00.000Z',
   reputation: 'good',      // 'good', 'fair', 'poor'
   domains: ['example.com', 'api.example.com']
 }

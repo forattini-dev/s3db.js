@@ -121,10 +121,10 @@ async function main() {
     const progressInterval = setInterval(async () => {
       const status = await spider.getQueueStatus();
       console.log(
-        `  ⏳ Pending: ${status.pending} | Completed: ${status.completed} | Active: ${status.activeWorkers}`
+        `  ⏳ Pending: ${status.pending} | Completed: ${status.completed} | Processing: ${status.processing}`
       );
 
-      if (status.pending === 0 && status.activeWorkers === 0) {
+      if (status.pending === 0 && status.processing === 0) {
         clearInterval(progressInterval);
         console.log('✅ All URLs processed!\n');
       }
@@ -134,7 +134,7 @@ async function main() {
     await new Promise((resolve) => {
       const checkInterval = setInterval(async () => {
         const status = await spider.getQueueStatus();
-        if (status.pending === 0 && status.activeWorkers === 0) {
+        if (status.pending === 0 && status.processing === 0) {
           clearInterval(checkInterval);
           resolve();
         }

@@ -70,6 +70,9 @@ describe('StateMachinePlugin - Persistence', () => {
   });
 
   it('should persist state changes to database', async () => {
+    expect(database.resources[plugin.config.stateResource].behavior).toBe('body-only');
+    expect(database.resources[plugin.config.transitionLogResource].behavior).toBe('body-only');
+
     await plugin.initializeEntity('order_processing', 'order1');
     await plugin.send('order_processing', 'order1', 'CONFIRM');
 
@@ -98,6 +101,7 @@ describe('StateMachinePlugin - Persistence', () => {
     expect(transitions[0].toState).toBe('confirmed');
     expect(transitions[0].event).toBe('CONFIRM');
     expect(transitions[0].context).toEqual({ test: 'data' });
+    expect(typeof transitions[0].timestamp).toBe('string');
   });
 
   it('should recover state from persistence', async () => {

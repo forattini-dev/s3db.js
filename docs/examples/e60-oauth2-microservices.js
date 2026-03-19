@@ -69,7 +69,7 @@ async function createSSOService() {
       algorithm: 'string',
       use: 'string',
       active: 'boolean',
-      createdAt: 'string'
+      createdAt: 'datetime'
     },
     timestamps: true
   });
@@ -100,7 +100,7 @@ async function createSSOService() {
       nonce: 'string',
       codeChallenge: 'string',
       codeChallengeMethod: 'string',
-      expiresAt: 'number|required',
+      expiresAt: 'datetime|required',
       audience: 'string'
     },
     timestamps: true

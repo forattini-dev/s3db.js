@@ -81,4 +81,23 @@ describe('S3QueuePlugin - Enqueue Messages', () => {
     expect(event.id).toBeDefined();
     expect(event.queueId).toBeDefined();
   });
+
+  test('should store dispatch ticket publishedAt as ISO string', async () => {
+    await resource.enqueue({
+      to: 'user@example.com',
+      subject: 'Test',
+      body: 'Hello World'
+    });
+
+    const queueResource = database.resources['emails_queue'];
+    const queueEntries = await queueResource.list();
+
+    const published = await plugin.publishDispatchTickets([queueEntries[0]]);
+    expect(published).toBe(1);
+
+    const tickets = await plugin.getAvailableTickets();
+    expect(tickets.length).toBe(1);
+    expect(typeof tickets[0].publishedAt).toBe('string');
+    expect(new Date(tickets[0].publishedAt).toISOString()).toBe(tickets[0].publishedAt);
+  });
 });

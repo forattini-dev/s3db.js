@@ -111,7 +111,7 @@ describe('SchedulerPlugin - Management & Scheduling', () => {
         schedule: '*/5 * * * *',
         description: 'Test job that runs every 5 minutes',
         lastRun: null,
-        nextRun: expect.any(Date),
+        nextRun: expect.any(String),
         isRunning: false,
         statistics: {
           totalRuns: 0,
@@ -187,8 +187,8 @@ describe('SchedulerPlugin - Management & Scheduling', () => {
       expect(history[0]).toEqual({
         id: expect.any(String),
         status: 'success',
-        startTime: expect.any(Date),
-        endTime: expect.any(Date),
+        startTime: expect.any(String),
+        endTime: expect.any(String),
         duration: expect.any(Number),
         result: { success: true },
         error: null,

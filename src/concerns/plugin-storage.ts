@@ -152,9 +152,9 @@ export interface PluginSequenceInfo {
   name: string;
   value: number;
   resourceName?: string | null;
-  createdAt: number;
-  updatedAt?: number;
-  resetAt?: number;
+  createdAt: string;
+  updatedAt?: string;
+  resetAt?: string;
 }
 
 export interface BehaviorResult {
@@ -957,7 +957,7 @@ export class PluginStorage {
           value: initialValue + increment,
           name,
           resourceName,
-          createdAt: this._now()
+          createdAt: new Date(this._now()).toISOString()
         }, { behavior: 'body-only' });
         return initialValue;
       }
@@ -966,7 +966,7 @@ export class PluginStorage {
       await this.set(valueKey, {
         ...data,
         value: currentValue + increment,
-        updatedAt: this._now()
+        updatedAt: new Date(this._now()).toISOString()
       }, { behavior: 'body-only' });
 
       return currentValue;
@@ -1071,9 +1071,9 @@ export class PluginStorage {
         value,
         name,
         resourceName,
-        createdAt: (data?.createdAt as number) || this._now(),
-        updatedAt: this._now(),
-        resetAt: this._now()
+        createdAt: (data?.createdAt as string) || new Date(this._now()).toISOString(),
+        updatedAt: new Date(this._now()).toISOString(),
+        resetAt: new Date(this._now()).toISOString()
       }, { behavior: 'body-only' });
 
       return true;

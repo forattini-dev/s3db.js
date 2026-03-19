@@ -62,6 +62,60 @@ export interface TfStatePluginConfig {
   [key: string]: unknown;
 }
 
+export interface TfStateDiffSummary {
+  addedCount: number;
+  modifiedCount: number;
+  deletedCount: number;
+}
+
+export interface TfStateDiffSummaryRecord {
+  id: string;
+  oldSerial: number;
+  newSerial: number;
+  calculatedAt: string;
+  summary: TfStateDiffSummary;
+}
+
+export interface TfStateDiffLookbackOptions {
+  lookback?: number;
+  includeDetails?: boolean;
+}
+
+export interface TfStateDiffTimeline {
+  sourceFile: string;
+  totalDiffs: number;
+  summary: {
+    totalAdded: number;
+    totalModified: number;
+    totalDeleted: number;
+    serialRange: {
+      oldest: number | null;
+      newest: number | null;
+    };
+    timeRange: {
+      first: string | null;
+      last: string | null;
+    };
+  };
+  diffs: TfStateDiffSummaryRecord[];
+}
+
+export interface TfStateStats {
+  totalStates: number;
+  totalResources: number;
+  totalDiffs: number;
+  latestSerial: number | null;
+  providers: Record<string, number>;
+  types: Record<string, number>;
+  statesProcessed: number;
+  resourcesExtracted: number;
+  resourcesInserted: number;
+  diffsCalculated: number;
+  errors: number;
+  partitionCacheHits: number;
+  partitionQueriesOptimized: number;
+}
+
 export class TfStatePlugin extends Plugin {
   driverType: string | null;
   driverConfig: any;
@@ -243,8 +297,8 @@ export class TfStatePlugin extends Plugin {
           latestSerial: 'number',
           latestStateId: 'string',
           totalStates: 'number',
-          firstImportedAt: 'number',
-          lastImportedAt: 'number',
+          firstImportedAt: 'datetime',
+          lastImportedAt: 'datetime',
           metadata: 'json'
         },
         timestamps: true,
@@ -278,7 +332,7 @@ export class TfStatePlugin extends Plugin {
           stateVersion: 'number|required',
           resourceCount: 'number',
           sha256Hash: 'string|required',
-          importedAt: 'number|required'
+          importedAt: 'datetime|required'
         },
         timestamps: true,
         asyncPartitions: this.asyncPartitions,
@@ -320,8 +374,9 @@ export class TfStatePlugin extends Plugin {
           mode: 'string',
           attributes: 'json',
           dependencies: 'array',
-          importedAt: 'number|required'
+          importedAt: 'datetime|required'
         },
+        behavior: 'body-overflow',
         timestamps: true,
         asyncPartitions: this.asyncPartitions,
         partitions: {
@@ -359,7 +414,7 @@ export class TfStatePlugin extends Plugin {
           newSerial: 'number|required',
           oldStateId: 'string',
           newStateId: 'string|required',
-          calculatedAt: 'number|required',
+          calculatedAt: 'datetime|required',
           summary: {
             type: 'object',
             props: {
@@ -680,7 +735,7 @@ export class TfStatePlugin extends Plugin {
         };
       }
 
-      const currentTime = Date.now();
+      const currentTime = new Date().toISOString();
 
       // Create state file record
       const stateFileRecord = {
@@ -950,7 +1005,7 @@ export class TfStatePlugin extends Plugin {
       return await this.lineagesResource.get(lineageUuid);
     });
 
-    const currentTime = Date.now();
+    const currentTime = new Date().toISOString();
 
     if (existingLineage) {
       // Update existing lineage record
@@ -1199,7 +1254,7 @@ export class TfStatePlugin extends Plugin {
     let totalExtracted = 0;
     const stateSerial = state.serial;
     const stateVersion = state.version;
-    const importedAt = Date.now();
+    const importedAt = new Date().toISOString();
 
     // Extract resources from state (format varies by version)
     const stateResources = state.resources || [];
@@ -1247,7 +1302,7 @@ export class TfStatePlugin extends Plugin {
    * Extract single resource instance
    * @private
    */
-  _extractResourceInstance(resource: any, instance: any, stateSerial: number, stateVersion: number, importedAt: number, sourceFile: string, stateFileId: string, lineageId: string | null): any {
+  _extractResourceInstance(resource: any, instance: any, stateSerial: number, stateVersion: number, importedAt: string, sourceFile: string, stateFileId: string, lineageId: string | null): any {
     const resourceType = resource.type;
     const resourceName = resource.name;
     const mode = resource.mode || 'managed';
@@ -1562,7 +1617,7 @@ export class TfStatePlugin extends Plugin {
       newSerial: diff.newSerial,
       oldStateId: diff.oldStateId,                 // NEW: FK to state_files
       newStateId: diff.newStateId || newStateFileId, // NEW: FK to state_files
-      calculatedAt: Date.now(),
+      calculatedAt: new Date().toISOString(),
       summary: {
         addedCount: diff.added.length,
         modifiedCount: diff.modified.length,
@@ -1758,7 +1813,7 @@ export class TfStatePlugin extends Plugin {
             }
 
             // Create state file record
-            const currentTime = Date.now();
+            const currentTime = new Date().toISOString();
             const stateFileRecord = {
               id: idGenerator(),
               sourceFile: fileMetadata.path,
@@ -2068,7 +2123,18 @@ export class TfStatePlugin extends Plugin {
   /**
    * Get diffs with lookback support
    */
-  async getDiffsWithLookback(sourceFile: string, options: any = {}): Promise<any[]> {
+  async getDiffsWithLookback(
+    sourceFile: string,
+    options: TfStateDiffLookbackOptions & { includeDetails: true }
+  ): Promise<Record<string, unknown>[]>;
+  async getDiffsWithLookback(
+    sourceFile: string,
+    options?: TfStateDiffLookbackOptions & { includeDetails?: false }
+  ): Promise<TfStateDiffSummaryRecord[]>;
+  async getDiffsWithLookback(
+    sourceFile: string,
+    options: TfStateDiffLookbackOptions = {}
+  ): Promise<Record<string, unknown>[] | TfStateDiffSummaryRecord[]> {
     if (!this.diffsResource) {
       throw new TfStateError('Diff tracking is not enabled for this plugin');
     }
@@ -2076,9 +2142,21 @@ export class TfStatePlugin extends Plugin {
     const lookback = options.lookback || this.diffsLookback;
     const includeDetails = options.includeDetails || false;
 
-    // Query diffs for this source file
+    let lineageId: string | null = null;
+    if (this.stateFilesResource) {
+      const stateFiles = await this.stateFilesResource.query(
+        { sourceFile },
+        {
+          limit: 1,
+          sort: { serial: -1 }
+        }
+      );
+      lineageId = stateFiles[0]?.lineageId || null;
+    }
+
+    // Diffs are partitioned by lineageId. Fall back to legacy sourceFile queries if needed.
     const diffs = await this.diffsResource.query(
-      { sourceFile },
+      lineageId ? { lineageId } : { sourceFile },
       {
         limit: lookback,
         sort: { newSerial: -1 } // Newest first
@@ -2087,7 +2165,7 @@ export class TfStatePlugin extends Plugin {
 
     if (!includeDetails) {
       // Return only summary information
-      return diffs.map((diff: any) => ({
+      return diffs.map((diff: any): TfStateDiffSummaryRecord => ({
         id: diff.id,
         oldSerial: diff.oldSerial,
         newSerial: diff.newSerial,
@@ -2102,13 +2180,17 @@ export class TfStatePlugin extends Plugin {
   /**
    * Get diff timeline for a state file
    */
-  async getDiffTimeline(sourceFile: string, options: any = {}): Promise<any> {
+  async getDiffTimeline(sourceFile: string, options: TfStateDiffLookbackOptions = {}): Promise<TfStateDiffTimeline> {
     const diffs = await this.getDiffsWithLookback(sourceFile, {
       ...options,
       includeDetails: false
     });
 
     // Calculate cumulative statistics
+    const diffTimes = diffs
+      .map((diff) => new Date(diff.calculatedAt).getTime())
+      .filter((timestamp: number) => Number.isFinite(timestamp));
+
     const timeline = {
       sourceFile,
       totalDiffs: diffs.length,
@@ -2117,12 +2199,12 @@ export class TfStatePlugin extends Plugin {
         totalModified: 0,
         totalDeleted: 0,
         serialRange: {
-          oldest: diffs.length > 0 ? Math.min(...diffs.map((d: any) => d.oldSerial)) : null,
-          newest: diffs.length > 0 ? Math.max(...diffs.map((d: any) => d.newSerial)) : null
+          oldest: diffs.length > 0 ? Math.min(...diffs.map((diff) => diff.oldSerial)) : null,
+          newest: diffs.length > 0 ? Math.max(...diffs.map((diff) => diff.newSerial)) : null
         },
         timeRange: {
-          first: diffs.length > 0 ? Math.min(...diffs.map((d: any) => d.calculatedAt)) : null,
-          last: diffs.length > 0 ? Math.max(...diffs.map((d: any) => d.calculatedAt)) : null
+          first: diffTimes.length > 0 ? new Date(Math.min(...diffTimes)).toISOString() : null,
+          last: diffTimes.length > 0 ? new Date(Math.max(...diffTimes)).toISOString() : null
         }
       },
       diffs: diffs.reverse() // Oldest first for timeline view
@@ -2297,7 +2379,7 @@ export class TfStatePlugin extends Plugin {
   /**
    * Get plugin statistics
    */
-  async getStats(): Promise<any> {
+  async getStats(): Promise<TfStateStats> {
     // Get state files count
     const stateFiles = await this.stateFilesResource.list({ limit: 100000 });
 

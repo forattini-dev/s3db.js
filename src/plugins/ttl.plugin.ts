@@ -61,6 +61,17 @@ export interface TTLStats {
   lastScanDuration: number;
 }
 
+export interface TTLPluginStats extends TTLStats {
+  resources: number;
+  isRunning: boolean;
+  cronJobs: number;
+}
+
+export interface TTLCleanupResult {
+  resource: string;
+  granularity: TTLGranularity;
+}
+
 interface GranularityConfig {
   threshold: number;
   cronExpression: string;
@@ -75,7 +86,7 @@ interface IndexEntry {
   expiresAtCohort: string;
   expiresAtTimestamp: number;
   granularity: TTLGranularity;
-  createdAt: number;
+  createdAt: string;
 }
 
 interface CohortScanState {
@@ -460,7 +471,7 @@ export class TTLPlugin extends CoordinatorPlugin {
         expiresAtCohort: 'string|required',
         expiresAtTimestamp: 'number|required',
         granularity: 'string|required',
-        createdAt: 'number'
+        createdAt: 'datetime'
       },
       partitions: {
         byExpiresAtCohort: {
@@ -548,7 +559,7 @@ export class TTLPlugin extends CoordinatorPlugin {
         expiresAtCohort: metadata.expiresAtCohort,
         expiresAtTimestamp: metadata.expiresAtTimestamp,
         granularity: config.granularity,
-        createdAt: Date.now()
+        createdAt: new Date().toISOString()
       };
 
       await this.expirationIndex!.upsert(payload);
@@ -882,7 +893,7 @@ export class TTLPlugin extends CoordinatorPlugin {
     );
   }
 
-  async cleanupResource(resourceName: string): Promise<{ resource: string; granularity: TTLGranularity }> {
+  async cleanupResource(resourceName: string): Promise<TTLCleanupResult> {
     const config = this.resources[resourceName];
     if (!config) {
       throw new PluginError(`Resource "${resourceName}" not configured in TTLPlugin`, {
@@ -923,7 +934,7 @@ export class TTLPlugin extends CoordinatorPlugin {
     }
   }
 
-  getStats(): TTLStats & { resources: number; isRunning: boolean; cronJobs: number } {
+  getStats(): TTLPluginStats {
     return {
       ...this.stats,
       resources: Object.keys(this.resources).length,

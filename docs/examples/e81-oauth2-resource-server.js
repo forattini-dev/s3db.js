@@ -36,7 +36,7 @@ async function setupResourceServer() {
       model: 'string|required',
       year: 'number|required',
       price: 'number|required',
-      createdAt: 'string|optional'
+      createdAt: 'datetime|optional'
     },
     timestamps: true
   });

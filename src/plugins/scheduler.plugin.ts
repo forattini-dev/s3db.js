@@ -4,6 +4,13 @@ import { idGenerator } from "../concerns/id.js";
 import { SchedulerError } from "./scheduler.errors.js";
 import { createLogger, type Logger } from '../concerns/logger.js';
 
+const toEpoch = (value: unknown): number => {
+  if (value instanceof Date) return value.getTime();
+  if (typeof value === 'number') return value;
+  if (typeof value === 'string') return new Date(value).getTime();
+  return 0;
+};
+
 interface Database {
   createResource(config: ResourceConfig): Promise<Resource>;
   resources: Record<string, Resource>;
@@ -89,10 +96,15 @@ interface JobStatistics {
   avgDuration: number;
   lastRun: Date | null;
   lastSuccess: Date | null;
-  lastError: JobError | null;
+  lastError: RawJobError | null;
 }
 
 interface JobError {
+  time: string;
+  message: string;
+}
+
+interface RawJobError {
   time: Date;
   message: string;
 }
@@ -102,8 +114,8 @@ interface JobStatus {
   enabled: boolean;
   schedule: string;
   description?: string;
-  lastRun: Date | null;
-  nextRun: Date | null;
+  lastRun: string | null;
+  nextRun: string | null;
   isRunning: boolean;
   statistics: {
     totalRuns: number;
@@ -111,7 +123,7 @@ interface JobStatus {
     totalErrors: number;
     successRate: number;
     avgDuration: number;
-    lastSuccess: Date | null;
+    lastSuccess: string | null;
     lastError: JobError | null;
   };
 }
@@ -119,8 +131,8 @@ interface JobStatus {
 interface JobHistoryEntry {
   id: string;
   status: string;
-  startTime: Date;
-  endTime: Date | null;
+  startTime: string;
+  endTime: string | null;
   duration: number;
   result: unknown;
   error: string | null;
@@ -649,18 +661,18 @@ export class SchedulerPlugin extends CoordinatorPlugin {
         id: 'string|required',
         jobName: 'string|required',
         status: 'string|required',
-        startTime: 'number|required',
-        endTime: 'number',
+        startTime: 'datetime|required',
+        endTime: 'datetime',
         duration: 'number',
         result: 'json|default:null',
         error: 'string|default:null',
         retryCount: 'number|default:0',
-        createdAt: 'string|required'
+        createdAt: 'dateonly|required'
       },
-      behavior: 'body-overflow',
+      behavior: 'body-only',
       partitions: {
         byJob: { fields: { jobName: 'string' } },
-        byDate: { fields: { createdAt: 'string|maxlength:10' } }
+        byDate: { fields: { createdAt: 'dateonly' } }
       }
     }));
   }
@@ -1040,8 +1052,8 @@ export class SchedulerPlugin extends CoordinatorPlugin {
         id: executionId,
         jobName,
         status,
-        startTime,
-        endTime,
+        startTime: new Date(startTime).toISOString(),
+        endTime: new Date(endTime).toISOString(),
         duration,
         result: result ? JSON.stringify(result) : null,
         error: error?.message || null,
@@ -1139,8 +1151,8 @@ export class SchedulerPlugin extends CoordinatorPlugin {
       enabled: job.enabled,
       schedule: job.schedule,
       description: job.description,
-      lastRun: job.lastRun,
-      nextRun: job.nextRun,
+      lastRun: job.lastRun ? job.lastRun.toISOString() : null,
+      nextRun: job.nextRun ? job.nextRun.toISOString() : null,
       isRunning: this.activeJobs.has(jobName),
       statistics: {
         totalRuns: stats.totalRuns,
@@ -1148,8 +1160,11 @@ export class SchedulerPlugin extends CoordinatorPlugin {
         totalErrors: stats.totalErrors,
         successRate: stats.totalRuns > 0 ? (stats.totalSuccesses / stats.totalRuns) * 100 : 0,
         avgDuration: Math.round(stats.avgDuration),
-        lastSuccess: stats.lastSuccess,
-        lastError: stats.lastError
+        lastSuccess: stats.lastSuccess ? stats.lastSuccess.toISOString() : null,
+        lastError: stats.lastError ? {
+          ...stats.lastError,
+          time: stats.lastError.time.toISOString()
+        } : null
       }
     };
   }
@@ -1190,7 +1205,7 @@ export class SchedulerPlugin extends CoordinatorPlugin {
     }
 
     const filtered = (history as Array<Record<string, unknown>>)
-      .sort((a, b) => (b.startTime as number) - (a.startTime as number))
+      .sort((a, b) => toEpoch(b.startTime) - toEpoch(a.startTime))
       .slice(0, limit);
 
     return filtered.map(h => {
@@ -1203,14 +1218,18 @@ export class SchedulerPlugin extends CoordinatorPlugin {
         }
       }
 
+      const errorValue = h.error === 'null' || h.error === undefined
+        ? null
+        : h.error as string | null;
+
       return {
         id: h.id as string,
         status: h.status as string,
-        startTime: new Date(h.startTime as number),
-        endTime: h.endTime ? new Date(h.endTime as number) : null,
+        startTime: new Date(toEpoch(h.startTime)).toISOString(),
+        endTime: h.endTime ? new Date(toEpoch(h.endTime)).toISOString() : null,
         duration: h.duration as number,
         result,
-        error: h.error as string | null,
+        error: errorValue,
         retryCount: h.retryCount as number
       };
     });

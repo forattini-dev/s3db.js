@@ -253,12 +253,12 @@ export class FailbanManager {
         ip: 'string|required',
         reason: 'string',
         violations: 'number',
-        bannedAt: 'string',
-        expiresAt: 'string|required',
+        bannedAt: 'datetime',
+        expiresAt: 'datetime|required',
         metadata: {
           userAgent: 'string',
           path: 'string',
-          lastViolation: 'string'
+          lastViolation: 'datetime'
         }
       },
       behavior: 'body-overflow',
@@ -309,7 +309,7 @@ export class FailbanManager {
       name: resourceName,
       attributes: {
         ip: 'string|required',
-        timestamp: 'string|required',
+        timestamp: 'datetime|required',
         type: 'string',
         path: 'string',
         userAgent: 'string'

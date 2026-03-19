@@ -46,7 +46,15 @@ export class DatabaseMetadata {
     if (!client) return false;
 
     const connStr = client.connectionString || '';
-    if (connStr.startsWith('file://') || connStr.startsWith('memory://')) {
+    if (
+      connStr.startsWith('file://') ||
+      connStr.startsWith('memory://') ||
+      connStr.startsWith('sqlite://')
+    ) {
+      return false;
+    }
+
+    if (client.config?.region === 'sqlite') {
       return false;
     }
 

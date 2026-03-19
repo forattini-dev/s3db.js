@@ -147,7 +147,7 @@
 | `serverPort` | number | `25` | SMTP server port |
 | `serverHost` | string | `'0.0.0.0'` | Bind address |
 | `serverSecure` | boolean | `false` | Require TLS |
-| `serverAuth` | object | — | Authentication config |
+| `authHandler` | function | — | Validate SMTP AUTH credentials in server mode |
 | `serverMaxConnections` | number | `50` | Max concurrent connections |
 | `serverMaxMessageSize` | number | `25MB` | Max email size |
 | `serverMaxRecipients` | number | `100` | Max recipients per email |
@@ -155,37 +155,34 @@
 ### Server Authentication
 
 ```javascript
-serverAuth: {
-  username: 'postmaster',
-  password: 'secret'
-}
+authHandler: async (auth) => {
+  if (auth.user === 'postmaster' && auth.pass === 'secret') {
+    return { user: auth.user };
+  }
 
-// Or multiple users:
-serverAuth: {
-  credentials: [
-    { username: 'admin', password: 'pass1' },
-    { username: 'noreply', password: 'pass2' }
-  ]
+  throw new Error('Invalid SMTP credentials');
 }
 ```
+
+`Server Mode` uses Raffel's SMTP adapter by default. If you need `onMailFrom`, install `smtp-server`; s3db.js will fall back to the legacy backend for that specific hook.
 
 ### Server Callbacks
 
 ```javascript
 {
   onMailFrom: async (address) => {
-    // Validate sender - return true to accept
-    return address.includes('@authorized-domain.com');
+    // Validate sender - throw or return false to reject
+    return address.address.endsWith('@authorized-domain.com');
   },
 
   onRcptTo: async (address) => {
-    // Validate recipient - return true to accept
-    const user = await db.resources.users.get(address);
+    // Validate recipient - throw or return false to reject
+    const user = await db.resources.users.get(address.address);
     return user?.enabled || false;
   },
 
-  onData: async (stream) => {
-    // Process email before storing - return true to accept
+  onData: async (stream, session) => {
+    // Process email before storing - return false to reject
     return true;
   }
 }

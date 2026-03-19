@@ -37,7 +37,7 @@ import { Plugin } from '../plugin.class.js';
 import { requirePluginDependency } from '../concerns/plugin-dependencies.js';
 import * as raffel from 'raffel';
 import tryFn from '../../concerns/try-fn.js';
-import { ApiServer } from './server.js';
+import { ApiServer, type ApiPluginServerInfo } from './server.js';
 import { ApiRouteRegistry } from './route-registry.js';
 import { idGenerator } from '../../concerns/id.js';
 import { resolveResourceName } from '../concerns/resource-names.js';
@@ -132,8 +132,6 @@ export interface ApiPluginOptions {
   logLevel?: string | false;
 }
 
-import type { ServerInfo } from '../shared/types.js';
-
 const BASE_USER_ATTRIBUTES: Record<string, string> = {
   id: 'string|required',
   username: 'string|required|minlength:3',
@@ -141,8 +139,8 @@ const BASE_USER_ATTRIBUTES: Record<string, string> = {
   role: 'string|default:user',
   scopes: 'array|items:string|optional',
   active: 'boolean|default:true',
-  createdAt: 'string|optional',
-  lastLoginAt: 'string|optional',
+  createdAt: 'datetime|optional',
+  lastLoginAt: 'datetime|optional',
   metadata: 'json|optional'
 };
 
@@ -803,7 +801,7 @@ export class ApiPlugin extends Plugin {
     };
   }
 
-  getServerInfo(): ServerInfo {
+  getServerInfo(): ApiPluginServerInfo {
     return this.server ? this.server.getInfo() : { isRunning: false };
   }
 

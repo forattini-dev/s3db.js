@@ -262,6 +262,46 @@ describe('WebSocket Plugin — New Features (Ticket Auth, Recovery, Channels, Co
       expect(publicChannels.length).toBe(1);
       expect(publicChannels[0].name).toBe('general');
     });
+
+    it('normalizes presence member joinedAt to ISO string', async () => {
+      wsPlugin = new WebSocketPlugin({
+        port: wsPort,
+        host: '127.0.0.1',
+        startupBanner: false,
+        logLevel: 'silent',
+        channels: { enabled: true } as any,
+        resources: { items: {} }
+      });
+      await db.usePlugin(wsPlugin, 'ws-presence-iso');
+      await waitForServer(wsPort);
+
+      const originalAdapter = (wsPlugin.server as any).adapter;
+
+      (wsPlugin.server as any).adapter = {
+        ...originalAdapter,
+        channels: {
+          hasChannel: (channel: string) => channel === 'presence-room',
+          getSubscriberCount: () => 1,
+          getMembers: () => [{
+            id: 'socket-1',
+            userId: 'user-1',
+            info: { name: 'Test User' },
+            joinedAt: 1710844200000
+          }]
+        }
+      };
+
+      const members = wsPlugin.getChannelMembers('presence-room');
+      expect(members.length).toBe(1);
+      expect(typeof members[0].joinedAt).toBe('string');
+      expect(new Date(members[0].joinedAt).toISOString()).toBe(members[0].joinedAt);
+
+      const channel = wsPlugin.getChannel('presence-room');
+      expect(channel.members.length).toBe(1);
+      expect(channel.members[0].joinedAt).toBe(members[0].joinedAt);
+
+      (wsPlugin.server as any).adapter = originalAdapter;
+    });
   });
 
   describe('Compression Config', () => {

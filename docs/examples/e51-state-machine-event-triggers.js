@@ -39,7 +39,7 @@ const ordersResource = await database.createResource({
     trackingNumber: 'string|optional',
 
     // Delivery tracking
-    deliveredAt: 'string|optional',
+    deliveredAt: 'datetime|optional',
     signature: 'string|optional',
 
     // State machine field

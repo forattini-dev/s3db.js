@@ -531,7 +531,7 @@ const wsPlugin = new WebSocketPlugin({
             return false;
           }
           data.userId = user.id;
-          data.timestamp = Date.now();
+          data.timestamp = new Date().toISOString();
           return true;
         }
       }

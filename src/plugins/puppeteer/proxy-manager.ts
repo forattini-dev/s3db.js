@@ -31,7 +31,7 @@ export interface ProxyStats {
   successRate: number;
   lastUsed: number;
   healthy: boolean;
-  createdAt: number;
+  createdAt: string;
 }
 
 export interface ProxyStatResult {
@@ -40,9 +40,9 @@ export interface ProxyStatResult {
   requests: number;
   failures: number;
   successRate: number;
-  lastUsed: number;
+  lastUsed: string | null;
   healthy: boolean;
-  createdAt: number;
+  createdAt: string;
   boundSessions: number;
 }
 
@@ -138,7 +138,7 @@ export class ProxyManager {
           successRate: 1.0,
           lastUsed: 0,
           healthy: true,
-          createdAt: Date.now()
+          createdAt: new Date().toISOString()
         });
       }
 
@@ -337,7 +337,12 @@ export class ProxyManager {
       return {
         proxyId: proxy.id!,
         url: this._maskProxyUrl(proxy.url),
-        ...stats,
+        requests: stats.requests,
+        failures: stats.failures,
+        successRate: stats.successRate,
+        lastUsed: stats.lastUsed > 0 ? new Date(stats.lastUsed).toISOString() : null,
+        healthy: stats.healthy,
+        createdAt: stats.createdAt,
         boundSessions: Array.from(this.sessionProxyMap.entries())
           .filter(([, proxyId]) => proxyId === proxy.id)
           .length

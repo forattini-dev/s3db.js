@@ -101,7 +101,7 @@ await db.createResource({
     name: 'string|required',
     role: 'string|default:user',
     active: 'boolean|default:true',
-    lastLoginAt: 'string|optional'
+    lastLoginAt: 'datetime|optional'
   }
 });
 ```
@@ -199,7 +199,7 @@ await db.createResource({
     inStock: 'boolean|default:true',
     tags: 'array|items:string|optional',
     vendor: 'string|optional',
-    publishedAt: 'string|optional'
+    publishedAt: 'datetime|optional'
   },
   timestamps: true,
   partitions: {

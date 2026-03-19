@@ -106,6 +106,9 @@ s3://ACCESS_KEY:SECRET_KEY@bucket-name?region=us-east-1
 # MinIO / S3-compatible
 http://minioadmin:minioadmin@localhost:9000/my-bucket
 
+# SQLite (persistent local)
+sqlite:///tmp/s3db.sqlite
+
 # In-memory (testing)
 memory://my-bucket
 
@@ -202,7 +205,7 @@ Resources provide structured documentation and live schema information via URI t
 | `s3db://plugin/{name}` | Plugin docs — `cache`, `api`, `audit`, `ttl`, `vector`, `replicator`, `metrics`, `full-text`, etc. |
 | `s3db://guide/{topic}` | Guides — `getting-started`, `performance`, `testing`, `security` |
 | `s3db://field-type/{type}` | Field type reference — `string`, `password`, `secret`, `embedding`, `ip4`, etc. |
-| `s3db://client/{name}` | Storage client docs — `s3`, `memory`, `filesystem` |
+| `s3db://client/{name}` | Storage client docs — `s3`, `sqlite`, `memory`, `filesystem` |
 
 ### Available in Full Mode Only
 

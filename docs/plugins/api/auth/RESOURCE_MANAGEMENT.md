@@ -63,8 +63,8 @@ Cada driver de autenticação precisa de um resource com campos específicos. Co
     role: 'string|default:user',
     scopes: 'array|items:string|optional',
     active: 'boolean|default:true',
-    createdAt: 'string|optional',
-    lastLoginAt: 'string|optional'
+    createdAt: 'datetime|optional',
+    lastLoginAt: 'datetime|optional'
   },
   behavior: 'body-overflow',
   timestamps: true,
@@ -229,7 +229,7 @@ const OIDC_MINIMAL_SCHEMA = {
   active: 'boolean|default:true',
   provider: 'string|optional',  // 'azure', 'google', etc.
   providerId: 'string|optional', // ID no provedor externo
-  lastLoginAt: 'string|optional'
+  lastLoginAt: 'datetime|optional'
 };
 ```
 
@@ -369,8 +369,8 @@ class JWTResourceManager extends AuthResourceManager {
       role: 'string|default:user',
       scopes: 'array|items:string|optional',
       active: 'boolean|default:true',
-      lastLoginAt: 'string|optional',
-      createdAt: 'string|optional'
+      lastLoginAt: 'datetime|optional',
+      createdAt: 'datetime|optional'
     };
   }
 }
@@ -388,8 +388,8 @@ class APIKeyResourceManager extends AuthResourceManager {
       active: 'boolean|default:true',
       name: 'string|optional',        // Client/app name
       scopes: 'array|items:string|optional',
-      createdAt: 'string|optional',
-      lastUsedAt: 'string|optional'
+      createdAt: 'datetime|optional',
+      lastUsedAt: 'datetime|optional'
     };
   }
 }
@@ -433,7 +433,7 @@ class OAuth2ResourceManager extends AuthResourceManager {
       scopes: 'array|items:string|optional',
       active: 'boolean|default:true',
       providerId: 'string|optional', // Original 'sub' from token
-      createdAt: 'string|optional'
+      createdAt: 'datetime|optional'
     };
   }
 }
@@ -459,8 +459,8 @@ class OIDCResourceManager extends AuthResourceManager {
       active: 'boolean|default:true',
       provider: 'string|optional',     // 'azure', 'google', 'keycloak'
       providerId: 'string|optional',   // Original 'sub' from IdP
-      lastLoginAt: 'string|optional',
-      createdAt: 'string|optional',
+      lastLoginAt: 'datetime|optional',
+      createdAt: 'datetime|optional',
       metadata: 'json|optional'        // Extra claims/data
     };
   }

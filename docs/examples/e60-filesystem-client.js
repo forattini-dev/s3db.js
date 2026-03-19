@@ -161,14 +161,14 @@ async function example4ManualConfig() {
     name: 'events',
     attributes: {
       type: 'string|required',
-      timestamp: 'number|required',
+      timestamp: 'datetime|required',
       data: 'object'
     }
   });
 
   await db.resources.events.insert({
     type: 'user.login',
-    timestamp: Date.now(),
+    timestamp: new Date().toISOString(),
     data: { userId: 123, ip: '192.168.1.1' }
   });
 

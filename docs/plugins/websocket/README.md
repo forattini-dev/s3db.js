@@ -601,7 +601,7 @@ wsPlugin.getServerInfo();
 
 // Get connected clients
 wsPlugin.getClients();
-// Returns: [{ id, user, subscriptions, connectedAt, metadata }]
+// Returns: [{ id, user, subscriptions, connectedAt: '2026-03-19T12:00:00.000Z', metadata }]
 
 // Broadcast to all clients
 wsPlugin.broadcast({ type: 'announcement', message: 'Hello!' });

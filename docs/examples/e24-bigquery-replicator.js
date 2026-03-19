@@ -84,7 +84,7 @@ async function main() {
       id: 'string|required',
       name: 'string|required',
       email: 'string|required',
-      createdAt: 'string|required'
+      createdAt: 'datetime|required'
     }
   });
 
@@ -95,7 +95,7 @@ async function main() {
       originalUrl: 'string|required',
       shortCode: 'string|required',
       userId: 'string|required',
-      createdAt: 'string|required'
+      createdAt: 'datetime|required'
     }
   });
 
@@ -107,7 +107,7 @@ async function main() {
       userId: 'string',
       ipAddress: 'string',
       userAgent: 'string',
-      timestamp: 'string|required'
+      timestamp: 'datetime|required'
     }
   });
 
@@ -116,7 +116,7 @@ async function main() {
     attributes: {
       id: 'string|required',
       urlId: 'string|required',
-      timestamp: 'string|required'
+      timestamp: 'datetime|required'
     }
   });
 
@@ -126,7 +126,7 @@ async function main() {
       id: 'string|required',
       urlId: 'string|required',
       platform: 'string|required',
-      timestamp: 'string|required'
+      timestamp: 'datetime|required'
     }
   });
 
@@ -136,7 +136,7 @@ async function main() {
       id: 'string|required',
       urlId: 'string|required',
       qrCode: 'boolean|required',
-      timestamp: 'string|required'
+      timestamp: 'datetime|required'
     }
   });
 

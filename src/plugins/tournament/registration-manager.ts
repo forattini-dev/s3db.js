@@ -15,9 +15,9 @@ interface RegistrationRecord {
   participantId: string;
   seed: number | null;
   status: string;
-  registeredAt: number;
-  confirmedAt: number | null;
-  checkedInAt: number | null;
+  registeredAt: string | number;
+  confirmedAt: string | number | null;
+  checkedInAt: string | number | null;
   metadata: Record<string, unknown>;
 }
 
@@ -77,6 +77,33 @@ export class RegistrationManager {
     return this.plugin.registrationsResource;
   }
 
+  private _toStoredDateTime(value: string | number | null | undefined): string | null | undefined {
+    if (value === undefined) return undefined;
+    if (value === null) return null;
+    if (typeof value === 'string') return value;
+    return new Date(value).toISOString();
+  }
+
+  private _toEpoch(value: string | number | null | undefined): number | null | undefined {
+    if (value === undefined) return undefined;
+    if (value === null) return null;
+    if (typeof value === 'number') return value;
+
+    const epoch = new Date(value).getTime();
+    return Number.isNaN(epoch) ? null : epoch;
+  }
+
+  private _normalizeRegistration(record: RegistrationRecord | null | undefined): RegistrationRecord | null | undefined {
+    if (!record) return record;
+
+    return {
+      ...record,
+      registeredAt: this._toEpoch(record.registeredAt)!,
+      confirmedAt: this._toEpoch(record.confirmedAt) ?? null,
+      checkedInAt: this._toEpoch(record.checkedInAt) ?? null
+    };
+  }
+
   async register(tournamentId: string, participantId: string, options: RegistrationOptions = {}): Promise<RegistrationRecord> {
     const { seed = null, metadata = {} } = options;
 
@@ -103,7 +130,7 @@ export class RegistrationManager {
       participantId,
       seed,
       status: 'pending',
-      registeredAt: Date.now(),
+      registeredAt: new Date().toISOString(),
       confirmedAt: null,
       checkedInAt: null,
       metadata
@@ -117,7 +144,7 @@ export class RegistrationManager {
 
     this.logger.debug({ tournamentId, participantId }, 'Participant registered');
 
-    return registration;
+    return this._normalizeRegistration(registration)!;
   }
 
   async confirm(tournamentId: string, participantId: string): Promise<void> {
@@ -130,7 +157,7 @@ export class RegistrationManager {
 
     await this.resource.update(registration.id, {
       status: 'confirmed',
-      confirmedAt: Date.now()
+      confirmedAt: new Date().toISOString()
     });
 
     this.plugin.emit('plg:tournament:participant-confirmed', {
@@ -151,8 +178,8 @@ export class RegistrationManager {
 
     await this.resource.update(registration.id, {
       status: 'checked-in',
-      confirmedAt: registration.confirmedAt || Date.now(),
-      checkedInAt: Date.now()
+      confirmedAt: this._toStoredDateTime(registration.confirmedAt) || new Date().toISOString(),
+      checkedInAt: new Date().toISOString()
     });
 
     this.plugin.emit('plg:tournament:participant-checked-in', {
@@ -193,16 +220,16 @@ export class RegistrationManager {
       partitionValues: { tournamentId }
     });
 
-    return registrations.find(r => r.participantId === participantId);
+    return this._normalizeRegistration(registrations.find(r => r.participantId === participantId)) || undefined;
   }
 
   async getByTournament(tournamentId: string, filters: RegistrationFilters = {}): Promise<RegistrationRecord[]> {
     const { status } = filters;
 
-    let registrations = await this.resource.listPartition({
+    let registrations = (await this.resource.listPartition({
       partition: 'byTournament',
       partitionValues: { tournamentId }
-    });
+    })).map(r => this._normalizeRegistration(r)!);
 
     if (status) {
       registrations = registrations.filter(r => r.status === status);
@@ -212,7 +239,7 @@ export class RegistrationManager {
       if (a.seed && b.seed) return a.seed - b.seed;
       if (a.seed) return -1;
       if (b.seed) return 1;
-      return a.registeredAt - b.registeredAt;
+      return (a.registeredAt as number) - (b.registeredAt as number);
     });
   }
 
@@ -281,10 +308,10 @@ export class RegistrationManager {
   async getByParticipant(participantId: string, filters: RegistrationFilters = {}): Promise<RegistrationRecord[]> {
     const { status } = filters;
 
-    let registrations = await this.resource.listPartition({
+    let registrations = (await this.resource.listPartition({
       partition: 'byParticipant',
       partitionValues: { participantId }
-    });
+    })).map(r => this._normalizeRegistration(r)!);
 
     if (status) {
       registrations = registrations.filter(r => r.status === status);
@@ -320,7 +347,7 @@ export class RegistrationManager {
     for (const reg of pending) {
       await this.resource.update(reg.id, {
         status: 'confirmed',
-        confirmedAt: Date.now()
+        confirmedAt: new Date().toISOString()
       });
     }
 

@@ -505,7 +505,7 @@ callback: async (record) => {
     resource: 'orders',
     status: record.status,
     value: record.totalAmount,
-    timestamp: new Date()
+    timestamp: new Date().toISOString()
   });
   return true;  // Delete after recording
 }

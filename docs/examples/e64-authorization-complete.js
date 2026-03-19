@@ -236,7 +236,7 @@ function requirePolicies(...policyNames) {
       },
       resource: req.resource,
       request: req,
-      timestamp: new Date()
+      timestamp: new Date().toISOString()
     };
 
     try {

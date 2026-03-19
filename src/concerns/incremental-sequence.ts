@@ -51,9 +51,9 @@ export interface BatchStatus {
 export interface SequenceInfo {
   value: number;
   name: string;
-  createdAt: number;
-  updatedAt?: number;
-  resetAt?: number;
+  createdAt: string;
+  updatedAt?: string;
+  resetAt?: string;
 }
 
 export interface IncrementalSequenceOptions {
@@ -457,7 +457,7 @@ class SequenceStorage {
         await this.set(valueKey, {
           value: initialValue + increment,
           name: fieldName,
-          createdAt: Date.now()
+          createdAt: new Date().toISOString()
         });
         return initialValue;
       }
@@ -466,7 +466,7 @@ class SequenceStorage {
       await this.set(valueKey, {
         ...data,
         value: currentValue + increment,
-        updatedAt: Date.now()
+        updatedAt: new Date().toISOString()
       });
 
       return currentValue;
@@ -495,9 +495,9 @@ class SequenceStorage {
       await this.set(valueKey, {
         value,
         name: fieldName,
-        createdAt: data?.createdAt || Date.now(),
-        updatedAt: Date.now(),
-        resetAt: Date.now()
+        createdAt: data?.createdAt || new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+        resetAt: new Date().toISOString()
       });
 
       return true;

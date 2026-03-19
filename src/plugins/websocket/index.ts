@@ -39,7 +39,20 @@
 
 import { Plugin } from '../plugin.class.js';
 import { requirePluginDependency } from '../concerns/plugin-dependencies.js';
-import { WebSocketServer, WebSocketOptions, WebSocketAuth, WebSocketResourceConfig } from './server.js';
+import {
+  WebSocketServer,
+  WebSocketOptions,
+  WebSocketAuth,
+  WebSocketResourceConfig,
+  type WebSocketClientInfo,
+  type WebSocketChannelInfo,
+  type WebSocketPresenceMember,
+  type WebSocketChannelStats,
+  type WebSocketChannelSummary,
+  type WebSocketServerInfo,
+  type WebSocketMetrics,
+  type WebSocketTicket
+} from './server.js';
 import { normalizeAuthConfig } from './config/normalize-auth.js';
 import { normalizeResourcesConfig } from './config/normalize-resources.js';
 
@@ -262,14 +275,14 @@ export class WebSocketPlugin extends Plugin {
   /**
    * Get server information
    */
-  getServerInfo(): any {
+  getServerInfo(): WebSocketServerInfo | { isRunning: false } {
     return this.server ? this.server.getInfo() : { isRunning: false };
   }
 
   /**
    * Get connected clients
    */
-  getClients(): any[] {
+  getClients(): WebSocketClientInfo[] {
     return this.server ? this.server.getClients() : [];
   }
 
@@ -315,7 +328,7 @@ export class WebSocketPlugin extends Plugin {
   /**
    * Get metrics
    */
-  getMetrics(): any {
+  getMetrics(): WebSocketMetrics {
     return this.server?.getInfo()?.metrics || {
       connections: 0,
       disconnections: 0,
@@ -333,21 +346,21 @@ export class WebSocketPlugin extends Plugin {
   /**
    * Get channel info
    */
-  getChannel(channelName: string): any | null {
+  getChannel(channelName: string): WebSocketChannelInfo | null {
     return this.server?.getChannelInfo(channelName) || null;
   }
 
   /**
    * List all channels
    */
-  listChannels(options: { type?: 'public' | 'private' | 'presence' | 'queue'; prefix?: string } = {}): any[] {
+  listChannels(options: { type?: 'public' | 'private' | 'presence' | 'queue'; prefix?: string } = {}): WebSocketChannelSummary[] {
     return this.server?.listChannels(options) || [];
   }
 
   /**
    * Get members in a presence channel
    */
-  getChannelMembers(channelName: string): any[] {
+  getChannelMembers(channelName: string): WebSocketPresenceMember[] {
     return this.server?.getChannelMembers(channelName) || [];
   }
 
@@ -362,7 +375,7 @@ export class WebSocketPlugin extends Plugin {
   /**
    * Get channel statistics
    */
-  getChannelStats(): any {
+  getChannelStats(): WebSocketChannelStats {
     return this.server?.getChannelStats() || {
       channels: 0,
       totalMembers: 0,
@@ -392,7 +405,7 @@ export class WebSocketPlugin extends Plugin {
    * // Client connects with:
    * // new WebSocket('ws://localhost:3001?ticket=<ticketId>')
    */
-  async generateTicket(userId: string, options?: { ttl?: number; permissions?: string[]; metadata?: Record<string, unknown> }): Promise<{ id: string; userId: string; expiresAt: number }> {
+  async generateTicket(userId: string, options?: { ttl?: number; permissions?: string[]; metadata?: Record<string, unknown> }): Promise<WebSocketTicket> {
     if (!this.server) {
       throw new Error('WebSocket server is not running');
     }

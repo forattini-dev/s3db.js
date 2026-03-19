@@ -56,6 +56,7 @@ describe('CookieFarmSuitePlugin', () => {
 
   it('installs cookie-farm, puppeteer and queue with namespace', () => {
     expect(db.resources['persona_persona_jobs']).toBeDefined();
+    expect(db.resources['persona_persona_jobs'].behavior).toBe('body-only');
     expect(db.plugins['persona-puppeteer']).toBeDefined();
     expect(db.plugins['persona-cookie-farm']).toBeDefined();
     expect(db.plugins['persona-queue']).toBeDefined();

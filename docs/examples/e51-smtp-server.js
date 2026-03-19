@@ -9,8 +9,11 @@
  * - Internal microservices email routing
  * - Email collection from legacy systems
  *
- * Prerequisites:
- * - npm install smtp-server
+ * Default runtime:
+ * - Uses Raffel's SMTP adapter automatically
+ *
+ * Optional fallback:
+ * - Install `smtp-server` only if you need `onMailFrom`
  *
  * @example
  * node e51-smtp-server.js
@@ -44,8 +47,8 @@ await db.connect();
 // 1. Create SMTP plugin in server mode
 const smtpPlugin = new SMTPPlugin({
   mode: 'server', // In-process SMTP server
-  port: 25, // SMTP port (or use 1025 if you can't bind to 25)
-  host: '0.0.0.0', // Listen on all interfaces
+  serverPort: 25, // SMTP port (or use 1025 if you can't bind to 25)
+  serverHost: '0.0.0.0', // Listen on all interfaces
   secure: false, // No TLS (for dev)
   requireAuth: false, // No authentication required (for dev)
   emailResource: 'inbound_emails',
@@ -205,7 +208,7 @@ The SMTP server mode supports:
    - Reject invalid addresses early
 
 4. Email Processing
-   - Automatic MIME parsing
+   - Raw message delivery through Raffel SMTP adapter by default
    - Stream-based data handling (for large emails)
    - Custom onData handler for processing
 
@@ -220,4 +223,8 @@ Typical Use Cases:
 - Email collection from legacy systems
 - Multi-tenant email gateway
 - Custom email routing logic
+
+Notes:
+- `onMailFrom` forces the legacy `smtp-server` fallback because Raffel does not currently expose a MAIL FROM hook.
+- Without `onMailFrom`, server mode stays on the Raffel backend.
 */

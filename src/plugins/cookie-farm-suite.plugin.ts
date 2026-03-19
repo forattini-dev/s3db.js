@@ -156,15 +156,15 @@ export class CookieFarmSuitePlugin extends Plugin {
         priority: 'number|default:0',
         requestedBy: 'string|optional',
         metadata: 'json|optional',
-        createdAt: 'string|required'
+        createdAt: 'dateonly|required'
       },
-      behavior: 'body-overflow',
+      behavior: 'body-only',
       timestamps: true,
       asyncPartitions: true,
       partitions: {
         byJobType: { fields: { jobType: 'string' } },
         byPriority: { fields: { priority: 'number' } },
-        byDate: { fields: { createdAt: 'string|maxlength:10' } }
+        byDate: { fields: { createdAt: 'dateonly' } }
       }
     }));
 

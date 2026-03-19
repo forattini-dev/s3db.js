@@ -27,8 +27,8 @@ interface TournamentRecord {
   currentPhase: string | null;
   currentRound: number;
   metadata: Record<string, unknown>;
-  startedAt: number | null;
-  completedAt: number | null;
+  startedAt: string | number | null;
+  completedAt: string | number | null;
 }
 
 interface TournamentListFilters {
@@ -89,6 +89,32 @@ export class TournamentManager {
     return this.plugin.tournamentsResource;
   }
 
+  private _toStoredDateTime(value: string | number | null | undefined): string | null | undefined {
+    if (value === undefined) return undefined;
+    if (value === null) return null;
+    if (typeof value === 'string') return value;
+    return new Date(value).toISOString();
+  }
+
+  private _toEpoch(value: string | number | null | undefined): number | null | undefined {
+    if (value === undefined) return undefined;
+    if (value === null) return null;
+    if (typeof value === 'number') return value;
+
+    const epoch = new Date(value).getTime();
+    return Number.isNaN(epoch) ? null : epoch;
+  }
+
+  private _normalizeTournament(record: TournamentRecord | null): TournamentRecord | null {
+    if (!record) return null;
+
+    return {
+      ...record,
+      startedAt: this._toEpoch(record.startedAt) ?? null,
+      completedAt: this._toEpoch(record.completedAt) ?? null
+    };
+  }
+
   async create(options: TournamentCreateOptions): Promise<TournamentRecord> {
     const {
       name,
@@ -135,11 +161,11 @@ export class TournamentManager {
     this.plugin.emit('plg:tournament:created', { tournament });
     this.logger.info({ tournamentId: tournament.id, format }, 'Tournament created');
 
-    return tournament;
+    return this._normalizeTournament(tournament)!;
   }
 
   async get(id: string): Promise<TournamentRecord | null> {
-    return this.resource.get(id);
+    return this._normalizeTournament(await this.resource.get(id));
   }
 
   async update(id: string, data: Partial<TournamentRecord>): Promise<TournamentRecord> {
@@ -155,10 +181,14 @@ export class TournamentManager {
       }
     }
 
-    const updated = await this.resource.update(id, data);
+    const updated = await this.resource.update(id, {
+      ...data,
+      startedAt: this._toStoredDateTime(data.startedAt),
+      completedAt: this._toStoredDateTime(data.completedAt)
+    });
     this.plugin.emit('plg:tournament:updated', { tournament: updated });
 
-    return updated;
+    return this._normalizeTournament(updated)!;
   }
 
   async delete(id: string): Promise<void> {
@@ -182,22 +212,22 @@ export class TournamentManager {
     const { organizerId, status, format, limit = 100 } = filters;
 
     if (organizerId) {
-      return this.resource.listPartition({
+      return (await this.resource.listPartition({
         partition: 'byOrganizer',
         partitionValues: { organizerId },
         limit
-      });
+      })).map(t => this._normalizeTournament(t)!);
     }
 
     if (status) {
-      return this.resource.listPartition({
+      return (await this.resource.listPartition({
         partition: 'byStatus',
         partitionValues: { status },
         limit
-      });
+      })).map(t => this._normalizeTournament(t)!);
     }
 
-    const all = await this.resource.list({ limit });
+    const all = (await this.resource.list({ limit })).map(t => this._normalizeTournament(t)!);
 
     if (format) {
       return all.filter(t => t.format === format);
@@ -272,7 +302,7 @@ export class TournamentManager {
       bracket,
       currentPhase: formatInstance.getCurrentPhase(bracket, []),
       currentRound: 1,
-      startedAt: Date.now()
+      startedAt: new Date().toISOString()
     });
 
     this.plugin.emit('plg:tournament:started', {
@@ -322,7 +352,7 @@ export class TournamentManager {
     await this.resource.update(id, {
       status: 'completed',
       standings,
-      completedAt: Date.now(),
+      completedAt: new Date().toISOString(),
       metadata: { ...tournament.metadata, winner }
     });
 
@@ -374,9 +404,12 @@ export class TournamentManager {
     }
 
     const matches = await this.plugin.matchManager.getByTournament(tournamentId);
+    const persistedBracket = updatedBracket == null
+      ? updatedBracket
+      : JSON.parse(JSON.stringify(updatedBracket)) as Bracket;
 
     const updateData = {
-      bracket: updatedBracket,
+      bracket: persistedBracket,
       currentPhase: formatInstance.getCurrentPhase(updatedBracket, matches),
       currentRound: formatInstance.getCurrentRound(updatedBracket, matches),
       standings: formatInstance.getStandings(updatedBracket, matches)

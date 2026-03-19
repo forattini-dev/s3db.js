@@ -1,4 +1,5 @@
 import { SMTPPlugin } from '../../src/plugins/smtp.plugin.js';
+import { SMTPConnectionManager } from '../../src/plugins/smtp/connection-manager.js';
 import {
   SMTPError,
   AuthenticationError,
@@ -74,6 +75,52 @@ describe('SMTPPlugin', () => {
     it('should have default rate limit', () => {
       expect(plugin.rateLimit.maxPerSecond).toBe(100);
       expect(plugin.rateLimit.maxQueueDepth).toBe(10000);
+    });
+
+    it('should create the email resource as body-only', async () => {
+      const createResource = vi.fn(async (config) => config);
+      db.getResource = async () => null;
+      db.createResource = createResource;
+
+      const resource = await plugin._ensureEmailResource();
+
+      expect(createResource).toHaveBeenCalledWith(expect.objectContaining({ behavior: 'body-only' }));
+      expect(resource.behavior).toBe('body-only');
+    });
+
+    it('should pass server callbacks through to the connection manager', async () => {
+      const authHandler = vi.fn(async () => ({ user: 'postmaster' }));
+      const onMailFrom = vi.fn(async () => {});
+      const onRcptTo = vi.fn(async () => true);
+      const onData = vi.fn(async () => {});
+      const initializeSpy = vi.spyOn(SMTPConnectionManager.prototype, 'initialize').mockResolvedValue();
+
+      const serverPlugin = new SMTPPlugin({
+        mode: 'server',
+        serverPort: 2525,
+        serverHost: '127.0.0.1',
+        requireAuth: true,
+        authHandler,
+        onMailFrom,
+        onRcptTo,
+        onData
+      });
+
+      await (serverPlugin as any)._initializeServerMode();
+
+      expect(serverPlugin.connectionManager).toBeDefined();
+      expect((serverPlugin.connectionManager as any).options).toMatchObject({
+        mode: 'server',
+        port: 2525,
+        host: '127.0.0.1',
+        requireAuth: true,
+        authHandler,
+        onMailFrom,
+        onRcptTo,
+        onData
+      });
+
+      initializeSpy.mockRestore();
     });
   });
 

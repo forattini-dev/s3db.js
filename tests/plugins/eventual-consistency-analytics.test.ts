@@ -51,11 +51,41 @@ describe('EventualConsistencyPlugin Analytics', () => {
     const analyticsResource = database.resources[analyticsResourceName];
 
     expect(analyticsResource).toBeDefined();
+    expect(analyticsResource.behavior).toBe('body-only');
 
     // Verify the handler has analytics resource
     const fieldHandlers = plugin.fieldHandlers.get('wallets');
     const handler = fieldHandlers.get('balance');
     expect(handler.analyticsResource).toBe(analyticsResource);
+  });
+
+  it('should expose a typed plugin status summary', () => {
+    const status = plugin.getStatus();
+
+    expect(status).toMatchObject({
+      name: 'EventualConsistencyPlugin',
+      version: '1.0.0',
+      enableAnalytics: true,
+      workerId: expect.any(String),
+      handlers: {
+        wallets: ['balance']
+      }
+    });
+
+    expect(status.worker).toMatchObject({
+      enabled: expect.any(Boolean),
+      active: expect.any(Boolean),
+      running: expect.any(Boolean),
+      runs: expect.any(Number),
+      failures: expect.any(Number),
+      total: {
+        ticketsClaimed: expect.any(Number),
+        recordsProcessed: expect.any(Number),
+        transactionsApplied: expect.any(Number),
+        ticketsWithErrors: expect.any(Number),
+        handlerErrors: expect.any(Number)
+      }
+    });
   });
 
   it('should update analytics after consolidation', async () => {

@@ -135,7 +135,7 @@ export const prompts: MCPPrompt[] = [
   },
   {
     name: 'compare_clients',
-    description: 'Compare S3, Memory, and FileSystem clients for different use cases',
+    description: 'Compare S3, Memory, FileSystem, and SQLite clients for different use cases',
     arguments: [
       { name: 'environment', description: 'Target environment (production/development/testing/ci)', required: false },
     ],
@@ -1074,15 +1074,15 @@ ${clients
 
 ## Detailed Comparison
 
-| Feature | S3Client | MemoryClient | FileSystemClient |
-|---------|----------|--------------|------------------|
-| Persistence | ✅ Durable | ❌ Lost on restart | ✅ Durable |
-| Performance | ~50-100ms | ~0.1ms | ~1-5ms |
-| Cost | Pay per use | Free | Free |
-| Scalability | Unlimited | RAM limited | Disk limited |
-| Multi-process | ✅ Safe | ❌ No sharing | ⚠️ Careful |
-| Testing | Integration | Unit tests | Unit/Integration |
-| Production | ✅ Yes | ❌ No | ⚠️ Dev only |
+| Feature | S3Client | MemoryClient | FileSystemClient | SqliteClient |
+|---------|----------|--------------|------------------|-------------|
+| Persistence | ✅ Durable | ❌ Lost on restart | ✅ Durable | ✅ Durable |
+| Performance | ~50-100ms | ~0.1ms | ~1-5ms | ~1-10ms |
+| Cost | Pay per use | Free | Free | Free (disk only) |
+| Scalability | High | RAM limited | Disk limited | Disk limited |
+| Multi-process | ✅ Safe | ❌ No sharing | ⚠️ Careful | ⚠️ Careful |
+| Testing | Integration | Unit tests | Unit/Integration | Unit/Integration |
+| Production | ✅ Yes | ❌ No | ⚠️ Dev only | ⚠️ Single-process only |
 
 ## Environment Recommendations
 
@@ -1098,6 +1098,11 @@ const db = createDatabase('http://minioadmin:minioadmin@localhost:9000/dev');
 
 // Or FileSystem for simplicity
 const db = createDatabase('file:///tmp/s3db-dev');
+\`\`\`
+
+### Local SQLite
+\`\`\`javascript
+const db = createDatabase('sqlite:///tmp/test.db');
 \`\`\`
 
 ### Testing (Unit Tests)

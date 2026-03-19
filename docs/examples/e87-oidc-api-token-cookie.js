@@ -50,7 +50,7 @@ async function setupDatabase() {
       role: 'string|optional',
       active: 'boolean|optional',
       apiToken: 'string|optional',  // 🔑 API Token field
-      lastLoginAt: 'string|optional',
+      lastLoginAt: 'datetime|optional',
       metadata: 'object|optional'
     },
     timestamps: true

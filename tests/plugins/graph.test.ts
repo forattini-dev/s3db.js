@@ -69,6 +69,38 @@ describe('GraphPlugin', () => {
       expect(typeof db.resources.edges.graph.bySource).toBe('function');
       expect(typeof db.resources.edges.graph.byTarget).toBe('function');
     });
+
+    it('should use body-overflow for plugin-created edge resources with denormalized snapshots', async () => {
+      const isolatedDb = new Database({ connectionString: 'memory://test/graph-create-resources' });
+      await isolatedDb.connect();
+
+      try {
+        const plugin = new GraphPlugin({
+          vertices: 'auto_nodes',
+          edges: 'auto_edges',
+          createResources: true,
+          denormalize: ['name'],
+          logLevel: 'silent'
+        });
+
+        await isolatedDb.usePlugin(plugin);
+
+      expect(isolatedDb.resources.auto_edges.behavior).toBe('body-overflow');
+      } finally {
+        await isolatedDb.disconnect();
+      }
+    });
+
+    it('should expose typed graph plugin stats', () => {
+      const stats = graphPlugin.getStats();
+
+      expect(stats).toEqual({
+        vertexResources: ['nodes'],
+        edgeResources: ['edges'],
+        directed: true,
+        weighted: true
+      });
+    });
   });
 
   describe('Vertex Operations', () => {

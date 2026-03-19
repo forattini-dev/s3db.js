@@ -10,7 +10,7 @@ interface PluginWithEstimate {
 }
 
 interface S3Client {
-  costs?: CostsData;
+  costs?: RawCostsData;
   on(event: string, handler: EventHandler): void;
   off?(event: string, handler: EventHandler): void;
   removeListener?(event: string, handler: EventHandler): void;
@@ -190,7 +190,7 @@ function extractNumericContentLength(value: unknown): number {
 }
 
 export interface CostUsagePoint {
-  timestamp: number;
+  timestamp: string;
   command: string;
   method: string;
   requestCost: number;
@@ -201,13 +201,27 @@ export interface CostUsagePoint {
   plugin: string | null;
 }
 
-interface UsageData {
+interface RawCostUsagePoint extends Omit<CostUsagePoint, 'timestamp'> {
+  timestamp: number;
+}
+
+export interface CostUsageData {
   historyRetentionMs: number;
   maxHistoryPoints: number;
   totalEvents: number;
   byResource: Record<string, number>;
   byPlugin: Record<string, number>;
   points: CostUsagePoint[];
+  lastUpdatedAt: string | null;
+}
+
+interface RawUsageData {
+  historyRetentionMs: number;
+  maxHistoryPoints: number;
+  totalEvents: number;
+  byResource: Record<string, number>;
+  byPlugin: Record<string, number>;
+  points: RawCostUsagePoint[];
   lastUpdatedAt: number | null;
 }
 
@@ -260,7 +274,11 @@ export interface CostsData {
   requests: RequestsData;
   storage: StorageData;
   dataTransfer: DataTransferData;
-  usage: UsageData;
+  usage: CostUsageData;
+}
+
+interface RawCostsData extends Omit<CostsData, 'usage'> {
+  usage: RawUsageData;
 }
 
 export class CostsPlugin extends Plugin {
@@ -269,7 +287,7 @@ export class CostsPlugin extends Plugin {
 
   config: CostsConfig;
   map: Record<CommandName, MethodName>;
-  costs: CostsData;
+  costs: RawCostsData;
   client: S3Client | null = null;
   private _responseListener: EventHandler | null = null;
   private _eventsSincePrune = 0;
@@ -675,7 +693,24 @@ export class CostsPlugin extends Plugin {
   }
 
   getCosts(): CostsData {
-    return this.costs;
+    return {
+      total: this.costs.total,
+      requests: this.costs.requests,
+      storage: this.costs.storage,
+      dataTransfer: this.costs.dataTransfer,
+      usage: {
+        ...this.costs.usage,
+        byResource: { ...this.costs.usage.byResource },
+        byPlugin: { ...this.costs.usage.byPlugin },
+        points: this.costs.usage.points.map(point => ({
+          ...point,
+          timestamp: new Date(point.timestamp).toISOString()
+        })),
+        lastUpdatedAt: this.costs.usage.lastUpdatedAt === null
+          ? null
+          : new Date(this.costs.usage.lastUpdatedAt).toISOString()
+      }
+    };
   }
 
   updateTotal(): void {
@@ -752,7 +787,7 @@ export class CostsPlugin extends Plugin {
     return { resource, plugin };
   }
 
-  private _recordUsagePoint(point: CostUsagePoint): void {
+  private _recordUsagePoint(point: RawCostUsagePoint): void {
     this.costs.usage.totalEvents++;
     this.costs.usage.lastUpdatedAt = point.timestamp;
     if (point.resource) {

@@ -32,6 +32,10 @@ await suite.startProcessing();
 - ✅ Multi-stage workflows (generate → verify → warmup → retire)
 - ✅ Zero configuration needed
 
+**Data contract note:**
+- Public persona APIs such as `generatePersonas()`, `getPersona()`, and `exportPersonas()` return semantic date fields as ISO 8601 strings (`createdAt`, `lastUsed`, `expiresAt`, `lastCalculated`).
+- Treat `personaPool` as internal runtime state. Use public APIs when you need stable output.
+
 **Performance:**
 - ~2-10 personas/minute per worker
 - 5-20 concurrent browsers typical

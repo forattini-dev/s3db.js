@@ -227,6 +227,8 @@ const tournament = await plugin.create({
 }
 ```
 
+`timestamp` fields in Tournament resources are public epoch-millisecond values by contract.
+
 ### Matches Resource
 
 ```javascript
@@ -394,4 +396,3 @@ const bracket = await plugin.getBracket(tournamentId);
 
 - [Usage Patterns](./usage-patterns.md) - Tournament lifecycle, real-world examples
 - [Best Practices](./best-practices.md) - Performance, troubleshooting, FAQ
-

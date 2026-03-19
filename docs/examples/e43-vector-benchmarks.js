@@ -109,7 +109,7 @@ async function setupDatabase(dimensions) {
         type: 'object',
         optional: true,
         props: {
-          timestamp: 'number|optional:true',
+          timestamp: 'datetime|optional:true',
           source: 'string|optional:true'
         }
       }
@@ -142,7 +142,7 @@ async function benchmarkInsertion(vectors, count, dimensions) {
     category: categories[i % categories.length],
     embedding: generateVector(dimensions),
     metadata: {
-      timestamp: Date.now(),
+      timestamp: new Date().toISOString(),
       source: 'benchmark'
     }
   }));
@@ -166,7 +166,7 @@ async function benchmarkInsertion(vectors, count, dimensions) {
     category: categories[i % categories.length],
     embedding: generateVector(dimensions),
     metadata: {
-      timestamp: Date.now(),
+      timestamp: new Date().toISOString(),
       source: 'benchmark'
     }
   }));

@@ -33,7 +33,7 @@ export interface AllStorageResult {
   localStorage: StorageResult;
   sessionStorage: StorageResult;
   indexedDB: IndexedDBResult;
-  timestamp: number;
+  timestamp: string;
   summary: {
     totalStorageTypes: number;
     totalItems: number;
@@ -236,7 +236,7 @@ export async function captureAllStorage(page: Page, logger?: Logger): Promise<Al
       data: sessionStorage
     },
     indexedDB,
-    timestamp: Date.now(),
+    timestamp: new Date().toISOString(),
     summary: {
       totalStorageTypes: (Object.keys(localStorage).length > 0 ? 1 : 0) + (Object.keys(sessionStorage).length > 0 ? 1 : 0) + (indexedDB.present ? 1 : 0),
       totalItems: Object.keys(localStorage).length + Object.keys(sessionStorage).length

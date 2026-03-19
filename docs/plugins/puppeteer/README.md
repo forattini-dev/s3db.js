@@ -691,17 +691,18 @@ const browser1 = await plugin.getBrowser();  // Gets proxy1
 const browser2 = await plugin.getBrowser();  // Gets proxy2 (round-robin)
 
 // Check proxy statistics
-const stats = await plugin.proxyManager.getProxyStats();
+const stats = plugin.proxyManager.getProxyStats();
 console.log('Proxy stats:', stats);
 // [
 //   {
-//     proxy: 'http://proxy1.com:8080',
+//     proxyId: 'proxy_0',
+//     url: 'http://proxy1.com:8080',
 //     requests: 145,
-//     successes: 120,
 //     failures: 25,
 //     successRate: 0.827,
-//     avgResponseTime: 423,
-//     healthy: true
+//     lastUsed: '2024-11-14T12:30:00.000Z',
+//     healthy: true,
+//     boundSessions: 4
 //   },
 //   ...
 // ]
@@ -1657,22 +1658,23 @@ await plugin.cookieManager.retireCookie('cookie-123');
 
 ### Proxy Manager Methods
 
-#### `getProxyStats(): Promise<Array>`
+#### `getProxyStats(): Array`
 
 Get statistics for all proxies.
 
 ```javascript
-const stats = await plugin.proxyManager.getProxyStats();
+const stats = plugin.proxyManager.getProxyStats();
 console.log(stats);
 // [
 //   {
-//     proxy: 'http://proxy1.com:8080',
+//     proxyId: 'proxy_0',
+//     url: 'http://proxy1.com:8080',
 //     requests: 145,
-//     successes: 120,
 //     failures: 25,
 //     successRate: 0.827,
-//     avgResponseTime: 423,
-//     healthy: true
+//     lastUsed: '2024-11-14T12:30:00.000Z',
+//     healthy: true,
+//     boundSessions: 4
 //   }
 // ]
 ```
@@ -2199,7 +2201,7 @@ proxy: { selectionStrategy: 'round-robin' }
 A: Check proxy stats:
 
 ```javascript
-const stats = await plugin.proxyManager.getProxyStats();
+const stats = plugin.proxyManager.getProxyStats();
 stats.forEach(proxy => {
   console.log(`${proxy.proxy}:`, {
     healthy: proxy.healthy,
