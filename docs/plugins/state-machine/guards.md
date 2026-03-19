@@ -80,6 +80,54 @@ guards: {
 }
 ```
 
+The `machine` argument is also injected into guards.
+
+It exposes:
+- `machine.database`: access to the database instance
+- `machine.machineId`: the current machine id
+- `machine.entityId`: the current entity id
+
+That lets a guard load other resources before allowing a transition.
+
+```javascript
+guards: {
+  hasInventory: async (context, event, machine) => {
+    // Load the current order controlled by the machine.
+    const order = await machine.database.resources.orders.get(machine.entityId);
+
+    // Validate order lines against inventory in another resource.
+    for (const item of order.items || []) {
+      const stock = await machine.database.resources.inventory.get(item.productId);
+      if (!stock || stock.quantity < item.quantity) {
+        return false;
+      }
+    }
+
+    return true;
+  }
+}
+```
+
+Important:
+- `context` is the payload passed to `send(...)` or produced by a trigger
+- `context` is not automatically the full entity record
+- if the guard needs the current record, it should load it through `machine.database`
+
+```javascript
+guards: {
+  canShip: async (context, event, machine) => {
+    // Event payload carries operational input for this transition.
+    if (!context.carrier) {
+      return false;
+    }
+
+    // Load the full entity when the validation depends on stored data.
+    const order = await machine.database.resources.orders.get(machine.entityId);
+    return order.status === 'paid' && order.addressVerified === true;
+  }
+}
+```
+
 ---
 
 ## Rich Example

@@ -221,6 +221,64 @@ const history = await orders.state.history('order-42', {
 await orders.state.delete('order-42');
 ```
 
+---
+
+## Runtime Context Injected Into Actions and Guards
+
+Both `actions` and `guards` receive the same runtime signature:
+
+```javascript
+async (context, event, machine) => {}
+```
+
+Where:
+- `context`: payload passed to `send(...)` or produced by a trigger
+- `event`: current event name
+- `machine.database`: database instance
+- `machine.machineId`: current machine id
+- `machine.entityId`: current entity id
+
+This is how the plugin gives your handlers access to the rest of the system.
+
+Important:
+- `context` is event/trigger payload
+- `context` is not automatically the full resource record
+- load the entity explicitly when the handler needs persisted fields
+
+```javascript
+actions: {
+  recordApproval: async (context, event, machine) => {
+    // Update the entity owned by the workflow.
+    await machine.database.resources.requests.patch(machine.entityId, {
+      approvedAt: new Date().toISOString()
+    });
+
+    // Also talk to a different resource using the injected database.
+    await machine.database.resources.audit_logs.insert({
+      id: `audit-${machine.entityId}`,
+      machineId: machine.machineId,
+      event,
+      createdAt: new Date().toISOString()
+    });
+  }
+}
+```
+
+Example loading the current entity explicitly:
+
+```javascript
+guards: {
+  canFulfill: async (context, event, machine) => {
+    // Event payload says what the caller is trying to do.
+    console.log(context.warehouseId);
+
+    // Load the actual record when business validation needs stored fields.
+    const order = await machine.database.resources.orders.get(machine.entityId);
+    return order.paymentStatus === 'confirmed' && order.stockReserved === true;
+  }
+}
+```
+
 ## Rich Example: Approval Workflow With Guards, Entry/Exit Actions, and Retry
 
 This example is closer to what teams actually need in production: authorization, audit, side effects, and retry policy for unstable integrations.

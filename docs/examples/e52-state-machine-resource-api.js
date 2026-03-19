@@ -1,10 +1,10 @@
 /**
  * State Machine Plugin - Resource API Example
  *
- * This example demonstrates the new resource-based API for state machines.
- * Instead of db.stateMachine('name').send(), you can now use resource.state()
+ * This example demonstrates the resource-based API for state machines.
+ * In addition to db.stateMachine('name').send(...), you can also use resource.state.*.
  *
- * New API Benefits:
+ * Resource API Benefits:
  * - More intuitive: state machine operations are directly on the resource
  * - Less verbose: no need to reference machine name
  * - Consistent: follows same pattern as insert(), update(), delete()
@@ -81,10 +81,10 @@ console.log('🎯 State Machine Plugin initialized with Resource API\n');
 console.log('='.repeat(60));
 
 // ============================================================================
-// NEW API: Using resource methods instead of db.stateMachine()
+// RESOURCE API: Using resource methods alongside db.stateMachine()
 // ============================================================================
 
-console.log('\n📝 EXAMPLE: New Resource API\n');
+console.log('\n📝 EXAMPLE: Resource API\n');
 
 // Create order
 const order = await ordersResource.insert({
@@ -96,36 +96,36 @@ const order = await ordersResource.insert({
 
 console.log(`Order created: ${order.id}`);
 
-// Initialize state (OLD vs NEW)
+// Initialize state (Machine API vs Resource API)
 console.log('\n--- Initialize State ---');
-console.log('OLD API: await db.stateMachine("orderWorkflow").initializeEntity(id, context)');
-console.log('NEW API: await ordersResource.state.initialize(id, context)');
+console.log('Machine API:  await db.stateMachine("orderWorkflow").initializeEntity(id, context)');
+console.log('Resource API: await ordersResource.state.initialize(id, context)');
 
 await ordersResource.state.initialize(order.id, {
   customerId: order.customerId,
   totalAmount: order.totalAmount
 });
 
-// Get current state (OLD vs NEW)
+// Get current state (Machine API vs Resource API)
 console.log('\n--- Get Current State ---');
-console.log('OLD API: await db.stateMachine("orderWorkflow").getState(id)');
-console.log('NEW API: await ordersResource.state.get(id)');
+console.log('Machine API:  await db.stateMachine("orderWorkflow").getState(id)');
+console.log('Resource API: await ordersResource.state.get(id)');
 
 let currentState = await ordersResource.state.get(order.id);
 console.log(`Current state: ${currentState}`);
 
-// Check valid events (OLD vs NEW)
+// Check valid events (Machine API vs Resource API)
 console.log('\n--- Get Valid Events ---');
-console.log('OLD API: await db.stateMachine("orderWorkflow").getValidEvents(id)');
-console.log('NEW API: await ordersResource.state.getValidEvents(id)');
+console.log('Machine API:  await db.stateMachine("orderWorkflow").getValidEvents(id)');
+console.log('Resource API: await ordersResource.state.getValidEvents(id)');
 
 let validEvents = await ordersResource.state.getValidEvents(order.id);
 console.log(`Valid events: ${validEvents.join(', ')}`);
 
-// Transition to new state (OLD vs NEW)
+// Transition to new state (Machine API vs Resource API)
 console.log('\n--- Trigger Transition ---');
-console.log('OLD API: await db.stateMachine("orderWorkflow").send(id, "CONFIRM")');
-console.log('NEW API: await ordersResource.state.send(id, "CONFIRM")');
+console.log('Machine API:  await db.stateMachine("orderWorkflow").send(id, "CONFIRM")');
+console.log('Resource API: await ordersResource.state.send(id, "CONFIRM")');
 
 await ordersResource.state.send(order.id, 'CONFIRM');
 
@@ -146,10 +146,10 @@ await ordersResource.state.send(order.id, 'DELIVER');
 currentState = await ordersResource.state.get(order.id);
 console.log(`Final state: ${currentState}`);
 
-// Get transition history (OLD vs NEW)
+// Get transition history (Machine API vs Resource API)
 console.log('\n--- Get Transition History ---');
-console.log('OLD API: await db.stateMachine("orderWorkflow").getTransitionHistory(id)');
-console.log('NEW API: await ordersResource.state.history(id)');
+console.log('Machine API:  await db.stateMachine("orderWorkflow").getTransitionHistory(id)');
+console.log('Resource API: await ordersResource.state.history(id)');
 
 const history = await ordersResource.state.history(order.id);
 console.log(`\nTransition history (${history.length} transitions):`);
@@ -158,7 +158,7 @@ for (const transition of history) {
 }
 
 // ============================================================================
-// COMPARISON: Old vs New API
+// COMPARISON: Machine API vs Resource API
 // ============================================================================
 
 console.log('\n\n' + '='.repeat(60));
@@ -166,7 +166,7 @@ console.log('API COMPARISON');
 console.log('='.repeat(60));
 
 console.log(`
-OLD API (verbose):
+MACHINE API:
 -----------------------------------------
 const machine = db.stateMachine('orderWorkflow');
 await machine.initializeEntity(id, context);
@@ -175,7 +175,7 @@ const state = await machine.getState(id);
 const events = await machine.getValidEvents(id);
 const history = await machine.getTransitionHistory(id);
 
-NEW API (intuitive + namespaced):
+RESOURCE API:
 -----------------------------------------
 await ordersResource.state.initialize(id, context);
 await ordersResource.state.send(id, 'CONFIRM');
@@ -185,7 +185,7 @@ const history = await ordersResource.state.history(id);
 
 KEY BENEFITS:
 ✅ More intuitive - operations on the resource itself
-✅ Less verbose - no machine name needed
+✅ Less repetitive - no machine name needed when you already have the resource
 ✅ Namespaced - clean organization under .state
 ✅ Consistent - same pattern as insert/update/delete
 ✅ Better DX - easier to discover and use
@@ -243,10 +243,10 @@ KEY TAKEAWAYS:
    - Or by name: { resource: 'orders' }
    - Plugin automatically attaches state object to the resource
 
-4. Backward Compatibility:
-   - This is a BREAKING CHANGE (v14.0.0)
-   - Old API (db.stateMachine().send()) has been removed
-   - All code must be updated to use resource.state.* methods
+4. API Choice:
+   - Machine API still exists: db.stateMachine('orderWorkflow').send(...)
+   - Resource API exists alongside it: ordersResource.state.send(...)
+   - Use the one that best matches your calling code
 
 5. Benefits:
    - ✅ Namespaced - organized under .state

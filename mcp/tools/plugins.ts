@@ -437,25 +437,28 @@ export const pluginTools = [
   // ============================================
   {
     name: 'stateMachineTransition',
-    description: 'Transition a document to a new state',
+    description: 'Send an event through a resource-attached state machine',
     inputSchema: {
       type: 'object',
       properties: {
         resourceName: { type: 'string', description: 'Name of the resource' },
         id: { type: 'string', description: 'Document ID' },
-        event: { type: 'string', description: 'Transition event' }
+        event: { type: 'string', description: 'State machine event name' },
+        context: { type: 'object', description: 'Optional event payload/context' }
       },
       required: ['resourceName', 'id', 'event']
     }
   },
   {
     name: 'stateMachineHistory',
-    description: 'Get state transition history for a document',
+    description: 'Get transition history from a resource-attached state machine',
     inputSchema: {
       type: 'object',
       properties: {
         resourceName: { type: 'string', description: 'Name of the resource' },
-        id: { type: 'string', description: 'Document ID' }
+        id: { type: 'string', description: 'Document ID' },
+        limit: { type: 'number', description: 'Maximum number of history entries' },
+        offset: { type: 'number', description: 'Pagination offset' }
       },
       required: ['resourceName', 'id']
     }
@@ -963,23 +966,28 @@ export function createPluginHandlers(server: S3dbMCPServer) {
     // ============================================
     // STATE MACHINE HANDLERS
     // ============================================
-    async stateMachineTransition(args: { resourceName: string; id: string; event: string }, database: S3db): Promise<any> {
+    async stateMachineTransition(args: { resourceName: string; id: string; event: string; context?: Record<string, unknown> }, database: S3db): Promise<any> {
       server.ensureConnected(database);
       const resource = server.getResource(database, args.resourceName);
-      const result = await resource.transition?.(args.id, args.event);
-      if (!result) {
+      const stateApi = resource.state;
+      if (!stateApi?.send) {
         return { success: false, error: { code: 'PLUGIN_NOT_ENABLED', message: 'State machine not enabled for this resource' } };
       }
+      const result = await stateApi.send(args.id, args.event, args.context || {});
       return { success: true, data: result };
     },
 
-    async stateMachineHistory(args: { resourceName: string; id: string }, database: S3db): Promise<any> {
+    async stateMachineHistory(args: { resourceName: string; id: string; limit?: number; offset?: number }, database: S3db): Promise<any> {
       server.ensureConnected(database);
       const resource = server.getResource(database, args.resourceName);
-      const history = await resource.getStateHistory?.(args.id);
-      if (!history) {
+      const stateApi = resource.state;
+      if (!stateApi?.history) {
         return { success: false, error: { code: 'PLUGIN_NOT_ENABLED', message: 'State machine not enabled for this resource' } };
       }
+      const history = await stateApi.history(args.id, {
+        limit: args.limit,
+        offset: args.offset
+      });
       return { success: true, data: history };
     },
 

@@ -333,7 +333,7 @@ const user = await users.get('user-id');
 - **VectorPlugin**: Vector embeddings + similarity search (AI/RAG)
 - **FullTextPlugin**: Indexed text search with stemming
 - **GraphPlugin**: Graph relationships and traversal
-- **StateMachinePlugin**: State transitions with history
+- **StateMachinePlugin**: Workflow orchestration with states, guards, actions, triggers, retries, and history
 - **RelationPlugin**: Resource relationships (1:N, N:M)
 - **TreePlugin**: Hierarchical data structures
 

@@ -74,6 +74,61 @@ actions: {
 }
 ```
 
+The `machine` argument is the runtime dependency-injection object for the action.
+
+It exposes:
+- `machine.database`: access to the database instance
+- `machine.machineId`: the current machine id
+- `machine.entityId`: the current entity id
+
+That means the action can talk to other resources, not only the resource attached to the machine.
+
+```javascript
+actions: {
+  recordApproval: async (context, event, machine) => {
+    // Update the main business record controlled by the machine.
+    await machine.database.resources.requests.patch(machine.entityId, {
+      approvedAt: new Date().toISOString(),
+      approvedBy: context.approverId
+    });
+
+    // Also write to another resource through the injected database.
+    await machine.database.resources.audit_logs.insert({
+      id: `audit-${machine.entityId}-${Date.now()}`,
+      machineId: machine.machineId,
+      entityId: machine.entityId,
+      event,
+      createdAt: new Date().toISOString()
+    });
+  }
+}
+```
+
+Important:
+- `context` is the payload passed to `send(...)` or produced by a trigger
+- `context` is not automatically the full entity record
+- if the action needs the current record, it should load it through `machine.database`
+
+```javascript
+actions: {
+  dispatchShipment: async (context, event, machine) => {
+    // Context contains event payload, not the full order by default.
+    console.log(context.carrier); // comes from send(..., { carrier: 'dhl' })
+
+    // Load the actual entity record when the action needs full resource data.
+    const order = await machine.database.resources.orders.get(machine.entityId);
+
+    await machine.database.resources.shipments.insert({
+      id: `shipment-${machine.entityId}`,
+      orderId: machine.entityId,
+      carrier: context.carrier,
+      destinationZip: order.shippingZip,
+      createdAt: new Date().toISOString()
+    });
+  }
+}
+```
+
 ---
 
 ## Entry vs Exit

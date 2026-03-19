@@ -136,7 +136,7 @@ const pluginCatalog = {
       { name: 'S3QueuePlugin', description: 'S3-backed message queue', config: { prefix: 'string', visibility: 'number' } },
       { name: 'SchedulerPlugin', description: 'Cron-based task scheduling', config: { timezone: 'string' } },
       { name: 'QueueConsumerPlugin', description: 'Queue processing workers', config: { concurrency: 'number', retries: 'number' } },
-      { name: 'StateMachinePlugin', description: 'State transitions with history', config: { states: 'object', transitions: 'object' } }
+      { name: 'StateMachinePlugin', description: 'Workflow orchestration with states, guards, actions, triggers, retries, and history', config: { stateMachines: 'object', actions: 'object', guards: 'object' } }
     ],
     webScraping: [
       { name: 'PuppeteerPlugin', description: 'Browser automation for scraping', config: { headless: 'boolean', timeout: 'number' } },
