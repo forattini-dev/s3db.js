@@ -86,7 +86,7 @@ memory://mybucket/prefix/path
 | `region` | string | AWS region (default: us-east-1) |
 | `forcePathStyle` | boolean | Force path-style URLs |
 | `sessionToken` | string | Optional session token for temporary credentials |
-| `maxMemoryMB` | number | Max in-memory write/read byte budget for SQLite backend |
+| `maxMemoryMB` | number | Logical payload budget for SQLite backend |
 | `maxObjectSize` | number | Max object size in bytes for all backends |
 | `enforceLimits` | boolean | Validate metadata and object-size constraints before writes |
 

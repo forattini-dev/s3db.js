@@ -40,6 +40,9 @@ const db = new Database({
 
 Persistent embedded SQLite backend for local environments and CI.
 
+It stores s3db objects durably in SQLite, but it does not turn resources into relational
+tables. Resource evolution still happens through s3db metadata and schema registries.
+
 ```javascript
 import { Database } from 's3db.js';
 
@@ -56,6 +59,14 @@ const client = new SqliteClient({
   maxMemoryMB: 256
 });
 ```
+
+**Best for:**
+- Single-process local services
+- Integration tests with reconnect durability
+- Migration drills and local persistence without S3
+
+**Important caveat:**
+- `maxMemoryMB` is a logical payload budget, not a precise SQLite engine memory measurement
 
 ### MemoryClient
 
@@ -105,8 +116,8 @@ All clients use a unified connection string format:
 protocol://[credentials@]host[:port]/bucket[/prefix][?options]
 ```
 
-SQLite does not use credentials. Use `sqlite:///absolute/path/to/file.db` or
-`sqlite://./relative/path/file.db`.
+SQLite does not use credentials. Use `sqlite:///absolute/path/to/file.db`,
+`sqlite://./relative/path/file.db`, or `sqlite:///:memory:`.
 
 ### Examples
 

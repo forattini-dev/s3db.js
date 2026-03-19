@@ -671,7 +671,7 @@ dev, CI, migration drills), use `SqliteClient`.
 - 🧰 **Simple local deployment** - file-based storage, no object storage setup
 - 📈 **Predictable performance** - consistent local latency
 - 🧪 **Reliable integration tests** - data persists between test steps
-- 🔐 **Memory budget controls** - `maxMemoryMB` to avoid OOM in heavy writes
+- 🔐 **Payload budget controls** - `maxMemoryMB` helps cap logical stored payload growth
 
 **Quick Start (Connection String):**
 
@@ -700,6 +700,9 @@ const client = new SqliteClient({
 const db = new S3db({ client });
 await db.connect();
 ```
+
+`SqliteClient` is still an object-storage backend. Resource schema evolution is handled by
+s3db metadata, not by one SQLite table per resource.
 
 📚 [**Full SqliteClient Documentation**](./clients/sqlite-client.md)
 
