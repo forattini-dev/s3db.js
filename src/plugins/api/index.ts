@@ -539,7 +539,15 @@ export class ApiPlugin extends Plugin {
     }
 
     if (this.config.logLevel) {
-      this.logger.info({
+      const listenerLabel = this.config.listeners.length === 1 ? 'listener' : 'listeners';
+      const requestLoggingSummary = this.config.logging.enabled
+        ? `request logging=${this.config.logging.format}`
+        : 'request logging=off';
+
+      this.logger.info(
+        `Resolved ${this.config.listeners.length} API ${listenerLabel}: ${this.config.listeners.map((listener) => this._formatListenerSummary(listener)).join('; ')}; ${requestLoggingSummary}`
+      );
+      this.logger.debug({
         listeners: this.config.listeners.map((listener) => ({
           name: listener.name,
           bind: listener.bind,
@@ -565,7 +573,8 @@ export class ApiPlugin extends Plugin {
         const listener = this.config.listeners[i];
 
         if (listener && this.config.logLevel) {
-          this.logger.info({
+          this.logger.info(`Starting ${this._formatListenerSummary(listener)}`);
+          this.logger.debug({
             listener: listener.name,
             bind: listener.bind,
             protocols: this._buildListenerProtocolSummary(listener)
@@ -576,7 +585,8 @@ export class ApiPlugin extends Plugin {
         startedListeners.push(listenerServer);
 
         if (listener && this.config.logLevel) {
-          this.logger.info({
+          this.logger.info(`${this._formatListenerSummary(listener)} is up`);
+          this.logger.debug({
             listener: listener.name,
             bind: listener.bind,
             protocolSummary: this._buildListenerProtocolSummary(listener)
@@ -799,6 +809,55 @@ export class ApiPlugin extends Plugin {
       },
       custom
     };
+  }
+
+  private _formatListenerSummary(listener: ApiListenerConfig): string {
+    return `${listener.name} on ${listener.bind.host}:${listener.bind.port} (${this._formatListenerProtocols(listener)})`;
+  }
+
+  private _formatListenerProtocols(listener: ApiListenerConfig): string {
+    const protocols: string[] = [];
+
+    if (listener.protocols.http.enabled) {
+      protocols.push(this._formatProtocolLabel('http', listener.protocols.http.path));
+    }
+
+    if (listener.protocols.websocket.enabled) {
+      protocols.push(this._formatProtocolLabel('ws', listener.protocols.websocket.path));
+    }
+
+    if (listener.protocols.tcp.enabled) {
+      protocols.push('tcp');
+    }
+
+    if (listener.protocols.udp.enabled) {
+      protocols.push('udp');
+    }
+
+    Object.entries(listener.protocols.custom).forEach(([name, protocol]) => {
+      if (!this._isProtocolEnabled(protocol)) {
+        return;
+      }
+
+      const path = typeof protocol === 'object' && protocol !== null ? protocol.path : undefined;
+      protocols.push(this._formatProtocolLabel(name, path));
+    });
+
+    return protocols.join(', ') || 'no protocols';
+  }
+
+  private _formatProtocolLabel(name: string, path?: string): string {
+    if (typeof path !== 'string') {
+      return name;
+    }
+
+    const normalizedPath = path.trim();
+
+    if (!normalizedPath || normalizedPath === '/') {
+      return name;
+    }
+
+    return `${name}:${normalizedPath}`;
   }
 
   getServerInfo(): ApiPluginServerInfo {

@@ -555,7 +555,8 @@ export class ApiServer {
 
     this.isRunning = true;
     if (this.options.logLevel) {
-      this.logger.info({
+      this.logger.info(this._formatRuntimeListenerSummary(serverInfo));
+      this.logger.debug({
         address: serverInfo.hostname,
         port: serverInfo.port,
         listenerName: this.options.listenerName,
@@ -811,6 +812,62 @@ export class ApiServer {
     };
   }
 
+  private _formatConfiguredListenerSummary(): string {
+    return `${this._formatConfiguredListenerName()} on ${this.options.host}:${this.options.port} (${this._formatProtocolList(this._getProtocolSummary())})`;
+  }
+
+  private _formatRuntimeListenerSummary(serverInfo: ServerInfo): string {
+    return `${this._formatConfiguredListenerName()} listening on ${serverInfo.hostname}:${serverInfo.port} (${this._formatProtocolList(this._getProtocolSummary())})`;
+  }
+
+  private _formatConfiguredListenerName(): string {
+    return this.options.listenerName || 'listener';
+  }
+
+  private _formatProtocolList(summary: ReturnType<ApiServer['_getProtocolSummary']>): string {
+    const protocols: string[] = [];
+
+    if (summary.http.enabled) {
+      protocols.push(this._formatProtocolLabel('http', summary.http.path));
+    }
+
+    if (summary.websocket.enabled) {
+      protocols.push(this._formatProtocolLabel('ws', summary.websocket.path));
+    }
+
+    if (summary.tcp.enabled) {
+      protocols.push('tcp');
+    }
+
+    if (summary.udp.enabled) {
+      protocols.push('udp');
+    }
+
+    Object.entries(summary.custom).forEach(([name, protocol]) => {
+      if (!protocol.enabled) {
+        return;
+      }
+
+      protocols.push(this._formatProtocolLabel(name, protocol.path));
+    });
+
+    return protocols.join(', ') || 'no protocols';
+  }
+
+  private _formatProtocolLabel(name: string, path?: string): string {
+    if (typeof path !== 'string') {
+      return name;
+    }
+
+    const normalizedPath = path.trim();
+
+    if (!normalizedPath || normalizedPath === '/') {
+      return name;
+    }
+
+    return `${name}:${normalizedPath}`;
+  }
+
   private _isMatchingPath(requestPath: string, protocolPath: string): boolean {
     const pathname = (() => {
       try {
@@ -826,7 +883,8 @@ export class ApiServer {
 
   private async _setupProtocolBindings(): Promise<void> {
     if (this.options.logLevel) {
-      this.logger.info({
+      this.logger.info(`Preparing ${this._formatConfiguredListenerSummary()}`);
+      this.logger.debug({
         listenerName: this.options.listenerName,
         bind: {
           host: this.options.host,
@@ -838,37 +896,14 @@ export class ApiServer {
 
     if (this.options.tcp?.enabled) {
       await this._setupTcpProtocol();
-      if (this.options.logLevel) {
-        this.logger.info({
-          listenerName: this.options.listenerName,
-          transport: 'tcp',
-          host: this.options.host,
-          port: this.options.port
-        }, 'TCP transport configured');
-      }
     }
 
     if (this.options.websocket?.enabled) {
       await this._setupWebSocketProtocol();
-      if (this.options.logLevel) {
-        this.logger.info({
-          listenerName: this.options.listenerName,
-          transport: 'websocket',
-          path: this._normalizeTransportPath(this.options.websocket.path)
-        }, 'WebSocket transport configured');
-      }
     }
 
     if (this.options.udp?.enabled) {
       await this._setupUdpProtocol();
-      if (this.options.logLevel) {
-        this.logger.info({
-          listenerName: this.options.listenerName,
-          transport: 'udp',
-          host: this.options.host,
-          port: this.options.port
-        }, 'UDP transport configured');
-      }
     }
   }
 
@@ -948,12 +983,7 @@ export class ApiServer {
         tcpServer.on('error', this._tcpServerErrorHandler!);
 
         if (this.options.logLevel) {
-          this.logger.info({
-            listenerName: this.options.listenerName,
-            transport: 'tcp',
-            host: this.options.host,
-            port: this.options.port
-          }, 'TCP transport is bound');
+          this.logger.debug(`TCP transport bound for ${this._formatConfiguredListenerName()} on ${this.options.host}:${this.options.port}`);
         }
         resolve();
       });
@@ -1004,11 +1034,7 @@ export class ApiServer {
       recovery: wsOpts.recovery as any,
       onConnection: (socketId: string, send: (message: unknown) => void, req: IncomingMessage) => {
         if (this.options.logLevel) {
-          this.logger.info({
-            listenerName: this.options.listenerName,
-            socketId,
-            transport: 'websocket'
-          }, 'WebSocket connection established');
+          this.logger.info(`WebSocket connected: ${socketId} on ${this._formatConfiguredListenerName()}`);
         }
         if (wsOpts.onConnection) {
           wsOpts.onConnection(socketId, send, req, { database: this.options.database, adapter, logger: this.logger });
@@ -1021,7 +1047,8 @@ export class ApiServer {
         : undefined,
       onClose: (socketId: string, code: number, reason: string) => {
         if (this.options.logLevel) {
-          this.logger.debug({ socketId, code, reason }, 'WebSocket connection closed');
+          const reasonSuffix = reason ? `: ${reason}` : '';
+          this.logger.debug(`WebSocket closed: ${socketId} (${code}${reasonSuffix})`);
         }
         if (wsOpts.onClose) {
           wsOpts.onClose(socketId, code, reason, { database: this.options.database, adapter, logger: this.logger });
@@ -1091,13 +1118,7 @@ export class ApiServer {
       socket.once('listening', () => {
         socket.off('error', onBindError);
         if (this.options.logLevel) {
-          this.logger.info({
-            listenerName: this.options.listenerName,
-            transport: 'udp',
-            host: this.options.host,
-            port: this.options.port,
-            maxMessageBytes
-          }, 'UDP transport is bound');
+          this.logger.debug(`UDP transport bound for ${this._formatConfiguredListenerName()} on ${this.options.host}:${this.options.port} (max ${maxMessageBytes} bytes)`);
         }
         resolve();
       });
