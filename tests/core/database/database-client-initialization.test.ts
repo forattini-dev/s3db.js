@@ -4,7 +4,10 @@ import path from 'path';
 
 import { Database } from '../../../src/database.class.js';
 import { MemoryClient } from '../../../src/clients/memory-client.class.js';
+import { isNodeSqliteAvailable } from '../../../src/clients/sqlite-runtime.js';
 import { createTemporaryPathForTest } from '#tests/config.js';
+
+const itIfSqlite = isNodeSqliteAvailable() ? it : it.skip;
 
 describe('Database Client Initialization', () => {
   const databases: Database[] = [];
@@ -56,7 +59,7 @@ describe('Database Client Initialization', () => {
     expect(db.keyPrefix).toBe('custom-prefix');
   });
 
-  it('supports sqlite:// filename connection strings', async () => {
+  itIfSqlite('supports sqlite:// filename connection strings', async () => {
     const tempDir = await createTemporaryPathForTest('s3db-sqlite-init');
     const dbPath = path.join(tempDir, 's3db.sqlite');
     const sqliteConnectionString = `sqlite://${dbPath}`;

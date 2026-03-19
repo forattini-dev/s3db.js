@@ -4,7 +4,10 @@ import { Readable } from 'node:stream'
 import { vi, describe, test, expect, beforeEach, afterEach } from 'vitest'
 
 import SqliteClient from '../../../src/clients/sqlite-client.class.js'
+import { isNodeSqliteAvailable } from '../../../src/clients/sqlite-runtime.js'
 import { createTemporaryPathForTest } from '#tests/config.js'
+
+const describeIfSqlite = isNodeSqliteAvailable() ? describe : describe.skip;
 
 const readBody = async (body: unknown): Promise<string> => {
   if (!body || typeof body !== 'object' || !('transformToString' in body) || typeof (body as { transformToString: unknown }).transformToString !== 'function') {
@@ -27,7 +30,7 @@ const createInMemorySqliteClient = (options: Record<string, unknown> = {}) => {
   return { client, baseDir: null };
 }
 
-describe('SqliteClient', () => {
+describeIfSqlite('SqliteClient', () => {
   let clients: Array<{ client: SqliteClient; baseDir: string | null }> = [];
 
   beforeEach(() => {

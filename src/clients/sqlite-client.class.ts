@@ -1,7 +1,6 @@
 import path from 'path';
 import { mkdirSync } from 'fs';
 import { Readable } from 'node:stream';
-import { DatabaseSync } from 'node:sqlite';
 import EventEmitter from 'events';
 import { createHash } from 'crypto';
 import { chunk } from 'lodash-es';
@@ -10,10 +9,12 @@ import { tryFn } from '../concerns/try-fn.js';
 import { idGenerator } from '../concerns/id.js';
 import { metadataEncode, metadataDecode } from '../concerns/metadata-encoding.js';
 import { normalizeEtagHeader } from './client-compat.js';
+import { getNodeSqliteAvailabilityError, getNodeSqliteDatabaseSync } from './sqlite-runtime.js';
 import { createLogger } from '../concerns/logger.js';
 import { mapAwsError, DatabaseError, ResourceError, ValidationError, BaseError, NoSuchKey } from '../errors.js';
 import { TasksRunner } from '../tasks/tasks-runner.class.js';
 import type { LogLevel } from '../types/common.types.js';
+import type { DatabaseSync as NodeSqliteDatabaseSync } from 'node:sqlite';
 import type {
   Logger,
   SqliteClientConfig,
@@ -106,7 +107,7 @@ export class SqliteClient extends EventEmitter {
   private logger: Logger;
   private taskExecutorMonitoring: MonitoringConfig | null;
   private taskManager: TaskManager;
-  private db: DatabaseSync;
+  private db: NodeSqliteDatabaseSync;
   private dbPath: string;
   bucket: string;
   private keyPrefix: string;
@@ -195,7 +196,20 @@ export class SqliteClient extends EventEmitter {
       basePath: this.basePath
     };
 
-    this.db = new DatabaseSync(this.basePath);
+    let DatabaseSyncClass: new (path: string) => NodeSqliteDatabaseSync;
+    try {
+      DatabaseSyncClass = getNodeSqliteDatabaseSync();
+    } catch {
+      const availabilityError = getNodeSqliteAvailabilityError();
+      throw new DatabaseError('SqliteClient requires the node:sqlite builtin module, which is not available in this runtime.', {
+        operation: 'SqliteClient.constructor',
+        retriable: false,
+        suggestion: 'Run on a Node.js runtime that provides node:sqlite, or use FileSystemClient/MemoryClient instead.',
+        original: availabilityError || undefined
+      });
+    }
+
+    this.db = new DatabaseSyncClass(this.basePath) as NodeSqliteDatabaseSync;
     this.db.exec(`
       CREATE TABLE IF NOT EXISTS objects (
         bucket TEXT NOT NULL,

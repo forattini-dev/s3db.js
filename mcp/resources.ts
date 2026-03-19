@@ -1061,6 +1061,16 @@ function generateClientDoc(name: string): string {
     return `# Client: ${name}\n\nClient not found. Available clients: ${availableClients}`;
   }
 
+  const normalized = name
+    .replace(/Client$/i, '')
+    .replace(/([a-z0-9])([A-Z])/g, '$1-$2')
+    .toLowerCase();
+  const clientDocPath = join(DOCS_ROOT, 'clients', `${normalized}-client.md`);
+
+  if (existsSync(clientDocPath)) {
+    return readFileSync(clientDocPath, 'utf-8');
+  }
+
   return `# ${client.name}
 
 ${client.description}

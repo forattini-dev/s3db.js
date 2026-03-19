@@ -3,10 +3,13 @@ import { rm } from 'fs/promises';
 import { afterEach, describe, expect, it } from 'vitest';
 
 import { Database } from '../../../src/database.class.js';
+import { isNodeSqliteAvailable } from '../../../src/clients/sqlite-runtime.js';
 import { clearValidatorCache } from '../../../src/concerns/validator-cache.js';
 import { createTemporaryPathForTest } from '#tests/config.js';
 
-describe('SQLite schema evolution', () => {
+const describeIfSqlite = isNodeSqliteAvailable() ? describe : describe.skip;
+
+describeIfSqlite('SQLite schema evolution', () => {
   const databases: Database[] = [];
   const tempDirs: string[] = [];
 
