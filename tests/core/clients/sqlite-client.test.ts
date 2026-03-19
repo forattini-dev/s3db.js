@@ -132,12 +132,32 @@ describe('SqliteClient', () => {
     expect(putResponse).toHaveProperty('ETag');
     expect(await readBody(got.Body)).toBe('cmd-body');
     expect(requested).toEqual(['PutObjectCommand', 'GetObjectCommand']);
-    expect(responded).toEqual([
-      'PutObjectCommand',
-      'PutObjectCommand',
-      'GetObjectCommand',
-      'GetObjectCommand'
-    ]);
+    expect(responded).toEqual(['PutObjectCommand', 'GetObjectCommand']);
+  });
+
+  test('uses metadata-only SQL for headObject and exists hot paths', async () => {
+    const client = register(createInMemorySqliteClient());
+
+    await client.putObject({
+      key: 'hot-path',
+      body: 'payload',
+      contentType: 'text/plain',
+      metadata: { touched: true }
+    });
+
+    const prepareSpy = vi.spyOn((client as any).db, 'prepare');
+    prepareSpy.mockClear();
+
+    await client.headObject('hot-path');
+    await client.exists('hot-path');
+
+    const sqlCalls = prepareSpy.mock.calls.map(([sql]) => String(sql).replace(/\s+/g, ' ').trim());
+
+    expect(sqlCalls).toEqual(expect.arrayContaining([
+      expect.stringMatching(/SELECT key, metadata, content_type, content_encoding, content_length, etag, last_modified FROM objects WHERE bucket = \? AND key = \?/),
+      expect.stringMatching(/SELECT 1 FROM objects WHERE bucket = \? AND key = \? LIMIT 1/)
+    ]));
+    expect(sqlCalls.some((sql) => /SELECT .*body/i.test(sql))).toBe(false);
   });
 
   test('sendCommand rejects unsupported operations', async () => {

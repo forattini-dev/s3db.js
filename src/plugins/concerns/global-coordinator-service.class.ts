@@ -928,20 +928,20 @@ export class GlobalCoordinatorService extends EventEmitter {
       return null;
     }
 
-    if (isLeaderState(data as unknown)) {
-      const stateData = data as LeaderState;
+    if (isLeaderState(data)) {
+      const stateData = data;
       if (typeof stateData.epoch === 'number' && stateData.epoch > this._lastKnownEpoch) {
         this._lastKnownEpoch = stateData.epoch;
       }
     }
 
     if (this._stateCacheTtl > 0) {
-      this._cachedState = data as LeaderState | null;
+      this._cachedState = isLeaderState(data) ? data : null;
       this._stateCacheTime = now;
       this.logger.debug({ namespace: this.namespace }, `[STATE_CACHE] MISS - cached`);
     }
 
-    return data as LeaderState | null;
+    return isLeaderState(data) ? data : null;
   }
 
   protected _invalidateStateCache(): void {

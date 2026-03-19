@@ -6,6 +6,11 @@
 It is useful when you want local persistence with predictable query performance and no
 external object storage service.
 
+Internally it behaves like an embedded object store: resource records still live as
+s3db objects plus `s3db.json` metadata, while SQLite provides durable local storage
+for those objects. Resource attribute evolution is managed by s3db schema metadata,
+not by creating one SQL table per resource.
+
 ## Use Cases
 
 - Local and CI integration tests that need persistence between steps
@@ -71,13 +76,14 @@ sqlite:///tmp/s3db.sqlite?enforceLimits=true&maxObjectSize=5242880&maxMemoryMB=2
 | `enforceLimits` | boolean | Validate metadata and object size before write |
 | `metadataLimit` | number | Metadata limit in bytes when `enforceLimits` is true |
 | `maxObjectSize` | number | Hard max object size in bytes |
-| `maxMemoryMB` | number | Optional memory budget in MB for SQLite write/read safety |
+| `maxMemoryMB` | number | Optional logical payload budget in MB for the current bucket |
 | `logLevel` | string | Logger level (`info`, `debug`, `warn`, `error`) |
 
-## Memory Safety and `maxMemoryMB`
+## Payload Budget and `maxMemoryMB`
 
-`maxMemoryMB` caps the effective bucket payload size and prevents oversized writes that can
-impact the current process. This is especially important when objects can grow unexpectedly.
+`maxMemoryMB` caps the total stored payload tracked by the current bucket. It is a write-time
+guardrail for object volume, not a precise measurement of SQLite process memory, WAL size, or
+other engine overhead.
 
 ```javascript
 import { Database } from 's3db.js';

@@ -68,6 +68,21 @@ interface DbRow {
   body: Buffer;
 }
 
+interface DbObjectHeaderRow {
+  key: string;
+  metadata: string;
+  content_type: string;
+  content_encoding: string | null;
+  content_length: number;
+  etag: string;
+  last_modified: string;
+}
+
+interface DbObjectStateRow {
+  content_length: number;
+  etag: string;
+}
+
 interface DbListRow {
   key: string;
   content_type: string;
@@ -79,6 +94,10 @@ interface DbListRow {
 
 interface DbCountRow {
   total: number;
+}
+
+interface DbBucketStatsRow {
+  total_content_length: number;
 }
 
 export class SqliteClient extends EventEmitter {
@@ -190,7 +209,15 @@ export class SqliteClient extends EventEmitter {
         body BLOB NOT NULL,
         PRIMARY KEY (bucket, key)
       );
+
+      CREATE TABLE IF NOT EXISTS bucket_stats (
+        bucket TEXT PRIMARY KEY,
+        total_content_length INTEGER NOT NULL DEFAULT 0
+      );
     `);
+
+    this._rebuildBucketStats();
+    this._ensureBucketStatsRow();
 
     tryFn(() => this.db.exec('PRAGMA journal_mode = WAL;'));
 
@@ -261,7 +288,6 @@ export class SqliteClient extends EventEmitter {
           });
       }
 
-      this.emit('cl:response', commandName, response, input);
       this.emit('command.response', commandName, response, input);
       return response;
     } catch (error) {
@@ -364,98 +390,103 @@ export class SqliteClient extends EventEmitter {
     };
 
     try {
-      const existingRow = this._getRow(fullKey);
-      const objectLengthFromLimit = this._getWriteBodyLimit(existingRow?.content_length || 0);
+      const initialState = this._getObjectState(fullKey);
+      const objectLengthFromLimit = this._getWriteBodyLimit(initialState?.content_length || 0);
       const objectBody = await this._normalizeBody(body, objectLengthFromLimit);
       const objectLength = objectBody.length;
-      this._validateLimits(objectBody, metadata, fullKey);
-      this._validateMemoryBudget(objectLength, existingRow?.content_length || 0, fullKey);
+      const response = this._withWriteTransaction(() => {
+        const existingRow = this._getObjectState(fullKey);
+        this._validateLimits(objectBody, metadata, fullKey);
+        this._validateMemoryBudget(objectLength, existingRow?.content_length || 0, fullKey);
+        const storedContentLength = typeof contentLength === 'number' ? contentLength : objectLength;
 
-      if (ifMatch !== undefined && ifMatch !== null) {
-        if (!existingRow) {
-          throw new ResourceError(`Precondition failed: object does not exist for key "${fullKey}"`, {
-            bucket: this.bucket,
-            key: fullKey,
-            code: 'PreconditionFailed',
-            statusCode: 412,
-            retriable: false,
-            suggestion: 'Fetch the latest object and retry with the current ETag in ifMatch.'
-          });
+        if (ifMatch !== undefined && ifMatch !== null) {
+          if (!existingRow) {
+            throw new ResourceError(`Precondition failed: object does not exist for key "${fullKey}"`, {
+              bucket: this.bucket,
+              key: fullKey,
+              code: 'PreconditionFailed',
+              statusCode: 412,
+              retriable: false,
+              suggestion: 'Fetch the latest object and retry with the current ETag in ifMatch.'
+            });
+          }
+
+          const expectedEtags = normalizeEtagHeader(ifMatch);
+          if (!expectedEtags.includes(existingRow.etag)) {
+            throw new ResourceError(`Precondition failed: ETag mismatch for key "${fullKey}"`, {
+              bucket: this.bucket,
+              key: fullKey,
+              code: 'PreconditionFailed',
+              statusCode: 412,
+              retriable: false,
+              suggestion: 'Fetch the latest object and retry with the current ETag in ifMatch.'
+            });
+          }
         }
 
-        const expectedEtags = normalizeEtagHeader(ifMatch);
-        if (!expectedEtags.includes(existingRow.etag)) {
-          throw new ResourceError(`Precondition failed: ETag mismatch for key "${fullKey}"`, {
-            bucket: this.bucket,
-            key: fullKey,
-            code: 'PreconditionFailed',
-            statusCode: 412,
-            retriable: false,
-            suggestion: 'Fetch the latest object and retry with the current ETag in ifMatch.'
-          });
+        if (ifNoneMatch !== undefined && ifNoneMatch !== null && existingRow) {
+          if (ifNoneMatch === '*') {
+            throw new ResourceError(`Precondition failed: object already exists for key "${fullKey}"`, {
+              bucket: this.bucket,
+              key: fullKey,
+              code: 'PreconditionFailed',
+              statusCode: 412,
+              retriable: false,
+              suggestion: 'Use ifNoneMatch: \"*\" only when the key should be created.'
+            });
+          }
+
+          const normalized = normalizeEtagHeader(ifNoneMatch);
+          if (normalized.includes(existingRow.etag)) {
+            throw new ResourceError(`Precondition failed: object already exists for key "${fullKey}"`, {
+              bucket: this.bucket,
+              key: fullKey,
+              code: 'PreconditionFailed',
+              statusCode: 412,
+              retriable: false,
+              suggestion: 'Remove ifNoneMatch header if you want to overwrite the object.'
+            });
+          }
         }
-      }
 
-      if (ifNoneMatch !== undefined && ifNoneMatch !== null && existingRow) {
-        if (ifNoneMatch === '*') {
-          throw new ResourceError(`Precondition failed: object already exists for key "${fullKey}"`, {
-            bucket: this.bucket,
-            key: fullKey,
-            code: 'PreconditionFailed',
-            statusCode: 412,
-            retriable: false,
-            suggestion: 'Use ifNoneMatch: \"*\" only when the key should be created.'
-          });
-        }
+        const encodedMetadata = this._encodeMetadata(metadata);
+        const now = new Date().toISOString();
+        const etag = this._generateEtag(objectBody);
+        const statement = this.db.prepare(`
+          INSERT INTO objects (
+            bucket, key, metadata, content_type, content_encoding, content_length, etag, last_modified, body
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+          ON CONFLICT(bucket, key) DO UPDATE SET
+            metadata = excluded.metadata,
+            content_type = excluded.content_type,
+            content_encoding = excluded.content_encoding,
+            content_length = excluded.content_length,
+            etag = excluded.etag,
+            last_modified = excluded.last_modified,
+            body = excluded.body
+        `);
 
-        const normalized = normalizeEtagHeader(ifNoneMatch);
-        if (normalized.includes(existingRow.etag)) {
-          throw new ResourceError(`Precondition failed: object already exists for key "${fullKey}"`, {
-            bucket: this.bucket,
-            key: fullKey,
-            code: 'PreconditionFailed',
-            statusCode: 412,
-            retriable: false,
-            suggestion: 'Remove ifNoneMatch header if you want to overwrite the object.'
-          });
-        }
-      }
+        statement.run(
+          this.bucket,
+          fullKey,
+          JSON.stringify(encodedMetadata || {}),
+          contentType || 'application/octet-stream',
+          contentEncoding || null,
+          storedContentLength,
+          etag,
+          now,
+          objectBody
+        );
+        this._adjustBucketSize(storedContentLength - (existingRow?.content_length || 0));
 
-      const encodedMetadata = this._encodeMetadata(metadata);
-      const now = new Date().toISOString();
-      const etag = this._generateEtag(objectBody);
-      const statement = this.db.prepare(`
-        INSERT INTO objects (
-          bucket, key, metadata, content_type, content_encoding, content_length, etag, last_modified, body
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-        ON CONFLICT(bucket, key) DO UPDATE SET
-          metadata = excluded.metadata,
-          content_type = excluded.content_type,
-          content_encoding = excluded.content_encoding,
-          content_length = excluded.content_length,
-          etag = excluded.etag,
-          last_modified = excluded.last_modified,
-          body = excluded.body
-      `);
-
-      statement.run(
-        this.bucket,
-        fullKey,
-        JSON.stringify(encodedMetadata || {}),
-        contentType || 'application/octet-stream',
-        contentEncoding || null,
-        typeof contentLength === 'number' ? contentLength : objectLength,
-        etag,
-        now,
-        objectBody
-      );
-
-      const response: PutObjectResponse = {
-        ETag: this._formatEtag(etag),
-        VersionId: null,
-        ServerSideEncryption: null,
-        Location: `/${this.bucket}/${fullKey}`
-      };
+        return {
+          ETag: this._formatEtag(etag),
+          VersionId: null,
+          ServerSideEncryption: null,
+          Location: `/${this.bucket}/${fullKey}`
+        } satisfies PutObjectResponse;
+      });
 
       this.emit('cl:response', 'PutObjectCommand', response, responseInput);
       return response;
@@ -539,7 +570,7 @@ export class SqliteClient extends EventEmitter {
     const responseInput = { Key: key };
 
     try {
-      const row = this._getRow(fullKey);
+      const row = this._getObjectHeaderRow(fullKey);
       if (!row) {
         throw new NoSuchKey({
           bucket: this.bucket,
@@ -580,69 +611,72 @@ export class SqliteClient extends EventEmitter {
     };
 
     try {
-      const sourceRow = this._getRow(fullFrom);
-      if (!sourceRow) {
-        throw new NoSuchKey({
-          bucket: this.bucket,
-          key: fullFrom,
-          statusCode: 404,
-          retriable: false,
-          suggestion: 'Copy requires an existing source object.'
-        });
-      }
+      const response = this._withWriteTransaction(() => {
+        const sourceRow = this._getRow(fullFrom);
+        if (!sourceRow) {
+          throw new NoSuchKey({
+            bucket: this.bucket,
+            key: fullFrom,
+            statusCode: 404,
+            retriable: false,
+            suggestion: 'Copy requires an existing source object.'
+          });
+        }
 
-      const destinationRow = this._getRow(fullTo);
-      this._validateMemoryBudget(sourceRow.content_length, destinationRow?.content_length || 0, fullTo);
+        const destinationRow = this._getObjectState(fullTo);
+        this._validateMemoryBudget(sourceRow.content_length, destinationRow?.content_length || 0, fullTo);
 
-      const sourceMetadata = this._decodeMetadataRow(sourceRow);
-      const normalizedMetadata = this._encodeMetadata(sourceMetadata);
-      let finalMetadata: Record<string, string>;
+        const sourceMetadata = this._decodeMetadataRow(sourceRow);
+        const normalizedMetadata = this._encodeMetadata(sourceMetadata);
+        let finalMetadata: Record<string, string>;
 
-      if (metadataDirective === 'REPLACE' && metadata) {
-        finalMetadata = this._encodeMetadata(metadata) || {};
-      } else if (metadata) {
-        finalMetadata = { ...normalizedMetadata, ...this._encodeMetadata(metadata) };
-      } else {
-        finalMetadata = normalizedMetadata || {};
-      }
+        if (metadataDirective === 'REPLACE' && metadata) {
+          finalMetadata = this._encodeMetadata(metadata) || {};
+        } else if (metadata) {
+          finalMetadata = { ...normalizedMetadata, ...this._encodeMetadata(metadata) };
+        } else {
+          finalMetadata = normalizedMetadata || {};
+        }
 
-      const finalContentType = contentType || sourceRow.content_type;
-      const statement = this.db.prepare(`
-        INSERT INTO objects (
-          bucket, key, metadata, content_type, content_encoding, content_length, etag, last_modified, body
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-        ON CONFLICT(bucket, key) DO UPDATE SET
-          metadata = excluded.metadata,
-          content_type = excluded.content_type,
-          content_encoding = excluded.content_encoding,
-          content_length = excluded.content_length,
-          etag = excluded.etag,
-          last_modified = excluded.last_modified,
-          body = excluded.body
-      `);
+        const finalContentType = contentType || sourceRow.content_type;
+        const statement = this.db.prepare(`
+          INSERT INTO objects (
+            bucket, key, metadata, content_type, content_encoding, content_length, etag, last_modified, body
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+          ON CONFLICT(bucket, key) DO UPDATE SET
+            metadata = excluded.metadata,
+            content_type = excluded.content_type,
+            content_encoding = excluded.content_encoding,
+            content_length = excluded.content_length,
+            etag = excluded.etag,
+            last_modified = excluded.last_modified,
+            body = excluded.body
+        `);
 
-      const now = new Date().toISOString();
-      statement.run(
-        this.bucket,
-        fullTo,
-        JSON.stringify(finalMetadata || {}),
-        finalContentType,
-        sourceRow.content_encoding,
-        sourceRow.content_length,
-        sourceRow.etag,
-        now,
-        sourceRow.body
-      );
+        const now = new Date().toISOString();
+        statement.run(
+          this.bucket,
+          fullTo,
+          JSON.stringify(finalMetadata || {}),
+          finalContentType,
+          sourceRow.content_encoding,
+          sourceRow.content_length,
+          sourceRow.etag,
+          now,
+          sourceRow.body
+        );
+        this._adjustBucketSize(sourceRow.content_length - (destinationRow?.content_length || 0));
 
-      const response: CopyObjectResponse = {
-        CopyObjectResult: {
-          ETag: this._formatEtag(sourceRow.etag),
-          LastModified: now
-        },
-        BucketKeyEnabled: false,
-        VersionId: null,
-        ServerSideEncryption: null
-      };
+        return {
+          CopyObjectResult: {
+            ETag: this._formatEtag(sourceRow.etag),
+            LastModified: now
+          },
+          BucketKeyEnabled: false,
+          VersionId: null,
+          ServerSideEncryption: null
+        } satisfies CopyObjectResponse;
+      });
 
       this.emit('cl:response', 'CopyObjectCommand', response, responseInput);
       return response;
@@ -662,7 +696,7 @@ export class SqliteClient extends EventEmitter {
 
   async exists(key: string): Promise<boolean> {
     const fullKey = this._applyKeyPrefix(key);
-    return Boolean(this._getRow(fullKey));
+    return this._hasKey(fullKey);
   }
 
   async deleteObject(key: string): Promise<DeleteObjectResponse> {
@@ -670,13 +704,20 @@ export class SqliteClient extends EventEmitter {
     const responseInput = { Key: key };
 
     try {
-      const statement = this.db.prepare('DELETE FROM objects WHERE bucket = ? AND key = ?');
-      statement.run(this.bucket, fullKey);
+      const response = this._withWriteTransaction(() => {
+        const existingRow = this._getObjectState(fullKey);
+        const statement = this.db.prepare('DELETE FROM objects WHERE bucket = ? AND key = ?');
+        statement.run(this.bucket, fullKey);
 
-      const response: DeleteObjectResponse = {
-        DeleteMarker: false,
-        VersionId: null
-      };
+        if (existingRow) {
+          this._adjustBucketSize(-existingRow.content_length);
+        }
+
+        return {
+          DeleteMarker: false,
+          VersionId: null
+        } satisfies DeleteObjectResponse;
+      });
 
       this.emit('cl:response', 'DeleteObjectCommand', response, responseInput);
       return response;
@@ -704,27 +745,36 @@ export class SqliteClient extends EventEmitter {
     const { results, errors } = await this.taskManager.process(
       batches,
       async (batch) => {
-        const deleted: Array<{ Key: string }> = [];
-        const batchErrors: Array<{ Key: string; Code: string; Message: string }> = [];
+        return this._withWriteTransaction(() => {
+          const deleted: Array<{ Key: string }> = [];
+          const batchErrors: Array<{ Key: string; Code: string; Message: string }> = [];
+          const statement = this.db.prepare('DELETE FROM objects WHERE bucket = ? AND key = ?');
+          let reclaimedBytes = 0;
 
-        const statement = this.db.prepare('DELETE FROM objects WHERE bucket = ? AND key = ?');
-
-        for (const fullKey of batch) {
-          try {
-            statement.run(this.bucket, fullKey) as any;
-            const localKey = this._stripKeyPrefix(fullKey);
-            // Keep behavior consistent with filesystem/memory: mark as deleted even if it did not exist.
-            deleted.push({ Key: localKey });
-          } catch (error) {
-            batchErrors.push({
-              Key: this._stripKeyPrefix(fullKey),
-              Code: (error as Error).name || 'InternalError',
-              Message: (error as Error).message
-            });
+          for (const fullKey of batch) {
+            try {
+              const existingRow = this._getObjectState(fullKey);
+              statement.run(this.bucket, fullKey) as any;
+              if (existingRow) {
+                reclaimedBytes += existingRow.content_length;
+              }
+              const localKey = this._stripKeyPrefix(fullKey);
+              deleted.push({ Key: localKey });
+            } catch (error) {
+              batchErrors.push({
+                Key: this._stripKeyPrefix(fullKey),
+                Code: (error as Error).name || 'InternalError',
+                Message: (error as Error).message
+              });
+            }
           }
-        }
 
-        return { deleted, batchErrors };
+          if (reclaimedBytes > 0) {
+            this._adjustBucketSize(-reclaimedBytes);
+          }
+
+          return { deleted, batchErrors };
+        });
       }
     );
 
@@ -1285,14 +1335,47 @@ export class SqliteClient extends EventEmitter {
 
   private _getCurrentBucketSize(): number {
     const statement = this.db.prepare(`
-      SELECT COALESCE(SUM(content_length), 0) AS total
-      FROM objects
+      SELECT total_content_length
+      FROM bucket_stats
       WHERE bucket = ?
     `);
-    const row = statement.get(this.bucket) as { total: number } | undefined;
-    const total = Number(row?.total || 0);
+    const row = statement.get(this.bucket) as DbBucketStatsRow | undefined;
+    const total = Number(row?.total_content_length || 0);
 
     return Number.isFinite(total) ? total : 0;
+  }
+
+  private _rebuildBucketStats(): void {
+    this.db.exec(`
+      INSERT INTO bucket_stats (bucket, total_content_length)
+      SELECT bucket, COALESCE(SUM(content_length), 0)
+      FROM objects
+      GROUP BY bucket
+      ON CONFLICT(bucket) DO UPDATE SET
+        total_content_length = excluded.total_content_length
+    `);
+  }
+
+  private _ensureBucketStatsRow(): void {
+    const statement = this.db.prepare(`
+      INSERT OR IGNORE INTO bucket_stats (bucket, total_content_length)
+      VALUES (?, 0)
+    `);
+    statement.run(this.bucket);
+  }
+
+  private _adjustBucketSize(delta: number): void {
+    if (!Number.isFinite(delta) || delta === 0) {
+      return;
+    }
+
+    this._ensureBucketStatsRow();
+    const statement = this.db.prepare(`
+      UPDATE bucket_stats
+      SET total_content_length = MAX(0, total_content_length + ?)
+      WHERE bucket = ?
+    `);
+    statement.run(Math.trunc(delta), this.bucket);
   }
 
   private _getMetadataSize(metadata?: Record<string, unknown>): number {
@@ -1316,6 +1399,48 @@ export class SqliteClient extends EventEmitter {
     return row || null;
   }
 
+  private _getObjectHeaderRow(key: string): DbObjectHeaderRow | null {
+    const statement = this.db.prepare(`
+      SELECT key, metadata, content_type, content_encoding, content_length, etag, last_modified
+      FROM objects
+      WHERE bucket = ? AND key = ?
+    `);
+    const row = statement.get(this.bucket, key) as DbObjectHeaderRow | undefined;
+    return row || null;
+  }
+
+  private _getObjectState(key: string): DbObjectStateRow | null {
+    const statement = this.db.prepare(`
+      SELECT content_length, etag
+      FROM objects
+      WHERE bucket = ? AND key = ?
+    `);
+    const row = statement.get(this.bucket, key) as DbObjectStateRow | undefined;
+    return row || null;
+  }
+
+  private _hasKey(key: string): boolean {
+    const statement = this.db.prepare(`
+      SELECT 1
+      FROM objects
+      WHERE bucket = ? AND key = ?
+      LIMIT 1
+    `);
+    return Boolean(statement.get(this.bucket, key));
+  }
+
+  private _withWriteTransaction<T>(fn: () => T): T {
+    this.db.exec('BEGIN IMMEDIATE');
+    try {
+      const result = fn();
+      this.db.exec('COMMIT');
+      return result;
+    } catch (error) {
+      tryFn(() => this.db.exec('ROLLBACK'));
+      throw error;
+    }
+  }
+
   private _encodeMetadata(metadata?: Record<string, unknown>): Record<string, string> | undefined {
     if (!metadata) {
       return undefined;
@@ -1331,7 +1456,7 @@ export class SqliteClient extends EventEmitter {
     return encoded;
   }
 
-  private _decodeMetadataRow(row: DbRow): Record<string, unknown> {
+  private _decodeMetadataRow(row: { metadata: string }): Record<string, unknown> {
     let metadata: Record<string, string>;
     try {
       metadata = JSON.parse(row.metadata);
@@ -1367,14 +1492,17 @@ export class SqliteClient extends EventEmitter {
     };
   }
 
-  private _normalizeObject(row: DbRow, headOnly: boolean): S3Object {
-    const bodyBuffer = Buffer.from(row.body);
+  private _normalizeObject(row: DbRow | DbObjectHeaderRow, headOnly: boolean): S3Object {
     const metadata = this._decodeMetadataRow(row);
-    const bodyStream = Readable.from(bodyBuffer) as S3Object['Body'];
+    let bodyStream: S3Object['Body'] | undefined;
 
-    bodyStream!.transformToString = async () => bodyBuffer.toString('utf-8');
-    bodyStream!.transformToByteArray = async () => new Uint8Array(bodyBuffer);
-    bodyStream!.transformToWebStream = () => Readable.toWeb(bodyStream as Readable) as ReadableStream;
+    if (!headOnly) {
+      const bodyBuffer = Buffer.from((row as DbRow).body);
+      bodyStream = Readable.from(bodyBuffer) as S3Object['Body'];
+      bodyStream!.transformToString = async () => bodyBuffer.toString('utf-8');
+      bodyStream!.transformToByteArray = async () => new Uint8Array(bodyBuffer);
+      bodyStream!.transformToWebStream = () => Readable.toWeb(bodyStream as Readable) as ReadableStream;
+    }
 
     return {
       Body: headOnly ? undefined : bodyStream,
