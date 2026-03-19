@@ -237,19 +237,21 @@ Where:
 - `machine.database`: database instance
 - `machine.machineId`: current machine id
 - `machine.entityId`: current entity id
+- `machine.resource`: attached resource when the machine is configured with `resource`
 
 This is how the plugin gives your handlers access to the rest of the system.
 
 Important:
 - `context` is event/trigger payload
 - `context` is not automatically the full resource record
+- `machine.resource` is only available when the machine is attached to a resource
 - load the entity explicitly when the handler needs persisted fields
 
 ```javascript
 actions: {
   recordApproval: async (context, event, machine) => {
-    // Update the entity owned by the workflow.
-    await machine.database.resources.requests.patch(machine.entityId, {
+    // Update the entity owned by the workflow through the attached resource.
+    await machine.resource.patch(machine.entityId, {
       approvedAt: new Date().toISOString()
     });
 
@@ -273,7 +275,7 @@ guards: {
     console.log(context.warehouseId);
 
     // Load the actual record when business validation needs stored fields.
-    const order = await machine.database.resources.orders.get(machine.entityId);
+    const order = await machine.resource.get(machine.entityId);
     return order.paymentStatus === 'confirmed' && order.stockReserved === true;
   }
 }

@@ -99,6 +99,7 @@ interface ActionContext {
   database: Database;
   machineId: string;
   entityId: string;
+  resource?: Resource | null;
 }
 
 interface StateConfig {
@@ -628,7 +629,12 @@ export class StateMachinePlugin extends Plugin {
         }
 
         const [guardOk, guardErr, guardResult] = await tryFn(() =>
-          guard(context, event, { database: this.database as unknown as Database, machineId, entityId })
+          guard(context, event, {
+            database: this.database as unknown as Database,
+            machineId,
+            entityId,
+            resource: await this._getAttachedResource(machineId)
+          })
         );
 
         if (!guardOk || !guardResult) {
@@ -712,7 +718,12 @@ export class StateMachinePlugin extends Plugin {
 
     while (attempt <= maxAttempts) {
       try {
-        const result = await action(context, event, { database: this.database as unknown as Database, machineId, entityId });
+        const result = await action(context, event, {
+          database: this.database as unknown as Database,
+          machineId,
+          entityId,
+          resource: await this._getAttachedResource(machineId)
+        });
 
         if (attempt > 0) {
           this.emit('plg:state-machine:action-retry-success', {
@@ -1014,6 +1025,21 @@ export class StateMachinePlugin extends Plugin {
     if (!ok) {
       this.logger.warn({ machineId, entityId, state }, `Failed to update resource stateField for entity ${entityId}`);
     }
+  }
+
+  private async _getAttachedResource(machineId: string): Promise<Resource | null> {
+    const machine = this.machines.get(machineId);
+    if (!machine) return null;
+
+    const resourceConfig = machine.config;
+    if (!resourceConfig.resource) return null;
+
+    if (typeof resourceConfig.resource === 'string') {
+      const resource = await this.database.getResource(resourceConfig.resource) as unknown as Resource | null;
+      return resource || null;
+    }
+
+    return resourceConfig.resource as Resource;
   }
 
   private _wrapEventHandler(

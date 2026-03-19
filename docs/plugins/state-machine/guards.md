@@ -86,6 +86,7 @@ It exposes:
 - `machine.database`: access to the database instance
 - `machine.machineId`: the current machine id
 - `machine.entityId`: the current entity id
+- `machine.resource`: the attached resource when the machine is bound to one
 
 That lets a guard load other resources before allowing a transition.
 
@@ -111,6 +112,7 @@ guards: {
 Important:
 - `context` is the payload passed to `send(...)` or produced by a trigger
 - `context` is not automatically the full entity record
+- `machine.resource` exists only when the machine is attached to a resource
 - if the guard needs the current record, it should load it through `machine.database`
 
 ```javascript
@@ -122,7 +124,7 @@ guards: {
     }
 
     // Load the full entity when the validation depends on stored data.
-    const order = await machine.database.resources.orders.get(machine.entityId);
+    const order = await machine.resource.get(machine.entityId);
     return order.status === 'paid' && order.addressVerified === true;
   }
 }

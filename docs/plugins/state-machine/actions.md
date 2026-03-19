@@ -80,14 +80,15 @@ It exposes:
 - `machine.database`: access to the database instance
 - `machine.machineId`: the current machine id
 - `machine.entityId`: the current entity id
+- `machine.resource`: the attached resource when the machine is bound to one
 
 That means the action can talk to other resources, not only the resource attached to the machine.
 
 ```javascript
 actions: {
   recordApproval: async (context, event, machine) => {
-    // Update the main business record controlled by the machine.
-    await machine.database.resources.requests.patch(machine.entityId, {
+    // Update the attached resource directly when available.
+    await machine.resource.patch(machine.entityId, {
       approvedAt: new Date().toISOString(),
       approvedBy: context.approverId
     });
@@ -107,6 +108,7 @@ actions: {
 Important:
 - `context` is the payload passed to `send(...)` or produced by a trigger
 - `context` is not automatically the full entity record
+- `machine.resource` exists only when the machine is attached to a resource
 - if the action needs the current record, it should load it through `machine.database`
 
 ```javascript
@@ -115,8 +117,8 @@ actions: {
     // Context contains event payload, not the full order by default.
     console.log(context.carrier); // comes from send(..., { carrier: 'dhl' })
 
-    // Load the actual entity record when the action needs full resource data.
-    const order = await machine.database.resources.orders.get(machine.entityId);
+    // Use the attached resource when the machine has one.
+    const order = await machine.resource.get(machine.entityId);
 
     await machine.database.resources.shipments.insert({
       id: `shipment-${machine.entityId}`,
@@ -251,6 +253,8 @@ Good actions are:
 - explicit
 - idempotent when possible
 - focused on one side effect
+
+When the machine is attached to a resource, prefer `machine.resource` for the primary entity and `machine.database.resources.*` for everything else.
 
 Avoid actions that:
 - hide business rules better expressed as guards
