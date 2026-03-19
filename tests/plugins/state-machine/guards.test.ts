@@ -112,7 +112,8 @@ describe('StateMachinePlugin - Guards', () => {
       {
         database: plugin.database,
         machineId: 'test_guards',
-        entityId: 'test1'
+        entityId: 'test1',
+        resource: null
       }
     );
   });
