@@ -1,42 +1,49 @@
-# State-Machine Plugin Guides
+# State Machine Guides
 
-Complete documentation for the State-Machine plugin, organized by topic.
+Use this page as the navigation hub for the plugin.
 
-## Quick Navigation
+## Reading Order
 
-| Guide | Focus | When to Read |
-|-------|-------|--------------|
-| **[Event-Based Triggers](/plugins/state-machine/guides/event-triggers.md)** | Automatic transitions based on events | Building reactive workflows |
-| **[Configuration](/plugins/state-machine/guides/configuration.md)** | Plugin options & state definitions | Setting up state machines |
-| **[Usage Patterns](/plugins/state-machine/guides/usage-patterns.md)** | Examples, API reference, advanced patterns | Implementing workflows |
-| **[Best Practices & Errors](/plugins/state-machine/guides/best-practices-errors.md)** | Error handling, troubleshooting, FAQ | Production deployment |
+1. [Configuration](/plugins/state-machine/guides/configuration.md)
+2. [States](/plugins/state-machine/states.md)
+3. [Actions](/plugins/state-machine/actions.md)
+4. [Guards](/plugins/state-machine/guards.md)
+5. [Triggers](/plugins/state-machine/triggers.md)
+6. [Retries](/plugins/state-machine/retries.md)
+7. [API Reference](/plugins/state-machine/guides/api-reference.md)
+8. [Runtime Behavior](/plugins/state-machine/guides/runtime-behavior.md)
+
+## By Goal
+
+| Goal | Guide |
+|------|-------|
+| Understand the machine shape and plugin options | [Configuration](/plugins/state-machine/guides/configuration.md) |
+| Design the workflow states themselves | [States](/plugins/state-machine/states.md) |
+| Add entry and exit side effects | [Actions](/plugins/state-machine/actions.md) |
+| Enforce transition rules | [Guards](/plugins/state-machine/guards.md) |
+| Automate transitions and polling | [Triggers](/plugins/state-machine/triggers.md) |
+| Make action side effects resilient | [Retries](/plugins/state-machine/retries.md) |
+| Learn the real runtime API and resource shortcuts | [API Reference](/plugins/state-machine/guides/api-reference.md) |
+| Understand locks, persistence, async events, and cleanup | [Runtime Behavior](/plugins/state-machine/guides/runtime-behavior.md) |
 
 ## By Problem
 
-### Getting Started
-- [How to define a state machine](/plugins/state-machine/guides/configuration.md#state-machine-configuration)
-- [State definition patterns](/plugins/state-machine/guides/configuration.md#state-definition)
-- [Usage examples](/plugins/state-machine/guides/usage-patterns.md#usage-examples)
+- I need to define states, guards, actions, or triggers:
+  [Configuration](/plugins/state-machine/guides/configuration.md)
+- I want one focused guide per concept:
+  [States](/plugins/state-machine/states.md),
+  [Actions](/plugins/state-machine/actions.md),
+  [Guards](/plugins/state-machine/guards.md),
+  [Triggers](/plugins/state-machine/triggers.md),
+  [Retries](/plugins/state-machine/retries.md)
+- I need examples richer than basic transitions:
+  [API Reference](/plugins/state-machine/guides/api-reference.md)
+- I need to understand `waitForPendingEvents()`:
+  [Runtime Behavior](/plugins/state-machine/guides/runtime-behavior.md)
+- I need to understand cleanup, history, or persistence:
+  [Runtime Behavior](/plugins/state-machine/guides/runtime-behavior.md)
 
-### Event-Based Automation
-- [Event triggers overview](/plugins/state-machine/guides/event-triggers.md#-event-based-triggers-automatic-transitions)
-- [Detecting field changes](/plugins/state-machine/guides/event-triggers.md#-detecting-which-fields-changed)
-- [Real-world examples](/plugins/state-machine/guides/event-triggers.md#complete-example-order-approval-workflow)
+## Back
 
-### Production Deployment
-- [Best practices](/plugins/state-machine/guides/best-practices-errors.md#best-practices)
-- [Error handling](/plugins/state-machine/guides/best-practices-errors.md#-error-handling)
-- [Concurrency & locks](/plugins/state-machine/guides/best-practices-errors.md#concurrency-and-locks)
-
-### Troubleshooting
-- [Common issues & fixes](/plugins/state-machine/guides/best-practices-errors.md#troubleshooting)
-- [FAQ (40+ questions)](/plugins/state-machine/guides/best-practices-errors.md#-faq)
-
-### Advanced Topics
-- [API reference](/plugins/state-machine/guides/usage-patterns.md#api-reference)
-- [Advanced patterns](/plugins/state-machine/guides/usage-patterns.md#advanced-patterns)
-- [State persistence](/plugins/state-machine/guides/best-practices-errors.md#7-state-persistence-and-consistency)
-
-## Back to Main Documentation
-
-[← Back to State-Machine README](/plugins/state-machine/README.md)
+- [State Machine README](/plugins/state-machine/README.md)
+- [Plugin Index](/plugins/README.md)
