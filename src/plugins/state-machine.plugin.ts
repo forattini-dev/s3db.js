@@ -628,7 +628,7 @@ export class StateMachinePlugin extends Plugin {
           });
         }
 
-        const [guardOk, guardErr, guardResult] = await tryFn(() =>
+        const [guardOk, guardErr, guardResult] = await tryFn(async () =>
           guard(context, event, {
             database: this.database as unknown as Database,
             machineId,
