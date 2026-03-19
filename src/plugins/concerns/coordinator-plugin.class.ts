@@ -571,13 +571,18 @@ export class CoordinatorPlugin<TOptions extends CoordinatorConfig = CoordinatorC
     const cronManager = this.database?.cronManager ?? getCronManager();
 
     if (cronManager && !cronManager.disabled) {
+      let running = false;
       await cronManager.scheduleInterval(
         intervalMs,
         async () => {
+          if (running) return;
+          running = true;
           try {
             await fn();
           } catch (err) {
             this.logger.warn({ error: (err as Error).message, jobName: name }, `[${name}] Error: ${(err as Error).message}`);
+          } finally {
+            running = false;
           }
         },
         name
