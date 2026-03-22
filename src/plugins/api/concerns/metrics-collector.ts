@@ -7,7 +7,7 @@ const logger: Logger = createLogger({ name: 'MetricsCollector', level: 'info' })
 
 export interface MetricsCollectorOptions {
   enabled?: boolean;
-  logLevel?: string;
+  logLevel?: string | false;
   maxPathsTracked?: number;
   resetInterval?: number;
   format?: 'json' | 'prometheus';
@@ -148,7 +148,7 @@ export class MetricsCollector {
   constructor(options: MetricsCollectorOptions = {}) {
     this.options = {
       enabled: options.enabled !== false,
-      logLevel: options.logLevel || 'info',
+      logLevel: options.logLevel || false,
       maxPathsTracked: options.maxPathsTracked || 100,
       resetInterval: options.resetInterval || 300000,
       format: options.format || 'json'
