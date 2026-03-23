@@ -15,7 +15,7 @@ You can work with the plugin in two styles.
 1. Machine API
    Use `db.stateMachine('machineName')` or the plugin instance directly.
 2. Resource shortcut API
-   Use `resource.state.*` when the machine is attached to a resource with `resource`.
+   Use `resource.state.*` when the machine is attached to a resource with `resource` or `resource.$schema.stateMachine`.
 
 The second style is usually the most readable in application code.
 
@@ -39,12 +39,92 @@ Returns:
 
 ```javascript
 {
+  ok: true,
   from: 'pending_payment',
   to: 'paid',
   event: 'PAY',
-  timestamp: '2026-03-19T12:00:00.000Z'
+  stateVersion: 3,
+  timestamp: '2026-03-19T12:00:00.000Z',
+  machineId: 'order',
+  entityId: 'order-42',
+  correlationId: 'order-order-42-PAY-...'
 }
 ```
+
+On rejected transition, it returns a normalized payload (never an inconsistent shape):
+
+```javascript
+{
+  ok: false,
+  code: 'GUARD_REJECTED',
+  reason: 'MISSING_REQUIRED_FIELD',
+  state: 'pending_payment',
+  from: 'pending_payment',
+  to: 'paid',
+  message: 'Transition blocked by guard ...',
+  details: {
+    currentState: 'pending_payment',
+    guardName: 'hasPaymentAmount'
+  },
+  machineId: 'order',
+  entityId: 'order-42',
+  event: 'PAY',
+  correlationId: 'order-order-42-PAY-...'
+}
+```
+
+If you need a guaranteed failure contract in downstream code, assert on:
+- `ok: false`
+- `code`
+- `reason`
+- `state`
+- `details`
+- `correlationId`
+
+State mismatch example:
+
+```javascript
+const stateMismatchResult = await plugin.send('order', 'order-42', 'SHIP', {
+  stateVersion: 1 // must match current stateVersion in memory/persisted state
+});
+// -> { ok: false, code: 'STATE_VERSION_MISMATCH', reason: 'STATE_VERSION_MISMATCH' }
+```
+
+### `assertTransition({ machineId, entityId, event, to, from?, context?, stateVersion? })`
+
+Contract helper for tests and CI pipelines.
+
+```javascript
+const result = await plugin.assertTransition({
+  machineId: 'order',
+  entityId: 'order-42',
+  event: 'PAY',
+  from: 'pending_payment',
+  to: 'paid',
+  context: {
+    amount: 199.9,
+    paymentMethod: 'credit_card'
+  }
+});
+```
+
+If the transition does not succeed or the observed `from`/`to`/`stateVersion` differs from expectations, an Error is thrown with details.
+
+### `assertReject({ machineId, entityId, event, code, reason?, to?, from?, context? })`
+
+Contract helper that ensures the transition is rejected.
+
+```javascript
+await plugin.assertReject({
+  machineId: 'order',
+  entityId: 'order-42',
+  event: 'PAY',
+  code: 'GUARD_REJECTED',
+  reason: 'MISSING_REQUIRED_FIELD'
+});
+```
+
+If the transition succeeds or returns a different structured error code/reason, an Error is thrown with details.
 
 ### `getState(machineId, entityId)`
 
@@ -79,21 +159,88 @@ await plugin.initializeEntity('order', 'order-42', {
 });
 ```
 
-### `getTransitionHistory(machineId, entityId, options?)`
+### `getTransitions(machineId, entityId, options?)`
 
-Read persisted transition history. This only returns useful data when `persistTransitions: true`.
+Read persisted transitions for one entity in one machine. This is the main REST-like API for history queries.
 
 ```javascript
-// Read the latest transitions for timeline UI or audit.
+const latest = await plugin.getTransitions('order', 'order-42', {
+  limit: 20,
+  offset: 0,
+  sort: 'desc'
+});
+```
+
+Options:
+- `limit`: max number of rows.
+- `offset`: pagination offset.
+- `sort`: `'asc' | 'desc'` (default `'desc'`).
+- `from`: inclusive start timestamp (ISO 8601).
+- `to`: inclusive end timestamp (ISO 8601).
+- `event`: filter by event name.
+- `fromState`: filter by source state.
+- `toState`: filter by target state.
+
+### `getTransitionHistory(machineId, entityId, options?)`
+
+Backward-compatible shorthand for common timeline use cases.
+
+This method uses:
+- `limit` (default `50`)
+- `offset` (default `0`)
+- implicit `sort: 'desc'`
+- no additional filtering fields (`from`, `to`, etc. are not supported on this method yet)
+
+```javascript
 const history = await plugin.getTransitionHistory('order', 'order-42', {
   limit: 20,
   offset: 0
 });
 ```
 
-Options:
-- `limit`: max number of rows to return, default `50`
-- `offset`: pagination offset, default `0`
+### `getTransition(machineId, entityId, transitionId)`
+
+Get one persisted transition by id.
+
+```javascript
+const transition = await plugin.getTransition('order', 'order-42', 'transition-id-123');
+```
+
+### `getTransitionCount(machineId, entityId, options?)`
+
+Count persisted transitions with optional filters (`event`, `from`, `to`, `fromState`, `toState`).
+
+```javascript
+const total = await plugin.getTransitionCount('order', 'order-42', { event: 'PAY' });
+```
+
+### `getSnapshot(machineId, entityId)`
+
+Get a practical snapshot of machine state for one entity:
+- current state
+- state version
+- context
+- transition counters
+- last transition id
+- whether state was persisted
+
+```javascript
+const snapshot = await plugin.getSnapshot('order', 'order-42');
+```
+
+### `getLastTransitions(machineId, entityId, n?)`
+
+Compatibility helper for "latest first" lists.
+
+```javascript
+// Get the latest 10 transitions.
+const latest = await plugin.getLastTransitions('order', 'order-42', 10);
+
+// Omit n to load all transitions for the entity/machine pair.
+const all = await plugin.getLastTransitions('order', 'order-42');
+```
+
+`getLastTransitions` always returns transitions from most recent to oldest.
 
 ### `deleteEntity(machineId, entityId)`
 
@@ -111,6 +258,46 @@ Inspect the loaded machine definition.
 ```javascript
 // Useful for diagnostics and tooling.
 const definition = plugin.getMachineDefinition('order');
+```
+
+### `getMachineDefinitionDiagnostics(machineId?)`
+
+Run structural validation over the loaded machine graph and return diagnostics.
+
+```javascript
+const diagnostic = plugin.getMachineDefinitionDiagnostics('order');
+
+console.log(diagnostic.errors);
+console.log(diagnostic.warnings);
+console.log(diagnostic.stats);
+```
+
+`getDefinitionDiagnostics()` returns diagnostics for all machines at once:
+
+```javascript
+const all = plugin.getDefinitionDiagnostics();
+```
+
+Returned payload:
+
+```javascript
+{
+  machineId: 'order',
+  errors: [],
+  warnings: [
+    {
+      code: 'UNREACHABLE_STATE',
+      message: 'State ... is unreachable from the initial state ...',
+      state: 'archived'
+    }
+  ],
+  stats: {
+    states: 4,
+    transitions: 3,
+    deadStates: ['draft'],
+    unreachableStates: ['archived']
+  }
+}
 ```
 
 ### `getMachines()`
@@ -214,12 +401,111 @@ const history = await orders.state.history('order-42', {
 });
 ```
 
+### `resource.state.transitions(id, options?)`
+
+```javascript
+// Filter recent transitions from the resource perspective.
+const transitions = await orders.state.transitions('order-42', {
+  limit: 10,
+  sort: 'desc',
+  event: 'SHIP'
+});
+```
+
+### `resource.state.transition(id, transitionId)`
+
+```javascript
+const transition = await orders.state.transition('order-42', 'transition-id-123');
+```
+
+### `resource.state.transitionCount(id, options?)`
+
+```javascript
+const count = await orders.state.transitionCount('order-42', { fromState: 'pending' });
+```
+
+### `resource.state.getLastTransitions(id, n?)`
+
+```javascript
+// Latest 10 transitions for a record.
+const latest = await orders.state.getLastTransitions('order-42', 10);
+
+// Omit n to fetch all transition history for the record.
+const all = await orders.state.getLastTransitions('order-42');
+```
+
+`resource.state.getLastTransitions` returns events ordered from most recent to oldest.
+
+Note: `resource.state` is the public helper bound to the resource-selected machine. The plugin can still manage multiple machines, but only one machine can expose `resource.state` for each resource.
+
+`resource.state.getLastTransitions` is the REST-like "latest N first" helper for quick UI rendering:
+- request `n` for a compact view (for example last 10 transitions)
+- omit `n` to fetch the complete timeline for the record/machine pair
+- useful when building event streams that should prioritize recency
+
+### `resource.state.snapshot(id)`
+
+```javascript
+const snapshot = await orders.state.snapshot('order-42');
+```
+
+`snapshot()` is the practical operational view for support tooling:
+- current state
+- stateVersion
+- context
+- lastTransition id
+- persistence flag
+
+The return is a compact object and is safe for dashboard cards and audit cards.
+
+`resource.state` is available only when the resource has exactly one bound machine:
+- configured by plugin `resource` field, or
+- attached through `resource.$schema.stateMachine`.
+
+You can define additional machines in the plugin with `stateMachines`, but only one will expose `resource.state`.
+
 ### `resource.state.delete(id)`
 
 ```javascript
 // Explicitly remove machine state when needed.
 await orders.state.delete('order-42');
 ```
+
+`resource.state` is available only when the resource has exactly one bound machine:
+- configured by plugin `resource` field, or
+- attached through `resource.$schema.stateMachine`.
+
+You can define additional machines in the plugin with `stateMachines`, but only one will expose `resource.state`.
+
+## Hook events
+
+- `plg:state-machine:before-transition`
+- `plg:state-machine:transition`
+- `plg:state-machine:after-transition`
+- `plg:state-machine:transition-rejected`
+- `plg:state-machine:action-error`
+
+These events receive a standard transition context:
+
+```javascript
+{
+  machineId,
+  entityId,
+  event,
+  from,
+  to,
+  guard,
+  stateVersion,
+  context,
+  correlationId,
+  startedAt,
+  endedAt,
+  elapsedMs,
+  error // only on failures/rejects
+}
+```
+
+`plg:state-machine:transition` remains the canonical event for successful transitions; `transition-rejected` provides machine-level diagnostics.
 
 ---
 

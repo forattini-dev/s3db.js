@@ -86,9 +86,13 @@ describe('StateMachinePlugin - Guards', () => {
   it('should block transition when guard returns false', async () => {
     mockGuards.cannotShip.mockResolvedValue(false);
 
-    await expect(plugin.send('test_guards', 'test1', 'FAIL')).rejects.toThrow(
-      /Transition blocked by guard 'cannotShip'/
-    );
+    const result = await plugin.send('test_guards', 'test1', 'FAIL');
+
+    expect(result).toMatchObject({
+      ok: false,
+      code: 'GUARD_REJECTED',
+      reason: 'MISSING_REQUIRED_FIELD'
+    });
 
     const state = await plugin.getState('test_guards', 'test1');
     expect(state).toBe('start'); // Should remain in start state
@@ -97,9 +101,12 @@ describe('StateMachinePlugin - Guards', () => {
   it('should block transition when guard throws error', async () => {
     mockGuards.guardError.mockRejectedValue(new Error('Guard error'));
 
-    await expect(plugin.send('test_guards', 'test1', 'ERROR')).rejects.toThrow(
-      /Transition blocked by guard 'guardError'/
-    );
+    const result = await plugin.send('test_guards', 'test1', 'ERROR');
+
+    expect(result).toMatchObject({
+      ok: false,
+      code: 'GUARD_ERROR'
+    });
   });
 
   it('should pass correct parameters to guard', async () => {

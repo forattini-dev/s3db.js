@@ -34,7 +34,19 @@ export { SchedulerPlugin } from './scheduler.plugin.js';
 export type { SchedulerPluginOptions } from './scheduler.plugin.js';
 
 export { StateMachinePlugin } from './state-machine.plugin.js';
-export type { StateMachinePluginOptions, TransitionResult, TransitionHistoryEntry, TransitionHistoryOptions } from './state-machine.plugin.js';
+export type {
+  StateMachinePluginOptions,
+  MachineEventPayloadMap,
+  TransitionResult,
+  TransitionAssertionSuccessParams,
+  TransitionAssertionRejectParams,
+  TransitionHistoryEntry,
+  TransitionHistoryOptions,
+  TransitionQueryOptions,
+  StateMachineSnapshot,
+  MachineDefinitionDiagnostics,
+  MachineDefinitionIssue
+} from './state-machine.plugin.js';
 
 export { TTLPlugin } from './ttl.plugin.js';
 export type { TTLPluginOptions, TTLResourceConfig, TTLStats, TTLGranularity, TTLExpireStrategy } from './ttl.plugin.js';

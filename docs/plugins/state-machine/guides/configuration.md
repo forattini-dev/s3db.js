@@ -55,6 +55,10 @@ new StateMachinePlugin({
   persistTransitions: true,
   transitionLogResource: 'plg_state_transitions',
   stateResource: 'plg_entity_states',
+  concurrency: {
+    mode: 'serial', // serial | parallel
+    conflict: 'reject' // reject | drop
+  },
   retryAttempts: 3,
   retryDelay: 100,
   workerId: 'default',
@@ -131,6 +135,7 @@ Supported machine-level fields:
 - `retryConfig`
 - `autoCleanup`
 - `config`
+- `concurrency`
 
 Supported state-level fields:
 - `on`
@@ -141,6 +146,63 @@ Supported state-level fields:
 - `meta`
 - `triggers`
 - `retryConfig`
+
+## Schema-first binding (`resource.$schema.stateMachine`)
+
+You can bind a machine to a resource from the resource definition itself.
+
+```javascript
+const orders = await db.createResource({
+  name: 'orders',
+  attributes: {
+    id: 'string|required',
+    status: 'string|required'
+  },
+  behavior: 'body-only'
+});
+
+orders.$schema = {
+  stateMachine: 'order'
+};
+
+const stateMachine = new StateMachinePlugin({
+  stateMachines: {
+    order: {
+      initialState: 'draft',
+      states: {
+        draft: { on: { SUBMIT: 'submitted' } },
+        submitted: { type: 'final' }
+      }
+    }
+  },
+  persistTransitions: false
+});
+```
+
+`stateMachine` supports two forms:
+- string shorthand:
+  - `stateMachine: 'order'`
+- object:
+  - `stateMachine: { machine: 'order', stateField?: 'status', autoCleanup?: true }`
+
+Object form notes:
+- `stateField` defines which field is synchronized with machine state.
+- `autoCleanup` controls delete hooks.
+- when `stateField` is not provided and the resource has `status` in schema attributes, that field is used as default.
+
+Important constraints:
+- one resource exposes **at most one** `resource.state` binding.
+- one machine can be schema-bound to only one resource.
+- this does not block additional plugin-level machines; they remain reachable via `db.stateMachine('anotherMachine')`.
+
+When both declaration styles are present, schema-binding becomes the single source of truth:
+- set `resource: 'orders'` in the machine and also define `resource.$schema.stateMachine` on that resource, both should resolve to the same lifecycle intent.
+- if `resource.$schema.stateMachine` is present, that machine is attached with priority to `resource.state`.
+
+Use schema-first binding to make intent explicit and easy to discover:
+- model teams can read it when creating the resource
+- migration and observability scripts can discover this value directly from schema metadata
+- plugin authors still keep freedom to define multiple machines in `stateMachines` for advanced orchestration.
 
 ---
 
@@ -179,10 +241,16 @@ const plugin = new StateMachinePlugin({
 
 ## Concurrency Options
 
-Transitions are protected by locks through plugin storage.
+Transitions are protected by locks through plugin storage and can be tuned with global or machine-level policies.
+
+Global defaults:
 
 ```javascript
 const plugin = new StateMachinePlugin({
+  concurrency: {
+    mode: 'serial', // serial | parallel
+    conflict: 'reject' // reject | drop
+  },
   workerId: 'orders-worker-a',
   lockTimeout: 2000,
   lockTTL: 10,
@@ -198,10 +266,35 @@ const plugin = new StateMachinePlugin({
 });
 ```
 
+`serial` uses a per-instance lock; `parallel` skips the lock and allows concurrent execution.
+`conflict: 'reject'` returns `CONCURRENCY_CONFLICT` when the lock is busy; `'drop'` returns
+`CONCURRENCY_CONFLICT_DROP` and does not execute the transition.
+
+You can override concurrency per machine:
+
+```javascript
+stateMachines: {
+  order: {
+    concurrency: {
+      mode: 'parallel',
+      conflict: 'drop'
+    },
+    initialState: 'draft',
+    states: {
+      draft: { on: { SUBMIT: 'submitted' } },
+      submitted: { type: 'final' }
+    }
+  }
+}
+```
+
 Use these options to tune contention behavior:
 - `workerId`
 - `lockTimeout`
 - `lockTTL`
+
+Optimistic concurrency with versioning is available in each transition payload using `stateVersion`.
+Pass the last known version in `send(...)` to force `STATE_VERSION_MISMATCH` when stale.
 
 ---
 

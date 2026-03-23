@@ -144,9 +144,13 @@ describe('StateMachinePlugin - Error Handling', () => {
     vi.spyOn(stateResource, 'update').mockRejectedValue(new Error('State update failed'));
     vi.spyOn(stateResource, 'insert').mockRejectedValue(new Error('State insert failed'));
 
-    await expect(
-      plugin.send('order_processing', 'order1', 'CONFIRM')
-    ).rejects.toThrow('Failed to persist entity state transition');
+    const result = await plugin.send('order_processing', 'order1', 'CONFIRM');
+
+    expect(result).toMatchObject({
+      ok: false,
+      code: 'INTERNAL_ERROR',
+      reason: 'INTERNAL_ERROR'
+    });
 
     const inMemoryState = await plugin.getState('order_processing', 'order1');
     const persisted = await stateResource.get('order_processing_order1');

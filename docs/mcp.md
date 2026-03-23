@@ -202,7 +202,7 @@ Resources provide structured documentation and live schema information via URI t
 | `s3db://overview` | Full capabilities overview |
 | `s3db://best-practices` | Behaviors, partitions, and performance guide |
 | `s3db://core/{topic}` | Core docs — `database`, `schema`, `behaviors`, `partitions`, `security`, `streaming`, `encryption` |
-| `s3db://plugin/{name}` | Plugin docs — `cache`, `api`, `audit`, `ttl`, `vector`, `replicator`, `metrics`, `full-text`, etc. |
+| `s3db://plugin/{name}` | Plugin docs — `api`, `audit`, `cache`, `full-text`, `metrics`, `replicator`, `state-machine`, `ttl`, `vector`, etc. |
 | `s3db://guide/{topic}` | Guides — `getting-started`, `performance`, `testing`, `security` |
 | `s3db://field-type/{type}` | Field type reference — `string`, `password`, `secret`, `embedding`, `ip4`, etc. |
 | `s3db://client/{name}` | Storage client docs — `s3`, `sqlite`, `memory`, `filesystem` |
@@ -298,6 +298,15 @@ User: How do I model a users resource with email login and role-based access?
 → AI uses create_resource prompt to generate schema
 ```
 
+### Explore State Machine Plugin in Docs
+
+```
+User: How does state machine validation and history work here?
+
+→ AI reads s3db://plugin/state-machine for machine capabilities
+→ AI explains transition rejection contract, history APIs, and snapshot helpers
+```
+
 ### Query Live Data (Full Mode)
 
 ```
@@ -306,6 +315,16 @@ User: Show me all orders placed in the last 7 days
 → AI calls dbListResources to see available resources
 → AI reads s3db://resource/orders to understand schema and partitions
 → AI calls resourceQuery with appropriate partition values
+```
+
+### Read State Timeline from a Live Resource
+
+```
+User: Give me the last 10 transitions for order order-42
+
+→ AI reads s3db://resource/orders to confirm state-field and bindings
+→ AI calls db.resources.orders.state.getLastTransitions('order-42', 10)
+→ AI returns a recency-first timeline with event, states, and context
 ```
 
 ### Connect at Runtime

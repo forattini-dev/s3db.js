@@ -95,15 +95,46 @@ describe('StateMachinePlugin - State Transitions', () => {
   });
 
   it('should throw error for invalid event', async () => {
-    await expect(plugin.send('order_processing', 'order1', 'INVALID')).rejects.toThrow(
-      "Event 'INVALID' not valid for state 'pending' in machine 'order_processing'"
-    );
+    const result = await plugin.send('order_processing', 'order1', 'INVALID');
+
+    expect(result).toMatchObject({
+      ok: false,
+      code: 'INVALID_EVENT',
+      reason: 'INVALID_EVENT'
+    });
   });
 
   it('should throw error for unknown machine in send', async () => {
-    await expect(plugin.send('unknown', 'order1', 'EVENT')).rejects.toThrow(
-      "State machine 'unknown' not found"
-    );
+    const result = await plugin.send('unknown', 'order1', 'EVENT');
+
+    expect(result).toMatchObject({
+      ok: false,
+      code: 'MACHINE_NOT_FOUND',
+      reason: 'MACHINE_NOT_FOUND'
+    });
+  });
+
+  it('should emit transition lifecycle hooks', async () => {
+    const beforeHook = vi.fn();
+    const transitionHook = vi.fn();
+    const afterHook = vi.fn();
+    const rejectHook = vi.fn();
+
+    plugin.on('plg:state-machine:before-transition', beforeHook);
+    plugin.on('plg:state-machine:transition', transitionHook);
+    plugin.on('plg:state-machine:after-transition', afterHook);
+    plugin.on('plg:state-machine:transition-rejected', rejectHook);
+
+    const success = await plugin.send('order_processing', 'order1', 'CONFIRM');
+
+    expect(success).toMatchObject({ ok: true, from: 'pending', to: 'confirmed' });
+    expect(beforeHook).toHaveBeenCalled();
+    expect(transitionHook).toHaveBeenCalled();
+    expect(afterHook).toHaveBeenCalled();
+
+    const rejected = await plugin.send('order_processing', 'order1', 'INVALID');
+    expect(rejected).toMatchObject({ ok: false, code: 'INVALID_EVENT' });
+    expect(rejectHook).toHaveBeenCalled();
   });
 
   it('should emit transition event', async () => {
@@ -112,14 +143,14 @@ describe('StateMachinePlugin - State Transitions', () => {
 
     await plugin.send('order_processing', 'order1', 'CONFIRM', { test: 'data' });
 
-    expect(transitionSpy).toHaveBeenCalledWith({
+    expect(transitionSpy).toHaveBeenCalledWith(expect.objectContaining({
       machineId: 'order_processing',
       entityId: 'order1',
       from: 'pending',
       to: 'confirmed',
       event: 'CONFIRM',
       context: { test: 'data' }
-    });
+    }));
   });
 
   it('should handle multiple sequential transitions', async () => {

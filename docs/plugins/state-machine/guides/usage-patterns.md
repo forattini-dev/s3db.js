@@ -346,13 +346,6 @@ Check if a transition is valid.
 const canConfirm = await machine.canTransition('order-123', 'CONFIRM');
 ```
 
-#### `getHistory(recordId)`
-Get transition history for a record.
-
-```javascript
-const history = await machine.getHistory('order-123');
-```
-
 #### `getValidEvents(recordId)`
 Get all valid events for the current state of a record.
 
@@ -362,22 +355,64 @@ const validEvents = await machine.getValidEvents('order-123');
 ```
 
 #### `getTransitionHistory(recordId, options?)`
-Get complete transition history for a record with filtering options.
+Get transition history for a record (latest-first) with simple pagination.
 
 ```javascript
 const history = await machine.getTransitionHistory('order-123', {
   limit: 50,
-  fromDate: new Date('2024-01-01'),
-  toDate: new Date('2024-12-31')
+  offset: 0
 });
 // Returns: [{ from, to, event, context, timestamp }, ...]
 ```
 
 **Options:**
-- `limit` (number): Maximum number of transitions to return (default: 100)
-- `fromDate` (Date): Filter transitions after this date
-- `toDate` (Date): Filter transitions before this date
-- `status` (string): Filter by transition status ('success', 'failed')
+- `limit` (number): Maximum number of transitions to return (default: 50)
+- `offset` (number): Pagination offset
+
+#### `getTransitions(recordId, options?)`
+Read transition history with richer filtering and sort control.
+
+```javascript
+const transitions = await machine.getTransitions('order-123', {
+  limit: 50,
+  offset: 0,
+  sort: 'desc',
+  event: 'SHIP',
+  fromState: 'pending',
+  toState: 'shipped'
+});
+```
+
+#### `getTransition(recordId, transitionId)`
+Read one persisted transition by id.
+
+```javascript
+const transition = await machine.getTransition('order-123', 'transition-id-123');
+```
+
+#### `transitionCount(recordId, options?)`
+Count transitions with optional filters (`event`, `fromState`, `toState`).
+
+```javascript
+const count = await machine.transitionCount('order-123', { event: 'PAY' });
+```
+
+#### `getLastTransitions(recordId, n?)`
+Read the latest transitions, defaulting to full history when `n` is omitted.
+
+```javascript
+const latest = await machine.getLastTransitions('order-123', 10);
+const all = await machine.getLastTransitions('order-123');
+```
+
+`getLastTransitions` returns transitions from most recent to oldest.
+
+#### `snapshot(recordId)`
+Read a compact operational view for dashboards and support workflows.
+
+```javascript
+const snapshot = await machine.getSnapshot('order-123');
+```
 
 #### `initializeEntity(recordId, context?)`
 Initialize a new entity with the initial state and optional context.
@@ -463,7 +498,7 @@ guards: {
 
 ## Resource State API
 
-When a state machine is attached to a resource (via the `resource` option), the resource gets a convenient `state` property with shorthand methods:
+When a state machine is attached to a resource (via the `resource` option or `resource.$schema.stateMachine`), the resource gets a convenient `state` property with shorthand methods:
 
 ```javascript
 const orders = db.resources.orders;
@@ -483,12 +518,31 @@ const validEvents = await orders.state.getValidEvents('order-123');
 // Instead of: db.stateMachine('order').initializeEntity('order-123', context)
 await orders.state.initialize('order-123', { customerId: 'user-1' });
 
+// Transition helpers with filters and rich query params.
+const transitions = await orders.state.transitions('order-123', {
+  limit: 10,
+  sort: 'desc',
+  event: 'SHIP'
+});
+
+const latest = await orders.state.getLastTransitions('order-123', 10);
+const snapshot = await orders.state.snapshot('order-123');
+
 // Instead of: db.stateMachine('order').getTransitionHistory('order-123')
 const history = await orders.state.history('order-123');
 
 // Instead of: db.stateMachine('order').deleteEntity('order-123')
 await orders.state.delete('order-123');
 ```
+
+You can bind by schema only, with no `resource` field in machine definitions:
+
+```javascript
+const orders = db.resources.orders;
+orders.$schema = { stateMachine: 'order' };
+```
+
+One resource exposes a single `state` shortcut surface. If your plugin has additional machines, call them directly by `db.stateMachine('other-machine')`.
 
 ---
 

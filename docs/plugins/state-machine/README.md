@@ -15,6 +15,7 @@ Use `StateMachinePlugin` when a resource has a lifecycle that must be controlled
 - Add actions for entry and exit side effects.
 - Persist current state and transition history.
 - Attach the machine to a resource for `resource.state.*` shortcuts.
+- Bind machines directly from resource schema (`resource.$schema.stateMachine`) for schema-first plugins.
 
 ```javascript
 import { Database, StateMachinePlugin } from 's3db.js';
@@ -318,7 +319,44 @@ That gives you:
 - `resource.state.getValidEvents()`
 - `resource.state.initialize()`
 - `resource.state.history()`
+- `resource.state.transitions()`
+- `resource.state.transition()`
+- `resource.state.transitionCount()`
+- `resource.state.getLastTransitions()`
+- `resource.state.snapshot()`
 - `resource.state.delete()`
+
+You can configure this in two equivalent ways:
+
+- Explicitly in the machine definition (`resource: 'orders'`)
+- Declaratively in resource schema (`resource.$schema.stateMachine`)
+
+```javascript
+const orders = await db.createResource({
+  name: 'orders',
+  attributes: {
+    id: 'string|required',
+    status: 'string|required'
+  },
+  behavior: 'body-only'
+});
+
+orders.$schema = {
+  stateMachine: {
+    machine: 'order',
+    stateField: 'status', // optional, defaults to schema `status` if present
+    autoCleanup: true // optional, defaults to machine config
+  }
+};
+```
+
+`resource.$schema.stateMachine` also accepts simple shorthand:
+
+```javascript
+orders.$schema = { stateMachine: 'order' };
+```
+
+Important: a resource has at most one `state` shortcut surface. If your plugin defines multiple machines, additional machines are still available through `db.stateMachine(...)`, while only the schema-bound or configured machine is available as `orders.state`.
 
 Example:
 
@@ -558,7 +596,12 @@ Machine-level methods:
 - `send(machineId, entityId, event, context?)`
 - `getState(machineId, entityId)`
 - `getValidEvents(machineId, entityIdOrState)`
+- `getTransitions(machineId, entityId, options?)`
 - `getTransitionHistory(machineId, entityId, { limit, offset })`
+- `getLastTransitions(machineId, entityId, n?)`
+- `getTransition(machineId, entityId, transitionId)`
+- `getTransitionCount(machineId, entityId, options?)`
+- `getSnapshot(machineId, entityId)`
 - `initializeEntity(machineId, entityId, context?)`
 - `deleteEntity(machineId, entityId)`
 - `getMachineDefinition(machineId)`
@@ -573,6 +616,11 @@ Resource shortcuts when `resource` is configured:
 - `resource.state.getValidEvents(id)`
 - `resource.state.initialize(id, context?)`
 - `resource.state.history(id, options?)`
+- `resource.state.transitions(id, options?)`
+- `resource.state.transition(id, transitionId)`
+- `resource.state.transitionCount(id, options?)`
+- `resource.state.getLastTransitions(id, n?)`
+- `resource.state.snapshot(id)`
 - `resource.state.delete(id)`
 
 ---

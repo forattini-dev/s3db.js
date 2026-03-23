@@ -12,7 +12,13 @@ interface Logger {
   debug(obj: unknown, msg?: string): void;
 }
 
+const TRANSITION_HISTORY_PAGE_SIZE = 1000;
+
 interface Resource {
+  $schema?: {
+    stateMachine?: string | ResourceStateMachineBinding;
+    [key: string]: unknown;
+  };
   name: string;
   insert(data: Record<string, unknown>): Promise<unknown>;
   update(id: string, data: Record<string, unknown>): Promise<unknown>;
@@ -23,9 +29,28 @@ interface Resource {
   on(event: string, handler: (...args: unknown[]) => void): void;
 }
 
+interface ResourceStateMachineBinding {
+  machine: string;
+  stateField?: string;
+  autoCleanup?: boolean;
+}
+
+interface ResolvedStateMachineBinding extends ResourceStateMachineBinding {
+  resourceName: string;
+  resource: Resource;
+}
+
+interface ResourceWithSchema extends Resource {
+  $schema?: {
+    stateMachine?: string | ResourceStateMachineBinding;
+  };
+}
+
 interface QueryOptions {
   limit?: number;
   offset?: number;
+  partition?: string | null;
+  partitionValues?: Record<string, unknown>;
 }
 
 interface StateRecord {
@@ -35,6 +60,7 @@ interface StateRecord {
   currentState: string;
   context: Record<string, unknown>;
   lastTransition: string | null;
+  stateVersion?: number;
   triggerCounts?: Record<string, number>;
   updatedAt: string;
 }
@@ -113,6 +139,14 @@ interface StateConfig {
   retryConfig?: RetryConfig;
 }
 
+type ConcurrencyMode = 'serial' | 'parallel';
+type ConcurrencyConflictPolicy = 'reject' | 'drop';
+
+interface ConcurrencyConfig {
+  mode: ConcurrencyMode;
+  conflict: ConcurrencyConflictPolicy;
+}
+
 interface TriggerConfig {
   type: 'cron' | 'date' | 'function' | 'event';
   action?: string;
@@ -138,6 +172,10 @@ interface MachineConfig {
   retryConfig?: RetryConfig;
   autoCleanup?: boolean;
   config?: MachineConfig;
+  concurrency?: {
+    mode?: ConcurrencyMode;
+    conflict?: ConcurrencyConflictPolicy;
+  };
 }
 
 interface RetryConfig {
@@ -170,6 +208,8 @@ interface TriggerListenerRef {
   handler: (...args: unknown[]) => unknown;
 }
 
+type TransitionSortOrder = 'asc' | 'desc';
+
 export interface StateMachinePluginOptions {
   resourceNames?: {
     transitionLog?: string;
@@ -181,6 +221,10 @@ export interface StateMachinePluginOptions {
   persistTransitions?: boolean;
   transitionLogResource?: string;
   stateResource?: string;
+  concurrency?: {
+    mode?: ConcurrencyMode;
+    conflict?: ConcurrencyConflictPolicy;
+  };
   retryAttempts?: number;
   retryDelay?: number;
   workerId?: string;
@@ -204,6 +248,7 @@ interface StateMachineConfig {
   persistTransitions: boolean;
   transitionLogResource: string;
   stateResource: string;
+  concurrency: ConcurrencyConfig;
   retryAttempts: number;
   retryDelay: number;
   workerId: string;
@@ -222,6 +267,8 @@ interface StateMachineConfig {
 interface MachineData {
   config: MachineConfig;
   currentStates: Map<string, string>;
+  currentStateVersions: Map<string, number>;
+  concurrency: ConcurrencyConfig;
 }
 
 interface ResourceNames {
@@ -235,13 +282,103 @@ interface ResourceDescriptor {
 }
 
 export interface TransitionResult {
+  ok: boolean;
+  machineId?: string;
+  entityId?: string;
+  event?: string;
+  state?: string;
+  from?: string;
+  to?: string;
+  guard?: string;
+  context?: Record<string, unknown>;
+  correlationId?: string;
+  startedAt?: string;
+  endedAt?: string;
+  elapsedMs?: number;
+  code?: string;
+  reason?: string;
+  details?: Record<string, unknown>;
+  message?: string;
+}
+
+export interface TransitionSuccessResult extends TransitionResult {
+  ok: true;
   from: string;
   to: string;
   event: string;
   timestamp: string;
+  machineId: string;
+  entityId: string;
+  context: Record<string, unknown>;
+  correlationId: string;
+  startedAt: string;
+  endedAt: string;
+  elapsedMs: number;
+  stateVersion: number;
+}
+
+export interface TransitionRejectedResult extends TransitionResult {
+  ok: false;
+  code: 'MACHINE_NOT_FOUND' | 'INVALID_EVENT' | 'GUARD_NOT_FOUND' | 'GUARD_REJECTED' | 'GUARD_ERROR' | 'ACTION_NOT_FOUND' | 'TRANSITION_LOCK_TIMEOUT' | 'CONCURRENCY_CONFLICT' | 'STATE_VERSION_MISMATCH' | 'INTERNAL_ERROR';
+  reason: string;
+  details: Record<string, unknown>;
+}
+
+export interface TransitionAssertionSuccessParams<TMachine extends string = string, TEvent extends string = string> {
+  machineId: TMachine;
+  entityId: string;
+  event: TEvent;
+  from?: string;
+  to: string;
+  stateVersion?: number;
+  context?: Record<string, unknown>;
+}
+
+export interface TransitionAssertionRejectParams<TMachine extends string = string, TEvent extends string = string> {
+  machineId: TMachine;
+  entityId: string;
+  event: TEvent;
+  code?: TransitionRejectedResult['code'];
+  reason?: string;
+  from?: string;
+  to?: string;
+  context?: Record<string, unknown>;
+}
+
+export type MachineEventPayloadMap = Record<string, Record<string, Record<string, unknown>>>;
+
+export interface MachineDefinitionIssue {
+  code:
+    | 'MISSING_TARGET_STATE'
+    | 'MISSING_GUARD'
+    | 'MISSING_ACTION'
+    | 'STATE_WITHOUT_TRANSITIONS'
+    | 'UNREACHABLE_STATE'
+    | 'ORPHAN_STATE';
+  message: string;
+  state?: string;
+  event?: string;
+  targetState?: string;
+  guardName?: string;
+  actionName?: string;
+}
+
+export interface MachineDefinitionDiagnostics {
+  machineId: string;
+  errors: MachineDefinitionIssue[];
+  warnings: MachineDefinitionIssue[];
+  stats: {
+    states: number;
+    transitions: number;
+    deadStates: string[];
+    unreachableStates: string[];
+  };
 }
 
 export interface TransitionHistoryEntry {
+  id?: string;
+  machineId?: string;
+  entityId?: string;
   from: string;
   to: string;
   event: string;
@@ -254,11 +391,50 @@ export interface TransitionHistoryOptions {
   offset?: number;
 }
 
+export interface TransitionQueryOptions {
+  limit?: number;
+  offset?: number;
+  sort?: TransitionSortOrder;
+  from?: string;
+  to?: string;
+  event?: string;
+  fromState?: string;
+  toState?: string;
+}
+
+export interface StateMachineSnapshot {
+  machineId: string;
+  entityId: string;
+  state: string;
+  stateVersion: number;
+  context: Record<string, unknown>;
+  lastTransition: string | null;
+  triggerCounts: Record<string, number>;
+  updatedAt: string;
+  persisted: boolean;
+}
+
 interface EntityInState {
   entityId: string;
   currentState: string;
   context: Record<string, unknown>;
   triggerCounts: Record<string, number>;
+}
+
+interface TransitionContext {
+  machineId: string;
+  entityId: string;
+  event: string;
+  from?: string;
+  to?: string;
+  guard?: string;
+  stateVersion?: number;
+  startedAt: string;
+  endedAt: string;
+  elapsedMs: number;
+  correlationId: string;
+  context: Record<string, unknown>;
+  error?: string;
 }
 
 interface MachineProxy {
@@ -267,7 +443,15 @@ interface MachineProxy {
   canTransition(id: string, event: string): Promise<boolean>;
   getValidEvents(id: string): Promise<string[]>;
   initializeEntity(id: string, context?: Record<string, unknown>): Promise<string>;
+  transitions(id: string, options?: TransitionQueryOptions): Promise<TransitionHistoryEntry[]>;
+  transition(id: string, transitionId: string): Promise<TransitionHistoryEntry | null>;
+  transitionCount(id: string, options?: Omit<TransitionQueryOptions, 'limit' | 'offset' | 'sort'>): Promise<number>;
+  getTransitions(id: string, options?: TransitionQueryOptions): Promise<TransitionHistoryEntry[]>;
   getTransitionHistory(id: string, options?: TransitionHistoryOptions): Promise<TransitionHistoryEntry[]>;
+  getTransitionCount(id: string, options?: Omit<TransitionQueryOptions, 'limit' | 'offset' | 'sort'>): Promise<number>;
+  getSnapshot(id: string): Promise<StateMachineSnapshot>;
+  getTransition(id: string, transitionId: string): Promise<TransitionHistoryEntry | null>;
+  getLastTransitions(id: string, limit?: number): Promise<TransitionHistoryEntry[]>;
   deleteEntity(id: string): Promise<void>;
 }
 
@@ -275,7 +459,7 @@ interface SchedulerPluginClass {
   new(options: Record<string, unknown>): Plugin & { stop(): Promise<void> };
 }
 
-export class StateMachinePlugin extends Plugin {
+export class StateMachinePlugin<TMachineEvents extends MachineEventPayloadMap = Record<string, Record<string, Record<string, unknown>>>> extends Plugin {
   declare namespace: string;
   declare logLevel: string;
 
@@ -306,6 +490,7 @@ export class StateMachinePlugin extends Plugin {
       workerId = 'default',
       lockTimeout = 1000,
       lockTTL = 5,
+      concurrency = {},
       retryConfig = null,
       enableScheduler = false,
       schedulerConfig = {},
@@ -345,6 +530,10 @@ export class StateMachinePlugin extends Plugin {
       persistTransitions,
       transitionLogResource: this.resourceNames.transitionLog,
       stateResource: this.resourceNames.states,
+      concurrency: {
+        mode: concurrency.mode || 'serial',
+        conflict: concurrency.conflict || 'reject'
+      },
       retryAttempts,
       retryDelay,
       logLevel: this.logLevel,
@@ -473,7 +662,165 @@ export class StateMachinePlugin extends Plugin {
     return machineConfig;
   }
 
+  private _resolveMachineConcurrency(machineConfig: MachineConfig): ConcurrencyConfig {
+    return {
+      mode: machineConfig.concurrency?.mode || this.config.concurrency.mode,
+      conflict: machineConfig.concurrency?.conflict || this.config.concurrency.conflict
+    };
+  }
+
+  private _collectSchemaBoundMachines(): Map<string, ResolvedStateMachineBinding> {
+    const bindings = new Map<string, ResolvedStateMachineBinding>();
+
+    if (!this.database?.resources) {
+      return bindings;
+    }
+
+    for (const [resourceName, resource] of Object.entries(this.database.resources)) {
+      const candidate = resource as unknown as Resource;
+      const binding = this._normalizeSchemaStateMachineBinding(candidate?.$schema?.stateMachine, resourceName, candidate);
+
+      if (!binding) {
+        continue;
+      }
+
+      if (bindings.has(binding.machine)) {
+        throw new StateMachineError(`State machine '${binding.machine}' is already bound to another resource via schema`, {
+          operation: 'collectSchemaBoundMachines',
+          machine: binding.machine,
+          resourceName,
+          currentResource: bindings.get(binding.machine)?.resourceName,
+          suggestion: 'Bind each machine to only one resource using resource.$schema.stateMachine'
+        });
+      }
+
+      if (!this.config.stateMachines[binding.machine]) {
+        this.logger.warn(
+          { machine: binding.machine, resourceName },
+          `Resource '${resourceName}' references undefined state machine '${binding.machine}' in $schema.stateMachine`
+        );
+        continue;
+      }
+
+      bindings.set(binding.machine, binding);
+    }
+
+    return bindings;
+  }
+
+  private _normalizeSchemaStateMachineBinding(
+    rawBinding: string | ResourceStateMachineBinding | undefined,
+    resourceName: string,
+    resource: Resource
+  ): ResolvedStateMachineBinding | null {
+    if (!rawBinding) {
+      return null;
+    }
+
+    if (typeof rawBinding === 'string') {
+      const machine = rawBinding.trim();
+      if (!machine) {
+        return null;
+      }
+
+      return {
+        machine,
+        resourceName,
+        resource
+      };
+    }
+
+    if (typeof rawBinding !== 'object' || Array.isArray(rawBinding)) {
+      this.logger.warn({ resourceName, stateMachine: rawBinding }, `Invalid stateMachine binding in resource.$schema.stateMachine`);
+      return null;
+    }
+
+    const bindingObject = rawBinding as Record<string, unknown>;
+    const machine = typeof bindingObject.machine === 'string' ? bindingObject.machine.trim() : '';
+    if (!machine) {
+      this.logger.warn({ resourceName, stateMachine: rawBinding }, `Invalid stateMachine binding in resource.$schema.stateMachine: missing machine`);
+      return null;
+    }
+
+    const resolvedBinding: ResolvedStateMachineBinding = {
+      machine,
+      resourceName,
+      resource
+    };
+
+    if (typeof bindingObject.stateField === 'string') {
+      resolvedBinding.stateField = bindingObject.stateField;
+    } else if (bindingObject.stateField !== undefined) {
+      this.logger.warn({ resourceName, stateMachine: machine }, `Ignoring invalid stateMachine stateField in resource.$schema.stateMachine`);
+    }
+
+    if (typeof bindingObject.autoCleanup === 'boolean') {
+      resolvedBinding.autoCleanup = bindingObject.autoCleanup;
+    } else if (bindingObject.autoCleanup !== undefined) {
+      this.logger.warn({ resourceName, stateMachine: machine }, `Ignoring invalid stateMachine autoCleanup in resource.$schema.stateMachine`);
+    }
+
+    return resolvedBinding;
+  }
+
+  private _resolveDefaultStateField(resource: Resource): string | undefined {
+    const schema = (resource as { schema?: { attributes?: Record<string, unknown> } }).schema;
+    if (schema?.attributes && Object.prototype.hasOwnProperty.call(schema.attributes, 'status')) {
+      return 'status';
+    }
+
+    return undefined;
+  }
+
+  private _resolveMachineConfig(
+    machineName: string,
+    machineConfig: MachineConfig,
+    schemaBinding?: ResolvedStateMachineBinding
+  ): MachineConfig {
+    const normalized = this._getMachineConfig(machineConfig);
+
+    if (!schemaBinding) {
+      return normalized;
+    }
+
+    const fallbackStateField = normalized.stateField || schemaBinding.stateField || this._resolveDefaultStateField(schemaBinding.resource);
+    const fallbackResource = normalized.resource || schemaBinding.resource;
+
+    if (!normalized.resource && fallbackResource) {
+      this.logger.debug(
+        {
+          machine: machineName,
+          resourceName: schemaBinding.resourceName,
+          stateField: fallbackStateField,
+          autoCleanup: normalized.autoCleanup ?? schemaBinding.autoCleanup
+        },
+        `Using resource from resource.$schema.stateMachine for machine '${machineName}'`
+      );
+    }
+
+    return {
+      ...normalized,
+      resource: fallbackResource,
+      stateField: fallbackStateField,
+      autoCleanup: normalized.autoCleanup ?? schemaBinding.autoCleanup
+    };
+  }
+
   private _validateConfiguration(): void {
+    if (this.config.concurrency.mode !== 'serial' && this.config.concurrency.mode !== 'parallel') {
+      throw new StateMachineError(`Invalid global concurrency mode '${this.config.concurrency.mode}'`, {
+        operation: 'validateConfiguration',
+        suggestion: 'Use one of: serial | parallel'
+      });
+    }
+
+    if (this.config.concurrency.conflict !== 'reject' && this.config.concurrency.conflict !== 'drop') {
+      throw new StateMachineError(`Invalid global concurrency conflict policy '${this.config.concurrency.conflict}'`, {
+        operation: 'validateConfiguration',
+        suggestion: 'Use one of: reject | drop'
+      });
+    }
+
     if (!this.config.stateMachines || Object.keys(this.config.stateMachines).length === 0) {
       throw new StateMachineError('At least one state machine must be defined', {
         operation: 'validateConfiguration',
@@ -509,6 +856,36 @@ export class StateMachinePlugin extends Plugin {
           suggestion: 'Set initialState to one of the defined states'
         });
       }
+
+      if (machine.concurrency?.mode && machine.concurrency.mode !== 'serial' && machine.concurrency.mode !== 'parallel') {
+        throw new StateMachineError(`Invalid concurrency mode '${machine.concurrency.mode}' in machine '${machineName}'`, {
+          operation: 'validateConfiguration',
+          machineId: machineName,
+          suggestion: 'Use one of: serial | parallel'
+        });
+      }
+
+      if (machine.concurrency?.conflict && machine.concurrency.conflict !== 'reject' && machine.concurrency.conflict !== 'drop') {
+        throw new StateMachineError(`Invalid concurrency conflict policy '${machine.concurrency.conflict}' in machine '${machineName}'`, {
+          operation: 'validateConfiguration',
+          machineId: machineName,
+          suggestion: 'Use one of: reject | drop'
+        });
+      }
+
+      const diagnostics = this._getMachineDefinitionDiagnostics(machineName, machine);
+      if (diagnostics.errors.length > 0) {
+        throw new StateMachineError(`State machine '${machineName}' definition is invalid`, {
+          operation: 'validateConfiguration',
+          machineId: machineName,
+          errors: diagnostics.errors,
+          suggestion: 'Fix definition errors before initializing the plugin'
+        });
+      }
+
+      if (diagnostics.warnings.length > 0) {
+        this.logger.warn({ machineId: machineName, warnings: diagnostics.warnings }, `State machine '${machineName}' has definition warnings`);
+      }
     }
   }
 
@@ -517,10 +894,17 @@ export class StateMachinePlugin extends Plugin {
       await this._createStateResources();
     }
 
+    const schemaBoundMachines = this._collectSchemaBoundMachines();
+
     for (const [machineName, machineConfig] of Object.entries(this.config.stateMachines)) {
+      const resolvedMachineConfig = this._resolveMachineConfig(machineName, machineConfig, schemaBoundMachines.get(machineName));
+      const machineConcurrency = this._resolveMachineConcurrency(resolvedMachineConfig);
+
       this.machines.set(machineName, {
-        config: machineConfig,
-        currentStates: new Map()
+        config: resolvedMachineConfig,
+        currentStates: new Map(),
+        currentStateVersions: new Map(),
+        concurrency: machineConcurrency
       });
     }
 
@@ -547,6 +931,8 @@ export class StateMachinePlugin extends Plugin {
       behavior: 'body-only',
       partitions: {
         byMachine: { fields: { machineId: 'string' } },
+        byEntity: { fields: { entityId: 'string' } },
+        byMachineEntity: { fields: { machineId: 'string', entityId: 'string' } },
         byDate: { fields: { createdAt: 'dateonly' } }
       }
     }));
@@ -567,6 +953,7 @@ export class StateMachinePlugin extends Plugin {
         currentState: 'string|required',
         context: 'json|default:{}',
         lastTransition: 'string|default:null',
+        stateVersion: 'number|default:0',
         triggerCounts: 'json|default:{}',
         updatedAt: 'datetime|required'
       },
@@ -581,51 +968,152 @@ export class StateMachinePlugin extends Plugin {
     }
   }
 
-  async send(machineId: string, entityId: string, event: string, context: Record<string, unknown> = {}): Promise<TransitionResult> {
+  async send<TMachine extends keyof TMachineEvents & string, TEvent extends keyof TMachineEvents[TMachine] & string>(
+    machineId: TMachine,
+    entityId: string,
+    event: TEvent,
+    context: TMachineEvents[TMachine][TEvent]
+  ): Promise<TransitionResult>;
+  async send(
+    machineId: string,
+    entityId: string,
+    event: string,
+    context: Record<string, unknown> = {}
+  ): Promise<TransitionResult> {
+    const startedAt = new Date().toISOString();
+    const correlationId = this._getCorrelationId(context, machineId, entityId, event);
+    const requestedStateVersion = typeof context.stateVersion === 'number' ? context.stateVersion : undefined;
+    const buildFailure = (
+      code: TransitionRejectedResult['code'],
+      reason: string,
+      message: string,
+      details: Record<string, unknown>,
+      state: Partial<Pick<TransitionContext, 'from' | 'to' | 'guard' | 'stateVersion'>> & { state?: string } = {}
+    ): TransitionResult => {
+      const endedAt = new Date().toISOString();
+      const transitionContext = this._buildTransitionContext(machineId, entityId, event, startedAt, endedAt, {
+        correlationId,
+        context,
+        from: state.from,
+        to: state.to,
+        guard: state.guard
+      });
+
+      this.emit('plg:state-machine:transition-rejected', {
+        ...transitionContext,
+        machineId,
+        event,
+        code,
+        reason,
+        message,
+        details
+      });
+
+      return {
+        ok: false,
+        code,
+        reason,
+        message,
+        details,
+        state: state.state || state.from || state.to,
+        ...transitionContext,
+        event
+      };
+    };
+
     const machine = this.machines.get(machineId);
     if (!machine) {
-      throw new StateMachineError(`State machine '${machineId}' not found`, {
-        operation: 'send',
-        machineId,
-        availableMachines: Array.from(this.machines.keys()),
-        suggestion: 'Check machine ID or use getMachines() to list available machines'
-      });
+      return buildFailure(
+        'MACHINE_NOT_FOUND',
+        'MACHINE_NOT_FOUND',
+        `State machine '${machineId}' not found`,
+        {
+          machineId,
+          availableMachines: Array.from(this.machines.keys()),
+          operation: 'send'
+        }
+      );
     }
 
-    const lock = await this._acquireTransitionLock(machineId, entityId);
+    let lock: Lock | null = null;
+    let currentStateVersion = 0;
+    let currentState = '';
+    let targetState = '';
+    let guardName: string | undefined;
+    let transitionedStateVersion = 0;
 
     try {
-      const currentState = await this.getState(machineId, entityId);
+      const stateSnapshot = await this._getStateSnapshot(machineId, entityId);
+      currentState = stateSnapshot.state;
+      currentStateVersion = stateSnapshot.version;
+
+      if (machine.concurrency.mode !== 'parallel') {
+        lock = await this._acquireTransitionLock(machineId, entityId);
+      }
+
+      this.emit('plg:state-machine:before-transition', {
+        machineId,
+        entityId,
+        event,
+        context,
+        startedAt,
+        correlationId,
+        guard: undefined,
+        from: currentState,
+        stateVersion: currentStateVersion,
+        to: undefined,
+        endedAt: new Date().toISOString(),
+        elapsedMs: 0
+      });
+
+      if (typeof requestedStateVersion === 'number' && requestedStateVersion !== currentStateVersion) {
+        return buildFailure(
+          'STATE_VERSION_MISMATCH',
+          'STATE_VERSION_MISMATCH',
+          `State version mismatch for machine '${machineId}' and entity '${entityId}'`,
+          {
+            machineId,
+            entityId,
+            currentState,
+            requestedStateVersion,
+            currentStateVersion
+          },
+          { from: currentState, stateVersion: currentStateVersion }
+        );
+      }
+
       const stateConfig = machine.config.states[currentState];
 
       if (!stateConfig || !stateConfig.on || !stateConfig.on[event]) {
-        throw new StateMachineError(`Event '${event}' not valid for state '${currentState}' in machine '${machineId}'`, {
-          operation: 'send',
-          machineId,
-          entityId,
-          event,
-          currentState,
-          validEvents: stateConfig && stateConfig.on ? Object.keys(stateConfig.on) : [],
-          suggestion: 'Use getValidEvents() to check which events are valid for the current state'
-        });
+        return buildFailure(
+          'INVALID_EVENT',
+          'INVALID_EVENT',
+          `Event '${event}' not valid for state '${currentState}' in machine '${machineId}'`,
+          {
+            currentState,
+            validEvents: stateConfig && stateConfig.on ? Object.keys(stateConfig.on) : []
+          },
+          { from: currentState }
+        );
       }
 
-      const targetState = stateConfig.on[event];
+      targetState = stateConfig.on[event];
 
       if (stateConfig.guards && stateConfig.guards[event]) {
-        const guardName = stateConfig.guards[event];
+        guardName = stateConfig.guards[event];
         const guard = this.config.guards[guardName];
 
         if (!guard) {
-          throw new StateMachineError(`Guard '${guardName}' not found`, {
-            operation: 'guard-not-found',
-            machineId,
-            entityId,
-            event,
-            currentState,
-            guardName,
-            suggestion: 'Register the guard in plugin options and ensure the state transition references a valid guard'
-          });
+          return buildFailure(
+            'GUARD_NOT_FOUND',
+            'GUARD_NOT_FOUND',
+            `Guard '${guardName}' not found`,
+            {
+              guardName,
+              currentState
+            },
+            { from: currentState, to: targetState, guard: guardName }
+          );
         }
 
         const [guardOk, guardErr, guardResult] = await tryFn(async () =>
@@ -637,49 +1125,535 @@ export class StateMachinePlugin extends Plugin {
           })
         );
 
-        if (!guardOk || !guardResult) {
-          throw new StateMachineError(`Transition blocked by guard '${guardName}'`, {
-            operation: 'guard',
-            machineId,
-            entityId,
-            event,
-            currentState,
-            guardName,
-            guardError: (guardErr as Error)?.message || 'Guard returned false',
-            suggestion: 'Check guard conditions or modify the context to satisfy guard requirements'
-          });
+        if (!guardOk) {
+          return buildFailure(
+            'GUARD_ERROR',
+            'GUARD_ERROR',
+            `Guard '${guardName}' threw an error`,
+            {
+              currentState,
+              guardName,
+              guardError: (guardErr as Error)?.message || 'Unknown guard error'
+            },
+            { from: currentState, to: targetState, guard: guardName }
+          );
+        }
+
+        if (!guardResult) {
+          return buildFailure(
+            'GUARD_REJECTED',
+            'MISSING_REQUIRED_FIELD',
+            `Transition blocked by guard '${guardName}'`,
+            {
+              currentState,
+              guardName,
+              guardResult: false
+            },
+            { from: currentState, to: targetState, guard: guardName }
+          );
         }
       }
 
       if (stateConfig.exit) {
-        await this._executeAction(stateConfig.exit, context, event, machineId, entityId);
+        await this._executeAction(stateConfig.exit, context, event, machineId, entityId, {
+          machineId,
+          entityId,
+          event,
+          from: currentState,
+          to: targetState,
+          startedAt,
+          correlationId,
+          context
+        });
       }
 
-      await this._transition(machineId, entityId, currentState, targetState, event, context);
+      transitionedStateVersion = await this._transition(machineId, entityId, currentState, targetState, event, context, currentStateVersion);
 
       const targetStateConfig = machine.config.states[targetState];
       if (targetStateConfig && targetStateConfig.entry) {
-        await this._executeAction(targetStateConfig.entry, context, event, machineId, entityId);
+        await this._executeAction(targetStateConfig.entry, context, event, machineId, entityId, {
+          machineId,
+          entityId,
+          event,
+          from: currentState,
+          to: targetState,
+          startedAt,
+          correlationId,
+          context
+        });
       }
 
-      this.emit('plg:state-machine:transition', {
+      const endedAt = new Date().toISOString();
+      const elapsedMs = new Date(endedAt).getTime() - new Date(startedAt).getTime();
+
+      const transitionContext = this._buildTransitionContext(
         machineId,
         entityId,
-        from: currentState,
-        to: targetState,
         event,
-        context
+        startedAt,
+        endedAt,
+        {
+          correlationId,
+          context,
+          from: currentState,
+          to: targetState,
+          stateVersion: transitionedStateVersion
+        }
+      );
+
+      this.emit('plg:state-machine:transition', {
+        ...transitionContext,
+        to: targetState
+      });
+
+      this.emit('plg:state-machine:after-transition', {
+        ...transitionContext,
+        to: targetState
       });
 
       return {
+        ok: true,
+        state: targetState,
         from: currentState,
         to: targetState,
         event,
-        timestamp: new Date().toISOString()
+        timestamp: endedAt,
+        machineId,
+        entityId,
+        context,
+        stateVersion: transitionedStateVersion,
+        correlationId,
+        startedAt,
+        endedAt,
+        elapsedMs
       };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Unknown error';
+      const details = {
+        operation: error && typeof error === 'object' && 'operation' in error ? (error as { operation?: string }).operation : undefined,
+        originalError: message
+      };
+
+      if (error instanceof StateMachineError) {
+        const stateMachineError = error as Error & { operation?: string; guardName?: string; currentState?: string; targetState?: string };
+        const operation = stateMachineError.operation;
+        let code: TransitionRejectedResult['code'] = 'INTERNAL_ERROR';
+        let reason = 'INTERNAL_ERROR';
+
+        if (operation === 'send') {
+          if (machine.concurrency.conflict === 'drop') {
+            code = 'CONCURRENCY_CONFLICT';
+            reason = 'CONCURRENCY_CONFLICT_DROP';
+          } else {
+            code = 'CONCURRENCY_CONFLICT';
+            reason = 'CONCURRENCY_CONFLICT';
+          }
+        } else if (operation === 'guard-not-found') {
+          code = 'GUARD_NOT_FOUND';
+          reason = 'GUARD_NOT_FOUND';
+        } else if (operation === 'guard') {
+          code = 'GUARD_REJECTED';
+          reason = 'MISSING_REQUIRED_FIELD';
+        } else if (operation === 'state-version-mismatch') {
+          code = 'STATE_VERSION_MISMATCH';
+          reason = 'STATE_VERSION_MISMATCH';
+        } else if (operation === 'action-not-found') {
+          code = 'ACTION_NOT_FOUND';
+          reason = 'ACTION_NOT_FOUND';
+        }
+
+        return buildFailure(
+          code,
+          reason,
+          error.message,
+          {
+            ...details
+          },
+          {
+            state: stateMachineError.currentState || currentState,
+            from: stateMachineError.currentState || currentState,
+            to: stateMachineError.targetState,
+            guard: stateMachineError.guardName
+          }
+        );
+      }
+
+      return buildFailure('INTERNAL_ERROR', 'INTERNAL_ERROR', message, details);
     } finally {
       await this._releaseTransitionLock(lock);
     }
+  }
+
+  async assertTransition<TMachine extends keyof TMachineEvents & string, TEvent extends keyof TMachineEvents[TMachine] & string>(
+    params: TransitionAssertionSuccessParams<TMachine, TEvent> & { context?: TMachineEvents[TMachine][TEvent] }
+  ): Promise<TransitionSuccessResult> {
+    const result = await this.send(
+      params.machineId,
+      params.entityId,
+      params.event,
+      params.context || {}
+    );
+
+    if (!result.ok) {
+      this._contractAssertionFailure('Expected transition to be accepted, but it was rejected', {
+        machineId: params.machineId,
+        entityId: params.entityId,
+        event: params.event,
+        expectedTo: params.to,
+        expectedFrom: params.from,
+        expectedStateVersion: params.stateVersion,
+        result
+      });
+    }
+
+    if (params.from && result.from !== params.from) {
+      this._contractAssertionFailure('Transition started from a different state than expected', {
+        machineId: params.machineId,
+        entityId: params.entityId,
+        event: params.event,
+        expectedFrom: params.from,
+        actualFrom: result.from
+      });
+    }
+
+    if (result.to !== params.to) {
+      this._contractAssertionFailure('Transition ended in a different state than expected', {
+        machineId: params.machineId,
+        entityId: params.entityId,
+        event: params.event,
+        expectedTo: params.to,
+        actualTo: result.to
+      });
+    }
+
+    if (typeof params.stateVersion === 'number' && result.stateVersion !== params.stateVersion) {
+      this._contractAssertionFailure('Transition state version does not match expected value', {
+        machineId: params.machineId,
+        entityId: params.entityId,
+        event: params.event,
+        expectedStateVersion: params.stateVersion,
+        actualStateVersion: result.stateVersion
+      });
+    }
+
+    return result;
+  }
+
+  async assertReject<TMachine extends keyof TMachineEvents & string, TEvent extends keyof TMachineEvents[TMachine] & string>(
+    params: TransitionAssertionRejectParams<TMachine, TEvent> & { context?: TMachineEvents[TMachine][TEvent] }
+  ): Promise<TransitionRejectedResult> {
+    const result = await this.send(
+      params.machineId,
+      params.entityId,
+      params.event,
+      params.context || {}
+    );
+
+    if (result.ok) {
+      this._contractAssertionFailure('Expected transition to be rejected, but it succeeded', {
+        machineId: params.machineId,
+        entityId: params.entityId,
+        event: params.event,
+        expectedTo: params.to || null,
+        actualResult: result
+      });
+    }
+
+    if (params.code && result.code !== params.code) {
+      this._contractAssertionFailure('Transition rejection code does not match expected code', {
+        machineId: params.machineId,
+        entityId: params.entityId,
+        event: params.event,
+        expectedCode: params.code,
+        actualCode: result.code
+      });
+    }
+
+    if (params.reason && result.reason !== params.reason) {
+      this._contractAssertionFailure('Transition rejection reason does not match expected reason', {
+        machineId: params.machineId,
+        entityId: params.entityId,
+        event: params.event,
+        expectedReason: params.reason,
+        actualReason: result.reason
+      });
+    }
+
+    if (params.from && result.from !== params.from) {
+      this._contractAssertionFailure('Rejected transition started from a different state than expected', {
+        machineId: params.machineId,
+        entityId: params.entityId,
+        event: params.event,
+        expectedFrom: params.from,
+        actualFrom: result.from
+      });
+    }
+
+    if (params.to && result.to !== params.to) {
+      this._contractAssertionFailure('Rejected transition targeted an unexpected state', {
+        machineId: params.machineId,
+        entityId: params.entityId,
+        event: params.event,
+        expectedTo: params.to,
+        actualTo: result.to
+      });
+    }
+
+    return result;
+  }
+
+  private _contractAssertionFailure(message: string, details: Record<string, unknown>): never {
+    const error = new Error(`[state-machine contract] ${message}`);
+    (error as Error & { details?: Record<string, unknown> }).details = details;
+    throw error;
+  }
+
+  private _getCorrelationId(context: Record<string, unknown>, machineId: string, entityId: string, event: string): string {
+    const provided = context?.correlationId;
+    if (typeof provided === 'string' && provided.length > 0) {
+      return provided;
+    }
+
+    return `${machineId}:${entityId}:${event}:${Date.now()}:${Math.random().toString(16).slice(2, 10)}`;
+  }
+
+  private _buildTransitionContext(
+    machineId: string,
+    entityId: string,
+    event: string,
+    startedAt: string,
+    endedAt: string,
+    options: {
+      correlationId: string;
+      context: Record<string, unknown>;
+      from?: string;
+      to?: string;
+      guard?: string;
+      stateVersion?: number;
+      error?: string;
+    }
+  ): TransitionContext {
+    const elapsedMs = new Date(endedAt).getTime() - new Date(startedAt).getTime();
+
+    return {
+      machineId,
+      entityId,
+      event,
+      from: options.from,
+      to: options.to,
+      guard: options.guard,
+      stateVersion: options.stateVersion,
+      context: options.context,
+      correlationId: options.correlationId,
+      startedAt,
+      endedAt,
+      elapsedMs,
+      error: options.error
+    };
+  }
+
+  private async _getStateSnapshot(machineId: string, entityId: string): Promise<{ state: string; version: number }> {
+    const machine = this.machines.get(machineId);
+    if (!machine) {
+      throw new StateMachineError(`Machine '${machineId}' not found`, {
+        operation: 'state-snapshot',
+        machineId,
+        entityId,
+        suggestion: 'Check machine ID or use getMachines() to list available machines'
+      });
+    }
+
+    if (machine.currentStates.has(entityId)) {
+      return {
+        state: machine.currentStates.get(entityId)!,
+        version: machine.currentStateVersions.get(entityId) || 0
+      };
+    }
+
+    if (this.config.persistTransitions && this._getStateResource()) {
+      const stateId = `${machineId}_${entityId}`;
+      const [ok, , stateRecord] = await tryFn<StateRecord>(() =>
+        this._getStateResource()!.get(stateId) as unknown as Promise<StateRecord>
+      );
+
+      if (ok && stateRecord) {
+        const stateVersion = typeof stateRecord.stateVersion === 'number' ? stateRecord.stateVersion : 0;
+        machine.currentStates.set(entityId, stateRecord.currentState);
+        machine.currentStateVersions.set(entityId, stateVersion);
+        return {
+          state: stateRecord.currentState,
+          version: stateVersion
+        };
+      }
+    }
+
+    const initialState = machine.config.initialState;
+    machine.currentStates.set(entityId, initialState);
+    machine.currentStateVersions.set(entityId, 0);
+    return {
+      state: initialState,
+      version: 0
+    };
+  }
+
+  private _setInMemoryState(machineId: string, entityId: string, state: string, stateVersion: number): void {
+    const machine = this.machines.get(machineId);
+    if (!machine) {
+      return;
+    }
+
+    machine.currentStates.set(entityId, state);
+    machine.currentStateVersions.set(entityId, stateVersion);
+  }
+
+  getMachineDefinitionDiagnostics(machineId: string): MachineDefinitionDiagnostics | null {
+    const machine = this.machines.get(machineId);
+    if (!machine) {
+      return null;
+    }
+
+    return this._getMachineDefinitionDiagnostics(machineId, machine.config);
+  }
+
+  getDefinitionDiagnostics(): Record<string, MachineDefinitionDiagnostics> {
+    const diagnostics: Record<string, MachineDefinitionDiagnostics> = {};
+
+    for (const machineId of this.machines.keys()) {
+      diagnostics[machineId] = this._getMachineDefinitionDiagnostics(machineId, this.machines.get(machineId)!.config);
+    }
+
+    return diagnostics;
+  }
+
+  private _getMachineDefinitionDiagnostics(machineId: string, config: MachineConfig): MachineDefinitionDiagnostics {
+    const stateNames = Object.keys(config.states);
+    const errors: MachineDefinitionIssue[] = [];
+    const warnings: MachineDefinitionIssue[] = [];
+    const incomingTransitions = new Map<string, number>();
+    const transitionTargets = new Map<string, string[]>();
+    let transitionCount = 0;
+    let deadStatesCount: string[] = [];
+
+    for (const stateName of stateNames) {
+      incomingTransitions.set(stateName, 0);
+    }
+
+    for (const [stateName, stateConfig] of Object.entries(config.states)) {
+      const on = stateConfig.on || {};
+      const targets: string[] = [];
+
+      for (const [event, target] of Object.entries(on)) {
+        transitionCount++;
+        targets.push(target);
+
+        if (!config.states[target]) {
+          errors.push({
+            code: 'MISSING_TARGET_STATE',
+            message: `Transition target state '${target}' is not defined in machine '${machineId}'`,
+            state: stateName,
+            event,
+            targetState: target
+          });
+          continue;
+        }
+
+        const incoming = incomingTransitions.get(target) || 0;
+        incomingTransitions.set(target, incoming + 1);
+      }
+
+      transitionTargets.set(stateName, targets);
+
+      if (Object.keys(on).length === 0 && stateConfig.type !== 'final') {
+        warnings.push({
+          code: 'STATE_WITHOUT_TRANSITIONS',
+          message: `State '${stateName}' has no outgoing transitions`,
+          state: stateName
+        });
+      }
+
+      const guardMappings = stateConfig.guards || {};
+      for (const [event, guardName] of Object.entries(guardMappings)) {
+        if (!this.config.guards[guardName]) {
+          errors.push({
+            code: 'MISSING_GUARD',
+            message: `Guard '${guardName}' is not registered in machine '${machineId}'`,
+            state: stateName,
+            event,
+            guardName
+          });
+        }
+      }
+
+      if (stateConfig.entry && !this.config.actions[stateConfig.entry]) {
+        errors.push({
+          code: 'MISSING_ACTION',
+          message: `Entry action '${stateConfig.entry}' is not registered in machine '${machineId}'`,
+          state: stateName,
+          actionName: stateConfig.entry
+        });
+      }
+
+      if (stateConfig.exit && !this.config.actions[stateConfig.exit]) {
+        errors.push({
+          code: 'MISSING_ACTION',
+          message: `Exit action '${stateConfig.exit}' is not registered in machine '${machineId}'`,
+          state: stateName,
+          actionName: stateConfig.exit
+        });
+      }
+    }
+
+    const reachable = new Set<string>();
+    const toVisit = [config.initialState];
+    reachable.add(config.initialState);
+
+    while (toVisit.length > 0) {
+      const current = toVisit.shift();
+      if (!current) continue;
+
+      const targets = transitionTargets.get(current) || [];
+      for (const target of targets) {
+        if (!reachable.has(target)) {
+          reachable.add(target);
+          toVisit.push(target);
+        }
+      }
+    }
+
+    const unreachableStates = stateNames.filter((stateName) => !reachable.has(stateName));
+    for (const stateName of unreachableStates) {
+      warnings.push({
+        code: 'UNREACHABLE_STATE',
+        message: `State '${stateName}' is unreachable from initial state '${config.initialState}'`,
+        state: stateName
+      });
+    }
+
+    const orphanStates = stateNames.filter((stateName) => stateName !== config.initialState && (incomingTransitions.get(stateName) || 0) === 0);
+    for (const stateName of orphanStates) {
+      warnings.push({
+        code: 'ORPHAN_STATE',
+        message: `State '${stateName}' has no incoming transitions`,
+        state: stateName
+      });
+    }
+
+    deadStatesCount = stateNames.filter((stateName) => {
+      const stateConfig = config.states[stateName];
+      return stateConfig?.type !== 'final' && (!stateConfig?.on || Object.keys(stateConfig.on).length === 0);
+    });
+
+    return {
+      machineId,
+      errors,
+      warnings,
+      stats: {
+        states: stateNames.length,
+        transitions: transitionCount,
+        deadStates: deadStatesCount,
+        unreachableStates
+      }
+    };
   }
 
   private async _executeAction(
@@ -687,7 +1661,8 @@ export class StateMachinePlugin extends Plugin {
     context: Record<string, unknown>,
     event: string,
     machineId: string,
-    entityId: string
+    entityId: string,
+    transitionContext?: Pick<TransitionContext, 'from' | 'to' | 'guard' | 'startedAt' | 'correlationId'>
   ): Promise<unknown> {
     const action = this.config.actions[actionName];
     if (!action) {
@@ -743,8 +1718,31 @@ export class StateMachinePlugin extends Plugin {
         lastError = error as Error;
 
         if (!retryEnabled) {
+          const actionContext = this._buildTransitionContext(machineId, entityId, event, transitionContext?.startedAt || new Date().toISOString(), new Date().toISOString(), {
+            correlationId: transitionContext?.correlationId || 'unknown',
+            context,
+            from: transitionContext?.from,
+            to: transitionContext?.to,
+            guard: transitionContext?.guard,
+            error: lastError.message
+          });
+
           this.logger.error({ actionName, machineId, entityId, error: lastError.message }, `Action '${actionName}' failed: ${lastError.message}`);
-          this.emit('plg:state-machine:action-error', { actionName, error: lastError.message, machineId, entityId });
+          this.emit('plg:state-machine:action-error', {
+            actionName,
+            error: lastError.message,
+            machineId,
+            entityId,
+            event,
+            from: actionContext.from,
+            to: actionContext.to,
+            guard: actionContext.guard,
+            correlationId: actionContext.correlationId,
+            context,
+            startedAt: actionContext.startedAt,
+            endedAt: actionContext.endedAt,
+            elapsedMs: actionContext.elapsedMs
+          });
           throw lastError;
         }
 
@@ -819,18 +1817,21 @@ export class StateMachinePlugin extends Plugin {
     fromState: string,
     toState: string,
     event: string,
-    context: Record<string, unknown>
-  ): Promise<void> {
+    context: Record<string, unknown>,
+    fromStateVersion?: number
+  ): Promise<number> {
     const timestamp = new Date().toISOString();
     const now = new Date().toISOString();
 
     const machine = this.machines.get(machineId)!;
     const transitionId = `${machineId}_${entityId}_${timestamp}`;
     const stateId = `${machineId}_${entityId}`;
+    const nextStateVersion = (typeof fromStateVersion === 'number' ? fromStateVersion : (machine.currentStateVersions.get(entityId) || 0)) + 1;
     const stateData = {
       machineId,
       entityId,
       currentState: toState,
+      stateVersion: nextStateVersion,
       context,
       lastTransition: transitionId,
       updatedAt: now
@@ -840,6 +1841,21 @@ export class StateMachinePlugin extends Plugin {
     const transitionLogResource = this._getTransitionLogResource();
 
     if (stateResource) {
+      if (typeof fromStateVersion === 'number') {
+        const [snapshotOk, , persistedRecord] = await tryFn(() =>
+          stateResource.get(stateId) as unknown as Promise<StateRecord>
+        );
+        if (snapshotOk && persistedRecord && typeof persistedRecord.stateVersion === 'number' && persistedRecord.stateVersion !== fromStateVersion) {
+          throw new StateMachineError('State version changed before transition could be applied', {
+            operation: 'state-version-mismatch',
+            machineId,
+            entityId,
+            expectedStateVersion: fromStateVersion,
+            actualStateVersion: persistedRecord.stateVersion
+          });
+        }
+      }
+
       let persisted = false;
       let lastStateErr: Error | undefined;
 
@@ -939,6 +1955,9 @@ export class StateMachinePlugin extends Plugin {
     }
 
     machine.currentStates.set(entityId, toState);
+    machine.currentStateVersions.set(entityId, nextStateVersion);
+
+    return nextStateVersion;
   }
 
   private async _transitionToTargetState(
@@ -947,7 +1966,7 @@ export class StateMachinePlugin extends Plugin {
     targetState: string,
     event: string,
     context: Record<string, unknown>
-  ): Promise<{ from: string; to: string }> {
+  ): Promise<{ from: string; to: string; stateVersion: number }> {
     const machine = this.machines.get(machineId);
     if (!machine) {
       throw new StateMachineError(`State machine '${machineId}' not found`, {
@@ -967,12 +1986,14 @@ export class StateMachinePlugin extends Plugin {
       });
     }
 
-    const lock = await this._acquireTransitionLock(machineId, entityId);
+    const lock = machine.concurrency.mode === 'parallel' ? null : await this._acquireTransitionLock(machineId, entityId);
+    const transitionStartedAt = new Date().toISOString();
+    const transitionCorrelationId = this._getCorrelationId(context, machineId, entityId, event);
 
     try {
-      const fromState = await this.getState(machineId, entityId);
+      const { state: fromState, version: fromStateVersion } = await this._getStateSnapshot(machineId, entityId);
       if (fromState === targetState) {
-        return { from: fromState, to: targetState };
+        return { from: fromState, to: targetState, stateVersion: fromStateVersion };
       }
 
       const fromStateConfig = machine.config.states[fromState];
@@ -980,7 +2001,8 @@ export class StateMachinePlugin extends Plugin {
         await this._executeAction(fromStateConfig.exit, context, event, machineId, entityId);
       }
 
-      await this._transition(machineId, entityId, fromState, targetState, event, context);
+      const nextStateVersion = await this._transition(machineId, entityId, fromState, targetState, event, context, fromStateVersion);
+      const endedAt = new Date().toISOString();
 
       const targetStateConfig = machine.config.states[targetState];
       if (targetStateConfig?.entry) {
@@ -993,10 +2015,15 @@ export class StateMachinePlugin extends Plugin {
         from: fromState,
         to: targetState,
         event,
-        context
+        context,
+        correlationId: transitionCorrelationId,
+        startedAt: transitionStartedAt,
+        endedAt,
+        elapsedMs: new Date(endedAt).getTime() - new Date(transitionStartedAt).getTime(),
+        stateVersion: nextStateVersion
       });
 
-      return { from: fromState, to: targetState };
+      return { from: fromState, to: targetState, stateVersion: nextStateVersion };
     } finally {
       await this._releaseTransitionLock(lock);
     }
@@ -1116,35 +2143,8 @@ export class StateMachinePlugin extends Plugin {
   }
 
   async getState(machineId: string, entityId: string): Promise<string> {
-    const machine = this.machines.get(machineId);
-    if (!machine) {
-      throw new StateMachineError(`State machine '${machineId}' not found`, {
-        operation: 'getState',
-        machineId,
-        availableMachines: Array.from(this.machines.keys()),
-        suggestion: 'Check machine ID or use getMachines() to list available machines'
-      });
-    }
-
-    if (machine.currentStates.has(entityId)) {
-      return machine.currentStates.get(entityId)!;
-    }
-
-    if (this.config.persistTransitions && this._getStateResource()) {
-      const stateId = `${machineId}_${entityId}`;
-      const [ok, , stateRecord] = await tryFn<StateRecord>(() =>
-        this._getStateResource()!.get(stateId) as unknown as Promise<StateRecord>
-      );
-
-      if (ok && stateRecord) {
-        machine.currentStates.set(entityId, stateRecord.currentState);
-        return stateRecord.currentState;
-      }
-    }
-
-    const initialState = machine.config.initialState;
-    machine.currentStates.set(entityId, initialState);
-    return initialState;
+    const snapshot = await this._getStateSnapshot(machineId, entityId);
+    return snapshot.state;
   }
 
   async getValidEvents(machineId: string, stateOrEntityId: string): Promise<string[]> {
@@ -1169,31 +2169,202 @@ export class StateMachinePlugin extends Plugin {
     return stateConfig && stateConfig.on ? Object.keys(stateConfig.on) : [];
   }
 
+  private _toEpoch(value: string | number): number {
+    if (typeof value === 'number') {
+      return value;
+    }
+
+    const epoch = new Date(value).getTime();
+    return Number.isNaN(epoch) ? 0 : epoch;
+  }
+
+  private _normalizeTransitionRecord(record: RawTransitionRecord | TransitionRecord): TransitionHistoryEntry {
+    return {
+      id: record.id,
+      machineId: record.machineId,
+      entityId: record.entityId,
+      from: record.fromState,
+      to: record.toState,
+      event: record.event,
+      context: record.context,
+      timestamp: new Date(this._toEpoch(record.timestamp)).toISOString()
+    };
+  }
+
+  private _applyTransitionFilters(
+    transitions: TransitionHistoryEntry[],
+    options: Omit<TransitionQueryOptions, 'limit' | 'offset' | 'sort'>
+  ): TransitionHistoryEntry[] {
+    const fromTimestamp = this._toEpoch(options.from || '');
+    const toTimestamp = this._toEpoch(options.to || '');
+
+    const hasFromFilter = typeof options.from === 'string' && options.from.trim().length > 0;
+    const hasToFilter = typeof options.to === 'string' && options.to.trim().length > 0;
+
+    return transitions.filter((entry) => {
+      if (options.event && entry.event !== options.event) {
+        return false;
+      }
+
+      if (options.fromState && entry.from !== options.fromState) {
+        return false;
+      }
+
+      if (options.toState && entry.to !== options.toState) {
+        return false;
+      }
+
+      if (hasFromFilter || hasToFilter) {
+        const transitionTs = this._toEpoch(entry.timestamp);
+        if (hasFromFilter && transitionTs < fromTimestamp) {
+          return false;
+        }
+
+        if (hasToFilter && transitionTs > toTimestamp) {
+          return false;
+        }
+      }
+
+      return true;
+    });
+  }
+
+  private _sortTransitions(transitions: TransitionHistoryEntry[], sort: TransitionSortOrder = 'desc'): TransitionHistoryEntry[] {
+    const sorted = [...transitions];
+    sorted.sort((a, b) => {
+      const aTs = this._toEpoch(a.timestamp);
+      const bTs = this._toEpoch(b.timestamp);
+
+      return sort === 'desc'
+        ? bTs - aTs
+        : aTs - bTs;
+    });
+
+    return sorted;
+  }
+
+  async getTransitions(machineId: string, entityId: string, options: TransitionQueryOptions = {}): Promise<TransitionHistoryEntry[]> {
+    const limit = options.limit;
+    const offset = options.offset || 0;
+    const sort = options.sort || 'desc';
+    const includeFilters = this._applyTransitionFilters(
+      await this._getTransitionHistory(machineId, entityId, {}),
+      {
+        from: options.from,
+        to: options.to,
+        event: options.event,
+        fromState: options.fromState,
+        toState: options.toState
+      }
+    );
+
+    const sorted = this._sortTransitions(includeFilters, sort);
+
+    if (typeof limit !== 'number') {
+      return sorted.slice(offset);
+    }
+
+    return sorted.slice(offset, offset + limit);
+  }
+
   async getTransitionHistory(machineId: string, entityId: string, options: TransitionHistoryOptions = {}): Promise<TransitionHistoryEntry[]> {
+    const { limit = 50, offset = 0 } = options;
+    return this.getTransitions(machineId, entityId, { limit, offset, sort: 'desc' });
+  }
+
+  async getTransitionCount(
+    machineId: string,
+    entityId: string,
+    options: Omit<TransitionQueryOptions, 'limit' | 'offset' | 'sort'> = {}
+  ): Promise<number> {
+    const transitions = await this.getTransitions(machineId, entityId, options);
+    return transitions.length;
+  }
+
+  async getSnapshot(machineId: string, entityId: string): Promise<StateMachineSnapshot> {
+    const snapshot = await this._getStateSnapshot(machineId, entityId);
+    const defaultResult: StateMachineSnapshot = {
+      machineId,
+      entityId,
+      state: snapshot.state,
+      stateVersion: snapshot.version,
+      context: {},
+      lastTransition: null,
+      triggerCounts: {},
+      updatedAt: new Date().toISOString(),
+      persisted: false
+    };
+
+    const stateResource = this._getStateResource();
+    if (!stateResource) {
+      return defaultResult;
+    }
+
+    const stateId = `${machineId}_${entityId}`;
+    const [ok, , stateRecord] = await tryFn<StateRecord>(() =>
+      stateResource.get(stateId) as unknown as Promise<StateRecord>
+    );
+
+    if (!ok || !stateRecord) {
+      return defaultResult;
+    }
+
+    return {
+      machineId,
+      entityId,
+      state: stateRecord.currentState,
+      stateVersion: typeof stateRecord.stateVersion === 'number' ? stateRecord.stateVersion : snapshot.version,
+      context: stateRecord.context || {},
+      lastTransition: stateRecord.lastTransition || null,
+      triggerCounts: stateRecord.triggerCounts || {},
+      updatedAt: stateRecord.updatedAt,
+      persisted: true
+    };
+  }
+
+  async getTransition(machineId: string, entityId: string, transitionId: string): Promise<TransitionHistoryEntry | null> {
+    if (!this.config.persistTransitions) {
+      return null;
+    }
+
+    const transitionLogResource = this._getTransitionLogResource();
+    if (!transitionLogResource) {
+      this.logger.warn({ machineId, entityId, transitionId }, 'Transition log resource unavailable');
+      return null;
+    }
+
+    const [ok, err, transition] = await tryFn<TransitionRecord>(() =>
+      transitionLogResource.get(transitionId) as unknown as Promise<TransitionRecord>
+    );
+
+    if (!ok || !transition) {
+      return null;
+    }
+
+    if (transition.machineId !== machineId || transition.entityId !== entityId) {
+      return null;
+    }
+
+    return this._normalizeTransitionRecord(transition);
+  }
+
+  async getLastTransitions(machineId: string, entityId: string, n?: number): Promise<TransitionHistoryEntry[]> {
+    if (typeof n === 'number' && n > 0) {
+      return this.getTransitions(machineId, entityId, { limit: n, offset: 0, sort: 'desc' });
+    }
+
+    return this.getTransitions(machineId, entityId, { sort: 'desc' });
+  }
+
+  private async _getTransitionHistory(machineId: string, entityId: string, options: QueryOptions = {}): Promise<TransitionHistoryEntry[]> {
     if (!this.config.persistTransitions) {
       return [];
     }
 
-    const { limit = 50, offset = 0 } = options;
     const transitionLogResource = this._getTransitionLogResource();
 
     if (!transitionLogResource) {
       this.logger.warn({ machineId, entityId }, 'Transition log resource unavailable');
-      return [];
-    }
-
-    const [ok, err, transitions] = await tryFn<RawTransitionRecord[]>(() =>
-      transitionLogResource.query({
-        machineId,
-        entityId
-      }, {
-        limit,
-        offset
-      })
-    );
-
-    if (!ok) {
-      this.logger.warn({ machineId, entityId, error: (err as Error).message }, `Failed to get transition history: ${(err as Error).message}`);
       return [];
     }
 
@@ -1203,15 +2374,77 @@ export class StateMachinePlugin extends Plugin {
       return Number.isNaN(epoch) ? 0 : epoch;
     };
 
-    const sorted = (transitions || []).sort((a, b) => toEpoch(b.timestamp) - toEpoch(a.timestamp));
+    const basePartitionQuery = {
+      partition: 'byMachineEntity',
+      partitionValues: { machineId, entityId }
+    };
 
-    return sorted.map(t => ({
-      from: t.fromState,
-      to: t.toState,
-      event: t.event,
-      context: t.context,
-      timestamp: new Date(toEpoch(t.timestamp)).toISOString()
-    }));
+    const normalize = (transitions: RawTransitionRecord[]): TransitionHistoryEntry[] =>
+      (transitions || [])
+        .sort((a, b) => toEpoch(b.timestamp) - toEpoch(a.timestamp))
+        .map(t => ({
+          from: t.fromState,
+          to: t.toState,
+          event: t.event,
+          context: t.context,
+          timestamp: new Date(toEpoch(t.timestamp)).toISOString()
+        }));
+
+    if (typeof options.limit === 'number') {
+      const [ok, err, transitions] = await tryFn<RawTransitionRecord[]>(() =>
+        transitionLogResource.query(
+          {},
+          {
+            ...basePartitionQuery,
+            limit: options.limit,
+            offset: options.offset
+          }
+        )
+      );
+
+      if (!ok) {
+        this.logger.warn({ machineId, entityId, error: (err as Error).message }, `Failed to get transition history: ${(err as Error).message}`);
+        return [];
+      }
+
+      return normalize(transitions || []);
+    }
+
+    const allTransitions: RawTransitionRecord[] = [];
+    let offset = 0;
+
+    while (true) {
+      const [ok, err, transitions] = await tryFn<RawTransitionRecord[]>(() =>
+        transitionLogResource.query(
+          {},
+          {
+            ...basePartitionQuery,
+            limit: TRANSITION_HISTORY_PAGE_SIZE,
+            offset
+          }
+        )
+      );
+
+      if (!ok) {
+        this.logger.warn({ machineId, entityId, error: (err as Error).message }, `Failed to get transition history: ${(err as Error).message}`);
+        return normalize(allTransitions);
+      }
+
+      const chunk = transitions || [];
+      if (chunk.length === 0) {
+        break;
+      }
+
+      allTransitions.push(...chunk);
+
+      if (chunk.length < TRANSITION_HISTORY_PAGE_SIZE) {
+        break;
+      }
+
+      offset += chunk.length;
+    }
+
+    return normalize(allTransitions);
   }
 
   async initializeEntity(machineId: string, entityId: string, context: Record<string, unknown> = {}): Promise<string> {
@@ -1242,6 +2475,7 @@ export class StateMachinePlugin extends Plugin {
             machineId,
             entityId,
             currentState: initialState,
+            stateVersion: 0,
             context,
             lastTransition: null,
             updatedAt: now
@@ -1260,6 +2494,8 @@ export class StateMachinePlugin extends Plugin {
         }
       }
     }
+
+    this._setInMemoryState(machineId, entityId, initialState, 0);
 
     const initialStateConfig = machine.config.states[initialState];
     if (initialStateConfig && initialStateConfig.entry) {
@@ -1285,6 +2521,7 @@ export class StateMachinePlugin extends Plugin {
     const stateId = `${machineId}_${entityId}`;
 
     machine.currentStates.delete(entityId);
+    machine.currentStateVersions.delete(entityId);
 
     const stateResource = this._getStateResource();
     if (stateResource) {
@@ -1302,14 +2539,27 @@ export class StateMachinePlugin extends Plugin {
         return;
       }
 
-      const [ok, , transitions] = await tryFn<TransitionRecord[]>(() =>
-        transitionLogResource.query({
-          machineId,
-          entityId
-        }) as unknown as Promise<TransitionRecord[]>
-      );
+      const transitionPartition = {
+        partition: 'byMachineEntity',
+        partitionValues: { machineId, entityId }
+      };
 
-      if (ok && transitions && transitions.length > 0) {
+      while (true) {
+        const [ok, , transitions] = await tryFn<TransitionRecord[]>(() =>
+          transitionLogResource.query(
+            {},
+            {
+              ...transitionPartition,
+              limit: TRANSITION_HISTORY_PAGE_SIZE,
+              offset: 0
+            }
+          ) as unknown as Promise<TransitionRecord[]>
+        );
+
+        if (!ok || !transitions || transitions.length === 0) {
+          break;
+        }
+
         await Promise.all(
           transitions.map(t =>
             tryFn(() =>
@@ -1317,6 +2567,10 @@ export class StateMachinePlugin extends Plugin {
             )
           )
         );
+
+        if (transitions.length < TRANSITION_HISTORY_PAGE_SIZE) {
+          break;
+        }
       }
     }
 
@@ -1908,8 +3162,10 @@ export class StateMachinePlugin extends Plugin {
     }
   }
   private async _attachStateMachinesToResources(): Promise<void> {
-    for (const [machineName, machineConfig] of Object.entries(this.config.stateMachines)) {
-      const resourceConfig = this._getMachineConfig(machineConfig);
+    const resourceStateMachineBindingMap = new Map<string, string>();
+
+    for (const [machineName, machineData] of this.machines.entries()) {
+      const resourceConfig = machineData.config;
 
       if (!resourceConfig.resource) {
         this.logger.debug({ machineName }, `Machine '${machineName}' has no resource configured, skipping attachment`);
@@ -1950,11 +3206,37 @@ export class StateMachinePlugin extends Plugin {
         getTransitionHistory: async (id: string, options?: TransitionHistoryOptions) => {
           return this.getTransitionHistory(machineName, id, options);
         },
+        transitions: async (id: string, options?: TransitionQueryOptions) => {
+          return this.getTransitions(machineName, id, options);
+        },
+        transition: async (id: string, transitionId: string) => {
+          return this.getTransition(machineName, id, transitionId);
+        },
+        transitionCount: async (id: string, options?: Omit<TransitionQueryOptions, 'limit' | 'offset' | 'sort'>) => {
+          return this.getTransitionCount(machineName, id, options);
+        },
+        getLastTransitions: async (id: string, limit?: number) => {
+          return this.getLastTransitions(machineName, id, limit);
+        },
+        snapshot: async (id: string) => {
+          return this.getSnapshot(machineName, id);
+        },
         deleteEntity: async (id: string) => {
           return this.deleteEntity(machineName, id);
         }
       };
 
+      const existingMachine = resourceStateMachineBindingMap.get(resource.name);
+      if (existingMachine && existingMachine !== machineName) {
+        throw new StateMachineError(`Resource '${resource.name}' already has state machine '${existingMachine}' attached. A resource can expose only one resource.state binding.`, {
+          operation: 'attachStateMachinesToResources',
+          resourceName: resource.name,
+          machineName,
+          existingMachine
+        });
+      }
+
+      resourceStateMachineBindingMap.set(resource.name, machineName);
       (resource as Resource & { _stateMachine: MachineProxy })._stateMachine = machineProxy;
 
       Object.defineProperty(resource, 'state', {
@@ -1965,6 +3247,11 @@ export class StateMachinePlugin extends Plugin {
           getValidEvents: async (id: string) => machineProxy.getValidEvents(id),
           initialize: async (id: string, context?: Record<string, unknown>) => machineProxy.initializeEntity(id, context),
           history: async (id: string, options?: TransitionHistoryOptions) => machineProxy.getTransitionHistory(id, options),
+          transitions: async (id: string, options?: TransitionQueryOptions) => machineProxy.transitions(id, options),
+          transition: async (id: string, transitionId: string) => machineProxy.transition(id, transitionId),
+          transitionCount: async (id: string, options?: Omit<TransitionQueryOptions, 'limit' | 'offset' | 'sort'>) => machineProxy.transitionCount(id, options),
+          getLastTransitions: async (id: string, limit?: number) => machineProxy.getLastTransitions(id, limit),
+          snapshot: async (id: string) => machineProxy.snapshot(id),
           delete: async (id: string) => machineProxy.deleteEntity(id)
         }),
         configurable: true,

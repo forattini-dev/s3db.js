@@ -307,14 +307,14 @@ describe('StateMachinePlugin - Triggers', () => {
     expect(state).toBe('running');
     expect(exitSpy).toHaveBeenCalledTimes(1);
     expect(enterSpy).toHaveBeenCalledTimes(1);
-    expect(transitionSpy).toHaveBeenCalledWith({
+    expect(transitionSpy).toHaveBeenCalledWith(expect.objectContaining({
       machineId: 'poller',
       entityId: 'job-6',
       from: 'waiting',
       to: 'running',
       event: 'TRIGGER',
       context: expect.objectContaining({ id: 'job-6', eventData: { id: 'job-6' } })
-    });
+    }));
 
     await plugin.stop();
   });
