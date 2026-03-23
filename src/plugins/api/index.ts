@@ -92,6 +92,29 @@ import type {
 } from './types.internal.js';
 import type { ApiRuntimeInspectionPreview } from './runtime-inspection.js';
 
+export interface TlsConfig {
+  /** PEM-encoded private key (inline) */
+  key?: string | Buffer;
+  /** PEM-encoded certificate (inline) */
+  cert?: string | Buffer;
+  /** PEM-encoded CA certificate (inline) */
+  ca?: string | Buffer;
+  /** Path to PEM-encoded private key file */
+  keyFile?: string;
+  /** Path to PEM-encoded certificate file */
+  certFile?: string;
+  /** Path to PEM-encoded CA certificate file */
+  caFile?: string;
+  /** Environment variable name containing base64-encoded PEM private key */
+  keyEnv?: string;
+  /** Environment variable name containing base64-encoded PEM certificate */
+  certEnv?: string;
+  /** Environment variable name containing base64-encoded PEM CA certificate */
+  caEnv?: string;
+  /** Hostname for auto-generated self-signed certificate (default: 'localhost') */
+  host?: string;
+}
+
 export interface ApiPluginOptions {
   port?: number;
   host?: string;
@@ -99,6 +122,7 @@ export interface ApiPluginOptions {
   startupBanner?: boolean;
   versionPrefix?: boolean | string;
   listeners?: ApiListenerConfigInput | ApiListenerConfigInput[];
+  tls?: boolean | TlsConfig;
   docs?: Partial<DocsConfig>;
   auth?: Partial<AuthConfig> & {
     resource?: string;
@@ -224,6 +248,7 @@ export class ApiPlugin extends Plugin {
       startupBanner: options.startupBanner !== false,
       versionPrefix: options.versionPrefix !== undefined ? options.versionPrefix : false,
       listeners: normalizedListeners,
+      tls: options.tls || false,
 
       docs: {
         enabled: options.docs?.enabled !== false,
@@ -900,6 +925,7 @@ export class ApiPlugin extends Plugin {
       port: listener.bind.port,
       host: listener.bind.host,
       httpEnabled: listener.protocols.http.enabled,
+      tls: this.config.tls,
       database: this.database as any,
       namespace: this.namespace,
       basePath: mergedHttpBasePath,

@@ -349,6 +349,7 @@ export interface ApiPluginConfig {
   basePath: string;
   startupBanner: boolean;
   versionPrefix: boolean | string;
+  tls: boolean | import('./index.js').TlsConfig;
   docs: DocsConfig;
   auth: AuthConfig;
   routes: Record<string, unknown>;

@@ -172,7 +172,7 @@ export const loadSMTPPlugin = (): Promise<PluginClass> => lazyLoadPlugin('SMTPPl
 export const loadQueueConsumerPlugin = (): Promise<PluginClass> => lazyLoadPlugin('QueueConsumerPlugin');
 export const loadWebSocketPlugin = (): Promise<PluginClass> => lazyLoadPlugin('WebSocketPlugin');
 
-export type { ApiPluginOptions } from './api/index.js';
+export type { ApiPluginOptions, TlsConfig } from './api/index.js';
 
 export type {
   IdentityPluginOptions,
