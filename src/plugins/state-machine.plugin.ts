@@ -3231,11 +3231,20 @@ export class StateMachinePlugin<TMachineEvents extends MachineEventPayloadMap = 
         transition: async (id: string, transitionId: string) => {
           return this.getTransition(machineName, id, transitionId);
         },
+        getTransition: async (id: string, transitionId: string) => {
+          return this.getTransition(machineName, id, transitionId);
+        },
         transitionCount: async (id: string, options?: Omit<TransitionQueryOptions, 'limit' | 'offset' | 'sort'>) => {
           return this.getTransitionCount(machineName, id, options);
         },
         getLastTransitions: async (id: string, limit?: number) => {
           return this.getLastTransitions(machineName, id, limit);
+        },
+        getTransitions: async (id: string, options?: TransitionQueryOptions) => {
+          return this.getTransitions(machineName, id, options);
+        },
+        getTransitionCount: async (id: string, options?: Omit<TransitionQueryOptions, 'limit' | 'offset' | 'sort'>) => {
+          return this.getTransitionCount(machineName, id, options);
         },
         getSnapshot: async (id: string) => {
           return this.getSnapshot(machineName, id);
