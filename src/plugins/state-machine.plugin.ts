@@ -1119,6 +1119,7 @@ export class StateMachinePlugin<TMachineEvents extends MachineEventPayloadMap = 
             'GUARD_NOT_FOUND',
             `Guard '${guardName}' not found`,
             {
+              operation: 'guard-not-found',
               guardName,
               currentState
             },
@@ -1972,6 +1973,8 @@ export class StateMachinePlugin<TMachineEvents extends MachineEventPayloadMap = 
         }, `Failed to log transition after ${this.config.retryAttempts} attempts: ${lastLogErr.message}`);
       }
     }
+
+    await this._syncResourceStateField(machineId, entityId, toState);
 
     machine.currentStates.set(entityId, toState);
     machine.currentStateVersions.set(entityId, nextStateVersion);
