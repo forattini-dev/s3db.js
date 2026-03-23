@@ -299,6 +299,8 @@ export interface TransitionResult {
   reason?: string;
   details?: Record<string, unknown>;
   message?: string;
+  timestamp?: string;
+  stateVersion?: number;
 }
 
 export interface TransitionSuccessResult extends TransitionResult {
@@ -450,6 +452,7 @@ interface MachineProxy {
   getTransitionHistory(id: string, options?: TransitionHistoryOptions): Promise<TransitionHistoryEntry[]>;
   getTransitionCount(id: string, options?: Omit<TransitionQueryOptions, 'limit' | 'offset' | 'sort'>): Promise<number>;
   getSnapshot(id: string): Promise<StateMachineSnapshot>;
+  snapshot(id: string): Promise<StateMachineSnapshot>;
   getTransition(id: string, transitionId: string): Promise<TransitionHistoryEntry | null>;
   getLastTransitions(id: string, limit?: number): Promise<TransitionHistoryEntry[]>;
   deleteEntity(id: string): Promise<void>;
@@ -735,7 +738,7 @@ export class StateMachinePlugin<TMachineEvents extends MachineEventPayloadMap = 
       return null;
     }
 
-    const bindingObject = rawBinding as Record<string, unknown>;
+    const bindingObject = rawBinding as unknown as Record<string, unknown>;
     const machine = typeof bindingObject.machine === 'string' ? bindingObject.machine.trim() : '';
     if (!machine) {
       this.logger.warn({ resourceName, stateMachine: rawBinding }, `Invalid stateMachine binding in resource.$schema.stateMachine: missing machine`);
@@ -972,7 +975,13 @@ export class StateMachinePlugin<TMachineEvents extends MachineEventPayloadMap = 
     machineId: TMachine,
     entityId: string,
     event: TEvent,
-    context: TMachineEvents[TMachine][TEvent]
+    context?: TMachineEvents[TMachine][TEvent] & Record<string, unknown>
+  ): Promise<TransitionResult>;
+  async send(
+    machineId: string,
+    entityId: string,
+    event: string,
+    context: Record<string, unknown>
   ): Promise<TransitionResult>;
   async send(
     machineId: string,
@@ -981,8 +990,9 @@ export class StateMachinePlugin<TMachineEvents extends MachineEventPayloadMap = 
     context: Record<string, unknown> = {}
   ): Promise<TransitionResult> {
     const startedAt = new Date().toISOString();
-    const correlationId = this._getCorrelationId(context, machineId, entityId, event);
-    const requestedStateVersion = typeof context.stateVersion === 'number' ? context.stateVersion : undefined;
+    const normalizedContext = context || {};
+    const correlationId = this._getCorrelationId(normalizedContext, machineId, entityId, event);
+    const requestedStateVersion = typeof normalizedContext.stateVersion === 'number' ? normalizedContext.stateVersion : undefined;
     const buildFailure = (
       code: TransitionRejectedResult['code'],
       reason: string,
@@ -993,7 +1003,7 @@ export class StateMachinePlugin<TMachineEvents extends MachineEventPayloadMap = 
       const endedAt = new Date().toISOString();
       const transitionContext = this._buildTransitionContext(machineId, entityId, event, startedAt, endedAt, {
         correlationId,
-        context,
+        context: normalizedContext,
         from: state.from,
         to: state.to,
         guard: state.guard
@@ -1055,7 +1065,7 @@ export class StateMachinePlugin<TMachineEvents extends MachineEventPayloadMap = 
         machineId,
         entityId,
         event,
-        context,
+        context: normalizedContext,
         startedAt,
         correlationId,
         guard: undefined,
@@ -1117,7 +1127,7 @@ export class StateMachinePlugin<TMachineEvents extends MachineEventPayloadMap = 
         }
 
         const [guardOk, guardErr, guardResult] = await tryFn(async () =>
-          guard(context, event, {
+          guard(normalizedContext, event, {
             database: this.database as unknown as Database,
             machineId,
             entityId,
@@ -1155,7 +1165,7 @@ export class StateMachinePlugin<TMachineEvents extends MachineEventPayloadMap = 
       }
 
       if (stateConfig.exit) {
-        await this._executeAction(stateConfig.exit, context, event, machineId, entityId, {
+        await this._executeAction(stateConfig.exit, normalizedContext, event, machineId, entityId, {
           machineId,
           entityId,
           event,
@@ -1163,15 +1173,15 @@ export class StateMachinePlugin<TMachineEvents extends MachineEventPayloadMap = 
           to: targetState,
           startedAt,
           correlationId,
-          context
+          context: normalizedContext
         });
       }
 
-      transitionedStateVersion = await this._transition(machineId, entityId, currentState, targetState, event, context, currentStateVersion);
+      transitionedStateVersion = await this._transition(machineId, entityId, currentState, targetState, event, normalizedContext, currentStateVersion);
 
       const targetStateConfig = machine.config.states[targetState];
       if (targetStateConfig && targetStateConfig.entry) {
-        await this._executeAction(targetStateConfig.entry, context, event, machineId, entityId, {
+        await this._executeAction(targetStateConfig.entry, normalizedContext, event, machineId, entityId, {
           machineId,
           entityId,
           event,
@@ -1179,7 +1189,7 @@ export class StateMachinePlugin<TMachineEvents extends MachineEventPayloadMap = 
           to: targetState,
           startedAt,
           correlationId,
-          context
+          context: normalizedContext
         });
       }
 
@@ -1194,7 +1204,7 @@ export class StateMachinePlugin<TMachineEvents extends MachineEventPayloadMap = 
         endedAt,
         {
           correlationId,
-          context,
+          context: normalizedContext,
           from: currentState,
           to: targetState,
           stateVersion: transitionedStateVersion
@@ -1220,7 +1230,7 @@ export class StateMachinePlugin<TMachineEvents extends MachineEventPayloadMap = 
         timestamp: endedAt,
         machineId,
         entityId,
-        context,
+        context: normalizedContext,
         stateVersion: transitionedStateVersion,
         correlationId,
         startedAt,
@@ -1291,7 +1301,7 @@ export class StateMachinePlugin<TMachineEvents extends MachineEventPayloadMap = 
       params.machineId,
       params.entityId,
       params.event,
-      params.context || {}
+      (params.context || {}) as TMachineEvents[TMachine][TEvent]
     );
 
     if (!result.ok) {
@@ -1336,7 +1346,7 @@ export class StateMachinePlugin<TMachineEvents extends MachineEventPayloadMap = 
       });
     }
 
-    return result;
+    return result as TransitionSuccessResult;
   }
 
   async assertReject<TMachine extends keyof TMachineEvents & string, TEvent extends keyof TMachineEvents[TMachine] & string>(
@@ -1346,7 +1356,7 @@ export class StateMachinePlugin<TMachineEvents extends MachineEventPayloadMap = 
       params.machineId,
       params.entityId,
       params.event,
-      params.context || {}
+      (params.context || {}) as TMachineEvents[TMachine][TEvent]
     );
 
     if (result.ok) {
@@ -1399,7 +1409,16 @@ export class StateMachinePlugin<TMachineEvents extends MachineEventPayloadMap = 
       });
     }
 
-    return result;
+    return result as TransitionRejectedResult;
+  }
+
+  private _sendInternal(
+    machineId: string,
+    entityId: string,
+    event: string,
+    context: Record<string, unknown> = {}
+  ): Promise<TransitionResult> {
+    return this.send(machineId, entityId, event, context);
   }
 
   private _contractAssertionFailure(message: string, details: Record<string, unknown>): never {
@@ -1662,7 +1681,7 @@ export class StateMachinePlugin<TMachineEvents extends MachineEventPayloadMap = 
     event: string,
     machineId: string,
     entityId: string,
-    transitionContext?: Pick<TransitionContext, 'from' | 'to' | 'guard' | 'startedAt' | 'correlationId'>
+    transitionContext?: Partial<TransitionContext>
   ): Promise<unknown> {
     const action = this.config.actions[actionName];
     if (!action) {
@@ -2760,7 +2779,7 @@ export class StateMachinePlugin<TMachineEvents extends MachineEventPayloadMap = 
               if (triggerCount >= trigger.maxTriggers) {
                 if (triggerCount === trigger.maxTriggers && trigger.onMaxTriggersReached) {
                   await this._incrementTriggerCount(machineId, entity.entityId, triggerName);
-                  await this.send(machineId, entity.entityId, trigger.onMaxTriggersReached, triggerContext);
+                  await this._sendInternal(machineId, entity.entityId, trigger.onMaxTriggersReached, triggerContext);
                 }
                 continue;
               }
@@ -2778,12 +2797,12 @@ export class StateMachinePlugin<TMachineEvents extends MachineEventPayloadMap = 
               await this._syncResourceStateField(machineId, entity.entityId, trigger.targetState);
 
               if (trigger.eventOnSuccess) {
-                await this.send(machineId, entity.entityId, trigger.eventOnSuccess, {
+                await this._sendInternal(machineId, entity.entityId, trigger.eventOnSuccess, {
                   ...triggerContext,
                   triggerResult: transition
                 });
               } else if (trigger.event) {
-                await this.send(machineId, entity.entityId, trigger.event, {
+                await this._sendInternal(machineId, entity.entityId, trigger.event, {
                   ...triggerContext,
                   triggerResult: transition
                 });
@@ -2798,12 +2817,12 @@ export class StateMachinePlugin<TMachineEvents extends MachineEventPayloadMap = 
               );
 
               if (trigger.eventOnSuccess) {
-                await this.send(machineId, entity.entityId, trigger.eventOnSuccess, {
+                await this._sendInternal(machineId, entity.entityId, trigger.eventOnSuccess, {
                   ...triggerContext,
                   triggerResult: result
                 });
               } else if (trigger.event) {
-                await this.send(machineId, entity.entityId, trigger.event, {
+                await this._sendInternal(machineId, entity.entityId, trigger.event, {
                   ...triggerContext,
                   triggerResult: result
                 });
@@ -2823,7 +2842,7 @@ export class StateMachinePlugin<TMachineEvents extends MachineEventPayloadMap = 
 
           } catch (error) {
             if (trigger.event) {
-              await tryFn(() => this.send(machineId, entity.entityId, trigger.event!, {
+              await tryFn(() => this._sendInternal(machineId, entity.entityId, trigger.event!, {
                 ...entity.context,
                 triggerError: (error as Error).message
               }));
@@ -2866,7 +2885,7 @@ export class StateMachinePlugin<TMachineEvents extends MachineEventPayloadMap = 
                 if (triggerCount >= trigger.maxTriggers) {
                   if (triggerCount === trigger.maxTriggers && trigger.onMaxTriggersReached) {
                     await this._incrementTriggerCount(machineId, entity.entityId, triggerName);
-                    await this.send(machineId, entity.entityId, trigger.onMaxTriggersReached, triggerContext);
+                    await this._sendInternal(machineId, entity.entityId, trigger.onMaxTriggersReached, triggerContext);
                   }
                   continue;
                 }
@@ -2884,12 +2903,12 @@ export class StateMachinePlugin<TMachineEvents extends MachineEventPayloadMap = 
                 await this._syncResourceStateField(machineId, entity.entityId, trigger.targetState);
 
                 if (trigger.eventOnSuccess) {
-                  await this.send(machineId, entity.entityId, trigger.eventOnSuccess, {
+                  await this._sendInternal(machineId, entity.entityId, trigger.eventOnSuccess, {
                     ...triggerContext,
                     triggerResult: transition
                   });
                 } else if (trigger.event) {
-                  await this.send(machineId, entity.entityId, trigger.event, {
+                  await this._sendInternal(machineId, entity.entityId, trigger.event, {
                     ...triggerContext,
                     triggerResult: transition
                   });
@@ -2904,12 +2923,12 @@ export class StateMachinePlugin<TMachineEvents extends MachineEventPayloadMap = 
                 );
 
                 if (trigger.eventOnSuccess) {
-                  await this.send(machineId, entity.entityId, trigger.eventOnSuccess, {
+                  await this._sendInternal(machineId, entity.entityId, trigger.eventOnSuccess, {
                     ...triggerContext,
                     triggerResult: result
                   });
                 } else if (trigger.event) {
-                  await this.send(machineId, entity.entityId, trigger.event, {
+                  await this._sendInternal(machineId, entity.entityId, trigger.event, {
                     ...triggerContext,
                     triggerResult: result
                   });
@@ -2962,7 +2981,7 @@ export class StateMachinePlugin<TMachineEvents extends MachineEventPayloadMap = 
               if (triggerCount >= trigger.maxTriggers) {
                 if (triggerCount === trigger.maxTriggers && trigger.onMaxTriggersReached) {
                   await this._incrementTriggerCount(machineId, entity.entityId, triggerName);
-                  await this.send(machineId, entity.entityId, trigger.onMaxTriggersReached, {
+                  await this._sendInternal(machineId, entity.entityId, trigger.onMaxTriggersReached, {
                     ...entity.context,
                     triggerName
                   });
@@ -2984,13 +3003,13 @@ export class StateMachinePlugin<TMachineEvents extends MachineEventPayloadMap = 
 
               await this._syncResourceStateField(machineId, entity.entityId, trigger.targetState);
 
-                if (trigger.eventOnSuccess) {
-                  await this.send(machineId, entity.entityId, trigger.eventOnSuccess, {
-                    ...triggerContext,
-                    triggerResult: transition
-                  });
+              if (trigger.eventOnSuccess) {
+                await this._sendInternal(machineId, entity.entityId, trigger.eventOnSuccess, {
+                  ...triggerContext,
+                  triggerResult: transition
+                });
               } else if (trigger.event) {
-                await this.send(machineId, entity.entityId, trigger.event, {
+                await this._sendInternal(machineId, entity.entityId, trigger.event, {
                   ...triggerContext,
                   triggerResult: transition
                 });
@@ -3005,12 +3024,12 @@ export class StateMachinePlugin<TMachineEvents extends MachineEventPayloadMap = 
               );
 
               if (trigger.eventOnSuccess) {
-                await this.send(machineId, entity.entityId, trigger.eventOnSuccess, {
+                await this._sendInternal(machineId, entity.entityId, trigger.eventOnSuccess, {
                   ...triggerContext,
                   triggerResult: result
                 });
               } else if (trigger.event) {
-                await this.send(machineId, entity.entityId, trigger.event, {
+                await this._sendInternal(machineId, entity.entityId, trigger.event, {
                   ...triggerContext,
                   triggerResult: result
                 });
@@ -3066,7 +3085,7 @@ export class StateMachinePlugin<TMachineEvents extends MachineEventPayloadMap = 
             if (triggerCount >= trigger.maxTriggers) {
               if (triggerCount === trigger.maxTriggers && trigger.onMaxTriggersReached) {
                 await this._incrementTriggerCount(machineId, entity.entityId, triggerName);
-                await this.send(machineId, entity.entityId, trigger.onMaxTriggersReached, {
+                await this._sendInternal(machineId, entity.entityId, trigger.onMaxTriggersReached, {
                   ...entity.context,
                   eventData,
                   triggerName
@@ -3106,7 +3125,7 @@ export class StateMachinePlugin<TMachineEvents extends MachineEventPayloadMap = 
             );
 
             if (trigger.sendEvent) {
-              await this.send(machineId, entity.entityId, trigger.sendEvent, {
+              await this._sendInternal(machineId, entity.entityId, trigger.sendEvent, {
                 ...triggerContext,
                 triggerResult: result
               });
@@ -3217,6 +3236,9 @@ export class StateMachinePlugin<TMachineEvents extends MachineEventPayloadMap = 
         },
         getLastTransitions: async (id: string, limit?: number) => {
           return this.getLastTransitions(machineName, id, limit);
+        },
+        getSnapshot: async (id: string) => {
+          return this.getSnapshot(machineName, id);
         },
         snapshot: async (id: string) => {
           return this.getSnapshot(machineName, id);
