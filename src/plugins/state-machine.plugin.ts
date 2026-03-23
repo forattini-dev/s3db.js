@@ -1241,13 +1241,21 @@ export class StateMachinePlugin<TMachineEvents extends MachineEventPayloadMap = 
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Unknown error';
       const details = {
-        operation: error && typeof error === 'object' && 'operation' in error ? (error as { operation?: string }).operation : undefined,
+        operation: undefined as string | undefined,
         originalError: message
       };
 
       if (error instanceof StateMachineError) {
-        const stateMachineError = error as Error & { operation?: string; guardName?: string; currentState?: string; targetState?: string };
-        const operation = stateMachineError.operation;
+        const stateMachineError = error as Error & {
+          operation?: string;
+          guardName?: string;
+          currentState?: string;
+          targetState?: string;
+          data?: Record<string, unknown>;
+        };
+        const operation = stateMachineError.operation || (typeof stateMachineError.data?.operation === 'string' ? stateMachineError.data.operation : undefined);
+
+        details.operation = operation;
         let code: TransitionRejectedResult['code'] = 'INTERNAL_ERROR';
         let reason = 'INTERNAL_ERROR';
 
@@ -1278,7 +1286,8 @@ export class StateMachinePlugin<TMachineEvents extends MachineEventPayloadMap = 
           reason,
           error.message,
           {
-            ...details
+            ...details,
+            ...stateMachineError.data
           },
           {
             state: stateMachineError.currentState || currentState,
