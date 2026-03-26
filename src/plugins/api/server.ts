@@ -108,6 +108,7 @@ export interface ApiServerOptions {
     compression?: boolean | { threshold?: number; level?: number };
     backpressure?: { maxBufferedAmount?: number; strategy?: 'drop' | 'disconnect' };
     recovery?: { enabled?: boolean; ttl?: number };
+    logLevel?: string;
     onConnection?: (socketId: string, send: (message: unknown) => void, req: IncomingMessage, ctx: { database: unknown; adapter: unknown; logger: unknown }) => void;
     onMessage?: (socketId: string, raw: string | Buffer, send: (message: unknown) => void, ctx: { database: unknown; adapter: unknown; logger: unknown }) => boolean | Promise<boolean>;
     onClose?: (socketId: string, code: number, reason: string, ctx: { database: unknown; adapter: unknown; logger: unknown }) => void;
@@ -115,11 +116,13 @@ export interface ApiServerOptions {
   udp?: {
     enabled: boolean;
     maxMessageBytes?: number;
+    logLevel?: string;
     onMessage?: (message: Buffer, remoteInfo: { address: string; port: number; family: string; size: number }) => void;
     onError?: (error: Error) => void;
   };
   tcp?: {
     enabled: boolean;
+    logLevel?: string;
     onConnection?: (socket: unknown) => void;
     onData?: (socket: unknown, data: Buffer) => void;
     onClose?: (socket: unknown, hadError: boolean) => void;
@@ -1105,7 +1108,8 @@ export class ApiServer {
         tcpServer.on('error', this._tcpServerErrorHandler!);
 
         if (this.options.logLevel) {
-          this.logger.debug(`TCP transport bound for ${this._formatConfiguredListenerName()} on ${this.options.host}:${this.options.port}`);
+          const tcpLevel = this.options.tcp?.logLevel || 'debug';
+          (this.logger as unknown as Record<string, (msg: string) => void>)[tcpLevel]?.(`TCP transport bound for ${this._formatConfiguredListenerName()} on ${this.options.host}:${this.options.port}`);
         }
         resolve();
       });
@@ -1156,7 +1160,8 @@ export class ApiServer {
       recovery: wsOpts.recovery as any,
       onConnection: (socketId: string, send: (message: unknown) => void, req: IncomingMessage) => {
         if (this.options.logLevel) {
-          this.logger.info(`WebSocket connected: ${socketId} on ${this._formatConfiguredListenerName()}`);
+          const wsLevel = wsOpts.logLevel || 'info';
+          (this.logger as unknown as Record<string, (msg: string) => void>)[wsLevel]?.(`WebSocket connected: ${socketId} on ${this._formatConfiguredListenerName()}`);
         }
         if (wsOpts.onConnection) {
           wsOpts.onConnection(socketId, send, req, { database: this.options.database, adapter, logger: this.logger });
@@ -1169,8 +1174,9 @@ export class ApiServer {
         : undefined,
       onClose: (socketId: string, code: number, reason: string) => {
         if (this.options.logLevel) {
+          const wsLevel = wsOpts.logLevel || 'debug';
           const reasonSuffix = reason ? `: ${reason}` : '';
-          this.logger.debug(`WebSocket closed: ${socketId} (${code}${reasonSuffix})`);
+          (this.logger as unknown as Record<string, (msg: string) => void>)[wsLevel]?.(`WebSocket closed: ${socketId} (${code}${reasonSuffix})`);
         }
         if (wsOpts.onClose) {
           wsOpts.onClose(socketId, code, reason, { database: this.options.database, adapter, logger: this.logger });
@@ -1240,7 +1246,8 @@ export class ApiServer {
       socket.once('listening', () => {
         socket.off('error', onBindError);
         if (this.options.logLevel) {
-          this.logger.debug(`UDP transport bound for ${this._formatConfiguredListenerName()} on ${this.options.host}:${this.options.port} (max ${maxMessageBytes} bytes)`);
+          const udpLevel = udpOptions.logLevel || 'debug';
+          (this.logger as unknown as Record<string, (msg: string) => void>)[udpLevel]?.(`UDP transport bound for ${this._formatConfiguredListenerName()} on ${this.options.host}:${this.options.port} (max ${maxMessageBytes} bytes)`);
         }
         resolve();
       });

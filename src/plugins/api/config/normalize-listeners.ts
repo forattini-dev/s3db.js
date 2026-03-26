@@ -166,6 +166,7 @@ function extractWebSocketCallbacks(raw: unknown) {
 
   const source = raw as Record<string, unknown>;
   return {
+    logLevel: typeof source.logLevel === 'string' ? source.logLevel : undefined,
     onConnection: typeof source.onConnection === 'function' ? source.onConnection : undefined,
     onMessage: typeof source.onMessage === 'function' ? source.onMessage : undefined,
     onClose: typeof source.onClose === 'function' ? source.onClose : undefined,
@@ -185,6 +186,7 @@ function extractUdpCallbacks(raw: unknown) {
 
   const source = raw as Record<string, unknown>;
   return {
+    logLevel: typeof source.logLevel === 'string' ? source.logLevel : undefined,
     onMessage: typeof source.onMessage === 'function' ? source.onMessage : undefined,
     onError: typeof source.onError === 'function' ? source.onError : undefined
   };
@@ -197,6 +199,7 @@ function extractTcpCallbacks(raw: unknown) {
 
   const source = raw as Record<string, unknown>;
   return {
+    logLevel: typeof source.logLevel === 'string' ? source.logLevel : undefined,
     onConnection: typeof source.onConnection === 'function' ? source.onConnection : undefined,
     onData: typeof source.onData === 'function' ? source.onData : undefined,
     onClose: typeof source.onClose === 'function' ? source.onClose : undefined,

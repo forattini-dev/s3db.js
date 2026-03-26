@@ -17,6 +17,7 @@ export interface FilterContext {
 export interface LoggingConfig {
   format?: string;
   colorize?: boolean;
+  logLevel?: string;
   filter?: (ctx: FilterContext) => boolean;
   excludePaths?: string[];
 }
@@ -30,7 +31,7 @@ export async function createLoggingMiddleware(
   loggingConfig: LoggingConfig,
   logger: Logger
 ): Promise<(c: Context, next: Next) => Promise<void>> {
-  const { format, colorize = true, filter, excludePaths } = loggingConfig;
+  const { format, colorize = true, logLevel, filter, excludePaths } = loggingConfig;
   const logFormat = format || DEFAULT_LOG_FORMAT;
   const useDefaultStyle = logFormat === DEFAULT_LOG_FORMAT;
   const excludedPatterns = Array.isArray(excludePaths) ? excludePaths : [];
@@ -88,14 +89,17 @@ export async function createLoggingMiddleware(
     }
 
     let urlPath = path;
+    let protocol = 'http';
     try {
       const parsed = new URL(c.req.url);
       urlPath = parsed.pathname + parsed.search;
+      protocol = parsed.protocol.replace(':', '');
     } catch {
       urlPath = path;
     }
 
     const baseReplacements: TokenReplacement[] = [
+      { tokens: [':protocol', ':proto'], value: protocol },
       { tokens: [':verb', ':method'], value: method },
       { tokens: [':ruta', ':path'], value: path },
       { tokens: [':url'], value: urlPath },
@@ -108,7 +112,7 @@ export async function createLoggingMiddleware(
     const contentLength = c.res?.headers?.get('content-length') ?? '-';
 
     const isHealthCheck = path === '/health' || path === '/health/live' || path === '/health/ready' || path === '/readiness' || path === '/liveness';
-    const logLevel = isHealthCheck ? 'debug' : 'info';
+    const effectiveLogLevel = isHealthCheck ? 'debug' : (logLevel || 'info');
 
     if (useDefaultStyle) {
       const prettyMessage = formatPrettyHttpLog({
@@ -117,10 +121,11 @@ export async function createLoggingMiddleware(
         status,
         duration,
         contentLength,
-        colorize
+        colorize,
+        protocol
       });
 
-      httpLogger[logLevel](prettyMessage);
+      (httpLogger as unknown as Record<string, (msg: string) => void>)[effectiveLogLevel]?.(prettyMessage);
       return;
     }
 
@@ -128,7 +133,8 @@ export async function createLoggingMiddleware(
 
     logMessage = formatHeaderTokens(logMessage, c.res?.headers);
 
-    httpLogger[logLevel]({
+    (httpLogger as unknown as Record<string, (obj: unknown, msg: string) => void>)[effectiveLogLevel]?.({
+      protocol,
       req: { method, url: urlPath },
       res: { statusCode: status },
       responseTime: duration,

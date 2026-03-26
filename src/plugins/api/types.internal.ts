@@ -287,10 +287,12 @@ export interface ApiListenerWebSocketConfig {
   compression?: boolean | { threshold?: number; level?: number };
   backpressure?: { maxBufferedAmount?: number; strategy?: 'drop' | 'disconnect' };
   recovery?: { enabled?: boolean; ttl?: number };
+  logLevel?: string;
 }
 
 export interface ApiListenerTcpConfig {
   enabled: boolean;
+  logLevel?: string;
   onConnection?: (socket: unknown) => void;
   onData?: (socket: unknown, data: Buffer) => void;
   onClose?: (socket: unknown, hadError: boolean) => void;
@@ -312,7 +314,7 @@ export type ApiListenerWebSocketProtocolHandlers = {
 export interface ApiListenerUdpConfig {
   enabled: boolean;
   maxMessageBytes: number;
-
+  logLevel?: string;
   onMessage?: (message: Buffer, remoteInfo: { address: string; port: number; family: string; size: number }) => void;
   onError?: (error: Error) => void;
 }

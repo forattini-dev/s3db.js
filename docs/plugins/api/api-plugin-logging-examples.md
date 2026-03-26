@@ -9,10 +9,11 @@ This document shows real logging outputs from the API Plugin in different scenar
 1. [Startup Logs (Verbose Mode)](#startup-logs-verbose-mode)
 2. [Startup Logs (Minimal Mode)](#startup-logs-minimal-mode)
 3. [Request Logs](#request-logs)
-4. [Event Logs](#event-logs)
-5. [Metrics Logs](#metrics-logs)
-6. [Error Logs](#error-logs)
-7. [Production JSON Logs](#production-json-logs)
+4. [Protocol-Aware Logging](#protocol-aware-logging)
+5. [Event Logs](#event-logs)
+6. [Metrics Logs](#metrics-logs)
+7. [Error Logs](#error-logs)
+8. [Production JSON Logs](#production-json-logs)
 
 ---
 
@@ -100,22 +101,25 @@ new ApiPlugin({
 
 ### Default Format (Colorized)
 
+Each request log is prefixed with the protocol (`http`, `https`):
+
 ```bash
-GET /api/v1/users => 200 (45 ms, 256 bytes)
-POST /api/v1/users => 201 (123 ms, 512 bytes)
-GET /api/v1/users/abc123 => 200 (23 ms, 128 bytes)
-PUT /api/v1/users/abc123 => 200 (67 ms, 256 bytes)
-DELETE /api/v1/users/abc123 => 204 (34 ms)
-GET /api/v1/notfound => 404 (12 ms, 89 bytes)
-POST /api/v1/users => 400 (15 ms, 145 bytes)
+http  GET    /api/v1/users          ⇒ 200  (12.543 ms, 1024)
+http  POST   /api/v1/orders         ⇒ 201  (45.120 ms, 256)
+http  DELETE /api/v1/orders/42      ⇒ 404  (3.210 ms, 128)
+https GET    /api/v1/secure         ⇒ 401  (2.100 ms, –)
+http  GET    /health                ⇒ 200  (0.543 ms, –)
 ```
 
 **Colors** (when terminal supports ANSI):
+- 🟣 Protocol: Soft purple
 - 🔵 Method: Light blue
-- 🟣 URL: Light purple
+- 🩵 URL: Light cyan
 - ⚪ Arrow: Gray
-- 🟡 Time: Orange
-- 🟢 Size: Blue-gray
+- 🟡 Time: Orange/pink
+- 🔷 Size: Lavender
+
+> Health check paths (`/health`, `/health/live`, `/health/ready`, `/readiness`, `/liveness`) are always logged at `debug` level, regardless of `logging.logLevel`.
 
 ### Custom Format
 
@@ -123,30 +127,177 @@ POST /api/v1/users => 400 (15 ms, 145 bytes)
 new ApiPlugin({
   logging: {
     enabled: true,
-    format: ':method :url :status (:elapsed ms)'
+    format: ':protocol :method :url :status (:elapsed ms)'
   }
 })
 ```
 
 **Output:**
 ```bash
-GET /users 200 (45 ms)
-POST /users 201 (123 ms)
-DELETE /users/abc123 204 (34 ms)
+http GET /users 200 (45 ms)
+https POST /users 201 (123 ms)
+http DELETE /users/abc123 204 (34 ms)
 ```
 
 ### Available Tokens
 
-| Token | Description | Example |
-|-------|-------------|---------|
-| `:method` | HTTP method | `GET` |
-| `:url` | Request path | `/users` |
-| `:status` | Status code | `200` |
-| `:elapsed` | Duration in ms | `45` |
-| `:ip` | Client IP | `192.168.1.100` |
-| `:user-agent` | User agent | `curl/7.68.0` |
-| `:req[header]` | Request header | `:req[authorization]` |
-| `:res[header]` | Response header | `:res[content-type]` |
+| Token | Aliases | Description | Example |
+|-------|---------|-------------|---------|
+| `:protocol` | `:proto` | Transport protocol | `http`, `https` |
+| `:method` | `:verb` | HTTP method | `GET` |
+| `:url` | | Full path + query | `/users?q=admin` |
+| `:path` | `:ruta` | Path only | `/users` |
+| `:status` | | Status code | `200` |
+| `:elapsed` | `:response-time` | Duration in ms | `45` |
+| `:user` | `:who` | Authenticated user | `daniel@tetis.io` |
+| `:requestId` | `:reqId` | Request ID | `abc-123` |
+| `:res[header]` | | Response header | `:res[content-length]` |
+
+---
+
+## 🔌 Protocol-Aware Logging
+
+The API Plugin supports multiple transport protocols. Each has its own log level configuration and emits specific log events.
+
+### HTTP / HTTPS
+
+```javascript
+new ApiPlugin({
+  logging: {
+    enabled: true,
+    logLevel: 'info'   // default: 'info'
+                       // health check paths always go to 'debug'
+  }
+})
+```
+
+**Logs emitted:**
+```bash
+# Normal requests (logLevel: 'info')
+http  GET  /api/users  ⇒ 200  (12.543 ms, 1024)
+https POST /api/orders ⇒ 201  (45.120 ms, 256)
+
+# Health checks (always 'debug', regardless of logLevel)
+http  GET  /health     ⇒ 200  (0.543 ms, –)
+```
+
+### WebSocket (ws / wss)
+
+```javascript
+new ApiPlugin({
+  websocket: {
+    enabled: true,
+    path: '/ws',
+    logLevel: 'info'   // default: 'info' for connect, 'debug' for close
+  }
+})
+```
+
+**Logs emitted:**
+```bash
+# Connection (logLevel or 'info')
+WebSocket connected: a3f9c2b1 on listener
+
+# Disconnection (logLevel or 'debug')
+WebSocket closed: a3f9c2b1 (1000)
+WebSocket closed: d7e1a4f0 (1001: Going Away)
+```
+
+> Per-message logging is not built-in (too verbose). Use the `onMessage` handler to log selectively.
+
+### TCP
+
+```javascript
+new ApiPlugin({
+  tcp: {
+    enabled: true,
+    logLevel: 'debug'  // default: 'debug'
+  }
+})
+```
+
+**Logs emitted:**
+```bash
+# On bind (startup only)
+TCP transport bound for listener on 0.0.0.0:3001
+```
+
+### UDP
+
+```javascript
+new ApiPlugin({
+  udp: {
+    enabled: true,
+    logLevel: 'debug'  // default: 'debug'
+  }
+})
+```
+
+**Logs emitted:**
+```bash
+# On bind (startup only)
+UDP transport bound for listener on 0.0.0.0:3002 (max 65507 bytes)
+```
+
+### Startup summary
+
+The server always logs the active protocols on startup:
+
+```bash
+listener listening on 0.0.0.0:3000 (http:/, ws:/ws)
+listener listening on 0.0.0.0:3000 (https:/, wss:/ws, tcp, udp)
+```
+
+### Per-protocol level reference
+
+| Protocol | Event | Default level | Configurable via |
+|----------|-------|---------------|-----------------|
+| `http` / `https` | request | `info` | `logging.logLevel` |
+| `http` / `https` | health check | `debug` | hardcoded |
+| `ws` / `wss` | connect | `info` | `websocket.logLevel` |
+| `ws` / `wss` | close | `debug` | `websocket.logLevel` |
+| `tcp` | bind | `debug` | `tcp.logLevel` |
+| `udp` | bind | `debug` | `udp.logLevel` |
+
+### Production JSON format
+
+When using structured logging, the `protocol` field is included:
+
+```json
+{"level":"info","protocol":"http","req":{"method":"GET","url":"/api/users"},"res":{"statusCode":200},"responseTime":12.543}
+{"level":"info","protocol":"https","req":{"method":"POST","url":"/api/orders"},"res":{"statusCode":201},"responseTime":45.12}
+{"level":"info","msg":"WebSocket connected: a3f9c2b1 on listener"}
+{"level":"debug","msg":"WebSocket closed: a3f9c2b1 (1000)"}
+```
+
+### Full multi-protocol example
+
+```javascript
+new ApiPlugin({
+  logLevel: 'debug',
+  logging: {
+    enabled: true,
+    logLevel: 'info'       // HTTP requests at info+
+  },
+  websocket: {
+    enabled: true,
+    path: '/ws',
+    logLevel: 'info',      // WS connect at info, close at debug
+    onMessage: (socketId, raw, send, { logger }) => {
+      logger.debug({ socketId, bytes: raw.length }, 'ws message received');
+      return true;
+    }
+  },
+  tcp: {
+    enabled: true,
+    logLevel: 'info'       // TCP bind log at info
+  },
+  udp: {
+    enabled: true,
+    logLevel: 'debug'      // UDP bind log at debug (default)
+  }
+})
+```
 
 ---
 
@@ -424,8 +575,8 @@ new ApiPlugin({
 
 ```javascript
 new ApiPlugin({
-  logLevel: 'silent',           // No startup details
-  startupBanner: false,     // No banner
+  logLevel: 'silent',          // No startup details
+  startupBanner: false,        // No banner
   logging: { enabled: false }, // No request logs
   events: { enabled: false },  // No event logs
   metrics: { enabled: false }  // No metrics logs
@@ -438,15 +589,22 @@ new ApiPlugin({
 
 ```javascript
 new ApiPlugin({
-  logLevel: 'debug',            // ✓ All startup details
-  logging: { enabled: true }, // ✓ Request logs
+  logLevel: 'debug',           // ✓ All startup details
+  logging: {
+    enabled: true,
+    logLevel: 'debug'          // ✓ All HTTP requests at debug
+  },
+  websocket: {
+    enabled: true,
+    logLevel: 'debug'          // ✓ WS connect/close at debug
+  },
   events: {
     enabled: true,
-    logLevel: 'debug'           // ✓ Event details
+    logLevel: 'debug'          // ✓ Event details
   },
   metrics: {
     enabled: true,
-    logLevel: 'debug'           // ✓ Metrics details
+    logLevel: 'debug'          // ✓ Metrics details
   }
 })
 ```
@@ -457,12 +615,19 @@ new ApiPlugin({
 
 ```javascript
 new ApiPlugin({
-  logLevel: 'silent',           // ✗ No startup spam
-  startupBanner: true,      // ✓ Quick summary
-  logging: { enabled: true }, // ✓ Request logs (custom JSON)
-  events: { enabled: true, logLevel: 'silent' }, // ✓ Events, no debug output
-  metrics: { enabled: true, logLevel: 'silent' }, // ✓ Metrics, no debug output
-  middlewares: [jsonLogger] // ✓ Structured logging
+  logLevel: 'info',            // Startup at info
+  logging: {
+    enabled: true,
+    logLevel: 'info'           // HTTP requests at info+
+  },
+  websocket: {
+    enabled: true,
+    logLevel: 'warn'           // WS: only problems
+  },
+  tcp: { enabled: true, logLevel: 'info' },
+  udp: { enabled: true, logLevel: 'info' },
+  events: { enabled: true, logLevel: 'warn' },
+  metrics: { enabled: true, logLevel: 'warn' }
 })
 ```
 

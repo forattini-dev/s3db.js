@@ -1,6 +1,7 @@
 const ANSI_RESET = '\x1b[0m';
 
 const PASTEL_COLORS = {
+  protocol: '\x1b[38;5;141m',
   method: '\x1b[38;5;117m',
   url: '\x1b[38;5;195m',
   arrow: '\x1b[38;5;244m',
@@ -15,6 +16,7 @@ export interface HttpLogParams {
   duration: number | string;
   contentLength?: string | number | null;
   colorize?: boolean;
+  protocol?: string;
 }
 
 export function colorizeStatus(status: number, value: string): string {
@@ -26,11 +28,12 @@ export function colorizeStatus(status: number, value: string): string {
   return colorCode ? `${colorCode}${value}${ANSI_RESET}` : value;
 }
 
-export function formatPrettyHttpLog({ method, url, status, duration, contentLength, colorize = true }: HttpLogParams): string {
+export function formatPrettyHttpLog({ method, url, status, duration, contentLength, colorize = true, protocol = 'http' }: HttpLogParams): string {
   const sizeDisplay = contentLength === '-' || contentLength == null ? '–' : contentLength;
   const durationFormatted = typeof duration === 'number' ? duration.toFixed(3) : duration;
 
   if (colorize) {
+    const protocolText = `${PASTEL_COLORS.protocol}${protocol}${ANSI_RESET}`;
     const methodText = `${PASTEL_COLORS.method}${method}${ANSI_RESET}`;
     const urlText = `${PASTEL_COLORS.url}${url}${ANSI_RESET}`;
     const arrowSymbol = `${PASTEL_COLORS.arrow}⇒${ANSI_RESET}`;
@@ -38,8 +41,8 @@ export function formatPrettyHttpLog({ method, url, status, duration, contentLeng
     const sizeText = `${PASTEL_COLORS.size}${sizeDisplay}${ANSI_RESET}`;
     const statusText = colorizeStatus(status, String(status));
 
-    return `${methodText} ${urlText} ${arrowSymbol} ${statusText} (${timeText} ms, ${sizeText})`;
+    return `${protocolText} ${methodText} ${urlText} ${arrowSymbol} ${statusText} (${timeText} ms, ${sizeText})`;
   }
 
-  return `${method} ${url} ⇒ ${status} (${durationFormatted} ms, ${sizeDisplay})`;
+  return `${protocol} ${method} ${url} ⇒ ${status} (${durationFormatted} ms, ${sizeDisplay})`;
 }
