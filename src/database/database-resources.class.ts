@@ -178,6 +178,9 @@ export class DatabaseResources {
     const existingMetadata = db.savedMetadata?.resources?.[name];
     const version = existingMetadata?.currentVersion || 'v1';
     const { default: Resource } = await import('../resource.class.js');
+    const resolvedAsyncPartitions = config.asyncPartitions !== undefined
+      ? config.asyncPartitions
+      : !Boolean((db.client as { supportsPartitionIndex?: boolean })?.supportsPartitionIndex);
 
     const resource = new Resource({
       name,
@@ -200,7 +203,7 @@ export class DatabaseResources {
       idGenerator: config.idGenerator,
       idSize: config.idSize,
       asyncEvents: config.asyncEvents,
-      asyncPartitions: config.asyncPartitions !== undefined ? config.asyncPartitions : true,
+      asyncPartitions: resolvedAsyncPartitions,
       events: config.events || {},
       disableEvents: config.disableEvents !== undefined ? config.disableEvents : db.disableResourceEvents,
       createdBy: config.createdBy || 'user',

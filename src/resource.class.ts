@@ -370,7 +370,7 @@ export class Resource extends AsyncEventEmitter implements Disposable {
       strictValidation = true,
       events = {},
       asyncEvents = true,
-      asyncPartitions = true,
+      asyncPartitions: explicitAsyncPartitions,
       strictPartitions = false,
       createdBy = 'user',
       guard,
@@ -397,6 +397,9 @@ export class Resource extends AsyncEventEmitter implements Disposable {
     this.security = security ?? { passphrase: 'secret', bcrypt: { rounds: 12 } };
     this.versioningEnabled = versioningEnabled;
     this.strictValidation = strictValidation;
+    const asyncPartitions = explicitAsyncPartitions !== undefined
+      ? explicitAsyncPartitions
+      : !Boolean((client as { supportsPartitionIndex?: boolean })?.supportsPartitionIndex);
 
     this.setAsyncMode(asyncEvents);
     this._resourceAsyncEvents = asyncEvents;
@@ -1145,6 +1148,22 @@ export class Resource extends AsyncEventEmitter implements Disposable {
   async getSchemaForVersion(_version: string): Promise<Schema> {
     this._ensureSchemaCompiled();
     return this.schema;
+  }
+
+  async hydrateClientObject(id: string, request: {
+    Metadata?: StringRecord<string>;
+    ContentLength?: number;
+    ContentType?: string;
+    LastModified?: Date;
+    ETag?: string;
+    VersionId?: string;
+    Expiration?: string;
+    Body?: {
+      transformToByteArray(): Promise<Uint8Array>;
+    };
+  }): Promise<ResourceData> {
+    this._ensureSchemaCompiled();
+    return this._persistence.hydrateObject(id, request as any) as Promise<ResourceData>;
   }
 
   async createPartitionReferences(data: ResourceData): Promise<void> {

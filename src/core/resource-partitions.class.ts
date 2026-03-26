@@ -22,6 +22,7 @@ export interface ResourceConfig {
 }
 
 export interface S3Client {
+  supportsPartitionIndex?: boolean;
   putObject(params: {
     key: string;
     metadata: StringRecord<string>;
@@ -542,7 +543,7 @@ export class ResourcePartitions {
       });
     }
 
-    if (!isNewInsert) {
+    if (!isNewInsert && !this.resource.client.supportsPartitionIndex) {
       const cleanupPromises = Object.entries(partitions).map(async ([partitionName]) => {
         const prefix = `resource=${this.resource.name}/partition=${partitionName}`;
         const [okKeys, errKeys, keys] = await tryFn<string[]>(() => this.resource.client.getAllKeys({ prefix }));

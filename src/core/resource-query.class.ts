@@ -1,5 +1,6 @@
 import { tryFn } from '../concerns/try-fn.js';
 import { isNotFoundError } from '../concerns/s3-errors.js';
+import { metadataEncode } from '../concerns/metadata-encoding.js';
 import { PartitionError, mapAwsError } from '../errors.js';
 import type { StringRecord } from '../types/common.types.js';
 import { createHash } from 'node:crypto';
@@ -23,11 +24,44 @@ export interface ResourceConfig {
 export interface S3Client {
   count(params: { prefix: string }): Promise<number>;
   getKeysPage(params: { prefix: string; offset: number; amount: number }): Promise<string[]>;
+  getContinuationTokenAfterOffset?(params: { prefix?: string; offset?: number }): Promise<string | null>;
+  getFilteredObjectsPage?(params: {
+    prefix: string;
+    offset?: number;
+    amount?: number;
+    filters?: Array<{
+      metadataPath: string;
+      metadataValue: string;
+      mappedBodyPath?: string | null;
+      mappedBodyValue?: string | null;
+      rawBodyPath?: string | null;
+      rawBodyValue?: string | null;
+    }>;
+  }): Promise<BulkGetObjectResponse[]>;
   listObjects(params: { prefix: string; maxKeys: number; continuationToken?: string | null }): Promise<{
     Contents?: Array<{ Key: string }>;
     IsTruncated?: boolean;
     NextContinuationToken?: string | null;
   }>;
+  getObjects?(keys: string[]): Promise<BulkGetObjectResponse[]>;
+}
+
+export interface ClientObjectResponse {
+  Metadata?: StringRecord<string>;
+  ContentLength?: number;
+  ContentType?: string;
+  LastModified?: Date;
+  ETag?: string;
+  VersionId?: string;
+  Expiration?: string;
+  Body?: {
+    transformToByteArray(): Promise<Uint8Array>;
+  };
+}
+
+export interface BulkGetObjectResponse {
+  key: string;
+  object: ClientObjectResponse;
 }
 
 export interface Observer {
@@ -56,9 +90,14 @@ export interface Resource {
   client: S3Client;
   config: ResourceConfig;
   observers: Observer[];
+  schema: {
+    mapper(data: StringRecord): Promise<StringRecord>;
+  };
 
   executeHooks(hookName: string, data: unknown): Promise<unknown>;
   get(id: string): Promise<ResourceData>;
+  getResourceKey(id: string): string;
+  hydrateClientObject(id: string, request: ClientObjectResponse): Promise<ResourceData>;
   applyPartitionRule(value: unknown, rule: string): string;
   buildPartitionPrefix(partition: string, partitionDef: PartitionDefinition, partitionValues: StringRecord): string;
   extractPartitionValuesFromKey(id: string, keys: string[], sortedFields: Array<[string, string]>): StringRecord;
@@ -205,7 +244,7 @@ export class ResourceQuery {
         continue;
       }
 
-      partitionValues[fieldName] = this.resource.applyPartitionRule(value, rule);
+      partitionValues[fieldName] = value;
       matchCount++;
     }
 
@@ -267,12 +306,295 @@ export class ResourceQuery {
     };
   }
 
+  private enrichPartitionValuesFromFilter(
+    partition: string | null,
+    partitionValues: StringRecord,
+    filter: StringRecord
+  ): StringRecord {
+    if (!partition) {
+      return { ...partitionValues };
+    }
+
+    const partitionDef = this.partitions[partition];
+    if (!partitionDef?.fields) {
+      return { ...partitionValues };
+    }
+
+    const enrichedValues: StringRecord = { ...partitionValues };
+
+    for (const fieldName of Object.keys(partitionDef.fields)) {
+      if (Object.prototype.hasOwnProperty.call(enrichedValues, fieldName)) {
+        continue;
+      }
+
+      if (!Object.prototype.hasOwnProperty.call(filter, fieldName)) {
+        continue;
+      }
+
+      const value = filter[fieldName];
+      if (!this.isUsablePartitionFilterValue(value)) {
+        continue;
+      }
+
+      enrichedValues[fieldName] = value;
+    }
+
+    return enrichedValues;
+  }
+
   get client(): S3Client {
     return this.resource.client;
   }
 
   get partitions(): PartitionsConfig {
     return this.resource.config?.partitions || {};
+  }
+
+  private _supportsBulkObjectReads(): boolean {
+    return typeof this.client.getObjects === 'function';
+  }
+
+  private async _getBulkObjectMap(ids: string[]): Promise<Map<string, ClientObjectResponse> | null> {
+    if (ids.length <= 1 || !this._supportsBulkObjectReads()) {
+      return null;
+    }
+
+    const keys = ids.map((id) => this.resource.getResourceKey(id));
+    const [ok, , objects] = await tryFn<BulkGetObjectResponse[]>(() => this.client.getObjects!(keys));
+    if (!ok || !objects) {
+      return null;
+    }
+
+    const objectMap = new Map<string, ClientObjectResponse>();
+    for (const entry of objects) {
+      if (entry && typeof entry.key === 'string' && entry.object) {
+        objectMap.set(entry.key, entry.object);
+      }
+    }
+
+    return objectMap;
+  }
+
+  private async _hydrateResourceData(
+    id: string,
+    context: string,
+    objectMap: Map<string, ClientObjectResponse> | null,
+    decorate?: (data: ResourceData) => Promise<ResourceData> | ResourceData
+  ): Promise<ResourceData> {
+    const resourceKey = this.resource.getResourceKey(id);
+    const bulkObject = objectMap?.get(resourceKey);
+
+    const [ok, err, result] = await tryFn<ResourceData>(async () => {
+      let data: ResourceData;
+
+      if (bulkObject) {
+        await this.resource.executeHooks('beforeGet', { id });
+        data = await this.resource.hydrateClientObject(id, bulkObject);
+      } else {
+        data = await this.resource.get(id);
+      }
+
+      if (decorate) {
+        data = await decorate(data);
+      }
+
+      return data;
+    });
+
+    if (ok && result) {
+      return result;
+    }
+
+    return this.handleResourceError(err as Error, id, context);
+  }
+
+  private _buildResidualFilter(
+    filter: StringRecord,
+    partition: string | null,
+    partitionValues: StringRecord
+  ): StringRecord {
+    if (!partition) {
+      return { ...filter };
+    }
+
+    const partitionDef = this.partitions[partition];
+    if (!partitionDef?.fields) {
+      return { ...filter };
+    }
+
+    const residualFilter: StringRecord = { ...filter };
+
+    for (const [fieldName, rule] of Object.entries(partitionDef.fields)) {
+      if (!Object.prototype.hasOwnProperty.call(residualFilter, fieldName)) {
+        continue;
+      }
+
+      if (!Object.prototype.hasOwnProperty.call(partitionValues, fieldName)) {
+        continue;
+      }
+
+      const plannedValue = this.resource.applyPartitionRule(partitionValues[fieldName], rule);
+      const filteredValue = this.resource.applyPartitionRule(residualFilter[fieldName], rule);
+
+      if (plannedValue === filteredValue) {
+        delete residualFilter[fieldName];
+      }
+    }
+
+    return residualFilter;
+  }
+
+  private _supportsFilteredObjectPages(): boolean {
+    return typeof this.client.getFilteredObjectsPage === 'function';
+  }
+
+  private _sanitizeMetadataKey(key: string): string {
+    return String(key).replace(/[^a-zA-Z0-9\-_]/g, '_').toLowerCase();
+  }
+
+  private _escapeJsonPathSegment(segment: string): string {
+    return String(segment).replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+  }
+
+  private _buildLiteralJsonPath(key: string): string {
+    return `$."${this._escapeJsonPathSegment(key)}"`;
+  }
+
+  private _buildNestedJsonPath(key: string): string {
+    const segments = String(key || '').split('.').filter(Boolean);
+    if (segments.length === 0) {
+      return '$';
+    }
+
+    return `$${segments.map((segment) => `."${this._escapeJsonPathSegment(segment)}"`).join('')}`;
+  }
+
+  private _normalizeJsonComparisonValue(value: unknown): string | null {
+    if (typeof value === 'string') {
+      return value;
+    }
+
+    if (typeof value === 'number' && Number.isFinite(value)) {
+      return String(value);
+    }
+
+    if (typeof value === 'boolean') {
+      return value ? '1' : '0';
+    }
+
+    return null;
+  }
+
+  private _getNestedFieldValue(data: StringRecord, fieldPath: string): unknown {
+    if (!fieldPath.includes('.')) {
+      return data[fieldPath];
+    }
+
+    const segments = fieldPath.split('.');
+    let current: unknown = data;
+
+    for (const segment of segments) {
+      if (!current || typeof current !== 'object' || !(segment in current)) {
+        return undefined;
+      }
+
+      current = (current as StringRecord)[segment];
+    }
+
+    return current;
+  }
+
+  private _extractPartitionValuesFromData(data: ResourceData, partitionDef: PartitionDefinition): StringRecord {
+    const values: StringRecord = {};
+
+    for (const [fieldName, rule] of Object.entries(partitionDef.fields || {})) {
+      const fieldValue = this._getNestedFieldValue(data, fieldName);
+      if (!this.isUsablePartitionFilterValue(fieldValue)) {
+        continue;
+      }
+
+      values[fieldName] = this.resource.applyPartitionRule(fieldValue, rule) as string;
+    }
+
+    return values;
+  }
+
+  private async _buildFilteredObjectPageFilters(filter: StringRecord): Promise<Array<{
+    metadataPath: string;
+    metadataValue: string;
+    mappedBodyPath?: string | null;
+    mappedBodyValue?: string | null;
+    rawBodyPath?: string | null;
+    rawBodyValue?: string | null;
+  }> | null> {
+    if (!this._supportsFilteredObjectPages()) {
+      return null;
+    }
+
+    const filters: Array<{
+      metadataPath: string;
+      metadataValue: string;
+      mappedBodyPath?: string | null;
+      mappedBodyValue?: string | null;
+      rawBodyPath?: string | null;
+      rawBodyValue?: string | null;
+    }> = [];
+
+    for (const [fieldName, rawValue] of Object.entries(filter)) {
+      if (rawValue === null || rawValue === undefined) {
+        return null;
+      }
+
+      if (typeof rawValue === 'object' || typeof rawValue === 'function' || typeof rawValue === 'symbol') {
+        return null;
+      }
+
+      const mappedFilter = await this.resource.schema.mapper({ [fieldName]: rawValue });
+      const mappedEntries = Object.entries(mappedFilter).filter(([key]) => key !== '_v');
+
+      if (mappedEntries.length !== 1) {
+        return null;
+      }
+
+      const [mappedKey, mappedValue] = mappedEntries[0]!;
+      const mappedBodyValue = this._normalizeJsonComparisonValue(mappedValue);
+      const rawBodyValue = this._normalizeJsonComparisonValue(rawValue);
+
+      if (mappedBodyValue === null && rawBodyValue === null) {
+        return null;
+      }
+
+      filters.push({
+        metadataPath: this._buildLiteralJsonPath(this._sanitizeMetadataKey(mappedKey)),
+        metadataValue: metadataEncode(mappedValue).encoded,
+        mappedBodyPath: mappedBodyValue !== null ? this._buildLiteralJsonPath(mappedKey) : null,
+        mappedBodyValue,
+        rawBodyPath: rawBodyValue !== null ? this._buildNestedJsonPath(fieldName) : null,
+        rawBodyValue
+      });
+    }
+
+    return filters;
+  }
+
+  private async _hydratePrefetchedResults(
+    ids: string[],
+    context: string,
+    objectMap: Map<string, ClientObjectResponse>,
+    decorate?: (data: ResourceData) => Promise<ResourceData> | ResourceData
+  ): Promise<ResourceData[]> {
+    const operations = ids.map((id) => async () => {
+      return this._hydrateResourceData(id, context, objectMap, decorate);
+    });
+
+    const { results } = await this.resource._executeBatchHelper(operations, {
+      onItemError: (error, index) => {
+        this.resource.emit('error', error, ids[index]);
+        this.resource.observers.forEach((x) => x.emit('error', this.resource.name, error, ids[index]));
+      }
+    });
+
+    return results.filter((item): item is ResourceData => item !== null);
   }
 
   private _getCacheNamespace(): ResourceQueryCacheNamespace | null {
@@ -510,6 +832,20 @@ export class ResourceQuery {
   }
 
   async listMain({ limit, offset = 0 }: { limit?: number; offset?: number }): Promise<ResourceData[]> {
+    const prefetchedResults = await this._listWithPrefetchedObjectPage({
+      prefix: `resource=${this.resource.name}/data`,
+      limit,
+      offset,
+      partition: null,
+      partitionDef: null,
+      context: 'main-prefetched'
+    });
+
+    if (prefetchedResults) {
+      this.resource._emitStandardized('list', { count: prefetchedResults.length, errors: 0 });
+      return prefetchedResults;
+    }
+
     const [ok, err, ids] = await tryFn<string[]>(() => this.listIds({ limit, offset }));
     if (!ok || !ids) throw err;
     const results = await this.processListResults(ids, 'main');
@@ -530,6 +866,20 @@ export class ResourceQuery {
 
     const partitionDef = this.partitions[partition];
     const prefix = this.resource.buildPartitionPrefix(partition, partitionDef, partitionValues);
+
+    const prefetchedResults = await this._listWithPrefetchedObjectPage({
+      prefix,
+      limit,
+      offset,
+      partition,
+      partitionDef,
+      context: 'partition-prefetched'
+    });
+
+    if (prefetchedResults) {
+      this.resource._emitStandardized('list', { partition, partitionValues, count: prefetchedResults.length, errors: 0 });
+      return prefetchedResults;
+    }
 
     const [ok, err, keys] = await tryFn<string[]>(() => this.client.getKeysPage({
       prefix,
@@ -557,23 +907,10 @@ export class ResourceQuery {
   }
 
   async processListResults(ids: string[], context: string = 'main'): Promise<ResourceData[]> {
-    const operations = ids.map((id) => async () => {
-      const [ok, err, result] = await tryFn<ResourceData>(() => this.resource.get(id));
-      if (ok && result) {
-        return result;
-      }
-      return this.handleResourceError(err as Error, id, context);
-    });
-
-    const { results } = await this.resource._executeBatchHelper(operations, {
-      onItemError: (error, index) => {
-        this.resource.emit('error', error, ids[index]);
-        this.resource.observers.forEach((x) => x.emit('error', this.resource.name, error, ids[index]));
-      }
-    });
-
+    const objectMap = await this._getBulkObjectMap(ids);
+    const results = await this._hydratePrefetchedResults(ids, context, objectMap || new Map());
     this.resource._emitStandardized('list', { count: results.length, errors: 0 });
-    return results.filter((r): r is ResourceData => r !== null);
+    return results;
   }
 
   async processPartitionResults(
@@ -582,28 +919,181 @@ export class ResourceQuery {
     partitionDef: PartitionDefinition,
     keys: string[]
   ): Promise<ResourceData[]> {
-    const sortedFields = Object.entries(partitionDef.fields).sort(([a], [b]) => a.localeCompare(b)) as Array<[string, string]>;
+    const objectMap = await this._getBulkObjectMap(ids);
+    return await this._hydratePrefetchedResults(ids, 'partition', objectMap || new Map(), async (data) => {
+      data._partition = partition;
+      data._partitionValues = this._extractPartitionValuesFromData(data, partitionDef);
+      return data;
+    });
+  }
 
-    const operations = ids.map((id) => async () => {
-      const [ok, err, result] = await tryFn<ResourceData>(async () => {
-        const actualPartitionValues = this.resource.extractPartitionValuesFromKey(id, keys, sortedFields);
-        const data = await this.resource.get(id);
+  private async _listWithPrefetchedObjectPage({
+    prefix,
+    limit,
+    offset,
+    partition,
+    partitionDef,
+    context
+  }: {
+    prefix: string;
+    limit?: number;
+    offset: number;
+    partition: string | null;
+    partitionDef: PartitionDefinition | null;
+    context: string;
+  }): Promise<ResourceData[] | null> {
+    if (!this.client.getFilteredObjectsPage) {
+      return null;
+    }
+
+    const page = await this.client.getFilteredObjectsPage({
+      prefix,
+      offset,
+      amount: limit || 1000,
+      filters: []
+    });
+    const ids = this.extractIdsFromKeys(page.map((entry) => entry.key));
+    const objectMap = new Map<string, ClientObjectResponse>();
+
+    for (const entry of page) {
+      objectMap.set(entry.key, entry.object);
+    }
+
+    if (partition && partitionDef) {
+      return await this._hydratePrefetchedResults(ids, context, objectMap, async (data) => {
         data._partition = partition;
-        data._partitionValues = actualPartitionValues;
+        data._partitionValues = this._extractPartitionValuesFromData(data, partitionDef);
         return data;
       });
-      if (ok && result) return result;
-      return this.handleResourceError(err as Error, id, 'partition');
+    }
+
+    return await this._hydratePrefetchedResults(ids, context, objectMap);
+  }
+
+  private async _listPageByNumberWithPrefetchedObjectPage({
+    page,
+    size,
+    partition,
+    partitionValues
+  }: {
+    page: number;
+    size: number;
+    partition: string | null;
+    partitionValues: StringRecord;
+  }): Promise<{ items: ResourceData[]; nextCursor: string | null } | null> {
+    if (!this.client.getFilteredObjectsPage || typeof this.client.getContinuationTokenAfterOffset !== 'function') {
+      return null;
+    }
+
+    const { prefix, partitionDef } = this._buildPagePrefix(partition, partitionValues);
+    const safePage = Number.isFinite(page) && page > 0 ? Math.floor(page) : 1;
+    const safeSize = Math.max(1, Math.floor(size));
+    const offset = (safePage - 1) * safeSize;
+    const pageRows = await this.client.getFilteredObjectsPage({
+      prefix,
+      offset,
+      amount: safeSize + 1,
+      filters: []
+    });
+    const hasMore = pageRows.length > safeSize;
+    const visibleRows = hasMore ? pageRows.slice(0, safeSize) : pageRows;
+    const ids = this.extractIdsFromKeys(visibleRows.map((entry) => entry.key));
+    const objectMap = new Map<string, ClientObjectResponse>();
+
+    for (const entry of visibleRows) {
+      objectMap.set(entry.key, entry.object);
+    }
+
+    let items: ResourceData[];
+    if (partition && partitionDef) {
+      items = await this._hydratePrefetchedResults(ids, 'page-prefetched-partition', objectMap, async (data) => {
+        data._partition = partition;
+        data._partitionValues = this._extractPartitionValuesFromData(data, partitionDef);
+        return data;
+      });
+    } else {
+      items = await this._hydratePrefetchedResults(ids, 'page-prefetched', objectMap);
+    }
+
+    let nextCursor: string | null = null;
+    if (hasMore && items.length > 0) {
+      const continuationToken = await this.client.getContinuationTokenAfterOffset({
+        prefix,
+        offset: offset + items.length - 1
+      });
+
+      nextCursor = continuationToken
+        ? encodeCursorPayload({
+            v: 1,
+            prefix,
+            token: continuationToken,
+            pageSize: safeSize
+          })
+        : null;
+    }
+
+    await this._setCheckpointCursorForPage({
+      page: 1,
+      size: safeSize,
+      partition,
+      partitionValues,
+      cursor: null
+    });
+    await this._setCheckpointCursorForPage({
+      page: safePage + 1,
+      size: safeSize,
+      partition,
+      partitionValues,
+      cursor: nextCursor
     });
 
-    const { results } = await this.resource._executeBatchHelper(operations, {
-      onItemError: (error, index) => {
-        this.resource.emit('error', error, ids[index]);
-        this.resource.observers.forEach((x) => x.emit('error', this.resource.name, error, ids[index]));
-      }
+    return { items, nextCursor };
+  }
+
+  private async _queryWithFilteredObjectPage({
+    prefix,
+    filter,
+    limit,
+    offset,
+    partition,
+    partitionDef
+  }: {
+    prefix: string;
+    filter: StringRecord;
+    limit: number;
+    offset: number;
+    partition: string | null;
+    partitionDef: PartitionDefinition | null;
+  }): Promise<ResourceData[] | null> {
+    const filters = await this._buildFilteredObjectPageFilters(filter);
+    if (!filters || filters.length === 0 || !this.client.getFilteredObjectsPage) {
+      return null;
+    }
+
+    const page = await this.client.getFilteredObjectsPage({
+      prefix,
+      offset,
+      amount: limit,
+      filters
     });
 
-    return results.filter((item): item is ResourceData => item !== null);
+    const keys = page.map((entry) => entry.key);
+    const ids = this.extractIdsFromKeys(keys);
+    const objectMap = new Map<string, ClientObjectResponse>();
+
+    for (const entry of page) {
+      objectMap.set(entry.key, entry.object);
+    }
+
+    if (partition && partitionDef) {
+      return await this._hydratePrefetchedResults(ids, 'partition-filtered', objectMap, async (data) => {
+        data._partition = partition;
+        data._partitionValues = this._extractPartitionValuesFromData(data, partitionDef);
+        return data;
+      });
+    }
+
+    return await this._hydratePrefetchedResults(ids, 'filtered', objectMap);
   }
 
   handleResourceError(error: Error, id: string, context: string): ResourceData {
@@ -641,19 +1131,10 @@ export class ResourceQuery {
 
   async getMany(ids: string[]): Promise<ResourceData[]> {
     await this.resource.executeHooks('beforeGetMany', { ids });
+    const objectMap = await this._getBulkObjectMap(ids);
 
     const operations = ids.map((id) => async () => {
-      const [ok, err, data] = await tryFn<ResourceData>(() => this.resource.get(id));
-      if (ok && data) return data;
-      const error = err as Error;
-      if (error.message.includes('Cipher job failed') || error.message.includes('OperationError')) {
-        return {
-          id,
-          _decryptionFailed: true,
-          _error: error.message
-        } as ResourceData;
-      }
-      throw error;
+      return this._hydrateResourceData(id, 'getMany', objectMap);
     });
 
     const { results } = await this.resource._executeBatchHelper(operations, {
@@ -675,6 +1156,36 @@ export class ResourceQuery {
   }
 
   async getAll(): Promise<ResourceData[]> {
+    if (this.client.getFilteredObjectsPage) {
+      const results: ResourceData[] = [];
+      let offset = 0;
+      const pageSize = 1000;
+
+      while (true) {
+        const page = await this._listWithPrefetchedObjectPage({
+          prefix: `resource=${this.resource.name}/data`,
+          limit: pageSize,
+          offset,
+          partition: null,
+          partitionDef: null,
+          context: 'getAll-prefetched'
+        });
+
+        if (!page || page.length === 0) {
+          break;
+        }
+
+        results.push(...page);
+        if (page.length < pageSize) {
+          break;
+        }
+
+        offset += page.length;
+      }
+
+      return results;
+    }
+
     const ids: string[] = [];
     let offset = 0;
     const pageSize = 1000;
@@ -699,22 +1210,9 @@ export class ResourceQuery {
     const batchSize = 100;
     for (let i = 0; i < ids.length; i += batchSize) {
       const batchIds = ids.slice(i, i + batchSize);
-
-      const operations = batchIds.map((id) => async () => {
-        const [ok, err, item] = await tryFn<ResourceData>(() => this.resource.get(id));
-        if (ok && item) return item;
-        return this.handleResourceError(err as Error, id, 'getAll');
-      });
-
-      const { results: batchResults } = await this.resource._executeBatchHelper(operations, {
-        onItemError: (error, index) => {
-          const batchId = batchIds[index];
-          this.resource.emit('error', error, batchId);
-          this.resource.observers.forEach((x) => x.emit('error', this.resource.name, error, batchId));
-        }
-      });
-
-      results.push(...batchResults.filter((item): item is ResourceData => item !== null));
+      const objectMap = await this._getBulkObjectMap(batchIds);
+      const batchResults = await this._hydratePrefetchedResults(batchIds, 'getAll', objectMap || new Map());
+      results.push(...batchResults);
     }
 
     return results;
@@ -817,6 +1315,16 @@ export class ResourceQuery {
     partitionValues: StringRecord;
   }): Promise<{ items: ResourceData[]; nextCursor: string | null }> {
     const targetPage = Number.isFinite(page) && page > 0 ? Math.floor(page) : 1;
+    const prefetchedPageResult = await this._listPageByNumberWithPrefetchedObjectPage({
+      page: targetPage,
+      size,
+      partition,
+      partitionValues
+    });
+
+    if (prefetchedPageResult) {
+      return prefetchedPageResult;
+    }
 
     await this._setCheckpointCursorForPage({
       page: 1,
@@ -1039,6 +1547,34 @@ export class ResourceQuery {
       }
     }
 
+    queryPartitionValues = this.enrichPartitionValuesFromFilter(queryPartition, queryPartitionValues, filter);
+
+    const residualFilter = this._buildResidualFilter(filter, queryPartition, queryPartitionValues);
+    if (Object.keys(residualFilter).length === 0) {
+      const directResults = await this.list({
+        partition: queryPartition,
+        partitionValues: queryPartitionValues,
+        limit,
+        offset
+      });
+
+      return await this.resource.executeHooks('afterQuery', directResults) as ResourceData[];
+    }
+
+    const { prefix, partitionDef } = this._buildPagePrefix(queryPartition, queryPartitionValues);
+    const filteredPageResults = await this._queryWithFilteredObjectPage({
+      prefix,
+      filter: residualFilter,
+      limit,
+      offset,
+      partition: queryPartition,
+      partitionDef
+    });
+
+    if (filteredPageResults) {
+      return await this.resource.executeHooks('afterQuery', filteredPageResults) as ResourceData[];
+    }
+
     const results: ResourceData[] = [];
     let currentOffset = offset;
     const batchSize = Math.min(limit, 50);
@@ -1056,8 +1592,8 @@ export class ResourceQuery {
       }
 
       const filteredBatch = batch.filter(doc => {
-        return Object.entries(filter).every(([key, value]) => {
-          return doc[key] === value;
+        return Object.entries(residualFilter).every(([key, value]) => {
+          return this._getNestedFieldValue(doc, key) === value;
         });
       });
 

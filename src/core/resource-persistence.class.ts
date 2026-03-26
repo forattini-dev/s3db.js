@@ -96,6 +96,8 @@ export interface S3Client {
   deleteObject(key: string): Promise<unknown>;
   copyObject(params: CopyObjectParams): Promise<unknown>;
   deleteAll(params: { prefix: string }): Promise<number>;
+  runInTransaction?<T>(fn: () => Promise<T> | T): Promise<T>;
+  isInTransaction?(): boolean;
   _executeBatch?<T>(
     operations: Array<() => Promise<T>>,
     options?: BatchOptions
@@ -234,6 +236,40 @@ export class ResourcePersistence {
   get idGenerator(): (data?: unknown) => string | Promise<string> { return this.resource.idGenerator; }
   get versioningEnabled(): boolean { return this.resource.versioningEnabled; }
   get observers(): Observer[] { return this.resource.observers; }
+
+  private _hasConfiguredPartitions(): boolean {
+    return Boolean(this.config.partitions && Object.keys(this.config.partitions).length > 0);
+  }
+
+  private _shouldUseAtomicPartitionWriteTransaction(): boolean {
+    return this._hasConfiguredPartitions() &&
+      (this.config.strictPartitions || !this.config.asyncPartitions) &&
+      typeof this.client.runInTransaction === 'function';
+  }
+
+  private async _runAtomicPartitionWriteIfSupported<T>(fn: () => Promise<T>): Promise<T> {
+    if (this._shouldUseAtomicPartitionWriteTransaction()) {
+      if (this.client.isInTransaction?.()) {
+        return await fn();
+      }
+
+      return await this.client.runInTransaction!(fn);
+    }
+
+    return await fn();
+  }
+
+  private _shouldUseBulkWriteTransaction(): boolean {
+    return typeof this.client.runInTransaction === 'function';
+  }
+
+  private async _runBulkWriteTransactionIfSupported<T>(fn: () => Promise<T>): Promise<T> {
+    if (this._shouldUseBulkWriteTransaction()) {
+      return await this.client.runInTransaction!(fn);
+    }
+
+    return await fn();
+  }
 
   private _getPasswordFields(): string[] {
     const attrs = (this.schema as any).attributes || {};
@@ -433,12 +469,30 @@ export class ResourcePersistence {
       });
     }
 
-    const [okPut, errPut, putResponse] = await tryFn<{ ETag?: string }>(() => this.client.putObject({
-      key,
-      body,
-      contentType,
-      metadata: finalMetadata,
-      ifNoneMatch: '*'
+    const useAtomicPartitionWrite = this._shouldUseAtomicPartitionWriteTransaction();
+    let insertedObject = useAtomicPartitionWrite
+      ? await this.resource.composeFullObjectFromWrite({
+        id: finalId,
+        metadata: finalMetadata,
+        body,
+        behavior: this.behavior
+      })
+      : null;
+
+    const [okPut, errPut, putResponse] = await tryFn<{ ETag?: string }>(() => this._runAtomicPartitionWriteIfSupported(async () => {
+      const putResponse = await this.client.putObject({
+        key,
+        body,
+        contentType,
+        metadata: finalMetadata,
+        ifNoneMatch: '*'
+      });
+
+      if (useAtomicPartitionWrite && insertedObject) {
+        await this.resource.createPartitionReferences(insertedObject);
+      }
+
+      return putResponse;
     }));
 
     if (!okPut) {
@@ -482,12 +536,14 @@ export class ResourcePersistence {
       });
     }
 
-    const insertedObject = await this.resource.composeFullObjectFromWrite({
-      id: finalId,
-      metadata: finalMetadata,
-      body,
-      behavior: this.behavior
-    });
+    if (!insertedObject) {
+      insertedObject = await this.resource.composeFullObjectFromWrite({
+        id: finalId,
+        metadata: finalMetadata,
+        body,
+        behavior: this.behavior
+      });
+    }
 
     const bodyAsBuffer = typeof body === 'string'
       ? Buffer.from(body, 'utf8')
@@ -501,7 +557,20 @@ export class ResourcePersistence {
     insertedObject._lastModified = new Date();
     insertedObject._definitionHash = this.resource.getDefinitionHash();
 
-    if (this.config.partitions && Object.keys(this.config.partitions).length > 0) {
+    if (this._hasConfiguredPartitions()) {
+      if (useAtomicPartitionWrite) {
+        const nonPartitionHooks = this.hooks.afterInsert.filter(hook =>
+          !hook.toString().includes('createPartitionReferences')
+        );
+        let finalResult = insertedObject;
+        for (const hook of nonPartitionHooks) {
+          finalResult = await hook(finalResult);
+        }
+
+        this.resource._emitStandardized('inserted', finalResult, finalResult?.id || insertedObject?.id);
+        return finalResult;
+      }
+
       if (this.config.strictPartitions) {
         await this.resource.createPartitionReferences(insertedObject);
       } else if (this.config.asyncPartitions) {
@@ -577,6 +646,10 @@ export class ResourcePersistence {
       });
     }
 
+    return this.hydrateObject(id, request, key);
+  }
+
+  async hydrateObject(id: string, request: S3Response, key: string = this.resource.getResourceKey(id)): Promise<ResourceData> {
     const objectVersionRaw = request.Metadata?._v || this.version;
     const objectVersion = typeof objectVersionRaw === 'string' && objectVersionRaw.startsWith('v')
       ? objectVersionRaw.slice(1)
@@ -716,10 +789,27 @@ export class ResourcePersistence {
 
     await this.resource.executeHooks('beforeDelete', objectData);
     const key = this.resource.getResourceKey(id);
-    const [ok2, err2, response] = await tryFn(() => this.client.deleteObject(key));
+    const useAtomicPartitionWrite = this._shouldUseAtomicPartitionWriteTransaction();
+    const [ok2, err2, response] = await tryFn(() => this._runAtomicPartitionWriteIfSupported(async () => {
+      const response = await this.client.deleteObject(key);
 
-    if (this.config.partitions && Object.keys(this.config.partitions).length > 0 && objectData) {
-      if (this.config.strictPartitions) {
+      if (useAtomicPartitionWrite && this._hasConfiguredPartitions() && objectData) {
+        await this.resource.deletePartitionReferences(objectData);
+      }
+
+      return response;
+    }));
+
+    if (this._hasConfiguredPartitions() && objectData) {
+      if (useAtomicPartitionWrite) {
+        const nonPartitionHooks = this.hooks.afterDelete.filter(hook =>
+          !hook.toString().includes('deletePartitionReferences')
+        );
+        let afterDeleteData = objectData;
+        for (const hook of nonPartitionHooks) {
+          afterDeleteData = await hook(afterDeleteData);
+        }
+      } else if (this.config.strictPartitions) {
         await this.resource.deletePartitionReferences(objectData);
       } else if (this.config.asyncPartitions) {
         setImmediate(() => {
@@ -744,12 +834,14 @@ export class ResourcePersistence {
         }
       }
 
-      const nonPartitionHooks = this.hooks.afterDelete.filter(hook =>
-        !hook.toString().includes('deletePartitionReferences')
-      );
-      let afterDeleteData = objectData;
-      for (const hook of nonPartitionHooks) {
-        afterDeleteData = await hook(afterDeleteData);
+      if (!useAtomicPartitionWrite) {
+        const nonPartitionHooks = this.hooks.afterDelete.filter(hook =>
+          !hook.toString().includes('deletePartitionReferences')
+        );
+        let afterDeleteData = objectData;
+        for (const hook of nonPartitionHooks) {
+          afterDeleteData = await hook(afterDeleteData);
+        }
       }
     } else {
       await this.resource.executeHooks('afterDelete', objectData);
@@ -826,15 +918,17 @@ export class ResourcePersistence {
   }
 
   async insertMany(objects: InsertParams[]): Promise<ResourceData[]> {
-    const operations = objects.map((attributes) => async () => {
-      return await this.insert(attributes);
-    });
+    const { results } = await this._runBulkWriteTransactionIfSupported(async () => {
+      const operations = objects.map((attributes) => async () => {
+        return await this.insert(attributes);
+      });
 
-    const { results } = await this._executeBatchHelper(operations, {
-      onItemError: (error, index) => {
-        this.resource.emit('error', error, objects[index]);
-        this.observers.map((x) => x.emit('error', this.name, error, objects[index]));
-      }
+      return await this._executeBatchHelper(operations, {
+        onItemError: (error, index) => {
+          this.resource.emit('error', error, objects[index]);
+          this.observers.map((x) => x.emit('error', this.name, error, objects[index]));
+        }
+      });
     });
 
     this.resource._emitStandardized('inserted-many', objects.length);
@@ -842,15 +936,17 @@ export class ResourcePersistence {
   }
 
   async deleteMany(ids: string[]): Promise<DeleteManyResult> {
-    const operations = ids.map((id) => async () => {
-      return await this.delete(id);
-    });
+    const { results, errors } = await this._runBulkWriteTransactionIfSupported(async () => {
+      const operations = ids.map((id) => async () => {
+        return await this.delete(id);
+      });
 
-    const { results, errors } = await this._executeBatchHelper(operations, {
-      onItemError: (error, index) => {
-        this.resource.emit('error', error, ids[index]);
-        this.observers.map((x) => x.emit('error', this.name, error, ids[index]));
-      }
+      return await this._executeBatchHelper(operations, {
+        onItemError: (error, index) => {
+          this.resource.emit('error', error, ids[index]);
+          this.observers.map((x) => x.emit('error', this.name, error, ids[index]));
+        }
+      });
     });
 
     this.resource._emitStandardized('deleted-many', ids.length);
@@ -1011,11 +1107,27 @@ export class ResourcePersistence {
       if (okParse) finalContentType = 'application/json';
     }
 
-    const [ok, err] = await tryFn(() => this.client.putObject({
-      key,
-      body: finalBody,
-      contentType: finalContentType,
-      metadata: finalMetadata,
+    const useAtomicPartitionWrite = this._shouldUseAtomicPartitionWriteTransaction();
+    let updatedData = useAtomicPartitionWrite
+      ? await this.resource.composeFullObjectFromWrite({
+        id,
+        metadata: finalMetadata,
+        body: finalBody,
+        behavior: this.behavior
+      })
+      : null;
+
+    const [ok, err] = await tryFn(() => this._runAtomicPartitionWriteIfSupported(async () => {
+      await this.client.putObject({
+        key,
+        body: finalBody,
+        contentType: finalContentType,
+        metadata: finalMetadata,
+      });
+
+      if (useAtomicPartitionWrite && updatedData) {
+        await this.resource.handlePartitionReferenceUpdates(originalData, updatedData);
+      }
     }));
 
     if (!ok && err && (err as Error).message && (err as Error).message.includes('metadata headers exceed')) {
@@ -1068,14 +1180,33 @@ export class ResourcePersistence {
       }
     }
 
-    const updatedData = await this.resource.composeFullObjectFromWrite({
-      id,
-      metadata: finalMetadata,
-      body: finalBody,
-      behavior: this.behavior
-    });
+    if (!updatedData) {
+      updatedData = await this.resource.composeFullObjectFromWrite({
+        id,
+        metadata: finalMetadata,
+        body: finalBody,
+        behavior: this.behavior
+      });
+    }
 
-    if (this.config.partitions && Object.keys(this.config.partitions).length > 0) {
+    if (this._hasConfiguredPartitions()) {
+      if (useAtomicPartitionWrite) {
+        const nonPartitionHooks = this.hooks.afterUpdate.filter(hook =>
+          !hook.toString().includes('handlePartitionReferenceUpdates')
+        );
+        let finalResult = updatedData;
+        for (const hook of nonPartitionHooks) {
+          finalResult = await hook(finalResult);
+        }
+
+        this.resource._emitStandardized('updated', {
+          ...updatedData,
+          $before: { ...originalData },
+          $after: { ...finalResult }
+        }, updatedData.id);
+        return finalResult;
+      }
+
       if (this.config.strictPartitions) {
         await this.resource.handlePartitionReferenceUpdates(originalData, updatedData);
       } else if (this.config.asyncPartitions) {
@@ -1246,14 +1377,23 @@ export class ResourcePersistence {
     const newMetadata = await this.schema.mapper(mergedData);
     newMetadata._v = String(this.version);
 
-    await this.client.copyObject({
-      from: key,
-      to: key,
-      metadataDirective: 'REPLACE',
-      metadata: newMetadata
+    const useAtomicPartitionWrite = this._shouldUseAtomicPartitionWriteTransaction();
+    await this._runAtomicPartitionWriteIfSupported(async () => {
+      await this.client.copyObject({
+        from: key,
+        to: key,
+        metadataDirective: 'REPLACE',
+        metadata: newMetadata
+      });
+
+      if (useAtomicPartitionWrite && this._hasConfiguredPartitions()) {
+        const oldData = { ...currentData, id };
+        const newData = { ...mergedData, id };
+        await this.resource.handlePartitionReferenceUpdates(oldData, newData);
+      }
     });
 
-    if (this.config.partitions && Object.keys(this.config.partitions).length > 0) {
+    if (this._hasConfiguredPartitions() && !useAtomicPartitionWrite) {
       const oldData = { ...currentData, id };
       const newData = { ...mergedData, id };
 
@@ -1361,11 +1501,19 @@ export class ResourcePersistence {
       });
     }
 
-    const [okPut, errPut] = await tryFn(() => this.client.putObject({
-      key,
-      body,
-      contentType,
-      metadata: finalMetadata,
+    const replacedObject: ResourceData = { id, ...validatedAttributes };
+    const useAtomicPartitionWrite = this._shouldUseAtomicPartitionWriteTransaction();
+    const [okPut, errPut] = await tryFn(() => this._runAtomicPartitionWriteIfSupported(async () => {
+      await this.client.putObject({
+        key,
+        body,
+        contentType,
+        metadata: finalMetadata,
+      });
+
+      if (useAtomicPartitionWrite && this._hasConfiguredPartitions()) {
+        await this.resource.handlePartitionReferenceUpdates({}, replacedObject);
+      }
     }));
 
     if (!okPut) {
@@ -1390,9 +1538,7 @@ export class ResourcePersistence {
       });
     }
 
-    const replacedObject: ResourceData = { id, ...validatedAttributes };
-
-    if (this.config.partitions && Object.keys(this.config.partitions).length > 0) {
+    if (this._hasConfiguredPartitions() && !useAtomicPartitionWrite) {
       if (this.config.strictPartitions) {
         await this.resource.handlePartitionReferenceUpdates({}, replacedObject);
       } else if (this.config.asyncPartitions) {
@@ -1533,12 +1679,32 @@ export class ResourcePersistence {
       if (okParse) finalContentType = 'application/json';
     }
 
-    const [ok, err, response] = await tryFn<{ ETag?: string }>(() => this.client.putObject({
-      key,
-      body: finalBody,
-      contentType: finalContentType,
-      metadata: processedMetadata,
-      ifMatch
+    const oldData = { ...originalData, id };
+    const newData = { ...validatedAttributes, id };
+    const useAtomicPartitionWrite = this._shouldUseAtomicPartitionWriteTransaction();
+    let updatedData = useAtomicPartitionWrite
+      ? await this.resource.composeFullObjectFromWrite({
+        id,
+        metadata: processedMetadata,
+        body: finalBody,
+        behavior: this.behavior
+      })
+      : null;
+
+    const [ok, err, response] = await tryFn<{ ETag?: string }>(() => this._runAtomicPartitionWriteIfSupported(async () => {
+      const response = await this.client.putObject({
+        key,
+        body: finalBody,
+        contentType: finalContentType,
+        metadata: processedMetadata,
+        ifMatch
+      });
+
+      if (useAtomicPartitionWrite && updatedData) {
+        await this.resource.handlePartitionReferenceUpdates(oldData, newData);
+      }
+
+      return response;
     }));
 
     if (!ok) {
@@ -1568,17 +1734,38 @@ export class ResourcePersistence {
       }
     }
 
-    const updatedData = await this.resource.composeFullObjectFromWrite({
-      id,
-      metadata: processedMetadata,
-      body: finalBody,
-      behavior: this.behavior
-    });
+    if (!updatedData) {
+      updatedData = await this.resource.composeFullObjectFromWrite({
+        id,
+        metadata: processedMetadata,
+        body: finalBody,
+        behavior: this.behavior
+      });
+    }
 
-    const oldData = { ...originalData, id };
-    const newData = { ...validatedAttributes, id };
+    if (this._hasConfiguredPartitions()) {
+      if (useAtomicPartitionWrite) {
+        const nonPartitionHooks = this.hooks.afterUpdate.filter(hook =>
+          !hook.toString().includes('handlePartitionReferenceUpdates')
+        );
+        let finalResult = updatedData;
+        for (const hook of nonPartitionHooks) {
+          finalResult = await hook(finalResult);
+        }
 
-    if (this.config.partitions && Object.keys(this.config.partitions).length > 0) {
+        this.resource._emitStandardized('updated', {
+          ...updatedData,
+          $before: { ...originalData },
+          $after: { ...finalResult }
+        }, updatedData.id);
+
+        return {
+          success: true,
+          data: finalResult,
+          etag: response?.ETag
+        };
+      }
+
       if (this.config.strictPartitions) {
         await this.resource.handlePartitionReferenceUpdates(oldData, newData);
       } else if (this.config.asyncPartitions) {

@@ -317,6 +317,22 @@ export interface GetKeysPageParams {
   amount?: number;
 }
 
+export interface FilteredObjectsPageFilter {
+  metadataPath: string;
+  metadataValue: string;
+  mappedBodyPath?: string | null;
+  mappedBodyValue?: string | null;
+  rawBodyPath?: string | null;
+  rawBodyValue?: string | null;
+}
+
+export interface GetFilteredObjectsPageParams {
+  prefix: string;
+  offset?: number;
+  amount?: number;
+  filters?: FilteredObjectsPageFilter[];
+}
+
 export interface S3Object {
   Body?: Readable & {
     transformToString?: (encoding?: string) => Promise<string>;
@@ -584,6 +600,9 @@ export interface Client extends EventEmitter {
   id: string;
   config: ClientConfig;
   connectionString: string;
+  supportsPartitionIndex?: boolean;
+  runInTransaction?<T>(fn: () => Promise<T> | T): Promise<T>;
+  isInTransaction?(): boolean;
 
   putObject(params: PutObjectParams): Promise<PutObjectResponse>;
   getObject(key: string): Promise<S3Object>;
@@ -594,6 +613,7 @@ export interface Client extends EventEmitter {
   deleteObjects(keys: string[]): Promise<DeleteObjectsResponse>;
   listObjects(params?: ListObjectsParams): Promise<ListObjectsResponse>;
   getKeysPage(params?: GetKeysPageParams): Promise<string[]>;
+  getFilteredObjectsPage?(params: GetFilteredObjectsPageParams): Promise<Array<{ key: string; object: S3Object }>>;
   getAllKeys(params?: { prefix?: string }): Promise<string[]>;
   count(params?: { prefix?: string }): Promise<number>;
   deleteAll(params?: { prefix?: string }): Promise<number>;

@@ -305,6 +305,113 @@ describeIfSqlite('SqliteClient', () => {
     expect(remaining).toBe(0);
   });
 
+  test('materializes partition references in partition_index while preserving partition reads', async () => {
+    const client = register(createInMemorySqliteClient());
+    const partitionKey = 'resource=users/partition=byStatus/status=active/id=u1';
+    const prefix = 'resource=users/partition=byStatus/status=active';
+
+    await client.putObject({
+      key: partitionKey,
+      body: '',
+      metadata: { _v: '1' }
+    });
+
+    const objectsCount = (client as any).db
+      .prepare('SELECT COUNT(*) AS total FROM objects WHERE bucket = ? AND key = ?')
+      .get(client.bucket, partitionKey) as { total: number };
+    const partitionIndexCount = (client as any).db
+      .prepare('SELECT COUNT(*) AS total FROM partition_index WHERE bucket = ? AND key = ?')
+      .get(client.bucket, partitionKey) as { total: number };
+
+    expect(objectsCount.total).toBe(0);
+    expect(partitionIndexCount.total).toBe(1);
+
+    const head = await client.headObject(partitionKey);
+    const object = await client.getObject(partitionKey);
+    const listed = await client.listObjects({ prefix });
+    const keys = await client.getAllKeys({ prefix });
+    const total = await client.count({ prefix });
+
+    expect(head.Metadata).toEqual({ _v: '1' });
+    expect(await readBody(object.Body)).toBe('');
+    expect(listed.Contents.map((item) => item.Key)).toEqual([partitionKey]);
+    expect(keys).toEqual([partitionKey]);
+    expect(total).toBe(1);
+  });
+
+  test('deduplicates legacy partition objects and deletes both storage paths', async () => {
+    const client = register(createInMemorySqliteClient());
+    const prefix = 'resource=users/partition=byStatus/status=active';
+    const keyA = `${prefix}/id=u1`;
+    const keyB = `${prefix}/id=u2`;
+    const now = new Date().toISOString();
+
+    await client.putObject({
+      key: keyA,
+      body: '',
+      metadata: { _v: '1' }
+    });
+
+    const insertLegacy = (client as any).db.prepare(`
+      INSERT INTO objects (
+        bucket, key, metadata, content_type, content_encoding, content_length, etag, last_modified, body
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(bucket, key) DO UPDATE SET
+        metadata = excluded.metadata,
+        content_type = excluded.content_type,
+        content_encoding = excluded.content_encoding,
+        content_length = excluded.content_length,
+        etag = excluded.etag,
+        last_modified = excluded.last_modified,
+        body = excluded.body
+    `);
+
+    insertLegacy.run(
+      client.bucket,
+      keyA,
+      JSON.stringify({ source: 'legacy-duplicate' }),
+      'application/octet-stream',
+      null,
+      0,
+      'legacy-a',
+      now,
+      Buffer.alloc(0)
+    );
+    insertLegacy.run(
+      client.bucket,
+      keyB,
+      JSON.stringify({ source: 'legacy-only' }),
+      'application/octet-stream',
+      null,
+      0,
+      'legacy-b',
+      now,
+      Buffer.alloc(0)
+    );
+
+    const head = await client.headObject(keyA);
+    const keys = await client.getAllKeys({ prefix });
+    const total = await client.count({ prefix });
+
+    expect(head.Metadata).toEqual({ _v: '1' });
+    expect(keys).toEqual([keyA, keyB]);
+    expect(total).toBe(2);
+
+    const deleted = await client.deleteAll({ prefix });
+    expect(deleted).toBe(2);
+    await expect(client.count({ prefix })).resolves.toBe(0);
+
+    const remainingObjects = (client as any).db
+      .prepare('SELECT COUNT(*) AS total FROM objects WHERE bucket = ? AND key >= ? AND key < ?')
+      .get(client.bucket, prefix, `${prefix}\uffff`) as { total: number };
+    const remainingPartitionIndex = (client as any).db
+      .prepare('SELECT COUNT(*) AS total FROM partition_index WHERE bucket = ? AND key >= ? AND key < ?')
+      .get(client.bucket, prefix, `${prefix}\uffff`) as { total: number };
+
+    expect(remainingObjects.total).toBe(0);
+    expect(remainingPartitionIndex.total).toBe(0);
+  });
+
   test('copy supports metadata merge and metadata replacement', async () => {
     const client = register(createInMemorySqliteClient());
 
@@ -343,6 +450,33 @@ describeIfSqlite('SqliteClient', () => {
     expect(await readBody(replacement.Body)).toBe('source-body');
     expect(replacement.ContentType).toBe('application/json');
     expect(replacement.Metadata).toEqual({ destonly: 'replace' });
+  });
+
+  test('supports self-copy metadata replacement without changing body', async () => {
+    const client = register(createInMemorySqliteClient());
+
+    await client.putObject({
+      key: 'same-key',
+      body: 'source-body',
+      contentType: 'text/plain',
+      metadata: { version: '1' }
+    });
+
+    await client.copyObject({
+      from: 'same-key',
+      to: 'same-key',
+      metadata: { version: '2', mode: 'patched' },
+      metadataDirective: 'REPLACE',
+      contentType: 'application/json'
+    });
+
+    const updated = await client.getObject('same-key');
+    expect(await readBody(updated.Body)).toBe('source-body');
+    expect(updated.ContentType).toBe('application/json');
+    expect(updated.Metadata).toEqual({
+      version: '2',
+      mode: 'patched'
+    });
   });
 
   test('copyObject via sendCommand rejects cross-bucket sources', async () => {
@@ -478,6 +612,32 @@ describeIfSqlite('SqliteClient', () => {
       continuationToken: token
     });
     expect(pageAfter.Contents.map(x => x.Key)).toEqual(['alpha/d', 'alpha/e']);
+  });
+
+  test('uses range-scan SQL for prefix count and key pagination', async () => {
+    const client = register(createInMemorySqliteClient());
+
+    await Promise.all([
+      client.putObject({ key: 'logs/00', body: '00', contentType: 'text/plain' }),
+      client.putObject({ key: 'logs/01', body: '01', contentType: 'text/plain' }),
+      client.putObject({ key: 'logs/02', body: '02', contentType: 'text/plain' })
+    ]);
+
+    const prepareSpy = vi.spyOn((client as any).db, 'prepare');
+    prepareSpy.mockClear();
+
+    await client.count({ prefix: 'logs/' });
+    await client.getAllKeys({ prefix: 'logs/' });
+    await client.getKeysPage({ prefix: 'logs/', offset: 1, amount: 1 });
+    await client.getContinuationTokenAfterOffset({ prefix: 'logs/', offset: 1 });
+
+    const sqlCalls = prepareSpy.mock.calls.map(([sql]) => String(sql).replace(/\s+/g, ' ').trim());
+
+    expect(sqlCalls).toEqual(expect.arrayContaining([
+      expect.stringMatching(/SELECT COALESCE\(COUNT\(key\), 0\) AS total FROM objects WHERE bucket = \? AND key >= \? AND key < \?/),
+      expect.stringMatching(/SELECT key FROM objects WHERE bucket = \? AND key >= \? AND key < \? ORDER BY key ASC/),
+    ]));
+    expect(sqlCalls.some((sql) => /LIKE/i.test(sql))).toBe(false);
   });
 
   test('supports deleting missing keys and returns removed identifiers', async () => {
