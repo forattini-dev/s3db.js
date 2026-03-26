@@ -342,7 +342,7 @@ export class ApiServer {
 
     this.metrics = new MetricsCollector({
       enabled: this.options.metrics?.enabled !== false,
-      logLevel: this.options.metrics?.logLevel || this.options.logLevel,
+      logLevel: this.options.metrics?.logLevel ?? false,
       maxPathsTracked: this.options.metrics?.maxPathsTracked,
       resetInterval: this.options.metrics?.resetInterval,
       format: (this.options.metrics?.format || 'json') as 'json' | 'prometheus'

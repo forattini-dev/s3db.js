@@ -159,7 +159,7 @@ export class MetricsCollector {
     this.cronManager = getCronManager();
     this.resetJobName = null;
 
-    if (this.options.resetInterval > 0) {
+    if (this.options.enabled && this.options.resetInterval > 0) {
       this.resetJobName = `metrics-collector-reset-${Date.now()}`;
       this.cronManager.scheduleInterval(
         this.options.resetInterval,
