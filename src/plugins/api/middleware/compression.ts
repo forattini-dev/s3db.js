@@ -8,7 +8,8 @@ export interface CompressionConfig {
 const skipContentTypes = [
   'image/', 'video/', 'audio/',
   'application/zip', 'application/gzip',
-  'application/x-gzip', 'application/x-bzip2'
+  'application/x-gzip', 'application/x-bzip2',
+  'text/event-stream'
 ];
 
 const cacheControlNoTransformRegExp = /(?:^|,)\s*?no-transform\s*?(?:,|$)/i;
@@ -26,6 +27,10 @@ export async function createCompressionMiddleware(
     await next();
 
     if (!c.res || !c.res.body) {
+      return;
+    }
+
+    if (c.res.body.locked) {
       return;
     }
 
