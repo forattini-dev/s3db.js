@@ -38,6 +38,23 @@ export interface S3Client {
       rawBodyValue?: string | null;
     }>;
   }): Promise<BulkGetObjectResponse[]>;
+  getFilteredObjectsWindow?(params: {
+    prefix: string;
+    maxKeys: number;
+    continuationToken?: string | null;
+    filters?: Array<{
+      metadataPath: string;
+      metadataValue: string;
+      mappedBodyPath?: string | null;
+      mappedBodyValue?: string | null;
+      rawBodyPath?: string | null;
+      rawBodyValue?: string | null;
+    }>;
+  }): Promise<{
+    Contents: BulkGetObjectResponse[];
+    IsTruncated: boolean;
+    NextContinuationToken?: string | null;
+  }>;
   listObjects(params: { prefix: string; maxKeys: number; continuationToken?: string | null }): Promise<{
     Contents?: Array<{ Key: string }>;
     IsTruncated?: boolean;
@@ -1156,6 +1173,43 @@ export class ResourceQuery {
   }
 
   async getAll(): Promise<ResourceData[]> {
+    if (this.client.getFilteredObjectsWindow) {
+      const results: ResourceData[] = [];
+      const prefix = `resource=${this.resource.name}/data`;
+      let continuationToken: string | null = null;
+      const windowSize = 1000;
+
+      while (true) {
+        const window = await this.client.getFilteredObjectsWindow({
+          prefix,
+          maxKeys: windowSize,
+          continuationToken,
+          filters: []
+        });
+        const objectMap = new Map<string, ClientObjectResponse>();
+
+        for (const entry of window.Contents ?? []) {
+          objectMap.set(entry.key, entry.object);
+        }
+
+        const ids = this.extractIdsFromKeys((window.Contents ?? []).map((entry) => entry.key));
+        if (ids.length === 0) {
+          break;
+        }
+
+        const batchResults = await this._hydratePrefetchedResults(ids, 'getAll-prefetched-window', objectMap);
+        results.push(...batchResults);
+
+        if (!window.IsTruncated || !window.NextContinuationToken) {
+          break;
+        }
+
+        continuationToken = window.NextContinuationToken;
+      }
+
+      return results;
+    }
+
     if (this.client.getFilteredObjectsPage) {
       const results: ResourceData[] = [];
       let offset = 0;
@@ -1267,6 +1321,44 @@ export class ResourceQuery {
       }
 
       continuationToken = decoded.token;
+    }
+
+    if (this.client.getFilteredObjectsWindow) {
+      const response = await this.client.getFilteredObjectsWindow({
+        prefix,
+        maxKeys: size,
+        continuationToken,
+        filters: []
+      });
+      const objectMap = new Map<string, ClientObjectResponse>();
+
+      for (const entry of response.Contents ?? []) {
+        objectMap.set(entry.key, entry.object);
+      }
+
+      const ids = this.extractIdsFromKeys((response.Contents ?? []).map((entry) => entry.key));
+      const items = partition && partitionDef
+        ? await this._hydratePrefetchedResults(ids, 'cursor-prefetched-partition', objectMap, async (data) => {
+            data._partition = partition;
+            data._partitionValues = this._extractPartitionValuesFromData(data, partitionDef);
+            return data;
+          })
+        : await this._hydratePrefetchedResults(ids, 'cursor-prefetched', objectMap);
+
+      const nextToken = response.IsTruncated ? (response.NextContinuationToken ?? null) : null;
+      const nextCursor = nextToken
+        ? encodeCursorPayload({
+            v: 1,
+            prefix,
+            token: nextToken,
+            pageSize: size
+          })
+        : null;
+
+      return {
+        items,
+        nextCursor
+      };
     }
 
     const response = await this.client.listObjects({

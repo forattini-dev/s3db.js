@@ -111,6 +111,7 @@ describeIfSqlite('Resource SQLite bulk reads', () => {
       message: `log-${index + 1}`
     })));
 
+    const windowSpy = vi.spyOn(resource.client as any, 'getFilteredObjectsWindow');
     const filteredPageSpy = vi.spyOn(resource.client as any, 'getFilteredObjectsPage');
     const bulkSpy = vi.spyOn(resource.client as any, 'getObjects');
     const getKeysPageSpy = vi.spyOn(resource.client as any, 'getKeysPage');
@@ -121,7 +122,8 @@ describeIfSqlite('Resource SQLite bulk reads', () => {
     expect(results).toHaveLength(120);
     expect(results[0]?.id).toBe('l001');
     expect(results.at(-1)?.id).toBe('l120');
-    expect(filteredPageSpy).toHaveBeenCalledTimes(1);
+    expect(windowSpy).toHaveBeenCalledTimes(1);
+    expect(filteredPageSpy).not.toHaveBeenCalled();
     expect(bulkSpy).not.toHaveBeenCalled();
     expect(getKeysPageSpy).not.toHaveBeenCalled();
     expect(singleSpy).not.toHaveBeenCalled();
@@ -377,6 +379,42 @@ describeIfSqlite('Resource SQLite bulk reads', () => {
     expect(continuationSpy).toHaveBeenCalledWith({
       prefix: 'resource=reports/data',
       offset: 9
+    });
+    expect(listObjectsSpy).not.toHaveBeenCalled();
+  });
+
+  it('uses sqlite object-window fetch for cursor pagination', async () => {
+    const database = await createSqliteDatabase('s3db-sqlite-cursor-prefetch');
+    const resource = await database.createResource({
+      name: 'sessions',
+      attributes: {
+        id: 'string|optional',
+        name: 'string|required'
+      },
+      behavior: 'user-managed'
+    });
+
+    await resource.insertMany(Array.from({ length: 12 }, (_value, index) => ({
+      id: `s${String(index + 1).padStart(2, '0')}`,
+      name: `Session ${index + 1}`
+    })));
+
+    const windowSpy = vi.spyOn(resource.client as any, 'getFilteredObjectsWindow');
+    const listObjectsSpy = vi.spyOn(resource.client as any, 'listObjects');
+
+    const page1 = await resource.page({ size: 5, cursor: null, skipCount: true });
+    const page2 = await resource.page({ size: 5, cursor: page1.nextCursor as string, skipCount: true });
+
+    expect(page1.items.map((item) => item.id)).toEqual(['s01', 's02', 's03', 's04', 's05']);
+    expect(page2.items.map((item) => item.id)).toEqual(['s06', 's07', 's08', 's09', 's10']);
+    expect(typeof page1.nextCursor).toBe('string');
+    expect(typeof page2.nextCursor).toBe('string');
+    expect(windowSpy).toHaveBeenCalledTimes(2);
+    expect(windowSpy).toHaveBeenNthCalledWith(1, {
+      prefix: 'resource=sessions/data',
+      maxKeys: 5,
+      continuationToken: null,
+      filters: []
     });
     expect(listObjectsSpy).not.toHaveBeenCalled();
   });

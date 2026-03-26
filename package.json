@@ -127,6 +127,8 @@
     "benchmark": "node benchmark-compression.js",
     "benchmark:memory:core": "node --expose-gc scripts/benchmark-memory-core.mjs",
     "benchmark:memory:core:assert": "node --expose-gc scripts/benchmark-memory-core.mjs --assert",
+    "benchmark:sqlite:resources": "tsx scripts/benchmark-sqlite-resource-paths.ts",
+    "benchmark:sqlite:resources:assert": "tsx scripts/benchmark-sqlite-resource-paths.ts --assert",
     "benchmark:partitions": "node docs/benchmarks/partitions-matrix.js",
     "release:check": "pnpm run build && pnpm run test:ts && pnpm run test:ts:runtime && pnpm run benchmark:memory:core:assert && node scripts/pack-smoke-check.js",
     "validate:types": "pnpm run test:ts && echo 'TypeScript definitions are valid!'",

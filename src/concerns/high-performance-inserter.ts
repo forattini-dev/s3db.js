@@ -59,6 +59,7 @@ interface ResourceLike {
     partitions?: Record<string, unknown>;
   };
   insert(data: Record<string, unknown>): Promise<Record<string, unknown>>;
+  insertMany?(items: Record<string, unknown>[]): Promise<Record<string, unknown>[]>;
   createPartitionReferences(data: Record<string, unknown>): Promise<void>;
   emit(event: string, data: Record<string, unknown>): void;
   generateId(): string;
@@ -150,20 +151,12 @@ export class HighPerformanceInserter {
     const startTime = Date.now();
 
     const [ok] = await tryFn(async () => {
-      const { results, errors } = await TasksPool.map(
-        batch,
-        async (item) => this.performInsert(item),
-        { concurrency: this.concurrency }
-      );
-
+      const { inserted, failed } = await this.performBatchInsert(batch);
       const duration = Date.now() - startTime;
-      this.stats.inserted += results.filter(r => r.success).length;
-      this.stats.failed += errors.length;
-      this.stats.avgInsertTime = duration / batch.length;
 
-      if (!this.disablePartitions && this.partitionQueue.length > 0) {
-        this.processPartitionsAsync();
-      }
+      this.stats.inserted += inserted;
+      this.stats.failed += failed;
+      this.stats.avgInsertTime = duration / Math.max(batch.length, 1);
     });
 
     this.isProcessing = false;
@@ -173,36 +166,59 @@ export class HighPerformanceInserter {
     }
   }
 
+  private async _withTemporaryPartitionConfig<T>(fn: () => Promise<T>): Promise<T> {
+    const originalAsyncPartitions = this.resource.config.asyncPartitions;
+    const originalPartitions = this.resource.config.partitions;
+
+    if (this.disablePartitions) {
+      this.resource.config.partitions = {};
+    }
+
+    try {
+      return await fn();
+    } finally {
+      this.resource.config.partitions = originalPartitions;
+      this.resource.config.asyncPartitions = originalAsyncPartitions;
+    }
+  }
+
+  private async performBatchInsert(batch: QueuedItem[]): Promise<{ inserted: number; failed: number }> {
+    if (typeof this.resource.insertMany === 'function') {
+      const insertedItems = await this._withTemporaryPartitionConfig(async () => {
+        return await this.resource.insertMany!(batch.map((item) => item.data));
+      });
+
+      return {
+        inserted: insertedItems.length,
+        failed: Math.max(0, batch.length - insertedItems.length)
+      };
+    }
+
+    const { results, errors } = await TasksPool.map(
+      batch,
+      async (item) => this.performInsert(item),
+      { concurrency: this.concurrency }
+    );
+
+    return {
+      inserted: results.filter((result) => result.success).length,
+      failed: errors.length
+    };
+  }
+
   async performInsert(item: QueuedItem): Promise<InsertResult> {
     const { data } = item;
 
     const [ok, error, result] = await tryFn<InsertResult>(async () => {
-      const originalAsyncPartitions = this.resource.config.asyncPartitions;
-      const originalPartitions = this.resource.config.partitions;
+      return await this._withTemporaryPartitionConfig(async () => {
+        const [insertOk, insertErr, insertResult] = await tryFn<Record<string, unknown>>(() => this.resource.insert(data));
 
-      if (this.disablePartitions) {
-        this.resource.config.partitions = {};
-      }
+        if (!insertOk || !insertResult) {
+          throw insertErr ?? new Error('Insert returned no result');
+        }
 
-      const [insertOk, insertErr, insertResult] = await tryFn<Record<string, unknown>>(() => this.resource.insert(data));
-
-      if (!insertOk || !insertResult) {
-        throw insertErr ?? new Error('Insert returned no result');
-      }
-
-      if (!this.disablePartitions && originalPartitions && Object.keys(originalPartitions).length > 0) {
-        this.partitionQueue.push({
-          operation: 'create',
-          data: insertResult,
-          partitions: originalPartitions
-        });
-        this.stats.partitionsPending++;
-      }
-
-      this.resource.config.partitions = originalPartitions;
-      this.resource.config.asyncPartitions = originalAsyncPartitions;
-
-      return { success: true as const, data: insertResult };
+        return { success: true as const, data: insertResult };
+      });
     });
 
     if (!ok || !result) {

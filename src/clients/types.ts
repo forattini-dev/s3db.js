@@ -333,6 +333,19 @@ export interface GetFilteredObjectsPageParams {
   filters?: FilteredObjectsPageFilter[];
 }
 
+export interface GetFilteredObjectsWindowParams {
+  prefix: string;
+  maxKeys: number;
+  continuationToken?: string | null;
+  filters?: FilteredObjectsPageFilter[];
+}
+
+export interface FilteredObjectsWindowResponse {
+  Contents: Array<{ key: string; object: S3Object }>;
+  IsTruncated: boolean;
+  NextContinuationToken?: string | null;
+}
+
 export interface S3Object {
   Body?: Readable & {
     transformToString?: (encoding?: string) => Promise<string>;
@@ -614,6 +627,7 @@ export interface Client extends EventEmitter {
   listObjects(params?: ListObjectsParams): Promise<ListObjectsResponse>;
   getKeysPage(params?: GetKeysPageParams): Promise<string[]>;
   getFilteredObjectsPage?(params: GetFilteredObjectsPageParams): Promise<Array<{ key: string; object: S3Object }>>;
+  getFilteredObjectsWindow?(params: GetFilteredObjectsWindowParams): Promise<FilteredObjectsWindowResponse>;
   getAllKeys(params?: { prefix?: string }): Promise<string[]>;
   count(params?: { prefix?: string }): Promise<number>;
   deleteAll(params?: { prefix?: string }): Promise<number>;

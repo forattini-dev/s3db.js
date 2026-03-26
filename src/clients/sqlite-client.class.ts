@@ -26,6 +26,8 @@ import type {
   ListObjectsParams,
   GetKeysPageParams,
   GetFilteredObjectsPageParams,
+  GetFilteredObjectsWindowParams,
+  FilteredObjectsWindowResponse,
   FilteredObjectsPageFilter,
   QueueStats,
   S3Object,
@@ -1320,6 +1322,40 @@ export class SqliteClient extends EventEmitter {
     return results;
   }
 
+  async getFilteredObjectsWindow(params: GetFilteredObjectsWindowParams): Promise<FilteredObjectsWindowResponse> {
+    const {
+      prefix,
+      maxKeys = 100,
+      continuationToken = null,
+      filters = []
+    } = params;
+    const fullPrefix = this._applyKeyPrefix(prefix || '');
+    const safeMaxKeys = Math.max(1, Math.trunc(maxKeys));
+    const queryLimit = safeMaxKeys + 1;
+    const startAfter = continuationToken
+      ? this._decodeContinuationToken(continuationToken)
+      : null;
+
+    const rows = this._prefixTargetsPartitionIndex(fullPrefix)
+      ? this._getFilteredPartitionObjectRowsAfter(fullPrefix, filters, queryLimit, startAfter)
+      : this._getFilteredDataRowsAfter(fullPrefix, filters, queryLimit, startAfter);
+
+    const hasMore = rows.length > safeMaxKeys;
+    const visibleRows = hasMore ? rows.slice(0, safeMaxKeys) : rows;
+    const lastVisibleRow = visibleRows.at(-1) || null;
+    const response: FilteredObjectsWindowResponse = {
+      Contents: visibleRows.map((row) => ({
+        key: this._stripKeyPrefix(row.key),
+        object: this._normalizeObject(row, false)
+      })),
+      IsTruncated: hasMore,
+      NextContinuationToken: hasMore && lastVisibleRow ? this._encodeContinuationToken(lastVisibleRow.key) : null
+    };
+
+    this.emit('cl:GetFilteredObjectsWindow', response, params);
+    return response;
+  }
+
   async getAllKeys(params: { prefix?: string } = {}): Promise<string[]> {
     const { prefix = '' } = params;
     const fullPrefix = this._applyKeyPrefix(prefix || '');
@@ -1907,6 +1943,33 @@ export class SqliteClient extends EventEmitter {
     ) as unknown as DbRow[];
   }
 
+  private _getFilteredDataRowsAfter(
+    fullPrefix: string,
+    filters: FilteredObjectsPageFilter[],
+    amount: number,
+    startAfter: string | null
+  ): DbRow[] {
+    const { start: rangeStart, end: rangeEnd } = this._getKeyRange(fullPrefix);
+    const { sql: filterSql, params: filterParams } = this._buildFilteredObjectClause('o', filters);
+    const afterSql = startAfter ? ' AND o.key > ?' : '';
+    const statement = this._prepareCached(`
+      SELECT o.key, o.metadata, o.content_type, o.content_encoding, o.content_length, o.etag, o.last_modified, o.body
+      FROM objects o
+      WHERE o.bucket = ? AND o.key >= ? AND o.key < ?${afterSql}${filterSql}
+      ORDER BY o.key ASC
+      LIMIT ?
+    `);
+
+    return statement.all(
+      this.bucket,
+      rangeStart,
+      rangeEnd,
+      ...(startAfter ? [startAfter] : []),
+      ...filterParams,
+      amount
+    ) as unknown as DbRow[];
+  }
+
   private _getFilteredPartitionObjectRows(
     fullPrefix: string,
     filters: FilteredObjectsPageFilter[],
@@ -1957,6 +2020,60 @@ export class SqliteClient extends EventEmitter {
       ...filterParams,
       amount,
       offset
+    ) as unknown as DbRow[];
+  }
+
+  private _getFilteredPartitionObjectRowsAfter(
+    fullPrefix: string,
+    filters: FilteredObjectsPageFilter[],
+    amount: number,
+    startAfter: string | null
+  ): DbRow[] {
+    const dataKeyPrefix = this._buildDataKeyPrefixFromPartitionPrefix(fullPrefix);
+    if (!dataKeyPrefix) {
+      return [];
+    }
+
+    const { start: rangeStart, end: rangeEnd } = this._getKeyRange(fullPrefix);
+    const { sql: filterSql, params: filterParams } = this._buildFilteredObjectClause('o', filters);
+    const afterSql = startAfter ? ' AND o.key > ?' : '';
+    const statement = this._prepareCached(`
+      WITH matched_record_ids AS (
+        SELECT record_id
+        FROM partition_index
+        WHERE bucket = ? AND key >= ? AND key < ?
+        UNION
+        SELECT substr(legacy.key, instr(legacy.key, '/id=') + 4) AS record_id
+        FROM objects legacy
+        WHERE legacy.bucket = ? AND legacy.key >= ? AND legacy.key < ?
+          AND instr(legacy.key, '/id=') > 0
+          AND NOT EXISTS (
+            SELECT 1
+            FROM partition_index p
+            WHERE p.bucket = legacy.bucket AND p.key = legacy.key
+          )
+      )
+      SELECT o.key, o.metadata, o.content_type, o.content_encoding, o.content_length, o.etag, o.last_modified, o.body
+      FROM matched_record_ids m
+      JOIN objects o
+        ON o.bucket = ? AND o.key = ? || m.record_id
+      WHERE 1 = 1${afterSql}${filterSql}
+      ORDER BY o.key ASC
+      LIMIT ?
+    `);
+
+    return statement.all(
+      this.bucket,
+      rangeStart,
+      rangeEnd,
+      this.bucket,
+      rangeStart,
+      rangeEnd,
+      this.bucket,
+      dataKeyPrefix,
+      ...(startAfter ? [startAfter] : []),
+      ...filterParams,
+      amount
     ) as unknown as DbRow[];
   }
 
