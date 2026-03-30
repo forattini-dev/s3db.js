@@ -223,6 +223,34 @@ export interface SqliteClientConfig {
   maxMemoryMB?: number;
 }
 
+export interface RemoteSqliteClientConfig {
+  id?: string;
+  logLevel?: string;
+  logger?: Logger;
+  taskExecutor?: TaskManager;
+  taskExecutorMonitoring?: MonitoringConfig | null;
+  concurrency?: number;
+  retries?: number;
+  retryDelay?: number;
+  timeout?: number;
+  retryableErrors?: string[];
+  bucket?: string;
+  keyPrefix?: string;
+  region?: string;
+  endpoint: string;
+  connectionString?: string;
+  sqliteDriver: 'libsql' | 'd1';
+  enforceLimits?: boolean;
+  metadataLimit?: number;
+  maxObjectSize?: number;
+  authToken?: string;
+  apiToken?: string;
+  executor?: {
+    execute(sql: string, args?: unknown[]): Promise<{ rows: Array<Record<string, unknown>> }>;
+    close?(): Promise<void> | void;
+  };
+}
+
 export interface CompressionConfig {
   enabled?: boolean;
   threshold?: number;

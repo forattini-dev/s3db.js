@@ -382,3 +382,34 @@ describe('ConnectionString Sqlite (sqlite://)', () => {
     expect(conn.endpoint).toBe('sqlite:///tmp/s3db.sqlite');
   });
 });
+
+describe('ConnectionString Remote Sqlite', () => {
+  test('sqlite+libsql:// parses remote libsql endpoints', () => {
+    const conn = new ConnectionString('sqlite+libsql://db-org.turso.io?authToken=token-123');
+    expect(conn.clientType).toBe('sqlite-remote');
+    expect(conn.sqliteDriver).toBe('libsql');
+    expect(conn.endpoint).toBe('sqlite+libsql://db-org.turso.io');
+    expect(conn.clientOptions.authToken).toBe('token-123');
+    expect(conn.bucket).toBe('s3db');
+    expect(conn.keyPrefix).toBe('');
+  });
+
+  test('sqlite+d1:// parses Cloudflare D1 account and database identifiers', () => {
+    const conn = new ConnectionString('sqlite+d1://account-123/database-456?apiToken=secret');
+    expect(conn.clientType).toBe('sqlite-remote');
+    expect(conn.sqliteDriver).toBe('d1');
+    expect(conn.endpoint).toBe('sqlite+d1://account-123/database-456');
+    expect(conn.clientOptions.apiToken).toBe('secret');
+  });
+
+  test('sqlite+d1://binding parses worker binding endpoints', () => {
+    const conn = new ConnectionString('sqlite+d1://binding/DB');
+    expect(conn.clientType).toBe('sqlite-remote');
+    expect(conn.sqliteDriver).toBe('d1');
+    expect(conn.endpoint).toBe('sqlite+d1://binding/DB');
+  });
+
+  test('sqlite+d1:// requires account and database identifiers when not using bindings', () => {
+    expect(() => new ConnectionString('sqlite+d1://account-only')).toThrow(/requires accountId and databaseId/);
+  });
+});

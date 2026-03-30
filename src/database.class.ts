@@ -361,6 +361,20 @@ export class Database extends SafeEventEmitter {
             }, mergedClientOptions as any) as any);
             return new SqliteClient(sqliteOptions) as unknown as Client;
           };
+        } else if (url.protocol === 'sqlite+libsql:' || url.protocol === 'sqlite+d1:') {
+          this._clientFactory = async () => {
+            const { RemoteSqliteClient } = await import('./clients/remote-sqlite-client.class.js');
+            const sqliteRemoteOptions = this._applyTaskExecutorMonitoring(this._deepMerge({
+              bucket: (connStr as any)?.bucket,
+              keyPrefix: (connStr as any)?.keyPrefix,
+              logLevel: this.logger.level,
+              region: (connStr as any)?.region,
+              endpoint: (connStr as any)?.endpoint,
+              connectionString,
+              sqliteDriver: (connStr as any)?.sqliteDriver,
+            }, mergedClientOptions as any) as any);
+            return new RemoteSqliteClient(sqliteRemoteOptions) as unknown as Client;
+          };
         } else {
           this._clientFactory = async () => {
             const { S3Client } = await import('./clients/s3-client.class.js');

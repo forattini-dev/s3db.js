@@ -662,6 +662,34 @@ const db = new S3db({ client });
 await db.connect();
 ```
 
+### 🌐 Remote SQLite - Turso and Cloudflare D1
+
+For remote SQLite-compatible backends, use the explicit remote connection string schemes:
+
+```javascript
+import { Database } from 's3db.js';
+
+const tursoDb = new Database({
+  connectionString: 'sqlite+libsql://my-db-my-org.turso.io?authToken=YOUR_TOKEN'
+});
+
+const d1Db = new Database({
+  connectionString: 'sqlite+d1://ACCOUNT_ID/DATABASE_ID?apiToken=YOUR_TOKEN'
+});
+```
+
+Notes:
+- `sqlite://` remains local-only.
+- `sqlite+libsql://` uses the remote SQLite client over libsql/Turso.
+- `sqlite+d1://` uses the remote SQLite client over the Cloudflare D1 HTTP API.
+- `@libsql/client` is optional and only required when you use `sqlite+libsql://`.
+
+Install the optional Turso dependency in your app:
+
+```bash
+pnpm add @libsql/client
+```
+
 📚 [**Full SqliteClient Documentation**](./docs/clients/sqlite-client.md)
 
 ---

@@ -704,6 +704,33 @@ await db.connect();
 `SqliteClient` is still an object-storage backend. Resource schema evolution is handled by
 s3db metadata, not by one SQLite table per resource.
 
+### 🌐 Remote SQLite - Turso and Cloudflare D1
+
+Use the remote SQLite connection string schemes when the storage engine is not a local file:
+
+```javascript
+import { Database } from 's3db.js';
+
+const tursoDb = new Database({
+  connectionString: 'sqlite+libsql://my-db-my-org.turso.io?authToken=YOUR_TOKEN'
+});
+
+const d1Db = new Database({
+  connectionString: 'sqlite+d1://ACCOUNT_ID/DATABASE_ID?apiToken=YOUR_TOKEN'
+});
+```
+
+Notes:
+- `sqlite://` is still local-only.
+- `sqlite+libsql://` requires the optional `@libsql/client` dependency.
+- `sqlite+d1://binding/MY_DB` is reserved for Worker-style bindings and is not usable from plain Node.js yet.
+
+Install the optional Turso dependency in your application:
+
+```bash
+pnpm add @libsql/client
+```
+
 📚 [**Full SqliteClient Documentation**](./clients/sqlite-client.md)
 
 ---

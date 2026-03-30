@@ -5,9 +5,13 @@
 It gives you durable local persistence with the same object-storage interface used by
 `S3Client`, `MemoryClient`, and `FilesystemClient`, but without external infrastructure.
 
+For remote SQLite backends such as Turso/libsql and Cloudflare D1, s3db.js also supports
+remote connection strings through `RemoteSqliteClient`.
+
 ## TLDR
 
 - Use it for local development, CI, migration drills, and single-process services that need persistence.
+- Use `sqlite+libsql://` or `sqlite+d1://` when the SQLite engine is remote.
 - It is an object-store backend backed by SQLite, not a relational table-per-resource engine.
 - Resource schema changes are handled by s3db metadata and stable schema registries, not by `ALTER TABLE` for each resource.
 - It is optimized for local reads like `head`, `exists`, `list`, and metadata-heavy flows.
@@ -128,6 +132,48 @@ URI query parameters map directly to `SqliteClient` config:
 ```bash
 sqlite:///tmp/s3db.sqlite?enforceLimits=true&maxObjectSize=5242880&maxMemoryMB=256
 ```
+
+## Remote SQLite Connection Strings
+
+Remote SQLite uses explicit provider-qualified schemes so `sqlite://` can stay local-only.
+
+### Turso / libsql
+
+```bash
+sqlite+libsql://my-db-my-org.turso.io?authToken=YOUR_TOKEN
+```
+
+```javascript
+import { Database } from 's3db.js';
+
+const db = new Database({
+  connectionString: 'sqlite+libsql://my-db-my-org.turso.io?authToken=YOUR_TOKEN'
+});
+```
+
+`@libsql/client` is optional and must be installed by applications that use this scheme:
+
+```bash
+pnpm add @libsql/client
+```
+
+### Cloudflare D1
+
+```bash
+sqlite+d1://ACCOUNT_ID/DATABASE_ID?apiToken=YOUR_TOKEN
+```
+
+```javascript
+import { Database } from 's3db.js';
+
+const db = new Database({
+  connectionString: 'sqlite+d1://ACCOUNT_ID/DATABASE_ID?apiToken=YOUR_TOKEN'
+});
+```
+
+The Node.js path currently uses the Cloudflare D1 HTTP API. A Worker binding-shaped
+connection string such as `sqlite+d1://binding/DB` is parsed for future runtime support,
+but is not usable from plain Node.js yet.
 
 ## Configuration
 

@@ -5,7 +5,7 @@ import { ConnectionStringError } from './errors.js';
 export const S3_DEFAULT_REGION = 'us-east-1';
 export const S3_DEFAULT_ENDPOINT = 'https://s3.us-east-1.amazonaws.com';
 
-export type ClientType = 'filesystem' | 'memory' | 's3' | 'sqlite' | 'custom';
+export type ClientType = 'filesystem' | 'memory' | 's3' | 'sqlite' | 'sqlite-remote' | 'custom';
 
 export interface ClientOptions {
   [key: string]: unknown;
@@ -24,6 +24,7 @@ export class ConnectionString {
   forcePathStyle?: boolean;
   clientType?: ClientType;
   basePath?: string;
+  sqliteDriver?: 'libsql' | 'd1';
   clientOptions: ClientOptions;
 
   constructor(connectionString: string) {
@@ -50,6 +51,8 @@ export class ConnectionString {
     else if (uri.protocol === 'file:') this.defineFromFileUri(uri);
     else if (uri.protocol === 'memory:') this.defineFromMemoryUri(uri);
     else if (uri.protocol === 'sqlite:') this.defineFromSqliteUri(uri);
+    else if (uri.protocol === 'sqlite+libsql:') this.defineFromRemoteSqliteUri(uri, 'libsql');
+    else if (uri.protocol === 'sqlite+d1:') this.defineFromRemoteSqliteUri(uri, 'd1');
     else this.defineFromCustomUri(uri);
 
     // Parse querystring parameters (supports nested dot notation)
@@ -327,6 +330,43 @@ export class ConnectionString {
     this.keyPrefix = '';
     this.region = 'sqlite';
     this.endpoint = `sqlite:///${encodeURI(this.basePath).replace(/^\//, '')}`;
+  }
+
+  private defineFromRemoteSqliteUri(uri: URL, driver: 'libsql' | 'd1'): void {
+    this.clientType = 'sqlite-remote';
+    this.sqliteDriver = driver;
+    this.forcePathStyle = true;
+    this.accessKeyId = undefined;
+    this.secretAccessKey = undefined;
+    this.bucket = 's3db';
+    this.keyPrefix = '';
+    this.region = 'sqlite';
+    this.endpoint = `${uri.protocol}//${uri.host}${uri.pathname || ''}`;
+
+    if (driver === 'd1') {
+      const pathname = uri.pathname.replace(/^\/+/, '');
+      const segments = pathname ? pathname.split('/').filter(Boolean) : [];
+
+      if (uri.hostname === 'binding') {
+        const bindingName = segments[0];
+        if (!bindingName) {
+          throw new ConnectionStringError('sqlite+d1://binding requires a binding name', {
+            input: uri.href,
+            suggestion: 'Use sqlite+d1://binding/DB or sqlite+d1://<accountId>/<databaseId>.'
+          });
+        }
+        return;
+      }
+
+      const accountId = uri.hostname || '';
+      const databaseId = segments[0] || '';
+      if (!accountId || !databaseId) {
+        throw new ConnectionStringError('sqlite+d1:// connection string requires accountId and databaseId', {
+          input: uri.href,
+          suggestion: 'Use sqlite+d1://<accountId>/<databaseId>?apiToken=...'
+        });
+      }
+    }
   }
 }
 

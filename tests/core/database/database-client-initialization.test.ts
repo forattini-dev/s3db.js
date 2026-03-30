@@ -93,4 +93,32 @@ describe('Database Client Initialization', () => {
 
     await rm(tempDir, { force: true, recursive: true });
   });
+
+  it('parses sqlite+libsql:// connection strings without instantiating the client eagerly', () => {
+    const db = new Database({
+      connectionString: 'sqlite+libsql://db-org.turso.io?authToken=test-token',
+      logLevel: 'silent',
+      deferMetadataWrites: true
+    });
+    databases.push(db);
+
+    expect((db as unknown as { client?: unknown }).client).toBeUndefined();
+    expect(db.connectionString).toBe('sqlite+libsql://db-org.turso.io?authToken=test-token');
+    expect(db.bucket).toBe('s3db');
+    expect(db.keyPrefix).toBe('');
+  });
+
+  it('parses sqlite+d1:// connection strings without instantiating the client eagerly', () => {
+    const db = new Database({
+      connectionString: 'sqlite+d1://account-123/database-456?apiToken=test-token',
+      logLevel: 'silent',
+      deferMetadataWrites: true
+    });
+    databases.push(db);
+
+    expect((db as unknown as { client?: unknown }).client).toBeUndefined();
+    expect(db.connectionString).toBe('sqlite+d1://account-123/database-456?apiToken=test-token');
+    expect(db.bucket).toBe('s3db');
+    expect(db.keyPrefix).toBe('');
+  });
 });
