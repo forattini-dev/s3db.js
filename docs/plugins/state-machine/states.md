@@ -19,6 +19,7 @@ In this plugin, a state can define:
 - what happens on exit through `exit`
 - which guard protects a given event through `guards`
 - which automatic triggers run while the entity is in that state through `triggers`
+- auto-expiration after a duration through `ttl`
 - optional metadata through `meta`
 - state-level retry policy through `retryConfig`
 

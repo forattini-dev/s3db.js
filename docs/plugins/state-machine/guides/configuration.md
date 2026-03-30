@@ -76,6 +76,7 @@ new StateMachinePlugin({
   enableFunctionTriggers: true,
   enableEventTriggers: true,
   triggerCheckInterval: 1000,
+  ttlCheckInterval: 600000, // 10 minutes (persistent TTL polling)
   logLevel: 'info'
 });
 ```
@@ -213,8 +214,11 @@ Use schema-first binding to make intent explicit and easy to discover:
 When `true`, the plugin persists:
 - current entity state
 - transition history
+- TTL expiration data (`_ttlExpiresAt`, `_ttlEvent`) in the state record
 
-When `false`, state is in memory only.
+State TTL timers survive process restarts via periodic polling (controlled by `ttlCheckInterval`, default 10 minutes).
+
+When `false`, state is in memory only and TTL uses `setTimeout`.
 
 ### `transitionLogResource` and `stateResource`
 

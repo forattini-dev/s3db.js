@@ -151,6 +151,7 @@ This plugin is powerful because it combines workflow modeling with runtime behav
 | Actions | Entry and exit side effects | [Actions](/plugins/state-machine/actions.md) |
 | Guards | Business-rule validation before transitions | [Guards](/plugins/state-machine/guards.md) |
 | Triggers | Automatic event-driven and time-driven workflow movement | [Triggers](/plugins/state-machine/triggers.md) |
+| State TTL | Auto-expire states after a duration; persistent across restarts | [State Machine](/plugins/state-machine.md#state-ttl) |
 | Retries | Resilience for unstable action side effects | [Retries](/plugins/state-machine/retries.md) |
 | Resource API | `resource.state.*` helpers for attached resources | [API Reference](/plugins/state-machine/guides/api-reference.md) |
 | Persistence | Current state recovery and transition history | [Runtime Behavior](/plugins/state-machine/guides/runtime-behavior.md) |

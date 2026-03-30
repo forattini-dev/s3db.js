@@ -407,6 +407,27 @@ Supported duration formats: `"100ms"`, `"30s"`, `"5m"`, `"2h"`, `"1d"`, or raw m
 
 If the entity leaves the state before the TTL fires, the timer is cancelled automatically.
 
+### Persistent TTL
+
+When `persistTransitions: true`, TTL data is embedded in the state record (`_ttlExpiresAt`, `_ttlEvent`) at zero extra S3 cost. A periodic poller checks for expired entries instead of using `setTimeout`. This means TTL timers **survive process restarts**.
+
+```javascript
+new StateMachinePlugin({
+  persistTransitions: true,
+  ttlCheckInterval: 600000,  // poll every 10 minutes (default)
+  stateMachines: { /* ... */ }
+});
+```
+
+On startup, the plugin recovers pending TTLs by querying entities in TTL-enabled states.
+
+| Mode | Mechanism | Survives restart | Precision |
+|------|-----------|-----------------|-----------|
+| `persistTransitions: false` | `setTimeout` (in-memory) | No | Exact (ms) |
+| `persistTransitions: true` | Polling + state record | Yes | Up to `ttlCheckInterval` delay |
+
+For TTLs shorter than `ttlCheckInterval`, reduce the interval accordingly. TTL is ignored on `final` states.
+
 ---
 
 ## Triggers
@@ -988,6 +1009,7 @@ Both methods throw a `[state-machine contract]` error with a `details` object co
 | `enableFunctionTriggers` | `boolean` | `true` | Enable function-based triggers |
 | `enableEventTriggers` | `boolean` | `true` | Enable event-based triggers |
 | `triggerCheckInterval` | `number` | `60000` | Polling interval for date/function triggers (ms) |
+| `ttlCheckInterval` | `number` | `600000` | Polling interval for persistent TTL checks (ms, default 10min) |
 | `resourceNames` | `{ transitionLog?, states? }` | auto | Override internal resource names |
 | `logLevel` | `string` | `undefined` | Plugin log level |
 
