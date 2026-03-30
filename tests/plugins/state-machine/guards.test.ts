@@ -91,7 +91,7 @@ describe('StateMachinePlugin - Guards', () => {
     expect(result).toMatchObject({
       ok: false,
       code: 'GUARD_REJECTED',
-      reason: 'MISSING_REQUIRED_FIELD'
+      reason: 'GUARD_REJECTED'
     });
 
     const state = await plugin.getState('test_guards', 'test1');

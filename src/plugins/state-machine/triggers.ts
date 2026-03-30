@@ -1,28 +1,9 @@
-import type { StateMachineConfig, MachineData, StateRecord, TriggerConfig, EntityInState, SchedulerJob, TriggerListenerRef, Lock, PluginStorage, Resource } from './types.js';
+import type { StateMachinePluginContext, StateRecord, TriggerConfig, EntityInState, SchedulerJob, TriggerListenerRef, Lock, Resource } from './types.js';
 import { StateMachineError } from '../state-machine.errors.js';
 import tryFn from '../../concerns/try-fn.js';
 import { getCronManager } from '../../concerns/cron-manager.js';
 
-export interface TriggersPluginContext {
-  config: StateMachineConfig;
-  machines: Map<string, MachineData>;
-  database: any;
-  logger: any;
-  logLevel: string;
-  triggerJobNames: string[];
-  schedulerPlugin: any;
-  _pendingEventHandlers: Set<Promise<void>>;
-  _triggerListeners: TriggerListenerRef[];
-  getStorage(): PluginStorage;
-  emit(event: string, data: unknown): void;
-  send(machineId: string, entityId: string, event: string, context: Record<string, unknown>): Promise<any>;
-  transitionToTargetState(machineId: string, entityId: string, targetState: string, event: string, context: Record<string, unknown>): Promise<any>;
-  executeAction(actionName: string, context: Record<string, unknown>, event: string, machineId: string, entityId: string): Promise<unknown>;
-  wrapEventHandler(handler: (...args: unknown[]) => unknown): (...args: unknown[]) => void;
-  getStateResource(): any | null;
-}
-
-export async function getEntitiesInState(plugin: TriggersPluginContext, machineId: string, stateName: string): Promise<EntityInState[]> {
+export async function getEntitiesInState(plugin: StateMachinePluginContext, machineId: string, stateName: string): Promise<EntityInState[]> {
   if (!plugin.config.persistTransitions) {
     const machine = plugin.machines.get(machineId);
     if (!machine) return [];
@@ -64,7 +45,7 @@ export async function getEntitiesInState(plugin: TriggersPluginContext, machineI
 }
 
 export async function executeTriggerForEntity(
-  plugin: TriggersPluginContext,
+  plugin: StateMachinePluginContext,
   machineId: string,
   stateName: string,
   entity: EntityInState,
@@ -138,7 +119,7 @@ export async function executeTriggerForEntity(
   return true;
 }
 
-export async function incrementTriggerCount(plugin: TriggersPluginContext, machineId: string, entityId: string, triggerName: string): Promise<void> {
+export async function incrementTriggerCount(plugin: StateMachinePluginContext, machineId: string, entityId: string, triggerName: string): Promise<void> {
   if (!plugin.config.persistTransitions) {
     return;
   }
@@ -152,7 +133,7 @@ export async function incrementTriggerCount(plugin: TriggersPluginContext, machi
 
   let lock: Lock | null = null;
   try {
-    const storage = plugin.getStorage() as PluginStorage;
+    const storage = plugin.getStorage();
     lock = await storage.acquireLock(`trigger-count-${stateId}`, {
       ttl: plugin.config.lockTTL,
       timeout: plugin.config.lockTimeout,
@@ -173,7 +154,7 @@ export async function incrementTriggerCount(plugin: TriggersPluginContext, machi
     }
   } finally {
     if (lock) {
-      const storage = plugin.getStorage() as PluginStorage;
+      const storage = plugin.getStorage();
       const [ok, err] = await tryFn(() => storage.releaseLock(lock!));
 
       if (!ok) {
@@ -183,7 +164,7 @@ export async function incrementTriggerCount(plugin: TriggersPluginContext, machi
   }
 }
 
-export async function setupTriggers(plugin: TriggersPluginContext): Promise<void> {
+export async function setupTriggers(plugin: StateMachinePluginContext): Promise<void> {
   if (!plugin.config.enableScheduler && !plugin.config.enableDateTriggers && !plugin.config.enableFunctionTriggers && !plugin.config.enableEventTriggers) {
     return;
   }
@@ -233,7 +214,7 @@ interface SchedulerPluginClass {
   new(options: Record<string, unknown>): any;
 }
 
-export async function createCronJob(plugin: TriggersPluginContext, machineId: string, stateName: string, trigger: TriggerConfig, triggerName: string): Promise<SchedulerJob> {
+export async function createCronJob(plugin: StateMachinePluginContext, machineId: string, stateName: string, trigger: TriggerConfig, triggerName: string): Promise<SchedulerJob> {
   return {
     schedule: trigger.schedule!,
     description: `Trigger '${triggerName}' for ${machineId}.${stateName}`,
@@ -261,7 +242,7 @@ export async function createCronJob(plugin: TriggersPluginContext, machineId: st
   };
 }
 
-export async function setupDateTrigger(plugin: TriggersPluginContext, machineId: string, stateName: string, trigger: TriggerConfig, triggerName: string): Promise<void> {
+export async function setupDateTrigger(plugin: StateMachinePluginContext, machineId: string, stateName: string, trigger: TriggerConfig, triggerName: string): Promise<void> {
   const cronManager = getCronManager();
   await cronManager.scheduleInterval(
     plugin.config.triggerCheckInterval,
@@ -289,7 +270,7 @@ export async function setupDateTrigger(plugin: TriggersPluginContext, machineId:
   plugin.triggerJobNames.push(jobName);
 }
 
-export async function setupFunctionTrigger(plugin: TriggersPluginContext, machineId: string, stateName: string, trigger: TriggerConfig, triggerName: string): Promise<void> {
+export async function setupFunctionTrigger(plugin: StateMachinePluginContext, machineId: string, stateName: string, trigger: TriggerConfig, triggerName: string): Promise<void> {
   const interval = trigger.interval || plugin.config.triggerCheckInterval;
 
   const cronManager = getCronManager();
@@ -313,7 +294,7 @@ export async function setupFunctionTrigger(plugin: TriggersPluginContext, machin
   plugin.triggerJobNames.push(jobName);
 }
 
-export async function setupEventTrigger(plugin: TriggersPluginContext, machineId: string, stateName: string, trigger: TriggerConfig, triggerName: string): Promise<void> {
+export async function setupEventTrigger(plugin: StateMachinePluginContext, machineId: string, stateName: string, trigger: TriggerConfig, triggerName: string): Promise<void> {
   const baseEventName = trigger.eventName || trigger.event;
   const eventSource = trigger.eventSource;
 

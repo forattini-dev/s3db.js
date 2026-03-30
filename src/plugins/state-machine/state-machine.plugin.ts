@@ -428,7 +428,7 @@ export class StateMachinePlugin<
   private _validateConfiguration(): void {
     validateConfiguration(
       this.config,
-      this.logger as any,
+      this.logger,
       (machineId, machineConfig) => diagnosticsGetMachineDefinitionDiagnostics(machineId, machineConfig, this.config.guards, this.config.actions)
     );
   }
@@ -437,7 +437,7 @@ export class StateMachinePlugin<
 
   override async onInstall(): Promise<void> {
     if (this.config.persistTransitions) {
-      await createStateResources(this as any);
+      await createStateResources(this);
     }
 
     const schemaBoundMachines = this._collectSchemaBoundMachines();
@@ -454,8 +454,8 @@ export class StateMachinePlugin<
       });
     }
 
-    await attachStateMachinesToResources(this as any);
-    await setupTriggers(this as any);
+    await attachStateMachinesToResources(this);
+    await setupTriggers(this);
 
     this.emit('db:plugin:initialized', { machines: Array.from(this.machines.keys()) });
   }
@@ -513,37 +513,37 @@ export class StateMachinePlugin<
     event: string,
     context: Record<string, unknown> = {}
   ): Promise<TransitionResult> {
-    return transitionEngineSend(this as any, machineId, entityId, event, context);
+    return transitionEngineSend(this, machineId, entityId, event, context);
   }
 
   async assertTransition<TMachine extends keyof TMachineEvents & string, TEvent extends keyof TMachineEvents[TMachine] & string>(
     params: TransitionAssertionSuccessParams<TMachine, TEvent> & { context?: TMachineEvents[TMachine][TEvent] }
   ): Promise<TransitionSuccessResult> {
-    return engineAssertTransition(this as any, params);
+    return engineAssertTransition(this, params);
   }
 
   async assertReject<TMachine extends keyof TMachineEvents & string, TEvent extends keyof TMachineEvents[TMachine] & string>(
     params: TransitionAssertionRejectParams<TMachine, TEvent> & { context?: TMachineEvents[TMachine][TEvent] }
   ): Promise<TransitionRejectedResult> {
-    return engineAssertReject(this as any, params);
+    return engineAssertReject(this, params);
   }
 
   // ── Query (public API) ─────────────────────────────────────
 
   async getState(machineId: string, entityId: string): Promise<string> {
-    return queryGetState(this as any, machineId, entityId);
+    return queryGetState(this, machineId, entityId);
   }
 
   async getValidEvents(machineId: string, stateOrEntityId: string): Promise<string[]> {
-    return queryGetValidEvents(this as any, machineId, stateOrEntityId);
+    return queryGetValidEvents(this, machineId, stateOrEntityId);
   }
 
   async getTransitions(machineId: string, entityId: string, options: TransitionQueryOptions = {}): Promise<TransitionHistoryEntry[]> {
-    return queryGetTransitions(this as any, machineId, entityId, options);
+    return queryGetTransitions(this, machineId, entityId, options);
   }
 
   async getTransitionHistory(machineId: string, entityId: string, options: TransitionHistoryOptions = {}): Promise<TransitionHistoryEntry[]> {
-    return queryGetTransitionHistory(this as any, machineId, entityId, options);
+    return queryGetTransitionHistory(this, machineId, entityId, options);
   }
 
   async getTransitionCount(
@@ -551,19 +551,19 @@ export class StateMachinePlugin<
     entityId: string,
     options: Omit<TransitionQueryOptions, 'limit' | 'offset' | 'sort'> = {}
   ): Promise<number> {
-    return queryGetTransitionCount(this as any, machineId, entityId, options);
+    return queryGetTransitionCount(this, machineId, entityId, options);
   }
 
   async getSnapshot(machineId: string, entityId: string): Promise<StateMachineSnapshot> {
-    return queryGetSnapshot(this as any, machineId, entityId);
+    return queryGetSnapshot(this, machineId, entityId);
   }
 
   async getTransition(machineId: string, entityId: string, transitionId: string): Promise<TransitionHistoryEntry | null> {
-    return queryGetTransition(this as any, machineId, entityId, transitionId);
+    return queryGetTransition(this, machineId, entityId, transitionId);
   }
 
   async getLastTransitions(machineId: string, entityId: string, n?: number): Promise<TransitionHistoryEntry[]> {
-    return queryGetLastTransitions(this as any, machineId, entityId, n);
+    return queryGetLastTransitions(this, machineId, entityId, n);
   }
 
   // ── Diagnostics (public API) ───────────────────────────────
@@ -590,11 +590,11 @@ export class StateMachinePlugin<
   // ── Resource attachment (public API) ───────────────────────
 
   async initializeEntity(machineId: string, entityId: string, context: Record<string, unknown> = {}): Promise<string> {
-    return attachInitializeEntity(this as any, machineId, entityId, context);
+    return attachInitializeEntity(this, machineId, entityId, context);
   }
 
   async deleteEntity(machineId: string, entityId: string): Promise<void> {
-    return attachDeleteEntity(this as any, machineId, entityId);
+    return attachDeleteEntity(this, machineId, entityId);
   }
 
   // ── Inline public methods ──────────────────────────────────
@@ -658,27 +658,27 @@ export class StateMachinePlugin<
   // ── Context interface methods (called by modules) ──────────
 
   getStateResource(): Resource | null {
-    return getStateResource(this as any);
+    return getStateResource(this);
   }
 
   getTransitionLogResource(): Resource | null {
-    return getTransitionLogResource(this as any);
+    return getTransitionLogResource(this);
   }
 
   async getAttachedResource(machineId: string): Promise<Resource | null> {
-    return persistenceGetAttachedResource(this as any, machineId);
+    return persistenceGetAttachedResource(this, machineId);
   }
 
   async acquireTransitionLock(machineId: string, entityId: string): Promise<Lock | null> {
-    return persistenceAcquireLock(this as any, machineId, entityId);
+    return persistenceAcquireLock(this, machineId, entityId);
   }
 
   async releaseTransitionLock(lock: Lock | null): Promise<void> {
-    return persistenceReleaseLock(this as any, lock);
+    return persistenceReleaseLock(this, lock);
   }
 
   async getStateSnapshot(machineId: string, entityId: string): Promise<{ state: string; version: number }> {
-    return getStateSnapshot(this as any, machineId, entityId);
+    return getStateSnapshot(this, machineId, entityId);
   }
 
   async persistTransition(
@@ -690,11 +690,11 @@ export class StateMachinePlugin<
     context: Record<string, unknown>,
     fromStateVersion?: number
   ): Promise<number> {
-    return persistenceTransition(this as any, machineId, entityId, fromState, toState, event, context, fromStateVersion);
+    return persistenceTransition(this, machineId, entityId, fromState, toState, event, context, fromStateVersion);
   }
 
   setInMemoryState(machineId: string, entityId: string, state: string, version: number): void {
-    setInMemoryState(this as any, machineId, entityId, state, version);
+    setInMemoryState(this, machineId, entityId, state, version);
   }
 
   async transitionToTargetState(
@@ -704,7 +704,7 @@ export class StateMachinePlugin<
     event: string,
     context: Record<string, unknown>
   ): Promise<{ from: string; to: string; stateVersion: number; cancelled?: boolean }> {
-    return engineTransitionToTargetState(this as any, machineId, entityId, targetState, event, context);
+    return engineTransitionToTargetState(this, machineId, entityId, targetState, event, context);
   }
 
   async executeAction(
@@ -715,7 +715,7 @@ export class StateMachinePlugin<
     entityId: string,
     transitionContext?: Partial<TransitionContext> & { machineContext?: Record<string, unknown>; assign?: (partial: Record<string, unknown>) => void }
   ): Promise<unknown> {
-    return executeAction(this as any, actionName, context, event, machineId, entityId, transitionContext);
+    return executeAction(this, actionName, context, event, machineId, entityId, transitionContext);
   }
 
   async executeHooks(
@@ -727,7 +727,7 @@ export class StateMachinePlugin<
     transitionCtx?: Partial<TransitionContext> & { machineContext?: Record<string, unknown>; assign?: (partial: Record<string, unknown>) => void },
     options?: { cancellable?: boolean; hookLabel?: string; stateName?: string }
   ): Promise<{ cancelled: boolean; action?: string }> {
-    return executeHooks(this as any, hookNames, context, event, machineId, entityId, transitionCtx, options);
+    return executeHooks(this, hookNames, context, event, machineId, entityId, transitionCtx, options);
   }
 
   async executeMachineHooks(
@@ -739,7 +739,7 @@ export class StateMachinePlugin<
     transitionCtx?: Partial<TransitionContext> & { machineContext?: Record<string, unknown>; assign?: (partial: Record<string, unknown>) => void },
     options?: { cancellable?: boolean }
   ): Promise<{ cancelled: boolean; action?: string }> {
-    return executeMachineHooks(this as any, machineId, hookName, context, event, entityId, transitionCtx, options);
+    return executeMachineHooks(this, machineId, hookName, context, event, entityId, transitionCtx, options);
   }
 
   resolveHooks(stateConfig: any, hookName: string, legacyField?: string): string[] {

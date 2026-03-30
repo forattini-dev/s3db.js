@@ -18,9 +18,9 @@ export interface Resource {
   insert(data: Record<string, unknown>): Promise<unknown>;
   update(id: string, data: Record<string, unknown>): Promise<unknown>;
   patch(id: string, data: Record<string, unknown>): Promise<unknown>;
-  delete(id: string): Promise<void>;
-  get(id: string): Promise<StateRecord | null>;
-  query(filter: Record<string, unknown>, options?: QueryOptions): Promise<RawTransitionRecord[]>;
+  delete(id: string): Promise<unknown>;
+  get(id: string): Promise<Record<string, unknown> | null>;
+  query(filter: Record<string, unknown>, options?: QueryOptions): Promise<Record<string, unknown>[]>;
   on(event: string, handler: (...args: unknown[]) => void): void;
 }
 
@@ -496,4 +496,46 @@ export interface MachineProxy {
 
 export interface SchedulerPluginClass {
   new(options: Record<string, unknown>): Plugin & { stop(): Promise<void> };
+}
+
+export interface StateMachinePluginContext {
+  config: StateMachineConfig;
+  machines: Map<string, MachineData>;
+  database: any;
+  logger: Logger;
+  logLevel: string;
+  triggerJobNames: string[];
+  schedulerPlugin: (Plugin & { stop(): Promise<void> }) | null;
+  _pendingEventHandlers: Set<Promise<void>>;
+  _triggerListeners: TriggerListenerRef[];
+  emit(event: string, data: unknown): void;
+  getStorage(): any;
+  send(machineId: string, entityId: string, event: string, context: Record<string, unknown>): Promise<TransitionResult>;
+  getState(machineId: string, entityId: string): Promise<string>;
+  getValidEvents(machineId: string, stateOrEntityId: string): Promise<string[]>;
+  getTransitions(machineId: string, entityId: string, options?: TransitionQueryOptions): Promise<TransitionHistoryEntry[]>;
+  getTransitionHistory(machineId: string, entityId: string, options?: TransitionHistoryOptions): Promise<TransitionHistoryEntry[]>;
+  getTransition(machineId: string, entityId: string, transitionId: string): Promise<TransitionHistoryEntry | null>;
+  getTransitionCount(machineId: string, entityId: string, options?: Omit<TransitionQueryOptions, 'limit' | 'offset' | 'sort'>): Promise<number>;
+  getLastTransitions(machineId: string, entityId: string, limit?: number): Promise<TransitionHistoryEntry[]>;
+  getSnapshot(machineId: string, entityId: string): Promise<StateMachineSnapshot>;
+  initializeEntity(machineId: string, entityId: string, context?: Record<string, unknown>): Promise<string>;
+  deleteEntity(machineId: string, entityId: string): Promise<void>;
+  getAttachedResource(machineId: string): Promise<Resource | null>;
+  getStateResource(): Resource | null;
+  getTransitionLogResource(): Resource | null;
+  getStateSnapshot(machineId: string, entityId: string): Promise<{ state: string; version: number }>;
+  setInMemoryState(machineId: string, entityId: string, state: string, version: number): void;
+  acquireTransitionLock(machineId: string, entityId: string): Promise<Lock | null>;
+  releaseTransitionLock(lock: Lock | null): Promise<void>;
+  persistTransition(machineId: string, entityId: string, fromState: string, toState: string, event: string, context: Record<string, unknown>, fromStateVersion?: number): Promise<number>;
+  transitionToTargetState(machineId: string, entityId: string, targetState: string, event: string, context: Record<string, unknown>): Promise<{ from: string; to: string; stateVersion: number; cancelled?: boolean }>;
+  executeAction(actionName: string, context: Record<string, unknown>, event: string, machineId: string, entityId: string, transitionContext?: Partial<TransitionContext> & { machineContext?: Record<string, unknown>; assign?: (partial: Record<string, unknown>) => void }): Promise<unknown>;
+  executeHooks(hookNames: string[], context: Record<string, unknown>, event: string, machineId: string, entityId: string, transitionCtx?: Partial<TransitionContext> & { machineContext?: Record<string, unknown>; assign?: (partial: Record<string, unknown>) => void }, options?: { cancellable?: boolean; hookLabel?: string; stateName?: string }): Promise<{ cancelled: boolean; action?: string }>;
+  executeMachineHooks(machineId: string, hookName: string, context: Record<string, unknown>, event: string, entityId: string, transitionCtx?: Partial<TransitionContext> & { machineContext?: Record<string, unknown>; assign?: (partial: Record<string, unknown>) => void }, options?: { cancellable?: boolean }): Promise<{ cancelled: boolean; action?: string }>;
+  resolveHooks(stateConfig: StateConfig | undefined, hookName: string, legacyField?: string): string[];
+  hasTTLStates(machineId: string): boolean;
+  cancelTTL(machineId: string, entityId: string): void;
+  scheduleTTL(machineId: string, entityId: string, stateConfig?: StateConfig): void;
+  wrapEventHandler(handler: (...args: unknown[]) => unknown): (...args: unknown[]) => void;
 }

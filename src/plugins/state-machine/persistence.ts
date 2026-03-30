@@ -1,16 +1,8 @@
-import type { StateMachineConfig, MachineData, StateRecord, Resource, Lock, PluginStorage, ResourceNames, ResourceConfig } from './types.js';
+import type { StateMachinePluginContext, StateRecord, Resource, Lock } from './types.js';
 import { StateMachineError } from '../state-machine.errors.js';
 import tryFn from '../../concerns/try-fn.js';
 
-export interface PersistencePluginContext {
-  config: StateMachineConfig;
-  machines: Map<string, MachineData>;
-  database: any;
-  logger: any;
-  getStorage(): PluginStorage;
-}
-
-export function getStateResource(plugin: PersistencePluginContext): Resource | null {
+export function getStateResource(plugin: StateMachinePluginContext): Resource | null {
   if (!plugin.config.persistTransitions || !plugin.database?.resources) {
     return null;
   }
@@ -18,7 +10,7 @@ export function getStateResource(plugin: PersistencePluginContext): Resource | n
   return (plugin.database.resources[plugin.config.stateResource] as Resource | undefined) || null;
 }
 
-export function getTransitionLogResource(plugin: PersistencePluginContext): Resource | null {
+export function getTransitionLogResource(plugin: StateMachinePluginContext): Resource | null {
   if (!plugin.config.persistTransitions || !plugin.database?.resources) {
     return null;
   }
@@ -26,7 +18,7 @@ export function getTransitionLogResource(plugin: PersistencePluginContext): Reso
   return (plugin.database.resources[plugin.config.transitionLogResource] as Resource | undefined) || null;
 }
 
-export async function getStateSnapshot(plugin: PersistencePluginContext, machineId: string, entityId: string): Promise<{ state: string; version: number }> {
+export async function getStateSnapshot(plugin: StateMachinePluginContext, machineId: string, entityId: string): Promise<{ state: string; version: number }> {
   const machine = plugin.machines.get(machineId);
   if (!machine) {
     throw new StateMachineError(`Machine '${machineId}' not found`, {
@@ -70,7 +62,7 @@ export async function getStateSnapshot(plugin: PersistencePluginContext, machine
   };
 }
 
-export function setInMemoryState(plugin: PersistencePluginContext, machineId: string, entityId: string, state: string, stateVersion: number): void {
+export function setInMemoryState(plugin: StateMachinePluginContext, machineId: string, entityId: string, state: string, stateVersion: number): void {
   const machine = plugin.machines.get(machineId);
   if (!machine) {
     return;
@@ -81,7 +73,7 @@ export function setInMemoryState(plugin: PersistencePluginContext, machineId: st
 }
 
 export async function persistTransition(
-  plugin: PersistencePluginContext,
+  plugin: StateMachinePluginContext,
   machineId: string,
   entityId: string,
   fromState: string,
@@ -231,7 +223,7 @@ export async function persistTransition(
   return nextStateVersion;
 }
 
-export async function syncResourceStateField(plugin: PersistencePluginContext, machineId: string, entityId: string, state: string): Promise<void> {
+export async function syncResourceStateField(plugin: StateMachinePluginContext, machineId: string, entityId: string, state: string): Promise<void> {
   const machine = plugin.machines.get(machineId);
   if (!machine) return;
 
@@ -256,7 +248,7 @@ export async function syncResourceStateField(plugin: PersistencePluginContext, m
   }
 }
 
-export async function getAttachedResource(plugin: PersistencePluginContext, machineId: string): Promise<Resource | null> {
+export async function getAttachedResource(plugin: StateMachinePluginContext, machineId: string): Promise<Resource | null> {
   const machine = plugin.machines.get(machineId);
   if (!machine) return null;
 
@@ -271,7 +263,7 @@ export async function getAttachedResource(plugin: PersistencePluginContext, mach
   return resourceConfig.resource as Resource;
 }
 
-export async function createStateResources(plugin: PersistencePluginContext): Promise<void> {
+export async function createStateResources(plugin: StateMachinePluginContext): Promise<void> {
   const [logOk, logErr] = await tryFn(() => plugin.database.createResource({
     name: plugin.config.transitionLogResource,
     attributes: {
@@ -325,7 +317,7 @@ export async function createStateResources(plugin: PersistencePluginContext): Pr
   }
 }
 
-export async function acquireTransitionLock(plugin: PersistencePluginContext, machineId: string, entityId: string): Promise<Lock | null> {
+export async function acquireTransitionLock(plugin: StateMachinePluginContext, machineId: string, entityId: string): Promise<Lock | null> {
   const storage = plugin.getStorage();
   const lockName = `transition-${machineId}-${entityId}`;
 
@@ -349,7 +341,7 @@ export async function acquireTransitionLock(plugin: PersistencePluginContext, ma
   return lock;
 }
 
-export async function releaseTransitionLock(plugin: PersistencePluginContext, lock: Lock | null): Promise<void> {
+export async function releaseTransitionLock(plugin: StateMachinePluginContext, lock: Lock | null): Promise<void> {
   if (!lock) return;
 
   const storage = plugin.getStorage();

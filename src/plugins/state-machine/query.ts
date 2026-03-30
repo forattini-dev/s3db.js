@@ -1,25 +1,15 @@
-import type { StateMachineConfig, MachineData, StateRecord, TransitionRecord, RawTransitionRecord, TransitionHistoryEntry, TransitionHistoryOptions, TransitionQueryOptions, StateMachineSnapshot, QueryOptions } from './types.js';
+import type { StateMachinePluginContext, StateRecord, TransitionRecord, RawTransitionRecord, TransitionHistoryEntry, TransitionHistoryOptions, TransitionQueryOptions, StateMachineSnapshot, QueryOptions } from './types.js';
 import { TRANSITION_HISTORY_PAGE_SIZE } from './types.js';
 import { StateMachineError } from '../state-machine.errors.js';
 import { toEpoch, normalizeTransitionRecord, applyTransitionFilters, sortTransitions } from './helpers.js';
 import tryFn from '../../concerns/try-fn.js';
 
-export interface QueryPluginContext {
-  config: StateMachineConfig;
-  machines: Map<string, MachineData>;
-  database: any;
-  logger: any;
-  getStateResource(): any | null;
-  getTransitionLogResource(): any | null;
-  getStateSnapshot(machineId: string, entityId: string): Promise<{ state: string; version: number }>;
-}
-
-export async function getState(plugin: QueryPluginContext, machineId: string, entityId: string): Promise<string> {
+export async function getState(plugin: StateMachinePluginContext, machineId: string, entityId: string): Promise<string> {
   const snapshot = await plugin.getStateSnapshot(machineId, entityId);
   return snapshot.state;
 }
 
-export async function getValidEvents(plugin: QueryPluginContext, machineId: string, stateOrEntityId: string): Promise<string[]> {
+export async function getValidEvents(plugin: StateMachinePluginContext, machineId: string, stateOrEntityId: string): Promise<string[]> {
   const machine = plugin.machines.get(machineId);
   if (!machine) {
     throw new StateMachineError(`State machine '${machineId}' not found`, {
@@ -44,7 +34,7 @@ export async function getValidEvents(plugin: QueryPluginContext, machineId: stri
   return [...new Set([...stateEvents, ...wildcardEvents])];
 }
 
-export async function getTransitions(plugin: QueryPluginContext, machineId: string, entityId: string, options: TransitionQueryOptions = {}): Promise<TransitionHistoryEntry[]> {
+export async function getTransitions(plugin: StateMachinePluginContext, machineId: string, entityId: string, options: TransitionQueryOptions = {}): Promise<TransitionHistoryEntry[]> {
   const limit = options.limit;
   const offset = options.offset || 0;
   const sort = options.sort || 'desc';
@@ -68,13 +58,13 @@ export async function getTransitions(plugin: QueryPluginContext, machineId: stri
   return sorted.slice(offset, offset + limit);
 }
 
-export async function getTransitionHistory(plugin: QueryPluginContext, machineId: string, entityId: string, options: TransitionHistoryOptions = {}): Promise<TransitionHistoryEntry[]> {
+export async function getTransitionHistory(plugin: StateMachinePluginContext, machineId: string, entityId: string, options: TransitionHistoryOptions = {}): Promise<TransitionHistoryEntry[]> {
   const { limit = 50, offset = 0 } = options;
   return getTransitions(plugin, machineId, entityId, { limit, offset, sort: 'desc' });
 }
 
 export async function getTransitionCount(
-  plugin: QueryPluginContext,
+  plugin: StateMachinePluginContext,
   machineId: string,
   entityId: string,
   options: Omit<TransitionQueryOptions, 'limit' | 'offset' | 'sort'> = {}
@@ -83,7 +73,7 @@ export async function getTransitionCount(
   return transitions.length;
 }
 
-export async function getSnapshot(plugin: QueryPluginContext, machineId: string, entityId: string): Promise<StateMachineSnapshot> {
+export async function getSnapshot(plugin: StateMachinePluginContext, machineId: string, entityId: string): Promise<StateMachineSnapshot> {
   const snapshot = await plugin.getStateSnapshot(machineId, entityId);
   const defaultResult: StateMachineSnapshot = {
     machineId,
@@ -124,7 +114,7 @@ export async function getSnapshot(plugin: QueryPluginContext, machineId: string,
   };
 }
 
-export async function getTransition(plugin: QueryPluginContext, machineId: string, entityId: string, transitionId: string): Promise<TransitionHistoryEntry | null> {
+export async function getTransition(plugin: StateMachinePluginContext, machineId: string, entityId: string, transitionId: string): Promise<TransitionHistoryEntry | null> {
   if (!plugin.config.persistTransitions) {
     return null;
   }
@@ -150,7 +140,7 @@ export async function getTransition(plugin: QueryPluginContext, machineId: strin
   return normalizeTransitionRecord(transition);
 }
 
-export async function getLastTransitions(plugin: QueryPluginContext, machineId: string, entityId: string, n?: number): Promise<TransitionHistoryEntry[]> {
+export async function getLastTransitions(plugin: StateMachinePluginContext, machineId: string, entityId: string, n?: number): Promise<TransitionHistoryEntry[]> {
   if (typeof n === 'number' && n > 0) {
     return getTransitions(plugin, machineId, entityId, { limit: n, offset: 0, sort: 'desc' });
   }
@@ -158,7 +148,7 @@ export async function getLastTransitions(plugin: QueryPluginContext, machineId: 
   return getTransitions(plugin, machineId, entityId, { sort: 'desc' });
 }
 
-export async function fetchTransitionHistory(plugin: QueryPluginContext, machineId: string, entityId: string, options: QueryOptions = {}): Promise<TransitionHistoryEntry[]> {
+export async function fetchTransitionHistory(plugin: StateMachinePluginContext, machineId: string, entityId: string, options: QueryOptions = {}): Promise<TransitionHistoryEntry[]> {
   if (!plugin.config.persistTransitions) {
     return [];
   }
@@ -195,7 +185,7 @@ export async function fetchTransitionHistory(plugin: QueryPluginContext, machine
           limit: options.limit,
           offset: options.offset
         }
-      )
+      ) as unknown as Promise<RawTransitionRecord[]>
     );
 
     if (!ok) {
@@ -218,7 +208,7 @@ export async function fetchTransitionHistory(plugin: QueryPluginContext, machine
           limit: TRANSITION_HISTORY_PAGE_SIZE,
           offset
         }
-      )
+      ) as unknown as Promise<RawTransitionRecord[]>
     );
 
     if (!ok) {

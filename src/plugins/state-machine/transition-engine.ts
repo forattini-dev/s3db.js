@@ -1,7 +1,5 @@
 import type {
-  StateMachineConfig,
-  MachineData,
-  MachineConfig,
+  StateMachinePluginContext,
   StateConfig,
   Resource,
   Lock,
@@ -20,35 +18,24 @@ import type {
 import { StateMachineError } from '../state-machine.errors.js';
 import tryFn from '../../concerns/try-fn.js';
 import { resolveEdge, resolveHooks, findGuardForTargetState, buildTransitionContext, getCorrelationId, contractAssertionFailure } from './helpers.js';
-import { executeHooks, executeMachineHooks, type HooksPluginContext } from './hooks.js';
-
-export interface TransitionEngineContext extends HooksPluginContext {
-  acquireTransitionLock(machineId: string, entityId: string): Promise<Lock | null>;
-  releaseTransitionLock(lock: Lock | null): Promise<void>;
-  getStateSnapshot(machineId: string, entityId: string): Promise<{ state: string; version: number }>;
-  getStateResource(): Resource | null;
-  persistTransition(machineId: string, entityId: string, fromState: string, toState: string, event: string, context: Record<string, unknown>, fromStateVersion?: number): Promise<number>;
-  hasTTLStates(machineId: string): boolean;
-  cancelTTL(machineId: string, entityId: string): void;
-  scheduleTTL(machineId: string, entityId: string, stateConfig?: StateConfig): void;
-}
+import { executeHooks, executeMachineHooks } from './hooks.js';
 
 export async function send<TMachineEvents extends MachineEventPayloadMap = Record<string, Record<string, Record<string, unknown>>>, TMachine extends keyof TMachineEvents & string = string, TEvent extends keyof TMachineEvents[TMachine] & string = string>(
-  plugin: TransitionEngineContext,
+  plugin: StateMachinePluginContext,
   machineId: TMachine,
   entityId: string,
   event: TEvent,
   context?: TMachineEvents[TMachine][TEvent] & Record<string, unknown>
 ): Promise<TransitionResult>;
 export async function send(
-  plugin: TransitionEngineContext,
+  plugin: StateMachinePluginContext,
   machineId: string,
   entityId: string,
   event: string,
   context: Record<string, unknown>
 ): Promise<TransitionResult>;
 export async function send(
-  plugin: TransitionEngineContext,
+  plugin: StateMachinePluginContext,
   machineId: string,
   entityId: string,
   event: string,
@@ -203,8 +190,7 @@ export async function send(
     let edge: { target: string; guard: string | undefined; beforeTransition: string[]; afterTransition: string[] };
     if (Array.isArray(eventSource)) {
       let matched = false;
-      // @ts-ignore - edge is assigned inside loop before break
-      edge = undefined as unknown as typeof edge;
+      edge = { target: '', guard: undefined, beforeTransition: [], afterTransition: [] };
       for (const candidate of eventSource) {
         const resolved = resolveEdge(candidate);
         if (!resolved.guard) {
@@ -312,7 +298,7 @@ export async function send(
       if (!guardResult) {
         const rejectResult = buildFailure(
           'GUARD_REJECTED',
-          'MISSING_REQUIRED_FIELD',
+          'GUARD_REJECTED',
           `Transition blocked by guard '${guardName}'`,
           {
             currentState,
@@ -544,7 +530,7 @@ export async function send(
         reason = 'GUARD_NOT_FOUND';
       } else if (operation === 'guard') {
         code = 'GUARD_REJECTED';
-        reason = 'MISSING_REQUIRED_FIELD';
+        reason = 'GUARD_REJECTED';
       } else if (operation === 'state-version-mismatch') {
         code = 'STATE_VERSION_MISMATCH';
         reason = 'STATE_VERSION_MISMATCH';
@@ -580,7 +566,7 @@ export async function send(
 }
 
 export async function assertTransition<TMachineEvents extends MachineEventPayloadMap = Record<string, Record<string, Record<string, unknown>>>, TMachine extends keyof TMachineEvents & string = string, TEvent extends keyof TMachineEvents[TMachine] & string = string>(
-  plugin: TransitionEngineContext,
+  plugin: StateMachinePluginContext,
   params: TransitionAssertionSuccessParams<TMachine, TEvent> & { context?: TMachineEvents[TMachine][TEvent] }
 ): Promise<TransitionSuccessResult> {
   const result = await send(
@@ -637,7 +623,7 @@ export async function assertTransition<TMachineEvents extends MachineEventPayloa
 }
 
 export async function assertReject<TMachineEvents extends MachineEventPayloadMap = Record<string, Record<string, Record<string, unknown>>>, TMachine extends keyof TMachineEvents & string = string, TEvent extends keyof TMachineEvents[TMachine] & string = string>(
-  plugin: TransitionEngineContext,
+  plugin: StateMachinePluginContext,
   params: TransitionAssertionRejectParams<TMachine, TEvent> & { context?: TMachineEvents[TMachine][TEvent] }
 ): Promise<TransitionRejectedResult> {
   const result = await send(
@@ -702,7 +688,7 @@ export async function assertReject<TMachineEvents extends MachineEventPayloadMap
 }
 
 export function sendInternal(
-  plugin: TransitionEngineContext,
+  plugin: StateMachinePluginContext,
   machineId: string,
   entityId: string,
   event: string,
@@ -712,7 +698,7 @@ export function sendInternal(
 }
 
 export async function transitionToTargetState(
-  plugin: TransitionEngineContext,
+  plugin: StateMachinePluginContext,
   machineId: string,
   entityId: string,
   targetState: string,

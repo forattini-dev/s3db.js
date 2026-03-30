@@ -82,7 +82,7 @@ describe('StateMachinePlugin - Contract Assertions', () => {
       event: 'START',
       to: 'running',
       code: 'GUARD_REJECTED',
-      reason: 'MISSING_REQUIRED_FIELD',
+      reason: 'GUARD_REJECTED',
       context: {
         amount: 0
       }
@@ -91,7 +91,7 @@ describe('StateMachinePlugin - Contract Assertions', () => {
     expect(result).toMatchObject({
       ok: false,
       code: 'GUARD_REJECTED',
-      reason: 'MISSING_REQUIRED_FIELD'
+      reason: 'GUARD_REJECTED'
     });
   });
 

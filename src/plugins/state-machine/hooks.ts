@@ -1,20 +1,10 @@
-import type { StateMachineConfig, MachineData, Database, Resource, ActionContext, RetryConfig, TransitionContext, Lock } from './types.js';
+import type { StateMachinePluginContext, Database, Resource, ActionContext, RetryConfig, TransitionContext, Lock } from './types.js';
 import { StateMachineError } from '../state-machine.errors.js';
 import { ErrorClassifier } from '../../concerns/error-classifier.js';
 import { buildTransitionContext, calculateBackoff } from './helpers.js';
 
-export interface HooksPluginContext {
-  config: StateMachineConfig;
-  machines: Map<string, MachineData>;
-  database: any;
-  logger: any;
-  emit(event: string, data: unknown): void;
-  getAttachedResource(machineId: string): Promise<Resource | null>;
-  getState(machineId: string, entityId: string): Promise<string>;
-}
-
 export async function executeAction(
-  plugin: HooksPluginContext,
+  plugin: StateMachinePluginContext,
   actionName: string,
   context: Record<string, unknown>,
   event: string,
@@ -183,7 +173,7 @@ export async function executeAction(
 }
 
 export async function executeHooks(
-  plugin: HooksPluginContext,
+  plugin: StateMachinePluginContext,
   hookNames: string[],
   context: Record<string, unknown>,
   event: string,
@@ -292,7 +282,7 @@ export async function executeHooks(
 }
 
 export async function executeMachineHooks(
-  plugin: HooksPluginContext,
+  plugin: StateMachinePluginContext,
   machineId: string,
   hookName: string,
   context: Record<string, unknown>,

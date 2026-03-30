@@ -1,34 +1,9 @@
-import type { MachineData, MachineConfig, Resource, TransitionHistoryOptions, TransitionQueryOptions, TransitionResult, TransitionHistoryEntry, StateMachineSnapshot, MachineProxy, TransitionContext, Lock, StateRecord, StateMachineConfig } from './types.js';
+import type { StateMachinePluginContext, Resource, TransitionHistoryOptions, TransitionQueryOptions, TransitionResult, TransitionHistoryEntry, StateMachineSnapshot, MachineProxy, TransitionContext, StateRecord } from './types.js';
 import { TRANSITION_HISTORY_PAGE_SIZE } from './types.js';
 import { StateMachineError } from '../state-machine.errors.js';
 import tryFn from '../../concerns/try-fn.js';
 
-export interface AttachmentPluginContext {
-  config: StateMachineConfig;
-  machines: Map<string, MachineData>;
-  database: any;
-  logger: any;
-  emit(event: string, data: unknown): void;
-  send(machineId: string, entityId: string, event: string, context: Record<string, unknown>): Promise<TransitionResult>;
-  getState(machineId: string, entityId: string): Promise<string>;
-  getValidEvents(machineId: string, entityId: string): Promise<string[]>;
-  getTransitions(machineId: string, entityId: string, options?: TransitionQueryOptions): Promise<TransitionHistoryEntry[]>;
-  getTransitionHistory(machineId: string, entityId: string, options?: TransitionHistoryOptions): Promise<TransitionHistoryEntry[]>;
-  getTransition(machineId: string, entityId: string, transitionId: string): Promise<TransitionHistoryEntry | null>;
-  getTransitionCount(machineId: string, entityId: string, options?: any): Promise<number>;
-  getLastTransitions(machineId: string, entityId: string, limit?: number): Promise<TransitionHistoryEntry[]>;
-  getSnapshot(machineId: string, entityId: string): Promise<StateMachineSnapshot>;
-  initializeEntity(machineId: string, entityId: string, context?: Record<string, unknown>): Promise<string>;
-  deleteEntity(machineId: string, entityId: string): Promise<void>;
-  getStateResource(): any | null;
-  getTransitionLogResource(): any | null;
-  setInMemoryState(machineId: string, entityId: string, state: string, version: number): void;
-  executeHooks(hookNames: string[], context: Record<string, unknown>, event: string, machineId: string, entityId: string, transitionCtx?: any, options?: any): Promise<{ cancelled: boolean; action?: string }>;
-  executeMachineHooks(machineId: string, hookName: string, context: Record<string, unknown>, event: string, entityId: string, transitionCtx?: any, options?: any): Promise<{ cancelled: boolean; action?: string }>;
-  resolveHooks(stateConfig: any, hookName: string, legacyField?: string): string[];
-}
-
-export async function attachStateMachinesToResources(plugin: AttachmentPluginContext): Promise<void> {
+export async function attachStateMachinesToResources(plugin: StateMachinePluginContext): Promise<void> {
   const resourceStateMachineBindingMap = new Map<string, string>();
 
   for (const [machineName, machineData] of plugin.machines.entries()) {
@@ -155,7 +130,7 @@ export async function attachStateMachinesToResources(plugin: AttachmentPluginCon
   }
 }
 
-export async function initializeEntity(plugin: AttachmentPluginContext, machineId: string, entityId: string, context: Record<string, unknown> = {}): Promise<string> {
+export async function initializeEntity(plugin: StateMachinePluginContext, machineId: string, entityId: string, context: Record<string, unknown> = {}): Promise<string> {
   const machine = plugin.machines.get(machineId);
   if (!machine) {
     throw new StateMachineError(`State machine '${machineId}' not found`, {
@@ -230,7 +205,7 @@ export async function initializeEntity(plugin: AttachmentPluginContext, machineI
   return initialState;
 }
 
-export async function deleteEntity(plugin: AttachmentPluginContext, machineId: string, entityId: string): Promise<void> {
+export async function deleteEntity(plugin: StateMachinePluginContext, machineId: string, entityId: string): Promise<void> {
   const machine = plugin.machines.get(machineId);
   if (!machine) {
     throw new StateMachineError(`State machine '${machineId}' not found`, {
