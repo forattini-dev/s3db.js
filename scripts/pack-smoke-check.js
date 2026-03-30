@@ -93,7 +93,7 @@ import { join } from 'node:path';
 
 await import('${packageName}');
 await import('${packageName}/lite');
-await import('${packageName}/plugins/state-machine.plugin');
+await import('${packageName}/plugins/state-machine/index');
 await import('${packageName}/concerns/guards-helpers');
 
 const packageRoot = join(process.cwd(), 'node_modules', ...${JSON.stringify(packageName.split('/'))});
