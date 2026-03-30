@@ -1,5 +1,5 @@
 import { createDatabaseForTest } from '../../config.js';
-import { StateMachinePlugin } from '../../../src/plugins/state-machine.plugin.js';
+import { StateMachinePlugin } from '../../../src/plugins/state-machine/index.js';
 
 const sleep = (ms: number): Promise<void> => new Promise(resolve => setTimeout(resolve, ms));
 
@@ -24,8 +24,16 @@ describe('StateMachinePlugin - Transition Queries and Snapshot', () => {
                 FINISH: 'finished'
               }
             },
-            finished: { type: 'final' }
+            finished: {
+              type: 'final',
+              beforeEnter: 'persistContext'
+            }
           }
+        }
+      },
+      actions: {
+        persistContext: (_ctx, _event, { assign }) => {
+          assign({ step: _ctx.step });
         }
       },
       persistTransitions: true

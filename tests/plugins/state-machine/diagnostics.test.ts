@@ -1,5 +1,5 @@
 import { createDatabaseForTest } from '../../config.js';
-import { StateMachinePlugin } from '../../../src/plugins/state-machine.plugin.js';
+import { StateMachinePlugin } from '../../../src/plugins/state-machine/index.js';
 
 describe('StateMachinePlugin - Definition Diagnostics', () => {
   let database;

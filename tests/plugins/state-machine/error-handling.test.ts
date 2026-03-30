@@ -1,5 +1,6 @@
 import { createDatabaseForTest } from '../../config.js';
-import { StateMachinePlugin } from '../../../src/plugins/state-machine.plugin.js';
+import { StateMachinePlugin } from '../../../src/plugins/state-machine/index.js';
+import { createStateResources } from '../../../src/plugins/state-machine/persistence.js';
 
 describe('StateMachinePlugin - Error Handling', () => {
   let database;
@@ -132,7 +133,7 @@ describe('StateMachinePlugin - Error Handling', () => {
     const originalDb = plugin.database;
     plugin.database = mockDb;
 
-    await expect(plugin._createStateResources()).resolves.toBeUndefined();
+    await expect(createStateResources(plugin as any)).resolves.toBeUndefined();
 
     plugin.database = originalDb;
   });

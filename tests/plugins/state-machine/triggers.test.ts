@@ -1,6 +1,7 @@
 import { EventEmitter } from 'node:events';
 import { createDatabaseForTest } from '../../config.js';
-import { StateMachinePlugin } from '../../../src/plugins/state-machine.plugin.js';
+import { StateMachinePlugin } from '../../../src/plugins/state-machine/index.js';
+import { createCronJob } from '../../../src/plugins/state-machine/triggers.js';
 
 const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
@@ -57,7 +58,7 @@ describe('StateMachinePlugin - Triggers', () => {
     await plugin.install(database);
     await plugin.initializeEntity('poller', 'job-1', { id: 'job-1' });
 
-    const cronJob = await plugin._createCronJob('poller', 'waiting', {
+    const cronJob = await createCronJob(plugin as any, 'poller', 'waiting', {
       type: 'cron',
       schedule: '*/1 * * * * *',
       targetState: 'running',
@@ -66,7 +67,7 @@ describe('StateMachinePlugin - Triggers', () => {
 
     const result = await cronJob.action();
 
-    expect(conditionSpy).toHaveBeenCalledWith({ id: 'job-1' }, 'job-1');
+    expect(conditionSpy).toHaveBeenCalledWith({ id: 'job-1' }, 'job-1', undefined);
     expect(result).toEqual({ processed: 1, executed: 1 });
     expect(exitSpy).toHaveBeenCalledTimes(1);
     expect(enterSpy).toHaveBeenCalledTimes(1);

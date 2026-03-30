@@ -1,5 +1,5 @@
 import { createDatabaseForTest } from '../../config.js';
-import { StateMachinePlugin } from '../../../src/plugins/state-machine.plugin.js';
+import { StateMachinePlugin } from '../../../src/plugins/state-machine/index.js';
 
 const sleep = (ms: number): Promise<void> => new Promise(resolve => setTimeout(resolve, ms));
 

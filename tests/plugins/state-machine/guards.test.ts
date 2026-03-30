@@ -1,5 +1,5 @@
 import { createDatabaseForTest } from '../../config.js';
-import { StateMachinePlugin } from '../../../src/plugins/state-machine.plugin.js';
+import { StateMachinePlugin } from '../../../src/plugins/state-machine/index.js';
 
 describe('StateMachinePlugin - Guards', () => {
   let database;
@@ -116,12 +116,15 @@ describe('StateMachinePlugin - Guards', () => {
     expect(mockGuards.canShip).toHaveBeenCalledWith(
       context,
       'PASS',
-      {
+      expect.objectContaining({
         database: plugin.database,
         machineId: 'test_guards',
         entityId: 'test1',
-        resource: null
-      }
+        resource: null,
+        entity: null,
+        machineContext: expect.any(Object),
+        assign: expect.any(Function)
+      })
     );
   });
 });

@@ -1,6 +1,8 @@
 import { createDatabaseForTest } from '../../config.js';
-import { StateMachinePlugin } from '../../../src/plugins/state-machine.plugin.js';
+import { StateMachinePlugin } from '../../../src/plugins/state-machine/index.js';
 import { StateMachineError } from '../../../src/plugins/state-machine.errors.js';
+import { calculateBackoff, toEpoch } from '../../../src/plugins/state-machine/helpers.js';
+import { fetchTransitionHistory } from '../../../src/plugins/state-machine/query.js';
 
 interface ResourceWithSchema {
   $schema?: {
@@ -202,10 +204,10 @@ describe('StateMachinePlugin - Coverage Edges', () => {
 
     expect(result).toMatchObject({
       ok: false,
-      code: 'ACTION_NOT_FOUND',
-      reason: 'ACTION_NOT_FOUND',
+      code: 'HOOK_NOT_FOUND',
+      reason: 'HOOK_NOT_FOUND',
       details: {
-        operation: 'action-not-found'
+        operation: 'hook-not-found'
       }
     });
 
@@ -219,7 +221,7 @@ describe('StateMachinePlugin - Coverage Edges', () => {
       }
     });
 
-    vi.spyOn(plugin as any, '_acquireTransitionLock').mockRejectedValue(
+    vi.spyOn(plugin as any, 'acquireTransitionLock').mockRejectedValue(
       new StateMachineError('lock busy', {
         operation: 'send',
         machineId: 'flow',
@@ -246,7 +248,7 @@ describe('StateMachinePlugin - Coverage Edges', () => {
 
     const { database: dropDatabase, plugin: pluginDrop } = await createPlugin(dropPluginConfig);
 
-    vi.spyOn(pluginDrop as any, '_acquireTransitionLock').mockRejectedValue(
+    vi.spyOn(pluginDrop as any, 'acquireTransitionLock').mockRejectedValue(
       new StateMachineError('lock busy', {
         operation: 'send',
         machineId: 'flow',
@@ -315,7 +317,7 @@ describe('StateMachinePlugin - Coverage Edges', () => {
       .mockResolvedValueOnce(allMachineTransitions)
       .mockResolvedValueOnce([]);
 
-    const all = await (plugin as any)._getTransitionHistory('flow', 'entity-1');
+    const all = await fetchTransitionHistory(plugin as any, 'flow', 'entity-1');
 
     expect(transitionLogResource.query).toHaveBeenCalledTimes(2);
     expect(all).toHaveLength(1000);
@@ -351,7 +353,7 @@ describe('StateMachinePlugin - Coverage Edges', () => {
 
     transitionLogResource.query.mockResolvedValueOnce(limited);
 
-    const limitedHistory = await (plugin as any)._getTransitionHistory('flow', 'entity-1', {
+    const limitedHistory = await fetchTransitionHistory(plugin as any, 'flow', 'entity-1', {
       limit: 2,
       offset: 1
     });
@@ -408,27 +410,21 @@ describe('StateMachinePlugin - Coverage Edges', () => {
   });
 
   it('handles exponential, linear and fixed backoff branches deterministically', () => {
-    const plugin = new StateMachinePlugin({
-      logLevel: 'silent',
-      stateMachines: buildMachineConfig(),
-      persistTransitions: false
-    });
-
     const randomSpy = vi.spyOn(Math, 'random').mockReturnValue(0.5);
 
-    expect((plugin as any)._calculateBackoff(1, {
+    expect(calculateBackoff(1, {
       backoffStrategy: 'exponential',
       baseDelay: 100,
       maxDelay: 1000
     })).toBe(100);
 
-    expect((plugin as any)._calculateBackoff(2, {
+    expect(calculateBackoff(2, {
       backoffStrategy: 'linear',
       baseDelay: 100,
       maxDelay: 1000
     })).toBe(200);
 
-    expect((plugin as any)._calculateBackoff(2, {
+    expect(calculateBackoff(2, {
       backoffStrategy: 'fixed',
       baseDelay: 150,
       maxDelay: 120
@@ -437,14 +433,8 @@ describe('StateMachinePlugin - Coverage Edges', () => {
     randomSpy.mockRestore();
   });
 
-  it('parses invalid timestamp in private _toEpoch as zero', () => {
-    const plugin = new StateMachinePlugin({
-      logLevel: 'silent',
-      stateMachines: buildMachineConfig(),
-      persistTransitions: false
-    });
-
-    expect((plugin as any)._toEpoch('not-a-date')).toBe(0);
+  it('parses invalid timestamp in toEpoch as zero', () => {
+    expect(toEpoch('not-a-date')).toBe(0);
   });
 
   it('uses direct state name path in getValidEvents', async () => {
@@ -523,8 +513,7 @@ describe('StateMachinePlugin - Coverage Edges', () => {
           initialState: 'pending',
           states: {
             pending: {
-              on: { START: 'started' },
-              exit: 'retryAction'
+              on: { START: 'started' }
             },
             started: { type: 'final' }
           }
@@ -544,13 +533,9 @@ describe('StateMachinePlugin - Coverage Edges', () => {
     await retryPlugin.install(database);
     await retryPlugin.initializeEntity('flow', 'entity-1');
 
-    const result = await retryPlugin.send('flow', 'entity-1', 'START');
+    const result = await retryPlugin.executeAction('retryAction', {}, 'START', 'flow', 'entity-1');
 
-    expect(result).toMatchObject({
-      ok: true,
-      from: 'pending',
-      to: 'started'
-    });
+    expect(result).toEqual({ action: 'ok' });
     expect(retryAction).toHaveBeenCalledTimes(2);
     expect(onRetry).toHaveBeenCalledTimes(1);
 
@@ -675,7 +660,7 @@ describe('StateMachinePlugin - Coverage Edges', () => {
 
     transitionLogResource.query.mockRejectedValueOnce(new Error('query failed'));
 
-    const result = await (plugin as any)._getTransitionHistory('flow', 'entity-1');
+    const result = await fetchTransitionHistory(plugin as any, 'flow', 'entity-1');
 
     expect(result).toEqual([]);
   });

@@ -33,7 +33,7 @@ export type { S3QueuePluginOptions } from './s3-queue.plugin.js';
 export { SchedulerPlugin } from './scheduler.plugin.js';
 export type { SchedulerPluginOptions } from './scheduler.plugin.js';
 
-export { StateMachinePlugin } from './state-machine.plugin.js';
+export { StateMachinePlugin } from './state-machine/index.js';
 export type {
   StateMachinePluginOptions,
   MachineEventPayloadMap,
@@ -46,7 +46,7 @@ export type {
   StateMachineSnapshot,
   MachineDefinitionDiagnostics,
   MachineDefinitionIssue
-} from './state-machine.plugin.js';
+} from './state-machine/index.js';
 
 export { TTLPlugin } from './ttl.plugin.js';
 export type { TTLPluginOptions, TTLResourceConfig, TTLStats, TTLGranularity, TTLExpireStrategy } from './ttl.plugin.js';
