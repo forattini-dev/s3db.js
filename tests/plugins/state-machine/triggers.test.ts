@@ -319,4 +319,101 @@ describe('StateMachinePlugin - Triggers', () => {
 
     await plugin.stop();
   });
+
+  it('should resolve eventSource triggers by entityId without scanning the full state set', async () => {
+    const source = new EventEmitter();
+    const longWork = vi.fn().mockResolvedValue({ action: 'done' });
+
+    const plugin = new StateMachinePlugin({
+      logLevel: 'silent',
+      stateMachines: {
+        poller: {
+          initialState: 'waiting',
+          states: {
+            waiting: {
+              triggers: [
+                {
+                  type: 'event',
+                  eventName: 'updated',
+                  eventSource: source,
+                  action: 'longWork'
+                }
+              ]
+            }
+          }
+        }
+      },
+      actions: {
+        longWork
+      },
+      persistTransitions: true
+    });
+
+    await plugin.install(database);
+    await plugin.initializeEntity('poller', 'job-7', { id: 'job-7' });
+    await plugin.initializeEntity('poller', 'job-8', { id: 'job-8' });
+
+    const stateResource = plugin.getStateResource();
+    const querySpy = vi.spyOn(stateResource!, 'query');
+
+    source.emit('updated', { entityId: 'job-7' });
+
+    await expect(plugin.waitForPendingEvents(1000)).resolves.toBeUndefined();
+
+    expect(longWork).toHaveBeenCalledTimes(1);
+    expect(longWork).toHaveBeenCalledWith(
+      expect.objectContaining({ id: 'job-7', eventData: { entityId: 'job-7' }, triggerName: 'longWork_0' }),
+      'TRIGGER',
+      expect.any(Object)
+    );
+    expect(querySpy).not.toHaveBeenCalled();
+
+    await plugin.stop();
+  });
+
+  it('should keep broadcast fallback when event payload has no entityId', async () => {
+    const source = new EventEmitter();
+    const longWork = vi.fn().mockResolvedValue({ action: 'done' });
+
+    const plugin = new StateMachinePlugin({
+      logLevel: 'silent',
+      stateMachines: {
+        poller: {
+          initialState: 'waiting',
+          states: {
+            waiting: {
+              triggers: [
+                {
+                  type: 'event',
+                  eventName: 'updated',
+                  eventSource: source,
+                  action: 'longWork'
+                }
+              ]
+            }
+          }
+        }
+      },
+      actions: {
+        longWork
+      },
+      persistTransitions: true
+    });
+
+    await plugin.install(database);
+    await plugin.initializeEntity('poller', 'job-9', { id: 'job-9' });
+    await plugin.initializeEntity('poller', 'job-10', { id: 'job-10' });
+
+    const stateResource = plugin.getStateResource();
+    const querySpy = vi.spyOn(stateResource!, 'query');
+
+    source.emit('updated', { kind: 'broadcast' });
+
+    await expect(plugin.waitForPendingEvents(1000)).resolves.toBeUndefined();
+
+    expect(longWork).toHaveBeenCalledTimes(2);
+    expect(querySpy).toHaveBeenCalled();
+
+    await plugin.stop();
+  });
 });

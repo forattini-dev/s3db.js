@@ -179,6 +179,7 @@ export async function initializeEntity(plugin: StateMachinePluginContext, machin
   }
 
   plugin.setInMemoryState(machineId, entityId, initialState, 0);
+  plugin.updateEntityTriggerSubscriptions(machineId, entityId, initialState);
 
   const initialStateConfig = machine.config.states[initialState];
   const initAfterEnterHooks = plugin.resolveHooks(initialStateConfig, 'afterEnter', 'entry');
@@ -220,6 +221,7 @@ export async function deleteEntity(plugin: StateMachinePluginContext, machineId:
 
   machine.currentStates.delete(entityId);
   machine.currentStateVersions.delete(entityId);
+  plugin.clearEntityTriggerSubscriptions(machineId, entityId);
 
   const stateResource = plugin.getStateResource();
   if (stateResource) {

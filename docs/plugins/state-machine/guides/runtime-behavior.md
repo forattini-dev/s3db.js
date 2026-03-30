@@ -106,6 +106,8 @@ In that case:
 - trigger handlers may still be running
 - reading state immediately can produce stale results
 
+When the event payload includes `entityId` or `id`, event triggers resolve the subscribed entity directly. That is the preferred O(1) path for resource-driven workflows. If the payload omits an entity identifier, the plugin falls back to evaluating all entities currently subscribed in that state.
+
 Use `waitForPendingEvents()` when you need a synchronization point.
 
 ```javascript

@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 import { execFileSync } from 'node:child_process';
-import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -18,9 +18,28 @@ function getPackageNodeModulesPath(packageName) {
 }
 
 function ensureTarballPath() {
-  const provided = process.argv[2];
-  if (provided) {
-    return resolve(provided);
+  const providedArgs = process.argv.slice(2);
+  if (providedArgs.length > 0) {
+    const resolvedTarballs = providedArgs
+      .map(arg => resolve(arg))
+      .filter(arg => arg.endsWith('.tgz') && existsSync(arg));
+
+    if (resolvedTarballs.length === 0) {
+      throw new Error(`No valid tarball paths found in arguments: ${providedArgs.join(', ')}`);
+    }
+
+    if (resolvedTarballs.length === 1) {
+      return resolvedTarballs[0];
+    }
+
+    const latestTarball = resolvedTarballs
+      .map(file => ({
+        file,
+        modifiedAt: statSync(file).mtimeMs
+      }))
+      .sort((a, b) => b.modifiedAt - a.modifiedAt)[0];
+
+    return latestTarball.file;
   }
 
   const stdout = execFileSync(nodeCommand, [join(root, 'scripts', 'create-package-tarball.js')], {

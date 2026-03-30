@@ -3,7 +3,14 @@ import { resolveResourceNames } from '../concerns/resource-names.js';
 import { StateMachineError } from '../state-machine.errors.js';
 import { getCronManager } from '../../concerns/cron-manager.js';
 
-import { resolveEdge, resolveHooks, parseDuration } from './helpers.js';
+import {
+  resolveEdge,
+  resolveHooks,
+  parseDuration,
+  buildTriggerSubscriptionKey,
+  buildEntityTriggerSubscriptionOwnerKey,
+  isEntityAddressableTrigger
+} from './helpers.js';
 
 import {
   validateConfiguration,
@@ -96,6 +103,8 @@ export class StateMachinePlugin<
   _pendingEventHandlers: Set<Promise<void>>;
   _triggerListeners: TriggerListenerRef[];
   _ttlTimers: Map<string, NodeJS.Timeout>;
+  _triggerSubscriptions: Map<string, Set<string>>;
+  _entityTriggerSubscriptions: Map<string, Set<string>>;
 
   private _resourceDescriptors: Record<string, ResourceDescriptor>;
 
@@ -182,6 +191,8 @@ export class StateMachinePlugin<
     this._pendingEventHandlers = new Set();
     this._triggerListeners = [];
     this._ttlTimers = new Map();
+    this._triggerSubscriptions = new Map();
+    this._entityTriggerSubscriptions = new Map();
 
     this._validateConfiguration();
   }
@@ -490,6 +501,8 @@ export class StateMachinePlugin<
       }
     }
     this._triggerListeners = [];
+    this._triggerSubscriptions.clear();
+    this._entityTriggerSubscriptions.clear();
     this.removeAllListeners();
   }
 
@@ -781,6 +794,65 @@ export class StateMachinePlugin<
       clearTimeout(existing);
       this._ttlTimers.delete(ttlKey);
     }
+  }
+
+  updateEntityTriggerSubscriptions(machineId: string, entityId: string, stateName: string): void {
+    const machine = this.machines.get(machineId);
+    if (!machine) {
+      return;
+    }
+
+    this.clearEntityTriggerSubscriptions(machineId, entityId);
+
+    const stateConfig = machine.config.states[stateName];
+    const triggers = stateConfig?.triggers || [];
+    const ownerKey = buildEntityTriggerSubscriptionOwnerKey(machineId, entityId);
+
+    for (let i = 0; i < triggers.length; i++) {
+      const trigger = triggers[i]!;
+      if (!isEntityAddressableTrigger(trigger)) {
+        continue;
+      }
+
+      const triggerName = `${trigger.action}_${i}`;
+      const subscriptionKey = buildTriggerSubscriptionKey(machineId, stateName, triggerName);
+
+      if (!this._triggerSubscriptions.has(subscriptionKey)) {
+        this._triggerSubscriptions.set(subscriptionKey, new Set());
+      }
+      this._triggerSubscriptions.get(subscriptionKey)!.add(entityId);
+
+      if (!this._entityTriggerSubscriptions.has(ownerKey)) {
+        this._entityTriggerSubscriptions.set(ownerKey, new Set());
+      }
+      this._entityTriggerSubscriptions.get(ownerKey)!.add(subscriptionKey);
+    }
+  }
+
+  clearEntityTriggerSubscriptions(machineId: string, entityId: string): void {
+    const ownerKey = buildEntityTriggerSubscriptionOwnerKey(machineId, entityId);
+    const subscriptions = this._entityTriggerSubscriptions.get(ownerKey);
+    if (!subscriptions) {
+      return;
+    }
+
+    for (const subscriptionKey of subscriptions) {
+      const entities = this._triggerSubscriptions.get(subscriptionKey);
+      if (!entities) {
+        continue;
+      }
+
+      entities.delete(entityId);
+      if (entities.size === 0) {
+        this._triggerSubscriptions.delete(subscriptionKey);
+      }
+    }
+
+    this._entityTriggerSubscriptions.delete(ownerKey);
+  }
+
+  getTriggerSubscribedEntities(subscriptionKey: string): string[] {
+    return Array.from(this._triggerSubscriptions.get(subscriptionKey) || []);
   }
 
   // ── Event handler wrapper ──────────────────────────────────

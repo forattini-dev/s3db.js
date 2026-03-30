@@ -52,8 +52,8 @@ new StateMachinePlugin({
           triggers: [{
             type: 'event',
 
-            // Listen for updates to this specific order
-            eventName: (context) => `updated:${context.id}`,
+            // Listen for resource updates
+            eventName: 'updated',
             eventSource: ordersResource,
 
             // Condition to check before transitioning
@@ -76,7 +76,7 @@ new StateMachinePlugin({
 
           triggers: [{
             type: 'event',
-            eventName: (context) => `updated:${context.id}`,
+            eventName: 'updated',
             eventSource: ordersResource,
             condition: (context, event) => {
               return context.shipmentId && context.trackingNumber;
@@ -90,7 +90,7 @@ new StateMachinePlugin({
 
           triggers: [{
             type: 'event',
-            eventName: (context) => `updated:${context.id}`,
+            eventName: 'updated',
             eventSource: ordersResource,
             condition: (context, event) => {
               return context.deliveredAt && context.signature;
@@ -149,6 +149,19 @@ await ordersResource.update(order.id, {
 // Automatically transitions to 'delivered'!
 ```
 
+### O(1) Event Routing
+
+For resource-driven event triggers, prefer emitting payloads that include `entityId` or `id`.
+
+```javascript
+source.emit('updated', {
+  entityId: order.id,
+  data: { paymentStatus: 'confirmed' }
+});
+```
+
+When the payload includes `entityId` or `id`, the plugin resolves the subscribed entity directly instead of scanning every entity in the state. If the payload omits an entity identifier, the runtime falls back to the broadcast path for all entities subscribed in that state.
+
 ### Event Names
 
 Use standard s3db.js resource events:
@@ -158,11 +171,11 @@ Use standard s3db.js resource events:
 | `inserted` | After any insert | All new records |
 | `inserted:${id}` | After specific insert | Specific record created |
 | `updated` | After any update | All updates |
-| `updated:${id}` | After specific update | **Most common for triggers** |
+| `updated:${id}` | After specific update | Useful when your resource emitter already publishes id-scoped events |
 | `deleted` | After any delete | All deletes |
 | `deleted:${id}` | After specific delete | Specific record deleted |
 
-**Best Practice**: Use ID-specific events (`updated:${context => context.id}`) to avoid triggering on unrelated records.
+**Best Practice**: Keep the event name stable and include `entityId` or `id` in the payload whenever possible. That keeps the trigger path O(1) and avoids unnecessary fan-out.
 
 ### 🔍 Detecting Which Fields Changed
 
@@ -190,7 +203,7 @@ new StateMachinePlugin({
 
           triggers: [{
             type: 'event',
-            eventName: (context) => `updated:${context.id}`,
+            eventName: 'updated',
             eventSource: usersResource,
 
             // ✅ Only transition when profileCompleted flag changes to true
@@ -211,7 +224,7 @@ new StateMachinePlugin({
 
           triggers: [{
             type: 'event',
-            eventName: (context) => `updated:${context.id}`,
+            eventName: 'updated',
             eventSource: usersResource,
 
             // ✅ Only transition when emailVerified changes to true

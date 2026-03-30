@@ -276,6 +276,8 @@ pending: {
 }
 ```
 
+When event trigger payloads include `entityId` or `id`, the runtime resolves the subscribed entity directly. If the payload has no entity identifier, the plugin falls back to the broader state-level broadcast path.
+
 See [Triggers](/plugins/state-machine/triggers.md).
 
 ### Retries

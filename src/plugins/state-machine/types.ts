@@ -241,6 +241,13 @@ export interface TriggerListenerRef {
   handler: (...args: unknown[]) => unknown;
 }
 
+export interface TriggerSubscriptionRef {
+  machineId: string;
+  stateName: string;
+  triggerName: string;
+  entityId: string;
+}
+
 export type TransitionSortOrder = 'asc' | 'desc';
 
 export interface StateMachinePluginOptions {
@@ -508,6 +515,8 @@ export interface StateMachinePluginContext {
   schedulerPlugin: (Plugin & { stop(): Promise<void> }) | null;
   _pendingEventHandlers: Set<Promise<void>>;
   _triggerListeners: TriggerListenerRef[];
+  _triggerSubscriptions: Map<string, Set<string>>;
+  _entityTriggerSubscriptions: Map<string, Set<string>>;
   emit(event: string, data: unknown): void;
   getStorage(): any;
   send(machineId: string, entityId: string, event: string, context: Record<string, unknown>): Promise<TransitionResult>;
@@ -538,4 +547,7 @@ export interface StateMachinePluginContext {
   cancelTTL(machineId: string, entityId: string): void;
   scheduleTTL(machineId: string, entityId: string, stateConfig?: StateConfig): void;
   wrapEventHandler(handler: (...args: unknown[]) => unknown): (...args: unknown[]) => void;
+  updateEntityTriggerSubscriptions(machineId: string, entityId: string, stateName: string): void;
+  clearEntityTriggerSubscriptions(machineId: string, entityId: string): void;
+  getTriggerSubscribedEntities(subscriptionKey: string): string[];
 }

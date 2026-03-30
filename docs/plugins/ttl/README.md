@@ -1,6 +1,6 @@
 # ⏱️ TTL Plugin v2
 
-> **Automated record expiration with O(1) indexing and flexible cleanup strategies.**
+> **Automated record expiration with indexed or lazy cleanup strategies.**
 >
 > **Navigation:** [Getting Started ↓](#-getting-started) | [Guides ↓](#-documentation-guides) | [Features ↓](#-key-features)
 
@@ -8,7 +8,7 @@
 
 ## ⚡ TLDR
 
-**Automatic Time-To-Live cleanup** with partition-based indexing for O(1) performance.
+**Automatic Time-To-Live cleanup** with either partition-based indexing or lazy expiration on read.
 
 ```javascript
 import { Database } from 's3db.js';
@@ -18,6 +18,7 @@ const db = new Database('s3://key:secret@bucket');
 
 // 1 line to get started:
 const ttlPlugin = new TTLPlugin({
+  mode: 'indexed', // Default: scheduled cleanup via expiration index
   resources: {
     sessions: { ttl: 86400, onExpire: 'soft-delete' },      // 24h
     temp_uploads: { ttl: 3600, onExpire: 'hard-delete' },   // 1h
@@ -34,8 +35,10 @@ console.log('Total expired:', stats.totalExpired);
 ```
 
 **Key Features:**
-- ✅ **O(1) cleanup** via partition-based expiration index (10-100x faster)
-- ✅ **Zero full scans** - indexes records by expiration cohorts
+- ✅ **Two operating modes**: `indexed` and `lazy`
+- ✅ **O(1) indexed cleanup** via partition-based expiration index
+- ✅ **Lazy expiration on read** when background cleanup is not desired
+- ✅ **Zero full scans** in indexed mode - records are grouped by expiration cohorts
 - ✅ **Auto-granularity detection** (minute, hour, day, week)
 - ✅ **4 expiration strategies** (soft-delete, hard-delete, archive, callback)
 - ✅ **Coordinator Mode** - automatic election for multi-pod deployments
@@ -76,6 +79,7 @@ const db = new Database('s3://key:secret@bucket');
 
 // Create plugin with TTL rules
 const ttlPlugin = new TTLPlugin({
+  mode: 'indexed', // Optional: 'indexed' (default) or 'lazy'
   resources: {
     // Sessions expire after 24 hours (auto-uses _createdAt)
     sessions: {
@@ -102,11 +106,42 @@ await db.usePlugin(ttlPlugin);
 await db.connect();
 
 // Records are automatically cleaned up!
-// Plugin runs cleanup at intervals based on TTL granularity
-// - < 1 hour TTL → checks every 10 seconds
-// - 1-7 days TTL → checks every 10 minutes
-// - > 7 days TTL → checks daily
+// Indexed mode runs cleanup at intervals based on TTL granularity:
+// - TTL < 1 hour   → every 10 seconds
+// - TTL < 1 day    → every 10 minutes
+// - TTL < 30 days  → every 1 hour
+// - TTL >= 30 days → every 1 day
 ```
+
+### Choosing a Mode
+
+Use `indexed` when you want predictable physical cleanup in the background.
+
+```javascript
+new TTLPlugin({
+  mode: 'indexed',
+  resources: {
+    sessions: { ttl: 86400, onExpire: 'soft-delete' }
+  }
+});
+```
+
+Use `lazy` when you want records to disappear on read without running cleanup intervals.
+
+```javascript
+new TTLPlugin({
+  mode: 'lazy',
+  resources: {
+    sessions: { ttl: 86400, onExpire: 'soft-delete' }
+  }
+});
+```
+
+In `lazy` mode:
+- expired records are hidden from `get`, `getOrNull`, `exists`, `list`, `listPartition`, `query`, `count`, and `page`
+- the expiration strategy runs when the expired record is read
+- no expiration index is created
+- no cleanup cron jobs are scheduled
 
 **Next Steps:**
 1. See [**Configuration Guide**](./guides/configuration.md) for all options
@@ -185,9 +220,9 @@ All documentation is organized into focused guides:
 
 ## 🎯 Key Features
 
-### 1. O(1) Partition-Based Indexing
+### 1. Indexed Mode
 
-Unlike traditional O(n) scanning, TTLPlugin uses partition-based expiration indexing:
+In `indexed` mode, TTLPlugin uses partition-based expiration indexing:
 
 ```javascript
 // Traditional TTL (O(n) - slow!)
@@ -211,11 +246,14 @@ Automatically selects cleanup frequency based on TTL:
 // TTL < 1 hour (minute granularity)
 verification_codes: { ttl: 600 }       // Checks every 10 seconds
 
-// TTL 1-7 days (hour granularity)
+// TTL 1 hour to < 1 day (hour granularity)
 sessions: { ttl: 3600 }                // Checks every 10 minutes
 
-// TTL > 7 days (day granularity)
-old_data: { ttl: 2592000 }             // Checks daily
+// TTL 1 day to < 30 days (day granularity)
+old_data: { ttl: 2592000 }             // Checks every hour
+
+// TTL >= 30 days (week granularity)
+audit_data: { ttl: 7776000 }           // Checks daily
 ```
 
 No configuration needed - plugin auto-detects!

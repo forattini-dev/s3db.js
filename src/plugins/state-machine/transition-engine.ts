@@ -391,6 +391,7 @@ export async function send(
     }
 
     transitionedStateVersion = await plugin.persistTransition(machineId, entityId, currentState, targetState, event, normalizedContext, currentStateVersion);
+    plugin.updateEntityTriggerSubscriptions(machineId, entityId, targetState);
 
     if (plugin.hasTTLStates(machineId)) {
       plugin.cancelTTL(machineId, entityId);

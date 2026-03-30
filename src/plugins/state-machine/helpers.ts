@@ -9,7 +9,8 @@ import type {
   TransitionRecord,
   TransitionHistoryEntry,
   TransitionQueryOptions,
-  TransitionSortOrder
+  TransitionSortOrder,
+  TriggerConfig
 } from './types.js';
 
 export function resolveEdge(edgeConfig: string | TransitionEdge | ConditionalTarget): { target: string; guard: string | undefined; beforeTransition: string[]; afterTransition: string[] } {
@@ -247,4 +248,25 @@ export function sortTransitions(transitions: TransitionHistoryEntry[], sort: Tra
   });
 
   return sorted;
+}
+
+export function buildTriggerSubscriptionKey(machineId: string, stateName: string, triggerName: string): string {
+  return `${machineId}:${stateName}:${triggerName}`;
+}
+
+export function buildEntityTriggerSubscriptionOwnerKey(machineId: string, entityId: string): string {
+  return `${machineId}:${entityId}`;
+}
+
+export function getEventEntityId(eventData: unknown): string | null {
+  if (!eventData || typeof eventData !== 'object') {
+    return null;
+  }
+
+  const candidate = (eventData as Record<string, unknown>).entityId || (eventData as Record<string, unknown>).id;
+  return typeof candidate === 'string' && candidate.length > 0 ? candidate : null;
+}
+
+export function isEntityAddressableTrigger(trigger: TriggerConfig): boolean {
+  return trigger.type === 'event';
 }

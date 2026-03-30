@@ -72,6 +72,17 @@ pending: {
 }
 ```
 
+For the best runtime characteristics, include `entityId` or `id` in the emitted event payload.
+
+When an event trigger receives `entityId` or `id`, the plugin resolves the subscribed entity directly instead of scanning all entities in the state. Without that identifier, the plugin falls back to the broadcast path for the whole state.
+
+```javascript
+await invoices.emit('updated', {
+  entityId: 'invoice-123',
+  data: { paymentStatus: 'confirmed' }
+});
+```
+
 If the source uses async events, pair this with `waitForPendingEvents()`.
 
 ---
@@ -238,6 +249,7 @@ const plugin = new StateMachinePlugin({
 
 Use:
 - `event` when the outside world tells the workflow something changed
+- `event` with `entityId` or `id` when you want the event path to stay O(1)
 - `function` when the state itself should keep doing work
 - `date` when time-based escalation matters
 - `cron` when recurring checks are needed

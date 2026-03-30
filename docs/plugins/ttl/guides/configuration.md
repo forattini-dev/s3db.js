@@ -25,6 +25,7 @@ import { TTLPlugin } from 's3db.js';
 
 const ttlPlugin = new TTLPlugin({
   // Plugin-level options
+  mode: 'indexed',             // 'indexed' (default) or 'lazy'
   batchSize: 100,              // Records to process per batch
   logLevel: 'silent',              // Enable logging
 
@@ -76,6 +77,21 @@ await db.usePlugin(ttlPlugin);
 - **Example:**
   ```javascript
   { batchSize: 500 }  // Process 500 records at a time
+  ```
+
+#### `mode`
+- **Type:** `'indexed' | 'lazy'`
+- **Default:** `'indexed'`
+- **Description:** Controls whether expiration happens through a scheduled index scan or lazily when records are read
+- **Use `indexed` when:** you want background cleanup and physical removal on schedule
+- **Use `lazy` when:** you want expired records to disappear on read without cleanup polling
+- **Behavior in `lazy`:**
+  - no expiration index is created
+  - no cleanup cron jobs are scheduled
+  - expired records are hidden from reads and processed on access
+- **Example:**
+  ```javascript
+  { mode: 'lazy' }
   ```
 
 #### `logLevel`
@@ -146,10 +162,10 @@ await db.usePlugin(ttlPlugin);
 - **Required:** ✅ (unless `field` is set)
 - **Description:** Time-to-live in seconds. Plugin auto-detects granularity based on TTL value.
 - **Granularity auto-detection:**
-  - `< 60s`: 'minute' (checks every 10 seconds)
-  - `60s - 3600s`: 'minute' (checks every 10 seconds)
-  - `3600s - 86400s`: 'hour' (checks every 10 minutes)
-  - `> 86400s`: 'day' (checks daily at midnight)
+  - `< 3600s`: `minute` (checks every 10 seconds)
+  - `3600s - < 86400s`: `hour` (checks every 10 minutes)
+  - `86400s - < 2592000s`: `day` (checks every 1 hour)
+  - `>= 2592000s`: `week` (checks every 1 day)
 - **Example:**
   ```javascript
   {
@@ -242,21 +258,40 @@ For local development with quick iteration:
 
 ```javascript
 new TTLPlugin({
-  batchSize: 50,              // Smaller batches
-  logLevel: 'debug',              // Show all logs
-
+  mode: 'lazy',
+  logLevel: 'debug',
   resources: {
     sessions: {
-      ttl: 300,               // 5 minutes (test quickly)
+      ttl: 300,
       onExpire: 'soft-delete'
     }
-  },
-
-  schedules: {
-    minute: '*/5 * * * * *'    // Check every 5 seconds (fast)
   }
 });
 ```
+
+### Pattern 1B: Lazy Expiration
+
+For workloads where background cleanup polling is undesirable:
+
+```javascript
+new TTLPlugin({
+  mode: 'lazy',
+  batchSize: 50,              // Smaller batches
+  logLevel: 'debug',
+
+  resources: {
+    sessions: {
+      ttl: 300,
+      onExpire: 'soft-delete'
+    }
+  }
+});
+```
+
+This mode is useful when:
+- you want no scheduled TTL polling
+- the natural read path is enough to evict expired records
+- eventual physical cleanup timing is less important than runtime simplicity
 
 **Use when:** Testing TTL behavior locally
 

@@ -2,6 +2,7 @@ import type { StateMachinePluginContext, StateRecord, TriggerConfig, EntityInSta
 import { StateMachineError } from '../state-machine.errors.js';
 import tryFn from '../../concerns/try-fn.js';
 import { getCronManager } from '../../concerns/cron-manager.js';
+import { buildTriggerSubscriptionKey, getEventEntityId } from './helpers.js';
 
 export async function getEntitiesInState(plugin: StateMachinePluginContext, machineId: string, stateName: string): Promise<EntityInState[]> {
   if (!plugin.config.persistTransitions) {
@@ -117,6 +118,25 @@ export async function executeTriggerForEntity(
   });
 
   return true;
+}
+
+async function getSubscribedEntitySnapshot(
+  plugin: StateMachinePluginContext,
+  machineId: string,
+  stateName: string,
+  entityId: string
+): Promise<EntityInState | null> {
+  const snapshot = await plugin.getSnapshot(machineId, entityId).catch(() => null);
+  if (!snapshot || snapshot.state !== stateName) {
+    return null;
+  }
+
+  return {
+    entityId,
+    currentState: snapshot.state,
+    context: snapshot.context || {},
+    triggerCounts: snapshot.triggerCounts || {}
+  };
 }
 
 export async function incrementTriggerCount(plugin: StateMachinePluginContext, machineId: string, entityId: string, triggerName: string): Promise<void> {
@@ -297,6 +317,7 @@ export async function setupFunctionTrigger(plugin: StateMachinePluginContext, ma
 export async function setupEventTrigger(plugin: StateMachinePluginContext, machineId: string, stateName: string, trigger: TriggerConfig, triggerName: string): Promise<void> {
   const baseEventName = trigger.eventName || trigger.event;
   const eventSource = trigger.eventSource;
+  const subscriptionKey = buildTriggerSubscriptionKey(machineId, stateName, triggerName);
 
   if (!baseEventName) {
     throw new StateMachineError(`Event trigger '${triggerName}' must have either 'event' or 'eventName' property`, {
@@ -308,18 +329,28 @@ export async function setupEventTrigger(plugin: StateMachinePluginContext, machi
   }
 
   const eventHandler = async (eventData: unknown) => {
-    const entities = await getEntitiesInState(plugin, machineId, stateName);
+    const targetedEntityId = getEventEntityId(eventData);
+    const entities = targetedEntityId
+      ? plugin.getTriggerSubscribedEntities(subscriptionKey)
+          .filter((entityId) => entityId === targetedEntityId)
+          .map((entityId) => ({ entityId }))
+      : await getEntitiesInState(plugin, machineId, stateName);
 
     for (const entity of entities) {
       try {
-        if (eventSource && typeof baseEventName === 'function') {
-          const eventIdMatch = (eventData as Record<string, unknown>)?.id || (eventData as Record<string, unknown>)?.entityId;
-          if (eventIdMatch && entity.entityId !== eventIdMatch) {
-            continue;
-          }
+        if (targetedEntityId && entity.entityId !== targetedEntityId) {
+          continue;
         }
 
-        await executeTriggerForEntity(plugin, machineId, stateName, entity, trigger, triggerName, 'event', { eventData });
+        const resolvedEntity = 'currentState' in entity
+          ? entity as EntityInState
+          : await getSubscribedEntitySnapshot(plugin, machineId, stateName, entity.entityId);
+
+        if (!resolvedEntity) {
+          continue;
+        }
+
+        await executeTriggerForEntity(plugin, machineId, stateName, resolvedEntity, trigger, triggerName, 'event', { eventData });
       } catch (error) {
         plugin.logger.error({ triggerName, machineId, stateName, error: (error as Error).message }, `Event trigger '${triggerName}' failed: ${(error as Error).message}`);
       }

@@ -21,6 +21,7 @@ const MAX_BATCH_SIZE = 10000;
 
 export type TTLGranularity = 'minute' | 'hour' | 'day' | 'week';
 export type TTLExpireStrategy = 'soft-delete' | 'hard-delete' | 'archive' | 'callback';
+export type TTLMode = 'indexed' | 'lazy';
 
 export interface TTLResourceConfig {
   ttl?: number;
@@ -35,6 +36,7 @@ export interface TTLResourceConfig {
 
 export interface TTLPluginOptions {
   resources?: Record<string, TTLResourceConfig>;
+  mode?: TTLMode;
   batchSize?: number;
   schedules?: Partial<Record<TTLGranularity, string>>;
   resourceFilter?: (resourceName: string) => boolean;
@@ -103,6 +105,17 @@ interface ResourceDescriptor {
 interface TTLIndexMetadata {
   expiresAtTimestamp: number;
   expiresAtCohort: string;
+}
+
+interface LazyPageResult {
+  items: Record<string, unknown>[];
+  totalItems: number | null;
+  page: number | null;
+  pageSize: number;
+  totalPages: number | null;
+  hasMore: boolean;
+  nextCursor?: string | null;
+  _debug?: Record<string, unknown>;
 }
 
 const GRANULARITIES: Record<TTLGranularity, GranularityConfig> = {
@@ -185,6 +198,7 @@ export class TTLPlugin extends CoordinatorPlugin {
 
   config: TTLPluginOptions & { logLevel?: string };
   resources: Record<string, TTLResourceConfig>;
+  mode: TTLMode;
   resourceFilter: (resourceName: string) => boolean;
   batchSize: number;
   schedules: Partial<Record<TTLGranularity, string>>;
@@ -193,6 +207,7 @@ export class TTLPlugin extends CoordinatorPlugin {
   expirationIndex: Resource | null;
   indexResourceName: string;
   private _cohortScanState: Record<TTLGranularity, CohortScanState>;
+  private _lazyProcessingRecords: Set<string>;
 
   private _indexResourceDescriptor: ResourceDescriptor;
 
@@ -208,6 +223,7 @@ export class TTLPlugin extends CoordinatorPlugin {
 
     const {
       resources = {},
+      mode = 'indexed',
       batchSize = 100,
       schedules = {},
       resourceFilter,
@@ -227,6 +243,7 @@ export class TTLPlugin extends CoordinatorPlugin {
     }
 
     this.resources = resources as Record<string, TTLResourceConfig>;
+    this.mode = mode;
     this.resourceFilter = this._buildResourceFilter({ resourceFilter, resourceAllowlist, resourceBlocklist } as any);
     this.batchSize = batchSize as number;
     this.schedules = schedules as Partial<Record<TTLGranularity, string>>;
@@ -275,6 +292,7 @@ export class TTLPlugin extends CoordinatorPlugin {
         lookup: new Set()
       }
     };
+    this._lazyProcessingRecords = new Set();
   }
 
   private _buildResourceFilter(config: {
@@ -318,10 +336,15 @@ export class TTLPlugin extends CoordinatorPlugin {
       managedResources.push(resourceName);
     }
 
-    await this._createExpirationIndex();
-
     for (const resourceName of managedResources) {
-      this._setupResourceHooks(resourceName, this.resources[resourceName]!);
+      if (this.mode === 'indexed') {
+        await this._createExpirationIndexIfNeeded();
+        this._setupResourceHooks(resourceName, this.resources[resourceName]!);
+      }
+
+      if (this.mode === 'lazy') {
+        this._setupLazyResourceHooks(resourceName, this.resources[resourceName]!);
+      }
     }
 
     this.logger.debug({ resourceCount: managedResources.length, resources: managedResources }, `Installed with ${managedResources.length} resources`);
@@ -331,7 +354,9 @@ export class TTLPlugin extends CoordinatorPlugin {
       resources: managedResources
     });
 
-    await this.startCoordination();
+    if (this.mode === 'indexed') {
+      await this.startCoordination();
+    }
   }
 
   private _resolveIndexResourceName(): string {
@@ -420,6 +445,10 @@ export class TTLPlugin extends CoordinatorPlugin {
     let baseTime = record[config.field!] as number | string | undefined;
 
     if (!baseTime && config.field === '_createdAt') {
+      baseTime = record.createdAt as number | string | undefined;
+    }
+
+    if (!baseTime && config.field === '_createdAt') {
       baseTime = Date.now();
     }
 
@@ -462,7 +491,11 @@ export class TTLPlugin extends CoordinatorPlugin {
     return previousMetadata.expiresAtTimestamp === updatedMetadata.expiresAtTimestamp;
   }
 
-  private async _createExpirationIndex(): Promise<void> {
+  private async _createExpirationIndexIfNeeded(): Promise<void> {
+    if (this.expirationIndex) {
+      return;
+    }
+
     this.expirationIndex = await this.database.createResource({
       name: this.indexResourceName,
       attributes: {
@@ -538,6 +571,380 @@ export class TTLPlugin extends CoordinatorPlugin {
     }
 
     this.logger.debug({ resourceName }, `Setup hooks for resource "${resourceName}"`);
+  }
+
+  private _setupLazyResourceHooks(resourceName: string, config: TTLResourceConfig): void {
+    if (!this.database.resources[resourceName]) {
+      this.logger.warn({ resourceName }, `Resource "${resourceName}" not found, skipping lazy TTL hooks`);
+      return;
+    }
+
+    if (!this.resourceFilter(resourceName)) {
+      this.logger.warn({ resourceName }, `Resource "${resourceName}" skipped by resource filter`);
+      return;
+    }
+
+    const resource = this.database.resources[resourceName]!;
+
+    (this as any).addMiddleware(resource, 'get', async (next: Function, id: string) => {
+      const record = await next(id);
+      const visible = await this._resolveLazyRead(resource, record as Record<string, unknown> | null, config);
+
+      if (!visible) {
+        throw new PluginError(`Record "${id}" not found`, {
+          pluginName: 'TTLPlugin',
+          operation: 'lazyGet',
+          resourceName,
+          statusCode: 404,
+          retriable: false,
+          suggestion: 'The record may have expired under lazy TTL mode.'
+        });
+      }
+
+      return visible;
+    });
+
+    if (typeof resource.getOrNull === 'function') {
+      (this as any).addMiddleware(resource, 'getOrNull', async (next: Function, id: string) => {
+        const record = await next(id);
+        return this._resolveLazyRead(resource, record as Record<string, unknown> | null, config);
+      });
+    }
+
+    if (typeof resource.exists === 'function') {
+      (this as any).addMiddleware(resource, 'exists', async (next: Function, id: string) => {
+        const exists = await next(id);
+        if (!exists) {
+          return false;
+        }
+
+        const visible = await resource.getOrNull(id);
+        return visible !== null;
+      });
+    }
+
+    if (typeof resource.list === 'function') {
+      (this as any).addMiddleware(
+        resource,
+        'list',
+        async (next: Function, options: { partition?: string | null; partitionValues?: Record<string, unknown>; limit?: number; offset?: number } = {}) => {
+          return this._collectVisibleRecords(
+            async (limit, offset) => next({ ...options, limit, offset }) as Promise<Record<string, unknown>[]>,
+            resource,
+            config,
+            options.limit,
+            options.offset || 0
+          );
+        }
+      );
+    }
+
+    if (typeof resource.listPartition === 'function') {
+      (this as any).addMiddleware(
+        resource,
+        'listPartition',
+        async (next: Function, options: { partition: string; partitionValues: Record<string, unknown>; limit?: number; offset?: number }) => {
+          return this._collectVisibleRecords(
+            async (limit, offset) => next({ ...options, limit, offset }) as Promise<Record<string, unknown>[]>,
+            resource,
+            config,
+            options.limit,
+            options.offset || 0
+          );
+        }
+      );
+    }
+
+    if (typeof resource.query === 'function') {
+      (this as any).addMiddleware(
+        resource,
+        'query',
+        async (
+          next: Function,
+          filter: Record<string, unknown> = {},
+          options: { limit?: number; offset?: number; partition?: string | null; partitionValues?: Record<string, unknown> } = {}
+        ) => {
+          return this._collectVisibleRecords(
+            async (limit, offset) => next(filter, { ...options, limit, offset }) as Promise<Record<string, unknown>[]>,
+            resource,
+            config,
+            options.limit,
+            options.offset || 0
+          );
+        }
+      );
+    }
+
+    if (typeof resource.count === 'function') {
+      (this as any).addMiddleware(
+        resource,
+        'count',
+        async (next: Function, options: { partition?: string | null; partitionValues?: Record<string, unknown>; skipCache?: boolean } = {}) => {
+          void next;
+          return this._countVisibleRecords(resource, config, options);
+        }
+      );
+    }
+
+    if (typeof resource.page === 'function') {
+      (this as any).addMiddleware(
+        resource,
+        'page',
+        async (
+          next: Function,
+          options: {
+            page?: number;
+            size?: number;
+            partition?: string | null;
+            partitionValues?: Record<string, unknown>;
+            skipCount?: boolean;
+            cursor?: string | null;
+          } = {}
+        ) => {
+          return this._collectVisiblePage(
+            async (pageOptions) => next(pageOptions) as Promise<LazyPageResult>,
+            resource,
+            config,
+            options
+          );
+        }
+      );
+    }
+
+    this.logger.debug({ resourceName }, `Setup lazy TTL hooks for resource "${resourceName}"`);
+  }
+
+  private async _collectVisibleRecords(
+    fetchBatch: (limit: number | undefined, offset: number) => Promise<Record<string, unknown>[]>,
+    resource: Resource,
+    config: TTLResourceConfig,
+    requestedLimit?: number,
+    requestedOffset: number = 0
+  ): Promise<Record<string, unknown>[]> {
+    if (typeof requestedLimit !== 'number') {
+      const records = await fetchBatch(undefined, requestedOffset);
+      return this._filterVisibleRecords(resource, records, config);
+    }
+
+    const visible: Record<string, unknown>[] = [];
+    let currentOffset = requestedOffset;
+
+    while (visible.length < requestedLimit) {
+      const remaining = requestedLimit - visible.length;
+      const batch = await fetchBatch(remaining, currentOffset);
+
+      if (batch.length === 0) {
+        break;
+      }
+
+      currentOffset += batch.length;
+      const filtered = await this._filterVisibleRecords(resource, batch, config);
+      visible.push(...filtered);
+
+      if (batch.length < remaining) {
+        break;
+      }
+    }
+
+    return visible.slice(0, requestedLimit);
+  }
+
+  private async _filterVisibleRecords(
+    resource: Resource,
+    records: Record<string, unknown>[],
+    config: TTLResourceConfig
+  ): Promise<Record<string, unknown>[]> {
+    const visible: Record<string, unknown>[] = [];
+
+    for (const record of records) {
+      const resolved = await this._resolveLazyRead(resource, record, config);
+      if (resolved) {
+        visible.push(resolved);
+      }
+    }
+
+    return visible;
+  }
+
+  private async _countVisibleRecords(
+    resource: Resource,
+    config: TTLResourceConfig,
+    options: { partition?: string | null; partitionValues?: Record<string, unknown> } = {}
+  ): Promise<number> {
+    let offset = 0;
+    let count = 0;
+    const batchSize = Math.max(this.batchSize, 100);
+
+    while (true) {
+      const batch = await resource.list({
+        partition: options.partition || null,
+        partitionValues: options.partitionValues || {},
+        limit: batchSize,
+        offset
+      }) as unknown as Record<string, unknown>[];
+
+      if (batch.length === 0) {
+        break;
+      }
+
+      count += batch.length;
+      offset += batch.length;
+
+      if (batch.length < batchSize) {
+        break;
+      }
+    }
+
+    return count;
+  }
+
+  private async _collectVisiblePage(
+    fetchPage: (options: {
+      page?: number;
+      size?: number;
+      partition?: string | null;
+      partitionValues?: Record<string, unknown>;
+      skipCount?: boolean;
+      cursor?: string | null;
+    }) => Promise<LazyPageResult>,
+    resource: Resource,
+    config: TTLResourceConfig,
+    options: {
+      page?: number;
+      size?: number;
+      partition?: string | null;
+      partitionValues?: Record<string, unknown>;
+      skipCount?: boolean;
+      cursor?: string | null;
+    }
+  ): Promise<LazyPageResult> {
+    const targetSize = Math.max(1, Math.floor(options.size || 100));
+    const items: Record<string, unknown>[] = [];
+    let currentOptions = { ...options, size: targetSize };
+    let finalResult: LazyPageResult | null = null;
+
+    while (items.length < targetSize) {
+      const pageResult = await fetchPage(currentOptions);
+      finalResult = pageResult;
+
+      const visible = await this._filterVisibleRecords(resource, pageResult.items || [], config);
+      items.push(...visible);
+
+      if (!pageResult.hasMore || !pageResult.nextCursor) {
+        break;
+      }
+
+      currentOptions = {
+        ...currentOptions,
+        page: undefined,
+        cursor: pageResult.nextCursor
+      };
+    }
+
+    return {
+      ...(finalResult || {
+        totalItems: null,
+        page: options.page ?? null,
+        pageSize: targetSize,
+        totalPages: null,
+        hasMore: false,
+        nextCursor: null
+      }),
+      items: items.slice(0, targetSize),
+      pageSize: targetSize,
+      hasMore: Boolean(finalResult?.hasMore && finalResult?.nextCursor),
+      nextCursor: finalResult?.nextCursor ?? null
+    };
+  }
+
+  private _isSoftDeleted(record: Record<string, unknown>, config: TTLResourceConfig): boolean {
+    if (config.onExpire !== 'soft-delete') {
+      return false;
+    }
+
+    const deleteField = config.deleteField || 'deletedat';
+    return Boolean(record[deleteField] || record.isdeleted === 'true' || record.isdeleted === true);
+  }
+
+  private async _resolveLazyRead(
+    resource: Resource,
+    record: Record<string, unknown> | null,
+    config: TTLResourceConfig
+  ): Promise<Record<string, unknown> | null> {
+    if (!record) {
+      return null;
+    }
+
+    if (this._isSoftDeleted(record, config)) {
+      return null;
+    }
+
+    const processingKey = `${resource.name}:${String(record.id)}`;
+    if (this._lazyProcessingRecords.has(processingKey)) {
+      return record;
+    }
+
+    const metadata = this._buildTTLMetadata(record, config);
+    if (!metadata || Date.now() < metadata.expiresAtTimestamp) {
+      return record;
+    }
+
+    const shouldHide = await this._processLazyExpiredRecord(resource, record, config);
+    return shouldHide ? null : record;
+  }
+
+  private async _processLazyExpiredRecord(
+    resource: Resource,
+    record: Record<string, unknown>,
+    config: TTLResourceConfig
+  ): Promise<boolean> {
+    const processingKey = `${resource.name}:${String(record.id)}`;
+    if (this._lazyProcessingRecords.has(processingKey)) {
+      return false;
+    }
+
+    this._lazyProcessingRecords.add(processingKey);
+
+    try {
+      switch (config.onExpire) {
+        case 'soft-delete':
+          await this._softDelete(resource, record, config);
+          this.stats.totalSoftDeleted++;
+          this.stats.totalExpired++;
+          return true;
+        case 'hard-delete':
+          await this._hardDelete(resource, record);
+          this.stats.totalDeleted++;
+          this.stats.totalExpired++;
+          return true;
+        case 'archive':
+          await this._archive(resource, record, config);
+          this.stats.totalArchived++;
+          this.stats.totalDeleted++;
+          this.stats.totalExpired++;
+          return true;
+        case 'callback': {
+          const shouldDelete = await config.callback!(record, resource);
+          this.stats.totalCallbacks++;
+
+          if (shouldDelete) {
+            await this._hardDelete(resource, record);
+            this.stats.totalDeleted++;
+            this.stats.totalExpired++;
+            return true;
+          }
+
+          return false;
+        }
+      }
+    } catch (error) {
+      this.logger.error({ error: (error as Error).message, stack: (error as Error).stack, resourceName: resource.name, recordId: record.id }, 'Error processing lazy-expired record');
+      this.stats.totalErrors++;
+    } finally {
+      this._lazyProcessingRecords.delete(processingKey);
+    }
+
+    return false;
   }
 
   private async _addToIndex(resourceName: string, record: Record<string, unknown>, config: TTLResourceConfig): Promise<void> {
