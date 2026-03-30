@@ -1,6 +1,6 @@
-import type { Context } from '#src/plugins/shared/http-runtime.js';
+import type { Context } from '#src/plugins/http/http-runtime.js';
 import type { Logger, LogLevel } from '../../../concerns/logger.js';
-import * as formatter from '../../shared/response-formatter.js';
+import * as formatter from '../../http/response-formatter.js';
 import { createLogger } from '../../../concerns/logger.js';
 
 type HttpAppType = {

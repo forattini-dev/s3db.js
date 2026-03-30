@@ -1,6 +1,6 @@
-import { getCookie, setCookie } from '#src/plugins/shared/http-runtime.js';
-import type { Context } from '#src/plugins/shared/http-runtime.js';
-import type { CookieOptions as HttpCookieOptions } from '#src/plugins/shared/http-runtime.js';
+import { getCookie, setCookie } from '#src/plugins/http/http-runtime.js';
+import type { Context } from '#src/plugins/http/http-runtime.js';
+import type { CookieOptions as HttpCookieOptions } from '#src/plugins/http/http-runtime.js';
 
 const safeGetCookie = (context: Context, name: string): string | null => {
   const req = context?.req as { cookie?: (name: string) => string | undefined };

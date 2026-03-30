@@ -1,5 +1,5 @@
 import zlib from "node:zlib";
-import { PluginStorage, type PluginStorageSetOptions, type PluginClient } from "../../concerns/plugin-storage.js";
+import { PluginStorage, type PluginStorageSetOptions, type PluginClient } from "../concerns/plugin-storage.js";
 import { Cache, type CacheConfig } from "./cache.class.js";
 import { CacheError } from "../cache.errors.js";
 

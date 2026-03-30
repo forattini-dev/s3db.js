@@ -2,7 +2,7 @@
  * Forgot Password Page
  */
 
-import { html, type HtmlEscapedString } from '#src/plugins/shared/html.js';
+import { html, type HtmlEscapedString } from '#src/plugins/http/html.js';
 import { BaseLayout, type ThemeConfig } from '../layouts/base.js';
 
 export interface ForgotPasswordPageProps {

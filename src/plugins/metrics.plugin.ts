@@ -1094,7 +1094,7 @@ export class MetricsPlugin extends Plugin {
   }
 
   async getPrometheusMetrics(): Promise<string> {
-    const { formatPrometheusMetrics } = await import('./concerns/prometheus-formatter.js');
+    const { formatPrometheusMetrics } = await import('./metrics/prometheus-formatter.js');
     return formatPrometheusMetrics(this);
   }
 
@@ -1154,7 +1154,7 @@ export class MetricsPlugin extends Plugin {
 
     let isIpAllowed: ((ip: string, allowlist: string[]) => boolean) | undefined;
     if (enforceIpAllowlist) {
-      const ipHelper = await import('./concerns/ip-allowlist.js');
+      const ipHelper = await import('./http/ip-allowlist.js');
       isIpAllowed = ipHelper.isIpAllowed;
     }
 

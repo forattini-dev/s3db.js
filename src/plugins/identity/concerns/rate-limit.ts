@@ -2,7 +2,7 @@
  * Sliding window rate limiter for IP-based throttling
  */
 
-import type { Context, Next } from '#src/plugins/shared/http-runtime.js';
+import type { Context, Next } from '#src/plugins/http/http-runtime.js';
 
 export interface RateLimiterOptions {
   windowMs?: number;

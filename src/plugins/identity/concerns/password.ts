@@ -7,7 +7,7 @@
  * Provides password strength validation according to policy.
  */
 
-import { verifyPassword as verifyPasswordWithPepper } from '#src/plugins/shared/password-verification.js';
+import { verifyPassword as verifyPasswordWithPepper } from '#src/plugins/http/password-verification.js';
 
 export interface PasswordPolicy {
   minLength?: number;

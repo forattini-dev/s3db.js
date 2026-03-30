@@ -1,5 +1,5 @@
 import { EventEmitter } from 'events';
-import { PluginStorage } from '../../concerns/plugin-storage.js';
+import { PluginStorage } from './plugin-storage.js';
 import { tryFn } from '../../concerns/try-fn.js';
 import { LatencyBuffer, type LatencyStats } from '../../concerns/ring-buffer.js';
 import type { Database } from '../../database.class.js';

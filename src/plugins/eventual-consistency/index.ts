@@ -4,7 +4,7 @@
  */
 
 import { CoordinatorPlugin, type IntervalHandle } from '../concerns/coordinator-plugin.class.js';
-import { PluginStorage } from '../../concerns/plugin-storage.js';
+import { PluginStorage } from '../concerns/plugin-storage.js';
 import { PluginError } from '../../errors.js';
 
 import {

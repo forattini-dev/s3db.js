@@ -1,5 +1,5 @@
-import type { Context } from '#src/plugins/shared/http-runtime.js';
-import { getCookie, getCookies, setCookie, generateCookie, type CookieOptions as RaffelCookieOptions } from '#src/plugins/shared/http-runtime.js';
+import type { Context } from '#src/plugins/http/http-runtime.js';
+import { getCookie, getCookies, setCookie, generateCookie, type CookieOptions as RaffelCookieOptions } from '#src/plugins/http/http-runtime.js';
 import { createLogger } from '../../../concerns/logger.js';
 
 const logger = createLogger({ name: 'CookieChunking', level: 'info' });

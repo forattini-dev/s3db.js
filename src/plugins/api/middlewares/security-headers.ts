@@ -1,4 +1,4 @@
-import type { Context, MiddlewareHandler, Next } from '#src/plugins/shared/http-runtime.js';
+import type { Context, MiddlewareHandler, Next } from '#src/plugins/http/http-runtime.js';
 
 export interface HSTSConfig {
   maxAge?: number;

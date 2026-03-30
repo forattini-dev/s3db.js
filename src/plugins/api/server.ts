@@ -5,8 +5,8 @@
  * to dedicated components (MiddlewareChain, Router, HealthManager).
  */
 
-import type { Context, MiddlewareHandler, HttpApp } from '#src/plugins/shared/http-runtime.js';
-import { serve } from '#src/plugins/shared/http-runtime.js';
+import type { Context, MiddlewareHandler, HttpApp } from '#src/plugins/http/http-runtime.js';
+import { serve } from '#src/plugins/http/http-runtime.js';
 import type { Server as HttpServer } from 'node:http';
 import type { NetworkInterfaceInfo } from 'node:os';
 import type { Socket as UdpSocket } from 'node:dgram';
@@ -14,8 +14,8 @@ import type { IncomingMessage } from 'node:http';
 import type { Server as NetServer, Socket as NetSocket } from 'node:net';
 import type { Logger } from '../../concerns/logger.js';
 import { networkInterfaces } from 'node:os';
-import { createErrorHandler } from '../shared/error-handler.js';
-import * as formatter from '../shared/response-formatter.js';
+import { createErrorHandler } from '../http/error-handler.js';
+import * as formatter from '../http/response-formatter.js';
 import { createOIDCHandler } from './auth/oidc-auth.js';
 import { createSessionStore } from './concerns/session-store-factory.js';
 import { FailbanManager } from '../../concerns/failban-manager.js';
@@ -409,7 +409,7 @@ export class ApiServer {
     }
 
     if (!this.initialized) {
-      const { HttpApp } = await import('#src/plugins/shared/http-runtime.js');
+      const { HttpApp } = await import('#src/plugins/http/http-runtime.js');
       const { cors } = await import('raffel/http');
 
       const corsMiddleware = cors as unknown as ConstructorParameters<typeof MiddlewareChain>[0]['corsMiddleware'];
@@ -1322,7 +1322,7 @@ export class ApiServer {
 
     this.app!.get(path, async (c: Context) => {
       if (enforceIpAllowlist) {
-        const { isIpAllowed, getClientIp } = await import('../concerns/ip-allowlist.js');
+        const { isIpAllowed, getClientIp } = await import('../http/ip-allowlist.js');
         const clientIp = getClientIp(c as unknown as Parameters<typeof getClientIp>[0]);
 
         if (!clientIp || !isIpAllowed(clientIp, ipAllowlist)) {
@@ -1822,7 +1822,7 @@ export class ApiServer {
       return;
     }
 
-    const { HttpApp } = await import('#src/plugins/shared/http-runtime.js');
+    const { HttpApp } = await import('#src/plugins/http/http-runtime.js');
 
     this.routeRegistry.clear();
     this._registerMetricsPluginRouteEntry();

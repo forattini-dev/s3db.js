@@ -1,4 +1,4 @@
-import { PluginStorage } from '../../concerns/plugin-storage.js';
+import { PluginStorage } from './plugin-storage.js';
 
 export interface LockResult {
   acquired: boolean;

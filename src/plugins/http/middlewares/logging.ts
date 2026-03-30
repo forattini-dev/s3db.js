@@ -1,4 +1,4 @@
-import type { Context, Next, MiddlewareHandler } from '#src/plugins/shared/http-runtime.js';
+import type { Context, Next, MiddlewareHandler } from '#src/plugins/http/http-runtime.js';
 import type { S3DBLogger } from '../../../concerns/logger.js';
 
 export interface LoggingConfig {

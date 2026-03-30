@@ -1,4 +1,4 @@
-import type { Context, Next, MiddlewareHandler } from '#src/plugins/shared/http-runtime.js';
+import type { Context, Next, MiddlewareHandler } from '#src/plugins/http/http-runtime.js';
 import type { DatabaseLike } from './resource-manager.js';
 import { createJWTHandler, createToken, verifyToken, createRefreshToken, verifyRefreshToken, jwtRefresh, type JWTConfig } from './jwt-auth.js';
 import { createApiKeyHandler, generateApiKey, type ApiKeyConfig } from './api-key-auth.js';
@@ -7,7 +7,7 @@ import { createOAuth2Handler, type OAuth2Config } from './oauth2-auth.js';
 import { createHeaderSecretHandler, type HeaderSecretConfig } from './header-secret-auth.js';
 import { OIDCClient } from './oidc-client.js';
 import { unauthorized } from '../utils/response-formatter.js';
-import { getCookie } from '#src/plugins/shared/http-runtime.js';
+import { getCookie } from '#src/plugins/http/http-runtime.js';
 
 function normalizeMethodName(method: string): string {
   if (!method || typeof method !== 'string') {

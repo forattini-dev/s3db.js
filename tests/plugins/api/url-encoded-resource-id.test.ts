@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ApiPlugin } from '../../../src/plugins/api/index.js';
 import { createRelationalRoutes } from '../../../src/plugins/api/routes/resource-routes.js';
-import { HttpApp } from '../../../src/plugins/shared/http-runtime.js';
+import { HttpApp } from '../../../src/plugins/http/http-runtime.js';
 import { createMemoryDatabaseForTest } from '../../config.js';
 
 async function waitForServer(port: number, maxAttempts = 100): Promise<void> {

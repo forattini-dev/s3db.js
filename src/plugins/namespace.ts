@@ -1,4 +1,4 @@
-import type { PluginStorage } from '../concerns/plugin-storage.js';
+import type { PluginStorage } from './concerns/plugin-storage.js';
 import type { S3DBLogger } from '../concerns/logger.js';
 
 export interface NamespaceLogger {

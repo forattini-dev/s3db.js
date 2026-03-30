@@ -10,8 +10,8 @@
  * - app.group() for route composition
  */
 
-import { HttpApp } from '#src/plugins/shared/http-runtime.js';
-import type { Context, Next, MiddlewareHandler as HttpMiddleware, TypedResponse } from '#src/plugins/shared/http-runtime.js';
+import { HttpApp } from '#src/plugins/http/http-runtime.js';
+import type { Context, Next, MiddlewareHandler as HttpMiddleware, TypedResponse } from '#src/plugins/http/http-runtime.js';
 import Validator from 'fastest-validator';
 import { RouteContext, createRouteContext } from './concerns/route-context.js';
 

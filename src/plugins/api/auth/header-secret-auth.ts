@@ -1,6 +1,6 @@
 import { timingSafeEqual } from 'crypto';
-import type { Context, Next } from '#src/plugins/shared/http-runtime.js';
-import type { ContentfulStatusCode } from '#src/plugins/shared/http-runtime.js';
+import type { Context, Next } from '#src/plugins/http/http-runtime.js';
+import type { ContentfulStatusCode } from '#src/plugins/http/http-runtime.js';
 import { unauthorized } from '../utils/response-formatter.js';
 
 export interface HeaderSecretServiceAccount {

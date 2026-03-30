@@ -1,4 +1,4 @@
-import type { Context, Next, MiddlewareHandler } from '#src/plugins/shared/http-runtime.js';
+import type { Context, Next, MiddlewareHandler } from '#src/plugins/http/http-runtime.js';
 import type { Logger } from '../../../concerns/logger.js';
 import { idGenerator } from '../../../concerns/id.js';
 import { createRequestIdMiddleware } from '../middlewares/request-id.js';
@@ -8,7 +8,7 @@ import { createSessionTrackingMiddleware, type DatabaseLike as SessionDatabaseLi
 import { createFailbanMiddleware, setupFailbanViolationListener, type FailbanManagerLike, type ApiEventEmitterLike } from '../middlewares/failban.js';
 import { errorHelper } from '../middlewares/error-helper.js';
 import { setupTemplateEngine, type TemplateEngineOptions } from '../utils/template-engine.js';
-import * as formatter from '../../shared/response-formatter.js';
+import * as formatter from '../../http/response-formatter.js';
 
 type HttpAppType = {
   use: (path: string, handler: MiddlewareHandler) => void;

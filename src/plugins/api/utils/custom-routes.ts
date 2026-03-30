@@ -1,4 +1,4 @@
-import type { Context } from '#src/plugins/shared/http-runtime.js';
+import type { Context } from '#src/plugins/http/http-runtime.js';
 import { asyncHandler } from './error-handler.js';
 import { createLogger } from '../../../concerns/logger.js';
 import type { Logger } from '../../../concerns/logger.js';

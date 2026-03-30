@@ -194,7 +194,7 @@ ui: {
 ### Custom Pages
 
 ```javascript
-import { html } from '#src/plugins/shared/html.js';
+import { html } from '#src/plugins/http/html.js';
 
 function MyCustomLoginPage(props) {
   const { error, email, config } = props;

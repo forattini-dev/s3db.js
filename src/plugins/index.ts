@@ -1,5 +1,4 @@
 export * from './plugin.class.js';
-export * from './plugin.obj.js';
 export { CoordinatorPlugin } from './concerns/coordinator-plugin.class.js';
 
 export { AuditPlugin } from './audit.plugin.js';
@@ -119,7 +118,7 @@ export type {
   LoggingContext,
   ServerInfo,
   BaseRateLimitConfig,
-} from './shared/types.js';
+} from './http/types.js';
 
 type PluginClass = new (...args: unknown[]) => unknown;
 type PluginLoader = () => Promise<PluginClass>;

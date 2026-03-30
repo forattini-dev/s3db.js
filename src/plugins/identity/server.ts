@@ -4,17 +4,17 @@
  * Manages OAuth2/OIDC endpoints only (no CRUD routes)
  */
 
-import { errorHandler } from '../shared/error-handler.js';
-import * as formatter from '../shared/response-formatter.js';
+import { errorHandler } from '../http/error-handler.js';
+import * as formatter from '../http/response-formatter.js';
 import {
   createCorsMiddleware,
   createSecurityMiddleware,
   createLoggingMiddleware
-} from '../shared/middlewares/index.js';
+} from '../http/middlewares/index.js';
 import { idGenerator } from '../../concerns/id.js';
 import { createJsonRateLimitMiddleware, RateLimiter } from './concerns/rate-limit.js';
-import { HttpApp, type Context as AppContext } from '#src/plugins/shared/http-runtime.js';
-import { serve } from '#src/plugins/shared/http-runtime.js';
+import { HttpApp, type Context as AppContext } from '#src/plugins/http/http-runtime.js';
+import { serve } from '#src/plugins/http/http-runtime.js';
 
 export interface IdentityServerOptions {
   port?: number;

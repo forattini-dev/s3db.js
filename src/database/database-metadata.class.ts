@@ -13,7 +13,7 @@ import type {
   StringRecord
 } from './types.js';
 import type { SchemaRegistry, PluginSchemaRegistry } from '../schema.class.js';
-import type { PluginStorage } from '../concerns/plugin-storage.js';
+import type { PluginStorage } from '../plugins/concerns/plugin-storage.js';
 import type { S3Mutex, LockResult } from '../plugins/concerns/s3-mutex.class.js';
 import tryFn from '../concerns/try-fn.js';
 
@@ -32,7 +32,7 @@ export class DatabaseMetadata {
 
   private async _getPluginStorage(): Promise<PluginStorage> {
     if (!this._pluginStorage) {
-      const { PluginStorage } = await import('../concerns/plugin-storage.js');
+      const { PluginStorage } = await import('../plugins/concerns/plugin-storage.js');
       this._pluginStorage = new PluginStorage(
         this.database.client as any,
         's3db-core'

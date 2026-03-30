@@ -1,4 +1,4 @@
-import type { Context, MiddlewareHandler, Next } from '#src/plugins/shared/http-runtime.js';
+import type { Context, MiddlewareHandler, Next } from '#src/plugins/http/http-runtime.js';
 import { idGenerator } from '../../../concerns/id.js';
 
 export type IdGeneratorFn = () => string;

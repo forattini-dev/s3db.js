@@ -1,10 +1,10 @@
-import { metadataEncode } from './metadata-encoding.js';
-import { calculateEffectiveLimit, calculateUTF8Bytes } from './calculator.js';
-import { tryFn } from './try-fn.js';
-import { idGenerator } from './id.js';
-import { streamToString } from '../stream/index.js';
-import { PluginStorageError, MetadataLimitError, BehaviorError } from '../errors.js';
-import { DistributedLock, computeBackoff, sleep, isPreconditionFailure, isValidLockPayload, isExpiredLockPayload, StorageAdapter, LockHandle, AcquireOptions } from './distributed-lock.js';
+import { metadataEncode } from '../../concerns/metadata-encoding.js';
+import { calculateEffectiveLimit, calculateUTF8Bytes } from '../../concerns/calculator.js';
+import { tryFn } from '../../concerns/try-fn.js';
+import { idGenerator } from '../../concerns/id.js';
+import { streamToString } from '../../stream/index.js';
+import { PluginStorageError, MetadataLimitError, BehaviorError } from '../../errors.js';
+import { DistributedLock, computeBackoff, sleep, isPreconditionFailure, isValidLockPayload, isExpiredLockPayload, StorageAdapter, LockHandle, AcquireOptions } from '../../concerns/distributed-lock.js';
 
 
 const S3_METADATA_LIMIT = 2047;

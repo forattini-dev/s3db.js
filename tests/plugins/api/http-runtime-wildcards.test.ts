@@ -1,4 +1,4 @@
-import { HttpApp } from '../../../src/plugins/shared/http-runtime.js';
+import { HttpApp } from '../../../src/plugins/http/http-runtime.js';
 
 describe('HttpApp wildcard compatibility', () => {
   test('matches deep terminal wildcards for get and all routes', async () => {

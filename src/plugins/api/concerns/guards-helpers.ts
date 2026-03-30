@@ -1,4 +1,4 @@
-import type { Context as AppContext } from '#src/plugins/shared/http-runtime.js';
+import type { Context as AppContext } from '#src/plugins/http/http-runtime.js';
 import { decodeRequestParams } from '../utils/request-params.js';
 
 export interface UserInfo {

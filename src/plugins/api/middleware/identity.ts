@@ -1,4 +1,4 @@
-import type { Context, Next } from '#src/plugins/shared/http-runtime.js';
+import type { Context, Next } from '#src/plugins/http/http-runtime.js';
 
 export interface UserToken {
   id?: string;

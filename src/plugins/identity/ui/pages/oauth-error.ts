@@ -3,7 +3,7 @@
  * Shows OAuth2/OIDC error messages with proper formatting
  */
 
-import { html, type HtmlEscapedString } from '#src/plugins/shared/html.js';
+import { html, type HtmlEscapedString } from '#src/plugins/http/html.js';
 import { BaseLayout, type ThemeConfig } from '../layouts/base.js';
 
 export interface ErrorInfo {

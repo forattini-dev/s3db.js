@@ -1,4 +1,4 @@
-import type { Context, Next, MiddlewareHandler } from '#src/plugins/shared/http-runtime.js';
+import type { Context, Next, MiddlewareHandler } from '#src/plugins/http/http-runtime.js';
 import { BaseAuthStrategy, type BaseAuthStrategyOptions } from './base-strategy.class.js';
 import { createPathRulesAuthMiddleware, type AuthRule } from '../path-rules-middleware.js';
 import { createJWTHandler } from '../jwt-auth.js';

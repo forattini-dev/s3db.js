@@ -1,5 +1,5 @@
-import type { Context, HttpApp as HttpAppType, MiddlewareHandler } from '#src/plugins/shared/http-runtime.js';
-import type { ContentfulStatusCode } from '#src/plugins/shared/http-runtime.js';
+import type { Context, HttpApp as HttpAppType, MiddlewareHandler } from '#src/plugins/http/http-runtime.js';
+import type { ContentfulStatusCode } from '#src/plugins/http/http-runtime.js';
 import type { HttpMethod } from 'raffel/http';
 import { asyncHandler } from '../utils/error-handler.js';
 import { createLogger } from '../../../concerns/logger.js';

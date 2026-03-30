@@ -155,14 +155,4 @@ describe('Index Files - Export Tests', () => {
     expect(typeof stream.streamToString).toBe('function');
   });
 
-  test('plugin.obj.js should export object', async () => {
-    const pluginObj = await import('../../src/plugins/plugin.obj.js');
-    
-    // This file exports an object with metadata
-    expect(pluginObj.PluginObject).toBeDefined();
-    expect(typeof pluginObj.PluginObject).toBe('object');
-    expect(typeof pluginObj.PluginObject.setup).toBe('function');
-    expect(typeof pluginObj.PluginObject.start).toBe('function');
-    expect(typeof pluginObj.PluginObject.stop).toBe('function');
-  });
 }); 

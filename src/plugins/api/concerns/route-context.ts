@@ -7,7 +7,7 @@ import {
   type ContextLogger,
   type Principal
 } from 'raffel';
-import type { Context } from '#src/plugins/shared/http-runtime.js';
+import type { Context } from '#src/plugins/http/http-runtime.js';
 import type { Database } from '../../../database.class.js';
 import { decodeRequestParam, decodeRequestParams } from '../utils/request-params.js';
 

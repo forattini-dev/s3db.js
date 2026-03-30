@@ -6,7 +6,7 @@
  */
 
 import Database from '../../src/database.class.js';
-import { HttpApp, serve } from '../../src/plugins/shared/http-runtime.js';
+import { HttpApp, serve } from '../../src/plugins/http/http-runtime.js';
 import {
   createRaffelContext,
   applyGuardsToList,

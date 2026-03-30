@@ -39,7 +39,7 @@ export * from './geo-encoding.js';
 export * from './optimized-encoding.js';
 export * from './metadata-encoding.js';
 export * from './incremental-sequence.js';
-export * from './plugin-storage.js';
+export * from '../plugins/concerns/plugin-storage.js';
 export * from './partition-queue.js';
 export * from './process-manager.js';
 export * from './cron-manager.js';

@@ -1,13 +1,13 @@
 import { timingSafeEqual } from 'node:crypto';
-import { HttpApp } from '#src/plugins/shared/http-runtime.js';
-import type { Context, MiddlewareHandler } from '#src/plugins/shared/http-runtime.js';
-import type { ContentfulStatusCode } from '#src/plugins/shared/http-runtime.js';
+import { HttpApp } from '#src/plugins/http/http-runtime.js';
+import type { Context, MiddlewareHandler } from '#src/plugins/http/http-runtime.js';
+import type { ContentfulStatusCode } from '#src/plugins/http/http-runtime.js';
 import { asyncHandler } from '../utils/error-handler.js';
 import * as formatter from '../utils/response-formatter.js';
 import { createToken, createRefreshToken, verifyRefreshToken } from '../auth/jwt-auth.js';
 import { generateApiKey } from '../auth/api-key-auth.js';
 import { compactHash, hashPassword, isPasswordHash, type SecurityConfig } from '../../../concerns/password-hashing.js';
-import { verifyPassword } from '#src/plugins/shared/password-verification.js';
+import { verifyPassword } from '#src/plugins/http/password-verification.js';
 import { resolveUser } from '../auth/resource-manager.js';
 
 export interface AuthResource {

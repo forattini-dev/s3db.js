@@ -1,4 +1,4 @@
-import type { Context, Next, MiddlewareHandler } from '#src/plugins/shared/http-runtime.js';
+import type { Context, Next, MiddlewareHandler } from '#src/plugins/http/http-runtime.js';
 
 export interface CorsConfig {
   origin?: string;

@@ -1,5 +1,5 @@
 import { createAuthMiddleware } from '../../../src/plugins/api/auth/index.js';
-import { HttpApp } from '../../../src/plugins/shared/http-runtime.js';
+import { HttpApp } from '../../../src/plugins/http/http-runtime.js';
 
 describe('createAuthMiddleware multi-method OIDC support', () => {
   test('runs OIDC middleware when request carries the default session cookie', async () => {

@@ -1,6 +1,6 @@
 import { gzip, brotliCompress } from 'zlib';
 import { promisify } from 'util';
-import type { Context, Next, MiddlewareHandler } from '#src/plugins/shared/http-runtime.js';
+import type { Context, Next, MiddlewareHandler } from '#src/plugins/http/http-runtime.js';
 import type { S3DBLogger } from '../../../concerns/logger.js';
 
 const gzipAsync = promisify(gzip);

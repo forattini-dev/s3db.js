@@ -35,7 +35,7 @@
  * }
  */
 
-import type { Context } from '#src/plugins/shared/http-runtime.js';
+import type { Context } from '#src/plugins/http/http-runtime.js';
 import { createRemoteJWKSet, jwtVerify, type JWTPayload } from 'jose';
 import { createLogger, type Logger } from '../../../concerns/logger.js';
 import { createHttpClient, type HttpClient } from '../../../concerns/http-client.js';

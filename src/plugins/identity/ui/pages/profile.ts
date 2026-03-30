@@ -2,7 +2,7 @@
  * User Profile Page
  */
 
-import { html, type HtmlEscapedString } from '#src/plugins/shared/html.js';
+import { html, type HtmlEscapedString } from '#src/plugins/http/html.js';
 import { BaseLayout, type ThemeConfig, type BaseLayoutUser } from '../layouts/base.js';
 import type { PasswordPolicy } from './register.js';
 

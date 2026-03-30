@@ -3,8 +3,8 @@
  * Handles login, registration, logout, and other UI endpoints
  */
 
-import type { Context, HttpApp } from '#src/plugins/shared/http-runtime.js';
-import type { HtmlEscapedString } from '#src/plugins/shared/html.js';
+import type { Context, HttpApp } from '#src/plugins/http/http-runtime.js';
+import type { HtmlEscapedString } from '#src/plugins/http/html.js';
 import { LoginPage } from './pages/login.js';
 import { RegisterPage } from './pages/register.js';
 import { ForgotPasswordPage } from './pages/forgot-password.js';

@@ -1,4 +1,4 @@
-import type { Context, MiddlewareHandler } from '#src/plugins/shared/http-runtime.js';
+import type { Context, MiddlewareHandler } from '#src/plugins/http/http-runtime.js';
 
 export interface VersionAdapter {
   response?: (data: Record<string, unknown>) => Record<string, unknown>;

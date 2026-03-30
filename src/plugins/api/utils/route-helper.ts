@@ -1,4 +1,4 @@
-import type { Context } from '#src/plugins/shared/http-runtime.js';
+import type { Context } from '#src/plugins/http/http-runtime.js';
 import { createRouteContext, type RouteAuthApi, type RouteInputApi, type RouteServicesApi } from '../concerns/route-context.js';
 
 export interface ResourceLike {

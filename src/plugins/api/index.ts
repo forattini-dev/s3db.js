@@ -32,7 +32,7 @@
  * await database.usePlugin(apiPlugin);
  */
 
-import type { Context, MiddlewareHandler } from '#src/plugins/shared/http-runtime.js';
+import type { Context, MiddlewareHandler } from '#src/plugins/http/http-runtime.js';
 import { Plugin } from '../plugin.class.js';
 import { requirePluginDependency } from '../concerns/plugin-dependencies.js';
 import * as raffel from 'raffel';
@@ -55,7 +55,7 @@ import { createRateLimitMiddleware } from './middleware/rate-limit.js';
 import { createSecurityMiddleware } from './middleware/security.js';
 import { initCookieChunking } from './concerns/cookie-chunking.js';
 
-import type { HttpApp } from '#src/plugins/shared/http-runtime.js';
+import type { HttpApp } from '#src/plugins/http/http-runtime.js';
 import type {
   ResourceDescriptor,
   RegistrationConfig,

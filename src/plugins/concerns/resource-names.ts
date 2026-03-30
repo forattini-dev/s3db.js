@@ -15,7 +15,7 @@ export interface ResolveNameOptions {
 
 export type ResourceDescriptor = string | ResolveNameParams;
 
-function normalizeNamespace(namespace?: string | null): string | null {
+export function normalizeNamespace(namespace?: string | null): string | null {
   if (!namespace) return null;
   const text = String(namespace).trim().toLowerCase();
   if (!text) return null;

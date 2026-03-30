@@ -1,11 +1,11 @@
 import { timingSafeEqual } from 'crypto';
-import type { Context, Next } from '#src/plugins/shared/http-runtime.js';
-import type { ContentfulStatusCode } from '#src/plugins/shared/http-runtime.js';
+import type { Context, Next } from '#src/plugins/http/http-runtime.js';
+import type { ContentfulStatusCode } from '#src/plugins/http/http-runtime.js';
 import type { DatabaseLike } from './resource-manager.js';
 import { unauthorized } from '../utils/response-formatter.js';
 import { createLogger } from '../../../concerns/logger.js';
-import { verifyPassword } from '#src/plugins/shared/password-verification.js';
-import { getCookie } from '#src/plugins/shared/http-runtime.js';
+import { verifyPassword } from '#src/plugins/http/password-verification.js';
+import { getCookie } from '#src/plugins/http/http-runtime.js';
 import { BasicAuthResourceManager, resolveUser, resolveUsers } from './resource-manager.js';
 
 const logger = createLogger({ name: 'BasicAuth', level: 'info' });

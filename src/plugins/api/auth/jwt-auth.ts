@@ -1,13 +1,13 @@
 import { createHmac, timingSafeEqual } from 'crypto';
-import type { Context, Next } from '#src/plugins/shared/http-runtime.js';
-import type { ContentfulStatusCode } from '#src/plugins/shared/http-runtime.js';
+import type { Context, Next } from '#src/plugins/http/http-runtime.js';
+import type { ContentfulStatusCode } from '#src/plugins/http/http-runtime.js';
 import type { ResourceLike, DatabaseLike } from './resource-manager.js';
 import { createLogger } from '../../../concerns/logger.js';
 import { unauthorized } from '../utils/response-formatter.js';
-import { getCookie } from '#src/plugins/shared/http-runtime.js';
+import { getCookie } from '#src/plugins/http/http-runtime.js';
 import { LRUCache } from '../concerns/lru-cache.js';
 import { JWTResourceManager, resolveUser } from './resource-manager.js';
-import { verifyPassword } from '#src/plugins/shared/password-verification.js';
+import { verifyPassword } from '#src/plugins/http/password-verification.js';
 
 const logger = createLogger({ name: 'JwtAuth', level: 'info' });
 const tokenCache = new LRUCache<JWTPayload>({ max: 1000, ttl: 60000 });

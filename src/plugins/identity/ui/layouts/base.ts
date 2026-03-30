@@ -3,7 +3,7 @@
  * Uses shared html helper for server-side rendering
  */
 
-import { html, type HtmlEscapedString } from '#src/plugins/shared/html.js';
+import { html, type HtmlEscapedString } from '#src/plugins/http/html.js';
 import { readFileSync } from 'fs';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';

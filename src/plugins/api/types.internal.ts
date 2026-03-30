@@ -5,7 +5,7 @@
  * exported to users. Users should only interact with ApiPluginOptions.
  */
 
-import type { Context, MiddlewareHandler } from '#src/plugins/shared/http-runtime.js';
+import type { Context, MiddlewareHandler } from '#src/plugins/http/http-runtime.js';
 
 export interface ResourceDescriptor {
   defaultName: string;

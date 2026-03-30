@@ -9,7 +9,7 @@ This page explains how `raffel` fits into s3db.js. It is the HTTP runtime undern
 ## TLDR
 
 - `raffel/http` provides the request, middleware, cookie, and app primitives used by the API runtime.
-- s3db.js keeps a small adapter in `src/plugins/shared/http-runtime.ts`.
+- s3db.js keeps a small adapter in `src/plugins/http/http-runtime.ts`.
 - On `1.0.7`, route matching semantics come from Raffel itself; s3db.js no longer needs a local matcher override.
 - The local wrapper remains responsible for contract-stabilizing request typing and cookie helper bridges.
 - The API plugin now also reuses Raffel `1.0.7` for inspection-oriented tooling: runtime preview, doctor reports, generated contract tests, and canonical schema descriptor normalization.
@@ -18,7 +18,7 @@ This page explains how `raffel` fits into s3db.js. It is the HTTP runtime undern
 
 `raffel` shows up most clearly in:
 
-- `src/plugins/shared/http-runtime.ts`
+- `src/plugins/http/http-runtime.ts`
 - API plugin server and routing code
 - identity and auth-adjacent HTTP flows
 
@@ -59,7 +59,7 @@ For the API plugin, the important shift is that Raffel now directly covers the r
 That means routing bugs should be investigated in this order:
 
 1. the API plugin route registration code
-2. `src/plugins/shared/http-runtime.ts`
+2. `src/plugins/http/http-runtime.ts`
 3. the upstream `raffel` runtime
 
 The adapter is no longer hiding a custom matcher layer between the plugin and Raffel.

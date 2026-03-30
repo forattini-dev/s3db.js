@@ -11,10 +11,10 @@
  */
 
 import crypto from 'crypto';
-import type { Context, Next, HttpApp, MiddlewareHandler } from '#src/plugins/shared/http-runtime.js';
-import type { ContentfulStatusCode } from '#src/plugins/shared/http-runtime.js';
+import type { Context, Next, HttpApp, MiddlewareHandler } from '#src/plugins/http/http-runtime.js';
+import type { ContentfulStatusCode } from '#src/plugins/http/http-runtime.js';
 import { SignJWT, jwtVerify, type JWTPayload } from 'jose';
-import { getCookie, getCookies, setCookie, deleteCookie } from '#src/plugins/shared/http-runtime.js';
+import { getCookie, getCookies, setCookie, deleteCookie } from '#src/plugins/http/http-runtime.js';
 import { createLogger, type Logger, type LogLevel } from '../../../concerns/logger.js';
 import { createHttpClient, type HttpClient } from '../../../concerns/http-client.js';
 import { unauthorized } from '../utils/response-formatter.js';

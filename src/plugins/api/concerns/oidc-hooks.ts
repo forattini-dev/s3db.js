@@ -1,6 +1,6 @@
-import { setCookie, getCookie, deleteCookie } from '#src/plugins/shared/http-runtime.js';
-import type { Context } from '#src/plugins/shared/http-runtime.js';
-import type { CookieOptions as HttpCookieOptions } from '#src/plugins/shared/http-runtime.js';
+import { setCookie, getCookie, deleteCookie } from '#src/plugins/http/http-runtime.js';
+import type { Context } from '#src/plugins/http/http-runtime.js';
+import type { CookieOptions as HttpCookieOptions } from '#src/plugins/http/http-runtime.js';
 import { createLogger } from '../../../concerns/logger.js';
 import type { Logger, LogLevel } from '../../../concerns/logger.js';
 

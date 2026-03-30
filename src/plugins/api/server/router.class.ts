@@ -1,9 +1,9 @@
-import type { Context, HttpApp as HttpAppType, MiddlewareHandler } from '#src/plugins/shared/http-runtime.js';
+import type { Context, HttpApp as HttpAppType, MiddlewareHandler } from '#src/plugins/http/http-runtime.js';
 import type { Logger, LogLevel } from '../../../concerns/logger.js';
 import { createResourceRoutes, createRelationalRoutes } from '../routes/resource-routes.js';
 import { createAuthRoutes } from '../routes/auth-routes.js';
 import { mountCustomRoutes, parseRouteKey } from '../utils/custom-routes.js';
-import * as formatter from '../../shared/response-formatter.js';
+import * as formatter from '../../http/response-formatter.js';
 import { createFilesystemHandler, validateFilesystemConfig } from '../utils/static-filesystem.js';
 import { createS3Handler, validateS3Config } from '../utils/static-s3.js';
 import { createFailbanAdminRoutes } from '../middlewares/failban.js';

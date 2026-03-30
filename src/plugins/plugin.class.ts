@@ -1,5 +1,6 @@
 import EventEmitter from 'events';
-import { PluginStorage } from '../concerns/plugin-storage.js';
+import { PluginStorage } from './concerns/plugin-storage.js';
+import { normalizeNamespace } from './concerns/resource-names.js';
 import { FilesystemStorageDriver } from '../concerns/storage-drivers/filesystem-driver.js';
 import { PluginError } from '../errors.js';
 import { listPluginNamespaces, detectAndWarnNamespaces } from './namespace.js';
@@ -119,14 +120,7 @@ export class Plugin<TOptions extends PluginConfig = PluginConfig> extends EventE
   }
 
   protected _normalizeNamespace(value: string | null | undefined): string | null {
-    if (value === null || value === undefined) return null;
-    const text = String(value).trim();
-    if (!text) return null;
-    return text
-      .toLowerCase()
-      .replace(/[^a-z0-9]+/g, '-')
-      .replace(/^-+/, '')
-      .replace(/-+$/, '') || null;
+    return normalizeNamespace(value);
   }
 
   setNamespace(value: string | null | undefined, { explicit = false }: { explicit?: boolean } = {}): void {
