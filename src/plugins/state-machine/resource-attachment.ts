@@ -1,6 +1,7 @@
 import type { StateMachinePluginContext, Resource, TransitionHistoryOptions, TransitionQueryOptions, TransitionResult, TransitionHistoryEntry, StateMachineSnapshot, MachineProxy, TransitionContext, StateRecord } from './types.js';
 import { TRANSITION_HISTORY_PAGE_SIZE } from './types.js';
 import { StateMachineError } from '../state-machine.errors.js';
+import { parseDuration } from './helpers.js';
 import tryFn from '../../concerns/try-fn.js';
 
 export async function attachStateMachinesToResources(plugin: StateMachinePluginContext): Promise<void> {
@@ -152,17 +153,30 @@ export async function initializeEntity(plugin: StateMachinePluginContext, machin
     if (!stateResource) {
       plugin.logger.warn({ machineId, entityId }, 'State resource unavailable during initializeEntity. Initial state will be kept in memory only.');
     } else {
+      const initialStateConfig = machine.config.states[initialState];
+      const insertData: Record<string, unknown> = {
+        id: stateId,
+        machineId,
+        entityId,
+        currentState: initialState,
+        stateVersion: 0,
+        context,
+        lastTransition: null,
+        _ttlExpiresAt: null,
+        _ttlEvent: null,
+        updatedAt: now
+      };
+
+      if (initialStateConfig?.ttl) {
+        const delayMs = parseDuration(initialStateConfig.ttl.after);
+        if (delayMs > 0) {
+          insertData._ttlExpiresAt = new Date(Date.now() + delayMs).toISOString();
+          insertData._ttlEvent = initialStateConfig.ttl.send;
+        }
+      }
+
       const [ok, err] = await tryFn(() =>
-        stateResource.insert({
-          id: stateId,
-          machineId,
-          entityId,
-          currentState: initialState,
-          stateVersion: 0,
-          context,
-          lastTransition: null,
-          updatedAt: now
-        })
+        stateResource.insert(insertData)
       );
 
       if (!ok && err && !(err as Error).message?.includes('already exists')) {
@@ -180,6 +194,11 @@ export async function initializeEntity(plugin: StateMachinePluginContext, machin
 
   plugin.setInMemoryState(machineId, entityId, initialState, 0);
   plugin.updateEntityTriggerSubscriptions(machineId, entityId, initialState);
+
+  if (plugin.hasTTLStates(machineId)) {
+    const initStateConfig = machine.config.states[initialState];
+    plugin.scheduleTTL(machineId, entityId, initStateConfig);
+  }
 
   const initialStateConfig = machine.config.states[initialState];
   const initAfterEnterHooks = plugin.resolveHooks(initialStateConfig, 'afterEnter', 'entry');
@@ -222,6 +241,7 @@ export async function deleteEntity(plugin: StateMachinePluginContext, machineId:
   machine.currentStates.delete(entityId);
   machine.currentStateVersions.delete(entityId);
   plugin.clearEntityTriggerSubscriptions(machineId, entityId);
+  plugin.cancelTTL(machineId, entityId);
 
   const stateResource = plugin.getStateResource();
   if (stateResource) {

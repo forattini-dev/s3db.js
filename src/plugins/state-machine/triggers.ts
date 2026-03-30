@@ -41,7 +41,9 @@ export async function getEntitiesInState(plugin: StateMachinePluginContext, mach
     entityId: r.entityId,
     currentState: r.currentState,
     context: r.context,
-    triggerCounts: r.triggerCounts || {}
+    triggerCounts: r.triggerCounts || {},
+    _ttlExpiresAt: r._ttlExpiresAt || null,
+    _ttlEvent: r._ttlEvent || null
   }));
 }
 

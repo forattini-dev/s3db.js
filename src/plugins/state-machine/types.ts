@@ -57,7 +57,16 @@ export interface StateRecord {
   lastTransition: string | null;
   stateVersion?: number;
   triggerCounts?: Record<string, number>;
+  _ttlExpiresAt?: string | null;
+  _ttlEvent?: string | null;
   updatedAt: string;
+}
+
+export interface TTLRegistryEntry {
+  machineId: string;
+  entityId: string;
+  expiresAt: number;
+  event: string;
 }
 
 export interface TransitionRecord {
@@ -277,6 +286,7 @@ export interface StateMachinePluginOptions {
   enableFunctionTriggers?: boolean;
   enableEventTriggers?: boolean;
   triggerCheckInterval?: number;
+  ttlCheckInterval?: number;
   logLevel?: string;
   [key: string]: unknown;
 }
@@ -301,6 +311,7 @@ export interface StateMachineConfig {
   enableFunctionTriggers: boolean;
   enableEventTriggers: boolean;
   triggerCheckInterval: number;
+  ttlCheckInterval: number;
   logLevel?: string;
 }
 
@@ -464,6 +475,8 @@ export interface EntityInState {
   currentState: string;
   context: Record<string, unknown>;
   triggerCounts: Record<string, number>;
+  _ttlExpiresAt?: string | null;
+  _ttlEvent?: string | null;
 }
 
 export interface TransitionContext {
@@ -515,6 +528,8 @@ export interface StateMachinePluginContext {
   schedulerPlugin: (Plugin & { stop(): Promise<void> }) | null;
   _pendingEventHandlers: Set<Promise<void>>;
   _triggerListeners: TriggerListenerRef[];
+  _ttlRegistry: Map<string, TTLRegistryEntry>;
+  _ttlPollerJobName: string | null;
   _triggerSubscriptions: Map<string, Set<string>>;
   _entityTriggerSubscriptions: Map<string, Set<string>>;
   emit(event: string, data: unknown): void;
@@ -546,6 +561,7 @@ export interface StateMachinePluginContext {
   hasTTLStates(machineId: string): boolean;
   cancelTTL(machineId: string, entityId: string): void;
   scheduleTTL(machineId: string, entityId: string, stateConfig?: StateConfig): void;
+  recoverTTLsFromStorage(): Promise<void>;
   wrapEventHandler(handler: (...args: unknown[]) => unknown): (...args: unknown[]) => void;
   updateEntityTriggerSubscriptions(machineId: string, entityId: string, stateName: string): void;
   clearEntityTriggerSubscriptions(machineId: string, entityId: string): void;

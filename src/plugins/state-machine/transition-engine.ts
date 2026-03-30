@@ -803,6 +803,13 @@ export async function transitionToTargetState(
     }
 
     const nextStateVersion = await plugin.persistTransition(machineId, entityId, fromState, targetState, event, context, fromStateVersion);
+    plugin.updateEntityTriggerSubscriptions(machineId, entityId, targetState);
+
+    if (plugin.hasTTLStates(machineId)) {
+      plugin.cancelTTL(machineId, entityId);
+      plugin.scheduleTTL(machineId, entityId, targetStateConfig);
+    }
+
     const endedAt = new Date().toISOString();
 
     try {

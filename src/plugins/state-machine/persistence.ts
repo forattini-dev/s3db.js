@@ -1,6 +1,7 @@
 import type { StateMachinePluginContext, StateRecord, Resource, Lock } from './types.js';
 import { StateMachineError } from '../state-machine.errors.js';
 import tryFn from '../../concerns/try-fn.js';
+import { parseDuration } from './helpers.js';
 
 export function getStateResource(plugin: StateMachinePluginContext): Resource | null {
   if (!plugin.config.persistTransitions || !plugin.database?.resources) {
@@ -82,11 +83,12 @@ export async function persistTransition(
   context: Record<string, unknown>,
   fromStateVersion?: number
 ): Promise<number> {
-  const timestamp = new Date().toISOString();
-  const now = new Date().toISOString();
+  const transitionTime = new Date();
+  const now = transitionTime.toISOString();
+  const nowMs = transitionTime.getTime();
 
   const machine = plugin.machines.get(machineId)!;
-  const transitionId = `${machineId}_${entityId}_${timestamp}_${Math.random().toString(36).slice(2, 8)}`;
+  const transitionId = `${machineId}_${entityId}_${now}_${Math.random().toString(36).slice(2, 8)}`;
   const stateId = `${machineId}_${entityId}`;
   const nextStateVersion = (typeof fromStateVersion === 'number' ? fromStateVersion : (machine.currentStateVersions.get(entityId) || 0)) + 1;
   const stateData: Record<string, unknown> = {
@@ -97,6 +99,21 @@ export async function persistTransition(
     lastTransition: transitionId,
     updatedAt: now
   };
+
+  const targetStateConfig = machine.config.states[toState];
+  if (targetStateConfig?.ttl) {
+    const delayMs = parseDuration(targetStateConfig.ttl.after);
+    if (delayMs > 0) {
+      stateData._ttlExpiresAt = new Date(nowMs + delayMs).toISOString();
+      stateData._ttlEvent = targetStateConfig.ttl.send;
+    } else {
+      stateData._ttlExpiresAt = null;
+      stateData._ttlEvent = null;
+    }
+  } else {
+    stateData._ttlExpiresAt = null;
+    stateData._ttlEvent = null;
+  }
 
   const stateResource = getStateResource(plugin);
   const transitionLogResource = getTransitionLogResource(plugin);
@@ -187,7 +204,7 @@ export async function persistTransition(
           toState,
           event,
           context,
-          timestamp,
+          timestamp: now,
           createdAt: now.slice(0, 10)
         })
       );
@@ -304,6 +321,8 @@ export async function createStateResources(plugin: StateMachinePluginContext): P
       lastTransition: 'string|default:null',
       stateVersion: 'number|default:0',
       triggerCounts: 'json|default:{}',
+      _ttlExpiresAt: 'string|optional',
+      _ttlEvent: 'string|optional',
       updatedAt: 'datetime|required'
     },
     behavior: 'body-only'

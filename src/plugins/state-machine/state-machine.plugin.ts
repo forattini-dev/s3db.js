@@ -57,6 +57,8 @@ import {
   deleteEntity as attachDeleteEntity
 } from './resource-attachment.js';
 
+import { getEntitiesInState } from './triggers.js';
+
 import type {
   StateMachinePluginOptions,
   StateMachineConfig,
@@ -86,7 +88,8 @@ import type {
   MachineDefinitionDiagnostics,
   MachineDefinitionIssue,
   TriggerListenerRef,
-  TransitionContext
+  TransitionContext,
+  TTLRegistryEntry
 } from './types.js';
 
 export class StateMachinePlugin<
@@ -103,6 +106,8 @@ export class StateMachinePlugin<
   _pendingEventHandlers: Set<Promise<void>>;
   _triggerListeners: TriggerListenerRef[];
   _ttlTimers: Map<string, NodeJS.Timeout>;
+  _ttlRegistry: Map<string, TTLRegistryEntry>;
+  _ttlPollerJobName: string | null;
   _triggerSubscriptions: Map<string, Set<string>>;
   _entityTriggerSubscriptions: Map<string, Set<string>>;
 
@@ -133,6 +138,7 @@ export class StateMachinePlugin<
       enableFunctionTriggers = true,
       enableEventTriggers = true,
       triggerCheckInterval = 60000,
+      ttlCheckInterval = 600000,
       ...rest
     } = smOptions;
 
@@ -182,6 +188,7 @@ export class StateMachinePlugin<
       enableFunctionTriggers,
       enableEventTriggers,
       triggerCheckInterval,
+      ttlCheckInterval,
       ...rest
     };
 
@@ -191,6 +198,8 @@ export class StateMachinePlugin<
     this._pendingEventHandlers = new Set();
     this._triggerListeners = [];
     this._ttlTimers = new Map();
+    this._ttlRegistry = new Map();
+    this._ttlPollerJobName = null;
     this._triggerSubscriptions = new Map();
     this._entityTriggerSubscriptions = new Map();
 
@@ -468,6 +477,18 @@ export class StateMachinePlugin<
     await attachStateMachinesToResources(this);
     await setupTriggers(this);
 
+    if (this.config.persistTransitions && this._hasTTLMachines()) {
+      await this.recoverTTLsFromStorage();
+      const cronManager = getCronManager();
+      this._ttlPollerJobName = `sm-ttl-poller-${this.slug || 'default'}`;
+      await cronManager.scheduleInterval(
+        this.config.ttlCheckInterval,
+        () => this._pollTTLRegistry(),
+        this._ttlPollerJobName
+      );
+      this.triggerJobNames.push(this._ttlPollerJobName);
+    }
+
     this.emit('db:plugin:initialized', { machines: Array.from(this.machines.keys()) });
   }
 
@@ -491,6 +512,7 @@ export class StateMachinePlugin<
       clearTimeout(handle);
     }
     this._ttlTimers.clear();
+    this._ttlRegistry.clear();
 
     this.machines.clear();
     for (const listener of this._triggerListeners) {
@@ -769,31 +791,124 @@ export class StateMachinePlugin<
 
   scheduleTTL(machineId: string, entityId: string, stateConfig?: StateConfig): void {
     if (!stateConfig?.ttl) return;
+    if (stateConfig.type === 'final') return;
     const ttlKey = `${machineId}:${entityId}`;
     this.cancelTTL(machineId, entityId);
     const delayMs = parseDuration(stateConfig.ttl.after);
     if (delayMs <= 0) return;
     const eventToSend = stateConfig.ttl.send;
-    const handle = setTimeout(async () => {
-      this._ttlTimers.delete(ttlKey);
-      try {
-        await this.send(machineId, entityId, eventToSend, { _ttlExpired: true });
-      } catch (err) {
-        this.logger.debug({ machineId, entityId, event: eventToSend, error: (err as Error)?.message },
-          'TTL event send failed (entity may have left state)');
-      }
-    }, delayMs);
-    if (handle.unref) handle.unref();
-    this._ttlTimers.set(ttlKey, handle);
+
+    if (this.config.persistTransitions) {
+      this._ttlRegistry.set(ttlKey, {
+        machineId,
+        entityId,
+        expiresAt: Date.now() + delayMs,
+        event: eventToSend
+      });
+    } else {
+      const handle = setTimeout(async () => {
+        this._ttlTimers.delete(ttlKey);
+        try {
+          await this.send(machineId, entityId, eventToSend, { _ttlExpired: true });
+        } catch (err) {
+          this.logger.debug({ machineId, entityId, event: eventToSend, error: (err as Error)?.message },
+            'TTL event send failed (entity may have left state)');
+        }
+      }, delayMs);
+      if (handle.unref) handle.unref();
+      this._ttlTimers.set(ttlKey, handle);
+    }
   }
 
   cancelTTL(machineId: string, entityId: string): void {
     const ttlKey = `${machineId}:${entityId}`;
+
     const existing = this._ttlTimers.get(ttlKey);
     if (existing) {
       clearTimeout(existing);
       this._ttlTimers.delete(ttlKey);
     }
+
+    this._ttlRegistry.delete(ttlKey);
+  }
+
+  async recoverTTLsFromStorage(): Promise<void> {
+    if (!this.config.persistTransitions) return;
+
+    let totalRecovered = 0;
+
+    for (const [machineId, machineData] of this.machines) {
+      if (!this.hasTTLStates(machineId)) continue;
+
+      for (const [stateName, stateConfig] of Object.entries(machineData.config.states)) {
+        if (!stateConfig.ttl) continue;
+
+        const entities = await getEntitiesInState(this, machineId, stateName);
+
+        for (const entity of entities) {
+          const ttlKey = `${machineId}:${entity.entityId}`;
+
+          if (entity._ttlExpiresAt) {
+            const expiresAt = new Date(entity._ttlExpiresAt).getTime();
+            this._ttlRegistry.set(ttlKey, {
+              machineId,
+              entityId: entity.entityId,
+              expiresAt,
+              event: entity._ttlEvent || stateConfig.ttl.send
+            });
+          } else {
+            const delayMs = parseDuration(stateConfig.ttl.after);
+            if (delayMs > 0) {
+              this._ttlRegistry.set(ttlKey, {
+                machineId,
+                entityId: entity.entityId,
+                expiresAt: Date.now() + delayMs,
+                event: stateConfig.ttl.send
+              });
+            }
+          }
+          totalRecovered++;
+        }
+      }
+    }
+
+    this.logger.debug({ recovered: totalRecovered, registrySize: this._ttlRegistry.size },
+      `TTL recovery complete: ${totalRecovered} entities recovered, ${this._ttlRegistry.size} TTL timers active`);
+  }
+
+  private async _pollTTLRegistry(): Promise<void> {
+    const now = Date.now();
+    const expiredKeys: string[] = [];
+    const expired: TTLRegistryEntry[] = [];
+
+    for (const [key, entry] of this._ttlRegistry) {
+      if (entry.expiresAt <= now) {
+        expiredKeys.push(key);
+        expired.push(entry);
+      }
+    }
+
+    for (const key of expiredKeys) {
+      this._ttlRegistry.delete(key);
+    }
+
+    for (const entry of expired) {
+      try {
+        await this.send(entry.machineId, entry.entityId, entry.event, { _ttlExpired: true });
+      } catch (err) {
+        this.logger.debug(
+          { machineId: entry.machineId, entityId: entry.entityId, event: entry.event, error: (err as Error)?.message },
+          'TTL poll: send failed (entity may have left state)'
+        );
+      }
+    }
+  }
+
+  private _hasTTLMachines(): boolean {
+    for (const machineId of this.machines.keys()) {
+      if (this.hasTTLStates(machineId)) return true;
+    }
+    return false;
   }
 
   updateEntityTriggerSubscriptions(machineId: string, entityId: string, stateName: string): void {
