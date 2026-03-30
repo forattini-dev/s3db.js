@@ -52,6 +52,12 @@ export const resourceTemplates: MCPResourceTemplate[] = [
     mimeType: 'text/markdown',
   },
   {
+    uriTemplate: 's3db://plugin/{name}/{sub-doc}',
+    name: 'Plugin Sub-Document',
+    description: 'Plugin sub-documentation: triggers, guards, states, actions, guides/api-reference, guides/configuration, etc.',
+    mimeType: 'text/markdown',
+  },
+  {
     uriTemplate: 's3db://guide/{topic}',
     name: 'Guide',
     description: 'Usage guides: getting-started, performance, typescript, testing, multi-tenancy, security',
@@ -1150,14 +1156,34 @@ function resolvePluginDir(name: string): string | null {
 }
 
 function generatePluginDoc(name: string): string {
-  const plugin = getPluginByName(name);
-  if (!plugin) {
-    const availablePlugins = plugins.map(p => p.name.replace('Plugin', '').toLowerCase()).join(', ');
-    return `# Plugin: ${name}\n\nPlugin not found. Available plugins: ${availablePlugins}`;
+  let pluginName = name;
+  let subDoc: string | null = null;
+  const slashIndex = name.indexOf('/');
+  if (slashIndex !== -1) {
+    pluginName = name.substring(0, slashIndex);
+    subDoc = name.substring(slashIndex + 1);
   }
 
-  const dirName = resolvePluginDir(name);
+  const plugin = getPluginByName(pluginName);
+  if (!plugin) {
+    const availablePlugins = plugins.map(p => p.name.replace('Plugin', '').toLowerCase()).join(', ');
+    return `# Plugin: ${pluginName}\n\nPlugin not found. Available plugins: ${availablePlugins}`;
+  }
+
+  const dirName = resolvePluginDir(pluginName);
   if (dirName) {
+    if (subDoc) {
+      const subDocPath = join(DOCS_ROOT, 'plugins', dirName, subDoc.endsWith('.md') ? subDoc : subDoc + '.md');
+      if (existsSync(subDocPath)) {
+        try {
+          return readFileSync(subDocPath, 'utf-8');
+        } catch {
+          return `# ${pluginName} / ${subDoc}\n\nFailed to read sub-document.`;
+        }
+      }
+      return `# ${pluginName} / ${subDoc}\n\nSub-document not found. Try \`s3db://plugin/${pluginName}\` for the main plugin documentation.`;
+    }
+
     const readmePath = join(DOCS_ROOT, 'plugins', dirName, 'README.md');
     if (existsSync(readmePath)) {
       try {

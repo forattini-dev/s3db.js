@@ -161,18 +161,20 @@ async function loadPluginDocs(): Promise<void> {
 }
 
 function pathToResourceUri(path: string): string | null {
-  // Convert doc file paths to s3db:// URIs
-  // plugins/cache/README.md → s3db://plugin/cache
-  // core/partitions.md → s3db://core/partitions
-  // guides/testing.md → s3db://guide/testing
-  // schema.md → s3db://core/schema
   const normalized = path.replace(/\\/g, '/');
-  const pluginMatch = normalized.match(/^plugins\/([^/]+)/);
-  if (pluginMatch) return `s3db://plugin/${pluginMatch[1]}`;
+  const pluginMatch = normalized.match(/^plugins\/([^/]+)\/(.+)$/);
+  if (pluginMatch) {
+    const [, pluginName, rest] = pluginMatch;
+    if (rest === 'README.md') {
+      return `s3db://plugin/${pluginName}`;
+    }
+    const subDoc = rest.replace(/\.md$/, '');
+    return `s3db://plugin/${pluginName}/${subDoc}`;
+  }
   const coreMatch = normalized.match(/^core\/([^.]+)\.md$/);
   if (coreMatch) return `s3db://core/${coreMatch[1]}`;
   const guideMatch = normalized.match(/^guides\/([^.]+)\.md$/);
-  if (guideMatch) return `s3db://guide/${guideMatch[1].replace(/-/g, '-')}`;
+  if (guideMatch) return `s3db://guide/${guideMatch[1]}`;
   const refMatch = normalized.match(/^reference\/([^.]+)\.md$/);
   if (refMatch) return `s3db://reference/${refMatch[1]}`;
   return null;
@@ -214,6 +216,72 @@ function search(index: any | null, docs: DocEntry[], query: string, limit = 5): 
     snippet: extractSnippet(r.item.content, query),
     score: 1 - (r.score || 0),
   }));
+}
+
+function regexSearch(docs: DocEntry[], pattern: string, limit = 5): SearchResult[] {
+  let regex: RegExp;
+  try {
+    regex = new RegExp(pattern, 'gim');
+  } catch (err: any) {
+    throw new Error(`Invalid regex pattern: ${err.message}`);
+  }
+
+  const results: SearchResult[] = [];
+
+  for (const doc of docs) {
+    const match = regex.exec(doc.content);
+    if (match) {
+      const matchPos = match.index;
+      const start = Math.max(0, matchPos - 50);
+      const end = Math.min(doc.content.length, matchPos + match[0].length + 200);
+      let snippet = doc.content.slice(start, end);
+      if (start > 0) snippet = '...' + snippet;
+      if (end < doc.content.length) snippet = snippet + '...';
+
+      results.push({
+        id: doc.id,
+        path: doc.path,
+        title: doc.title,
+        content: doc.content,
+        snippet: snippet.trim(),
+        score: 1.0,
+      });
+
+      if (results.length >= limit) break;
+    }
+    regex.lastIndex = 0;
+  }
+
+  return results;
+}
+
+function filterDocsByGroup(docs: DocEntry[], group: string): DocEntry[] {
+  const pluginGroupMatch = group.match(/^plugin:(.+)$/);
+  if (pluginGroupMatch) {
+    const pluginName = pluginGroupMatch[1].toLowerCase();
+    return docs.filter(d => {
+      const normalized = d.path.replace(/\\/g, '/');
+      const match = normalized.match(/^plugins\/([^/]+)/);
+      return match && match[1].toLowerCase() === pluginName;
+    });
+  }
+
+  switch (group.toLowerCase()) {
+    case 'core':
+      return docs.filter(d => d.category === 'core' || d.category === 'root');
+    case 'plugins':
+      return docs.filter(d => d.category === 'plugins');
+    case 'guides':
+      return docs.filter(d => d.category === 'guides');
+    case 'reference':
+      return docs.filter(d => d.category === 'reference');
+    case 'clients':
+      return docs.filter(d => d.category === 'clients');
+    case 'benchmarks':
+      return docs.filter(d => d.category === 'benchmarks');
+    default:
+      return docs;
+  }
 }
 
 async function searchDocs(type: 'core' | 'plugins', query: string, limit = 5): Promise<any> {
@@ -303,13 +371,21 @@ async function listTopics(type: 'core' | 'plugins'): Promise<any> {
 export const docsSearchTools = [
   {
     name: 's3dbSearchDocs',
-    description: `Search all s3db.js documentation (core + plugins) using fuzzy search. Covers: resource API, schema validation, CRUD, partitioning, behaviors, encoding, encryption, security config (passphrase, pepper, bcrypt, argon2, password hashing), CLI, and all plugins (Cache, Audit, TTL, API, Vector, Graph, etc). TIP: For security/password/encryption topics, read s3db://core/security directly instead of searching.`,
+    description: `Search all s3db.js documentation (core + plugins). Supports fuzzy search (query), regex search (pattern), and document group filtering (group). Use group to narrow scope before searching. TIP: For security/password/encryption topics, read s3db://core/security directly.`,
     inputSchema: {
       type: 'object',
       properties: {
         query: {
           type: 'string',
-          description: 'Search query (e.g., "how do partitions work", "cache plugin config", "create resource")',
+          description: 'Fuzzy search query (e.g., "how do partitions work", "cache plugin config")',
+        },
+        pattern: {
+          type: 'string',
+          description: 'Regex pattern to search doc content (e.g., "partition.*O\\\\(1\\\\)", "bcrypt|argon2")',
+        },
+        group: {
+          type: 'string',
+          description: 'Filter by doc group: "core", "plugins", "guides", "reference", "clients", "benchmarks", or "plugin:<name>" (e.g., "plugin:state-machine"). Without query/pattern, returns browsable index.',
         },
         limit: {
           type: 'number',
@@ -317,7 +393,6 @@ export const docsSearchTools = [
           default: 5,
         },
       },
-      required: ['query'],
     },
   },
   {
@@ -359,24 +434,62 @@ export const docsSearchTools = [
 export function createDocsSearchHandlers(server: S3dbMCPServer) {
   return {
     async s3dbSearchDocs(args: S3dbSearchDocsArgs): Promise<any> {
-      const { query, limit = 5 } = args;
-      // Search both core and plugin docs, merge and sort by score
-      const [coreResults, pluginResults] = await Promise.all([
-        searchDocs('core', query, limit),
-        searchDocs('plugins', query, limit),
-      ]);
+      const { query, pattern, group, limit = 5 } = args;
 
-      const allResults = [
-        ...(coreResults.results || []).map((r: any) => ({ ...r, source: 'core' })),
-        ...(pluginResults.results || []).map((r: any) => ({ ...r, source: 'plugin' })),
-      ].sort((a, b) => b.score - a.score).slice(0, limit);
+      if (!query && !pattern && !group) {
+        return {
+          success: false,
+          error: 'Provide at least one of: query (fuzzy search), pattern (regex search), or group (browse docs).',
+        };
+      }
+
+      await loadCoreDocs();
+      await loadPluginDocs();
+
+      let targetDocs = [...coreDocs, ...pluginDocs];
+      if (group) {
+        targetDocs = filterDocsByGroup(targetDocs, group);
+      }
+
+      if (!query && !pattern) {
+        return {
+          success: true,
+          group,
+          resultCount: targetDocs.length,
+          totalDocs: targetDocs.length,
+          results: targetDocs.slice(0, limit).map(d => ({
+            title: d.title,
+            path: d.path,
+            uri: pathToResourceUri(d.path),
+            category: d.category,
+          })),
+          hint: 'Read full docs via s3db:// URIs shown in each result.',
+        };
+      }
+
+      let results: SearchResult[];
+
+      if (pattern) {
+        results = regexSearch(targetDocs, pattern, limit);
+      } else {
+        const tempIndex = await buildIndex(targetDocs);
+        results = search(tempIndex, targetDocs, query!, limit);
+      }
 
       return {
         success: true,
-        query,
-        resultCount: allResults.length,
-        totalDocs: (coreResults.totalDocs || 0) + (pluginResults.totalDocs || 0),
-        results: allResults,
+        query: query || undefined,
+        pattern: pattern || undefined,
+        group: group || undefined,
+        resultCount: results.length,
+        totalDocs: targetDocs.length,
+        results: results.map(r => ({
+          title: r.title,
+          path: r.path,
+          uri: pathToResourceUri(r.path),
+          snippet: r.snippet,
+          score: r.score,
+        })),
         hint: 'Read full docs via s3db:// URIs shown in each result.',
       };
     },

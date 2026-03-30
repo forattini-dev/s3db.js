@@ -132,7 +132,9 @@ export interface DbGetRawArgs {
 }
 
 export interface S3dbSearchDocsArgs {
-  query: string;
+  query?: string;
+  pattern?: string;
+  group?: string;
   limit?: number;
   maxResults?: number;
 }

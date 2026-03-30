@@ -926,8 +926,8 @@ export const categories = {
 // =============================================================================
 
 export function getPluginByName(name: string): PluginDoc | undefined {
-  const normalized = name.toLowerCase().replace('plugin', '');
-  return plugins.find(p => p.name.toLowerCase().replace('plugin', '') === normalized);
+  const normalized = name.toLowerCase().replace('plugin', '').replace(/[-_\s]/g, '');
+  return plugins.find(p => p.name.toLowerCase().replace('plugin', '').replace(/[-_\s]/g, '') === normalized);
 }
 
 export function getFieldTypeByName(name: string): FieldTypeDoc | undefined {
