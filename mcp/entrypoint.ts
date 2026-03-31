@@ -50,6 +50,101 @@ const SERVER_INSTRUCTIONS = `s3db.js v${SERVER_VERSION} — S3-based document da
 
 Auto-connects on startup via S3DB_CONNECTION_STRING env var. All resources are restored — just start using tools.
 
+## Connection Strings
+
+s3db.js supports 7 storage backends via connection strings. Set \`S3DB_CONNECTION_STRING\` env var or use \`dbConnect\` tool.
+
+### Production backends
+
+| Backend | Connection string | Best for |
+|---------|------------------|----------|
+| **AWS S3** | \`s3://ACCESS_KEY:SECRET_KEY@bucket?region=us-east-1\` | Production, serverless |
+| **MinIO** | \`http://user:pass@localhost:9000/bucket\` | Self-hosted, on-prem |
+| **S3-compatible** | \`https://key:secret@nyc3.digitaloceanspaces.com/bucket\` | DO Spaces, R2, B2 |
+| **SQLite** | \`sqlite:///path/to/file.db\` or \`sqlite:///:memory:\` | Edge, embedded, single-node |
+| **Cloudflare D1** | \`sqlite+d1://ACCOUNT_ID/DB_ID?apiToken=TOKEN\` | Cloudflare Workers |
+| **Turso/libsql** | \`sqlite+libsql://db-org.turso.io?authToken=TOKEN\` | Edge-distributed SQLite |
+
+### Development/testing backends
+
+| Backend | Connection string | Best for |
+|---------|------------------|----------|
+| **Memory** | \`memory://bucket\` | Unit tests (fastest, no persistence) |
+| **FileSystem** | \`file:///tmp/s3db\` | Integration tests (persistent, no deps) |
+| **SQLite** | \`sqlite:///tmp/test.db\` | Tests needing persistence + SQL perf |
+
+### Examples
+
+\`\`\`
+# AWS S3 with prefix and region
+s3://AKIAXXXX:secret@mybucket/production?region=eu-west-1
+
+# MinIO local dev
+http://minioadmin:minioadmin@localhost:9000/devbucket
+
+# DigitalOcean Spaces
+https://KEY:SECRET@nyc3.digitaloceanspaces.com/myspace
+
+# Cloudflare R2
+https://KEY:SECRET@ACCOUNT_ID.r2.cloudflarestorage.com/mybucket
+
+# Backblaze B2
+https://keyId:appKey@s3.us-west-000.backblazeb2.com/mybucket
+
+# SQLite local file
+sqlite:///home/user/data/s3db.sqlite
+
+# SQLite in-memory
+sqlite:///:memory:
+
+# Cloudflare D1
+sqlite+d1://abc123/my-db-id?apiToken=YOUR_TOKEN
+
+# Turso cloud
+sqlite+libsql://my-db-my-org.turso.io?authToken=YOUR_TOKEN
+
+# Memory for tests
+memory://testbucket
+
+# Filesystem for tests
+file:///tmp/s3db-test
+\`\`\`
+
+### Query parameters (all backends)
+
+Append to any connection string: \`?key=value&key2=value2\`
+
+| Parameter | Example | Description |
+|-----------|---------|-------------|
+| \`region\` | \`us-east-1\` | AWS region (S3 only) |
+| \`sessionToken\` | \`FwoGZX...\` | AWS STS temporary token |
+| \`forcePathStyle\` | \`true\` | Force path-style S3 URLs |
+| \`compression.enabled\` | \`true\` | Enable metadata compression |
+| \`compression.level\` | \`6\` | Compression level (0-9) |
+| \`maxMemoryMB\` | \`512\` | SQLite memory budget |
+| \`maxObjectSize\` | \`5242880\` | Max object size in bytes |
+
+Nested options use dot notation: \`?executorPool.concurrency=50&executorPool.retries=5\`
+
+### Credential encoding
+
+Special characters in keys/secrets **must** be URL-encoded:
+\`/\` → \`%2F\`, \`+\` → \`%2B\`, \`=\` → \`%3D\`, \`@\` → \`%40\`, \`:\` → \`%3A\`
+
+### IAM roles (no credentials)
+
+On EC2/ECS/Lambda, omit credentials — AWS SDK auto-discovers IAM role:
+\`s3://mybucket?region=us-east-1\`
+
+### Peer dependencies
+
+Some backends require additional packages:
+- **Turso/libsql**: \`pnpm add @libsql/client\`
+- **Cloudflare D1**: No extra deps (uses HTTP API)
+- **SQLite**: \`pnpm add better-sqlite3\` (auto-detected)
+
+For full connection string reference: read \`s3db://reference/connection-strings\` resource.
+
 ## Tools (all you need)
 
 **Read:** resourceGet (by ID), resourceList (browse/filter), resourcePage (paginate), resourceQuery (filter by values), resourceCount
@@ -82,6 +177,7 @@ Use \`s3db://resource/{name}\` to see which partitions a resource has.
 - \`s3db://core/security\` — **security config reference** (passphrase, pepper, bcrypt, argon2, passwords)
 - \`s3db://guide/{topic}\` — guides (getting-started, performance, testing, security)
 - \`s3db://field-type/{type}\` — field type reference (string, password, secret, embedding, ip4)
+- \`s3db://reference/connection-strings\` — **full connection string reference**
 
 ## Prompts (ask for help)
 
@@ -89,6 +185,8 @@ Use \`s3db://resource/{name}\` to see which partitions a resource has.
 - \`setup_plugin\` — configure any plugin with best practices
 - \`create_partition_strategy\` — design partitions for your query patterns
 - \`explain_behavior\` / \`explain_partitions\` — learn core concepts
+- \`compare_clients\` — compare storage backends for your use case
+- \`debug_connection\` — troubleshoot connection issues
 - \`debug_query_performance\` / \`optimize_costs\` — troubleshoot issues
 - \`migrate_from_mongodb\` / \`migrate_from_dynamodb\` / \`migrate_from_prisma\` — migration guides
 `;

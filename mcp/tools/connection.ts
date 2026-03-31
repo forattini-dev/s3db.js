@@ -7,7 +7,21 @@ import { resolveConfig } from '../config.js';
 export const connectionTools = [
   {
     name: 'dbConnect',
-    description: 'Connect to S3DB database manually. Usually NOT needed — the server auto-connects via S3DB_CONNECTION_STRING env var. Use only to connect to a different database or if auto-connect is not configured. Formats: s3://key:secret@bucket (AWS S3), http://key:secret@host:9000/bucket (MinIO), sqlite:///absolute/path/to/file.db (SQLite), memory://bucket (testing), file:///path (testing).',
+    description: `Connect to S3DB database. Usually auto-connected via S3DB_CONNECTION_STRING env var.
+
+Connection string formats:
+• s3://KEY:SECRET@bucket?region=us-east-1 — AWS S3
+• http://user:pass@host:9000/bucket — MinIO / S3-compatible
+• https://KEY:SECRET@nyc3.digitaloceanspaces.com/bucket — DO Spaces, R2, B2
+• sqlite:///path/to/file.db — SQLite local file
+• sqlite:///:memory: — SQLite in-memory
+• sqlite+d1://ACCOUNT_ID/DB_ID?apiToken=TOKEN — Cloudflare D1
+• sqlite+libsql://db-org.turso.io?authToken=TOKEN — Turso/libsql
+• memory://bucket — In-memory (testing)
+• file:///path — Filesystem (testing)
+
+Special chars in credentials must be URL-encoded (/ → %2F, + → %2B, = → %3D, @ → %40).
+On EC2/ECS/Lambda, omit credentials for IAM role: s3://bucket?region=us-east-1`,
     inputSchema: {
       type: 'object',
       properties: {
