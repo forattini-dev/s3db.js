@@ -1,12 +1,14 @@
 # Cost Optimization
 
-> Practical actions to reduce S3 request volume and total cost.
+> Practical actions to reduce costs across all supported providers.
 
-**Navigation:** [← Back to Costs Plugin](/plugins/costs/README.md) | [Usage Patterns](/plugins/costs/guides/usage-patterns.md)
+**Navigation:** [<- Back to Costs Plugin](/plugins/costs/README.md) | [Usage Patterns](/plugins/costs/guides/usage-patterns.md)
 
 ---
 
-## Priority Order
+## Priority by Provider
+
+### Object Storage (S3, R2)
 
 | Priority | Action | Typical Impact |
 |---|---|---|
@@ -14,8 +16,19 @@
 | 2 | Add caching for read-heavy routes | High |
 | 3 | Tune polling plugins (`s3-queue`) | High |
 | 4 | Avoid unnecessary `HEAD` after `GET` | Medium |
-| 5 | Reduce transfer payload size | Medium |
+| 5 | Reduce transfer payload size (S3 only) | Medium |
 | 6 | Data lifecycle cleanup | Medium |
+
+### SQL Backends (D1, Turso)
+
+| Priority | Action | Typical Impact |
+|---|---|---|
+| 1 | Use `get(id)` instead of `query()` for single records | High |
+| 2 | Use partitions to scope `list()` and `query()` | High |
+| 3 | Add caching for repeated reads | High |
+| 4 | Use `replace()` instead of `update()` when you have full data | Medium |
+| 5 | Batch operations where possible | Medium |
+| 6 | Monitor row counts with `snapshot().rowsRead` | Low |
 
 ---
 
@@ -24,8 +37,8 @@
 Use cursor/token flow in APIs and internals where possible.
 
 Why:
-- offset-like behavior over S3 often causes extra list scans
-- list scans amplify request and transfer cost
+- offset-like behavior causes extra scans (list on S3, SELECT on SQL)
+- scans amplify request cost (S3/R2) and row-read cost (D1/Turso)
 
 Measure with:
 ```javascript
@@ -44,7 +57,8 @@ Read-heavy endpoints benefit from cache plugins:
 - repeated lookups by id
 
 Target:
-- lower `get/head/list` counts in `snapshot().byMethod`.
+- **S3/R2**: lower `get/head/list` counts in `snapshot().byMethod`
+- **D1/Turso**: lower `rowsRead` in `snapshot().rowsRead`
 
 ---
 
@@ -70,12 +84,14 @@ console.log(queueView.byMethod, queueView.totalRequests);
 
 Common wins:
 - avoid `GET + HEAD` when a single response already carries needed metadata
-- avoid read-before-write when not required for consistency semantics
+- use `replace()` instead of `update()` when you have the full record (saves 1 read)
 - batch deletes and writes when behavior allows
+
+For SQL backends, `replace()` is 1 UPSERT (1 write) vs `update()` which is SELECT + UPSERT (1 read + 1 write).
 
 ---
 
-## 5. Reduce Transfer Size
+## 5. Reduce Transfer Size (S3 Only)
 
 Use:
 - compact payloads
@@ -83,6 +99,8 @@ Use:
 - compression for large objects when appropriate
 
 This reduces `bytesOut` and `estimatedDataTransferOutCost` in snapshots.
+
+**Note:** R2, D1, and Turso have zero egress costs, so transfer size does not affect your bill.
 
 ---
 
@@ -94,6 +112,16 @@ Retain only necessary records:
 - periodic cleanup jobs
 
 This keeps storage growth and future list/read operations under control.
+
+**Storage cost varies significantly by provider:**
+| Provider | Storage $/GB |
+|----------|-------------|
+| R2 | $0.015 |
+| S3 | $0.023 |
+| Turso Scaler | $0.50 |
+| D1 / Turso Dev | $0.75 |
+
+For D1/Turso, storage costs per GB are 30-50x higher than object storage. Keep data lean.
 
 ---
 
@@ -107,13 +135,15 @@ const baseline = db.plugins.CostsPlugin.estimate({ days: 30 });
 3. Re-run the same workload.
 4. Compare:
 `projected.totalRequests`, `projected.totalCost`, `observed.byMethod`.
+For row-based: also check `projected.rowsRead`, `projected.rowsWritten`, `projected.rowCost`.
 5. Keep only changes with measurable gain.
 
 ---
 
-## What “Good” Looks Like
+## What "Good" Looks Like
 
-- Request growth is proportional to business volume, not super-linear.
+- Request/row growth is proportional to business volume, not super-linear.
 - `list/head` ratio remains stable under scale.
 - Queue idle traffic stays bounded.
 - Monthly projection remains within budget envelope with headroom.
+- For D1/Turso: reads stay within included free tier (25B for D1, 100B for Turso Scaler).

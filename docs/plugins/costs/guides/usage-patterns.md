@@ -1,12 +1,14 @@
 # Usage Patterns
 
-> Practical patterns for monitoring and forecasting cost.
+> Practical patterns for monitoring and forecasting cost across all providers.
 
-**Navigation:** [← Back to Costs Plugin](/plugins/costs/README.md) | [Configuration](/plugins/costs/guides/configuration.md)
+**Navigation:** [<- Back to Costs Plugin](/plugins/costs/README.md) | [Configuration](/plugins/costs/guides/configuration.md)
 
 ---
 
 ## 1. Live Session Tracking
+
+### Request-Based (S3, R2)
 
 ```javascript
 const costs = db.client.costs;
@@ -15,7 +17,18 @@ console.log('USD total:', costs.total);
 console.log('Requests:', costs.requests.total);
 console.log('By method:', costs.requests.counts);
 console.log('By resource:', costs.usage.byResource);
-console.log('By plugin:', costs.usage.byPlugin);
+```
+
+### Row-Based (D1, Turso)
+
+```javascript
+const costs = db.client.costs;
+
+console.log('USD total:', costs.total);
+console.log('Rows read:', costs.rows.counts.read);
+console.log('Rows written:', costs.rows.counts.written);
+console.log('Row cost:', costs.rows.subtotal);
+console.log('By resource:', costs.usage.byResource);
 ```
 
 Use this for:
@@ -33,12 +46,14 @@ const costsPlugin = db.plugins.CostsPlugin;
 const lastHour = costsPlugin.snapshot({ windowMs: 60 * 60 * 1000 });
 const lastDay = costsPlugin.snapshot({ windowMs: 24 * 60 * 60 * 1000 });
 
+// Works for both request-based and row-based providers
 console.log(lastHour.totalRequests, lastHour.estimatedTotal);
+console.log(lastHour.rowsRead, lastHour.rowsWritten, lastHour.rowCost);
 console.log(lastDay.byMethod, lastDay.byResource);
 ```
 
 Use this for:
-- “last 1h vs last 24h” trend
+- "last 1h vs last 24h" trend
 - request spikes
 - anomaly detection
 
@@ -77,8 +92,15 @@ const projection = costsPlugin.estimate({
   requestMultiplier: 1.15
 });
 
-console.log(projection.projected.totalCost);
-console.log(projection.projected.totalRequests);
+console.log('Projected total:', projection.projected.totalCost);
+
+// For request-based providers
+console.log('Request cost:', projection.projected.requestCost);
+
+// For row-based providers
+console.log('Row cost:', projection.projected.rowCost);
+console.log('Rows read:', projection.projected.rowsRead);
+console.log('Rows written:', projection.projected.rowsWritten);
 ```
 
 Use this for:
@@ -143,8 +165,27 @@ const after = costsPlugin.snapshot({ windowMs: 15 * 60 * 1000 });
 
 console.log({
   requestsDelta: after.totalRequests - before.totalRequests,
-  estimatedCostDelta: after.estimatedTotal - before.estimatedTotal
+  estimatedCostDelta: after.estimatedTotal - before.estimatedTotal,
+  rowsReadDelta: after.rowsRead - before.rowsRead,
+  rowsWrittenDelta: after.rowsWritten - before.rowsWritten
 });
+```
+
+---
+
+## 8. Provider-Aware Cost Checking
+
+```javascript
+const costs = db.plugins.CostsPlugin.getCosts();
+
+if (costs.pricingModel === 'row-based') {
+  console.log(`${costs.provider}: ${costs.rows.counts.read} reads, ${costs.rows.counts.written} writes`);
+  console.log(`Row cost: $${costs.rows.subtotal.toFixed(6)}`);
+} else {
+  console.log(`${costs.provider}: ${costs.requests.total} requests`);
+  console.log(`Request cost: $${costs.requests.subtotal.toFixed(6)}`);
+  console.log(`Egress cost: $${costs.dataTransfer.subtotal.toFixed(6)}`);
+}
 ```
 
 ---
@@ -154,3 +195,4 @@ console.log({
 1. `snapshot()` reflects observed events in memory for the current process.
 2. `estimate()` scales observed behavior; quality depends on window quality.
 3. For finance-grade reporting, export snapshots periodically to durable storage.
+4. `estimatedTotal` in snapshots uses the correct cost model — `rowCost` for D1/Turso, `requestCost` for S3/R2.

@@ -2,7 +2,7 @@
 
 > Production checklist, troubleshooting, and FAQ for Costs Plugin.
 
-**Navigation:** [← Back to Costs Plugin](/plugins/costs/README.md) | [Usage Patterns](/plugins/costs/guides/usage-patterns.md)
+**Navigation:** [<- Back to Costs Plugin](/plugins/costs/README.md) | [Usage Patterns](/plugins/costs/guides/usage-patterns.md)
 
 ---
 
@@ -10,25 +10,31 @@
 
 1. Install plugin explicitly:
 `await db.usePlugin(new CostsPlugin(...))`
-2. Define a standard observed window:
+2. Verify detected provider:
+`db.plugins.CostsPlugin.getCosts().provider`
+3. Define a standard observed window:
 `24h` is usually a good starting point.
-3. Track daily snapshots externally if you need history across restarts.
-4. Set budget alarms from `estimate({ days: 30 })`.
-5. Review `byResource` and `byPlugin` every release.
-6. Recalibrate request prices if you are not on standard AWS pricing.
+4. Track daily snapshots externally if you need history across restarts.
+5. Set budget alarms from `estimate({ days: 30 })`.
+6. Review `byResource` and `byPlugin` every release.
+7. For Turso, set the correct plan tier: `new CostsPlugin({ tursoPlan: 'scaler' })`.
 
 ---
 
 ## Common Pitfalls
 
-1. Treating projection as invoice:
+1. **Treating projection as invoice:**
 `estimate()` is directional and depends on observed behavior quality.
-2. Using very small observed windows:
+2. **Using very small observed windows:**
 short windows can overfit spikes.
-3. Ignoring idle traffic:
+3. **Ignoring idle traffic:**
 polling plugins can dominate cost even with low business traffic.
-4. Not capping history:
+4. **Not capping history:**
 large unbounded history increases memory footprint.
+5. **Wrong Turso plan tier:**
+if you don't set `tursoPlan`, it defaults to `'developer'`. Scaler and Pro have different pricing.
+6. **Assuming all backends have egress costs:**
+R2, D1, and Turso have zero egress. Only AWS S3 charges for data transfer out.
 
 ---
 
@@ -37,8 +43,9 @@ large unbounded history increases memory footprint.
 ### Costs stay near zero
 Check:
 1. Plugin is installed before workload starts.
-2. Operations are actually hitting S3-backed client paths.
+2. Operations are actually hitting the backend client (not cached).
 3. You are reading from `db.client.costs` in the same process.
+4. For SQL backends (D1/Turso): verify `costs.rows.counts` is incrementing.
 
 ### Projection looks too high
 Check:
@@ -50,16 +57,32 @@ Check:
 Breakdown depends on key patterns that include `resource=` and/or `plugin=` segments.
 If keys do not follow those prefixes, totals still work, but dimensions may be sparse.
 
+### Provider detected as 'aws-s3' when using R2
+Check that your connection string uses the R2 endpoint format:
+`https://KEY:SECRET@ACCOUNT_ID.r2.cloudflarestorage.com/bucket`
+
+If the endpoint doesn't contain `.r2.cloudflarestorage.com`, the plugin falls back to AWS S3 pricing. Use the `provider` option to override:
+`new CostsPlugin({ provider: 'cloudflare-r2' })`
+
 ---
 
 ## FAQ
+
+### How do I check which provider was detected?
+
+```javascript
+const costs = db.plugins.CostsPlugin.getCosts();
+console.log(costs.provider);      // 'aws-s3', 'cloudflare-r2', 'cloudflare-d1', 'turso', 'self-hosted'
+console.log(costs.pricingModel);  // 'request-based' or 'row-based'
+```
 
 ### How do I read current totals?
 
 ```javascript
 const costs = db.client.costs;
 console.log(costs.total);
-console.log(costs.requests.counts);
+console.log(costs.requests.counts);  // request-based
+console.log(costs.rows.counts);      // row-based
 ```
 
 ### How do I get last 24h only?
@@ -81,11 +104,25 @@ const projection = db.plugins.CostsPlugin.estimate({
 
 ### Can I customize prices?
 
-Yes, by mutating the request price table:
+Yes, by mutating the pricing tables at runtime:
 
 ```javascript
 const costs = db.plugins.CostsPlugin.getCosts();
+
+// Request-based providers
 costs.requests.prices.get = 0.0005 / 1000;
+
+// Row-based providers
+costs.rows.prices.readPerMillion = 0.0005;
+```
+
+### Can I force a specific provider?
+
+Yes, use the `provider` option:
+
+```javascript
+new CostsPlugin({ provider: 'cloudflare-r2' })
+new CostsPlugin({ provider: 'turso', tursoPlan: 'scaler' })
 ```
 
 ### Can I reset counters?
@@ -93,7 +130,14 @@ costs.requests.prices.get = 0.0005 / 1000;
 There is no dedicated reset API today.
 The common approach is restarting the process or reinitializing the database/plugin instance.
 
-### Is this compatible with non-AWS S3 providers?
+### Is row tracking accurate for SQL backends?
 
-Yes for usage counting.
-For cost fidelity, you should adapt the price tables to your provider contract.
+The plugin tracks rows per s3db.js operation:
+- `get(id)` = 1 row read
+- `insert(data)` = 1 row written (+ 1 row read if checking for existing)
+- `update(id, data)` = 1 row read + 1 row written
+- `patch(id, data)` = 1 row read + 1 row written
+- `delete(id)` = 1 row written
+- `list()` = N rows read (N = number of results)
+
+This matches the actual SQL operations performed by RemoteSqliteClient.
