@@ -104,6 +104,7 @@ export class S3Client extends EventEmitter {
     getKeysPageMs: number;
   };
   private _warnSlowOperations: boolean;
+  metadataLimit: number;
 
   constructor({
     logLevel = 'info',
@@ -114,6 +115,7 @@ export class S3Client extends EventEmitter {
     httpClientOptions = {},
     taskExecutor = false,
     executorPool = null,
+    metadataLimit,
   }: S3ClientConfig) {
     super();
     this.logLevel = logLevel;
@@ -130,6 +132,10 @@ export class S3Client extends EventEmitter {
     this.id = id ?? idGenerator(77);
     this.config = new ConnectionString(connectionString);
     this.connectionString = connectionString;
+
+    const isR2 = this.config.endpoint?.includes('.r2.cloudflarestorage.com') || false;
+    this.metadataLimit = metadataLimit ?? (isR2 ? 8192 : 2047);
+
     this._rawHttpClientOptions = httpClientOptions || {};
     this.httpClientOptions = {
       keepAlive: true,

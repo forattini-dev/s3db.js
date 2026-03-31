@@ -154,6 +154,7 @@ export interface Resource {
   idGeneratorType?: IdGeneratorConfig;
   versioningEnabled: boolean;
   observers: Observer[];
+  metadataLimit?: number;
 
   executeHooks(hookName: string, data: unknown): Promise<unknown>;
   validate(data: StringRecord, options?: { includeId?: boolean }): Promise<ValidationResult>;
@@ -511,7 +512,7 @@ export class ResourcePersistence {
       if (msg.includes('metadata headers exceed') || msg.includes('Insert failed')) {
         const totalSize = calculateTotalSize(finalMetadata);
         const effectiveLimit = calculateEffectiveLimit({
-          s3Limit: 2047,
+          s3Limit: this.resource.metadataLimit ?? 2047,
           systemConfig: {
             version: String(this.version),
             timestamps: this.config.timestamps,
@@ -1132,8 +1133,9 @@ export class ResourcePersistence {
 
     if (!ok && err && (err as Error).message && (err as Error).message.includes('metadata headers exceed')) {
       const totalSize = calculateTotalSize(finalMetadata);
+      const metadataLimit = this.resource.metadataLimit ?? 2047;
       const effectiveLimit = calculateEffectiveLimit({
-        s3Limit: 2047,
+        s3Limit: metadataLimit,
         systemConfig: {
           version: String(this.version),
           timestamps: this.config.timestamps,
@@ -1144,7 +1146,7 @@ export class ResourcePersistence {
       this.resource.emit('exceedsLimit', {
         operation: 'update',
         totalSize,
-        limit: 2047,
+        limit: metadataLimit,
         effectiveLimit,
         excess,
         data: validatedAttributes
@@ -1521,7 +1523,7 @@ export class ResourcePersistence {
       if (msg.includes('metadata headers exceed') || msg.includes('Replace failed')) {
         const totalSize = calculateTotalSize(finalMetadata);
         const effectiveLimit = calculateEffectiveLimit({
-          s3Limit: 2047,
+          s3Limit: this.resource.metadataLimit ?? 2047,
           systemConfig: {
             version: String(this.version),
             timestamps: this.config.timestamps,

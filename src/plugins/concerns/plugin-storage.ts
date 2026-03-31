@@ -7,7 +7,7 @@ import { PluginStorageError, MetadataLimitError, BehaviorError } from '../../err
 import { DistributedLock, computeBackoff, sleep, isPreconditionFailure, isValidLockPayload, isExpiredLockPayload, StorageAdapter, LockHandle, AcquireOptions } from '../../concerns/distributed-lock.js';
 
 
-const S3_METADATA_LIMIT = 2047;
+const S3_METADATA_LIMIT_DEFAULT = 2047;
 
 const SEQUENCE_GATES = new Map<string, Promise<void>>();
 
@@ -1132,7 +1132,8 @@ export class PluginStorage {
   }
 
   _applyBehavior(data: Record<string, unknown>, behavior: PluginBehavior): BehaviorResult {
-    const effectiveLimit = calculateEffectiveLimit({ s3Limit: S3_METADATA_LIMIT });
+    const metadataLimit = (this.client as unknown as { metadataLimit?: number }).metadataLimit ?? S3_METADATA_LIMIT_DEFAULT;
+    const effectiveLimit = calculateEffectiveLimit({ s3Limit: metadataLimit });
     let metadata: Record<string, unknown> = {};
     let body: Record<string, unknown> | null = null;
 
@@ -1178,7 +1179,7 @@ export class PluginStorage {
             throw new MetadataLimitError(`Data exceeds metadata limit with enforce-limits behavior`, {
               totalSize: currentSize,
               effectiveLimit,
-              absoluteLimit: S3_METADATA_LIMIT,
+              absoluteLimit: metadataLimit,
               excess: currentSize - effectiveLimit,
               operation: 'PluginStorage.set',
               pluginSlug: this.pluginSlug,

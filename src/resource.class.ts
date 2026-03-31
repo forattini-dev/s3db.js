@@ -320,6 +320,10 @@ export class Resource extends AsyncEventEmitter implements Disposable {
     strictValidation: boolean;
   } | null;
 
+  get metadataLimit(): number {
+    return (this.client as unknown as { metadataLimit?: number }).metadataLimit ?? 2047;
+  }
+
   private _instanceId: string;
   private _idGenerator: ResourceIdGenerator;
   private _hooksModule: ResourceHooks;

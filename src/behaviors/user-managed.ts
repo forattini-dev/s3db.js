@@ -15,7 +15,7 @@ export async function handleInsert({ resource, data, mappedData, originalData }:
   const totalSize = calculateTotalSize(mappedData);
 
   const effectiveLimit = calculateEffectiveLimit({
-    s3Limit: S3_METADATA_LIMIT_BYTES,
+    s3Limit: resource.metadataLimit ?? S3_METADATA_LIMIT_BYTES,
     systemConfig: {
       version: resource.version,
       timestamps: resource.config.timestamps,
@@ -27,8 +27,8 @@ export async function handleInsert({ resource, data, mappedData, originalData }:
     resource.emit('exceedsLimit', {
       operation: 'insert',
       totalSize,
-      limit: 2047,
-      excess: totalSize - 2047,
+      limit: resource.metadataLimit ?? 2047,
+      excess: totalSize - (resource.metadataLimit ?? 2047),
       data: originalData || data
     });
     const metadataOnly: StringRecord<string> = { _v: mappedData._v! };
@@ -47,7 +47,7 @@ export async function handleUpdate({ resource, id, data, mappedData, originalDat
   const totalSize = calculateTotalSize(mappedData);
 
   const effectiveLimit = calculateEffectiveLimit({
-    s3Limit: S3_METADATA_LIMIT_BYTES,
+    s3Limit: resource.metadataLimit ?? S3_METADATA_LIMIT_BYTES,
     systemConfig: {
       version: resource.version,
       timestamps: resource.config.timestamps,
@@ -60,8 +60,8 @@ export async function handleUpdate({ resource, id, data, mappedData, originalDat
       operation: 'update',
       id,
       totalSize,
-      limit: 2047,
-      excess: totalSize - 2047,
+      limit: resource.metadataLimit ?? 2047,
+      excess: totalSize - (resource.metadataLimit ?? 2047),
       data: originalData || data
     });
   }
@@ -72,7 +72,7 @@ export async function handleUpsert({ resource, id, data, mappedData }: BehaviorH
   const totalSize = calculateTotalSize(mappedData);
 
   const effectiveLimit = calculateEffectiveLimit({
-    s3Limit: S3_METADATA_LIMIT_BYTES,
+    s3Limit: resource.metadataLimit ?? S3_METADATA_LIMIT_BYTES,
     systemConfig: {
       version: resource.version,
       timestamps: resource.config.timestamps,
@@ -85,8 +85,8 @@ export async function handleUpsert({ resource, id, data, mappedData }: BehaviorH
       operation: 'upsert',
       id,
       totalSize,
-      limit: 2047,
-      excess: totalSize - 2047,
+      limit: resource.metadataLimit ?? 2047,
+      excess: totalSize - (resource.metadataLimit ?? 2047),
       data
     });
   }

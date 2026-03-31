@@ -18,7 +18,7 @@ const OVERFLOW_FLAG_BYTES = calculateUTF8Bytes(OVERFLOW_FLAG) + calculateUTF8Byt
 
 export async function handleInsert({ resource, data, mappedData }: BehaviorHandleInsertParams): Promise<BehaviorResult> {
   const effectiveLimit = calculateEffectiveLimit({
-    s3Limit: S3_METADATA_LIMIT_BYTES,
+    s3Limit: resource.metadataLimit ?? S3_METADATA_LIMIT_BYTES,
     systemConfig: {
       version: resource.version,
       timestamps: resource.config.timestamps,

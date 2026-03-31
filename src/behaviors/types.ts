@@ -14,6 +14,7 @@ export interface Resource {
   version: string;
   config: ResourceConfig;
   schema?: SchemaInfo;
+  metadataLimit?: number;
   emit(event: string, payload: unknown): void;
 }
 

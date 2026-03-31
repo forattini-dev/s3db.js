@@ -10,6 +10,7 @@ export interface S3ClientConfig {
   httpClientOptions?: HttpClientOptions;
   taskExecutor?: boolean | TaskExecutorConfig;
   executorPool?: boolean | TaskExecutorConfig | null;
+  metadataLimit?: number;
 }
 
 export type HttpClientProfile = 'balanced' | 'throughput' | 'resilient';
