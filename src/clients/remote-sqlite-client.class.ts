@@ -13,6 +13,7 @@ import { DatabaseError, ResourceError, NoSuchKey } from '../errors.js';
 import { TasksRunner } from '../tasks/tasks-runner.class.js';
 import { LibsqlExecutor } from './libsql-executor.class.js';
 import { D1Executor } from './d1-executor.class.js';
+import type { D1DatabaseLike } from './d1-executor.class.js';
 import type { LogLevel } from '../types/common.types.js';
 import type {
   ClientConfig,
@@ -32,7 +33,7 @@ import type {
   S3Object,
   TaskManager
 } from './types.js';
-import type { SqlExecutor } from './sql-executor.types.js';
+import type { SqlExecutor, SqlStatement } from './sql-executor.types.js';
 
 const pathPosix = path.posix;
 
@@ -68,6 +69,7 @@ export class RemoteSqliteClient extends EventEmitter {
   private apiToken?: string;
   private syncUrl?: string;
   private syncInterval?: number;
+  private d1Binding?: D1DatabaseLike;
   private executor?: SqlExecutor;
   private readonly providedExecutor?: SqlExecutor;
   private initPromise: Promise<void> | null = null;
@@ -86,6 +88,7 @@ export class RemoteSqliteClient extends EventEmitter {
     this.apiToken = config.apiToken;
     this.syncUrl = config.syncUrl;
     this.syncInterval = config.syncInterval;
+    this.d1Binding = config.d1Binding as D1DatabaseLike | undefined;
     this.providedExecutor = config.executor;
 
     if (config.logger) {
@@ -573,7 +576,8 @@ export class RemoteSqliteClient extends EventEmitter {
 
     return new D1Executor({
       endpoint: this.endpoint,
-      apiToken: this.apiToken
+      apiToken: this.apiToken,
+      binding: this.d1Binding
     });
   }
 
@@ -592,6 +596,23 @@ export class RemoteSqliteClient extends EventEmitter {
       });
     }
     return this.executor.execute(sql, args);
+  }
+
+  private async execBatch(statements: SqlStatement[]) {
+    if (!this.executor) {
+      throw new DatabaseError('Remote SQLite executor is not initialized.', {
+        operation: 'RemoteSqliteClient.execBatch',
+        retriable: false
+      });
+    }
+    if (this.executor.batch) {
+      return this.executor.batch(statements);
+    }
+    const results = [];
+    for (const stmt of statements) {
+      results.push(await this.executor.execute(stmt.sql, stmt.args));
+    }
+    return results;
   }
 
   private async getStoredObject(key: string, options: { includeBody: boolean }): Promise<RemoteSqliteRow | null> {

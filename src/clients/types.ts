@@ -248,6 +248,7 @@ export interface RemoteSqliteClientConfig {
   apiToken?: string;
   syncUrl?: string;
   syncInterval?: number;
+  d1Binding?: unknown;
   executor?: {
     execute(sql: string, args?: unknown[]): Promise<{ rows: Array<Record<string, unknown>> }>;
     close?(): Promise<void> | void;

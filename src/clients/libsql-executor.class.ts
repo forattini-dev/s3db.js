@@ -1,8 +1,9 @@
 import { DatabaseError } from '../errors.js';
-import type { SqlExecutor, SqlExecutorResult, SqlExecutorResultRow } from './sql-executor.types.js';
+import type { SqlExecutor, SqlExecutorResult, SqlExecutorResultRow, SqlStatement } from './sql-executor.types.js';
 
 interface LibsqlClientLike {
   execute(input: string | { sql: string; args?: unknown[] }): Promise<{ rows?: unknown[] }>;
+  batch?(statements: Array<{ sql: string; args?: unknown[] }>): Promise<Array<{ rows?: unknown[] }>>;
   sync?(): Promise<void>;
   close(): void;
 }
@@ -28,6 +29,23 @@ export class LibsqlExecutor implements SqlExecutor {
       ? result.rows.map(row => ({ ...(row as Record<string, unknown>) }) as SqlExecutorResultRow)
       : [];
     return { rows };
+  }
+
+  async batch(statements: SqlStatement[]): Promise<SqlExecutorResult[]> {
+    const client = await this.getClient();
+    if (typeof client.batch === 'function') {
+      const results = await client.batch(statements.map(s => ({ sql: s.sql, args: s.args || [] })));
+      return results.map(r => ({
+        rows: Array.isArray(r.rows)
+          ? r.rows.map(row => ({ ...(row as Record<string, unknown>) }) as SqlExecutorResultRow)
+          : []
+      }));
+    }
+    const results: SqlExecutorResult[] = [];
+    for (const stmt of statements) {
+      results.push(await this.execute(stmt.sql, stmt.args || []));
+    }
+    return results;
   }
 
   async sync(): Promise<void> {
