@@ -190,6 +190,7 @@ export const loadQueueConsumerPlugin = (): Promise<PluginClass> => lazyLoadPlugi
 export const loadWebSocketPlugin = (): Promise<PluginClass> => lazyLoadPlugin('WebSocketPlugin');
 
 export type { ApiPluginOptions, TlsConfig } from './api/index.js';
+export type { HttpApp, Context, Next, MiddlewareHandler } from './http/http-runtime.js';
 
 export type {
   IdentityPluginOptions,

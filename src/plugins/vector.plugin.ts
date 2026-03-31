@@ -253,7 +253,8 @@ export class VectorPlugin extends Plugin {
     this.validateVectorStorage();
     this.installResourceMethods();
 
-    this.database.on('db:resource-created', (name: string) => {
+    this.database.on('db:resource-created', (...args: unknown[]) => {
+      const name = args[0] as string;
       const resource = (this.database as any)._resourcesMap?.[name];
       if (!resource) return;
       const resourceAny = resource as unknown as Record<string, unknown>;

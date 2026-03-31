@@ -374,6 +374,12 @@ export interface ApiPluginConfig {
   maxBodySize: number;
   resources: Record<string, unknown>;
   listeners: ApiListenerConfig[];
+  setup?: (ctx: {
+    app: import('#src/plugins/http/http-runtime.js').HttpApp;
+    raffel: typeof import('raffel');
+    listenerName: string | undefined;
+    httpServer: import('node:http').Server | null;
+  }) => void | Promise<void>;
 }
 
 export interface UninstallOptions {

@@ -154,6 +154,49 @@ export interface ApiPluginOptions {
     failban?: Record<string, string>;
   };
   logLevel?: string | false;
+  /**
+   * Low-level setup hook called with the bare Raffel `HttpApp` immediately
+   * after it is created — before any s3db.js middleware, routes, or auth
+   * handlers are registered.
+   *
+   * Receives `{ app, raffel, listenerName, httpServer }`. Use it to prepend
+   * middleware, mount sub-applications, wire up proxy handlers, or perform any
+   * other configuration that must happen before the built-in chain.
+   *
+   * When multiple listeners are configured the hook is called once per
+   * listener, and `listenerName` identifies which one.
+   *
+   * @example
+   * import { ApiPlugin } from 's3db.js';
+   * import type { HttpApp } from 's3db.js';
+   *
+   * new ApiPlugin({
+   *   port: 3000,
+   *   setup: async ({ app, raffel }) => {
+   *     // Transparent reverse-proxy for /api/legacy/*
+   *     app.all('/api/legacy/*', async (c) => {
+   *       const target = new URL(c.req.url);
+   *       target.hostname = 'legacy.internal';
+   *       target.port = '8080';
+   *       return fetch(target.toString(), {
+   *         method: c.req.method,
+   *         headers: c.req.raw.headers,
+   *         body: c.req.raw.body,
+   *       });
+   *     });
+   *
+   *     // Or use Raffel's built-in proxy module via the http.Server hook:
+   *     // const proxy = raffel.createHttpForwardProxy({ ... });
+   *     // proxy.attach(httpServer);  ← after start(), use getHttpServer()
+   *   }
+   * });
+   */
+  setup?: (ctx: {
+    app: HttpApp;
+    raffel: typeof import('raffel');
+    listenerName: string | undefined;
+    httpServer: import('node:http').Server | null;
+  }) => void | Promise<void>;
 }
 
 const BASE_USER_ATTRIBUTES: Record<string, string> = {
@@ -389,7 +432,8 @@ export class ApiPlugin extends Plugin {
         : { enabled: options.health !== false },
       maxBodySize: options.maxBodySize || 10 * 1024 * 1024,
       rootRoute: options.rootRoute,
-      resources: normalizeResourcesConfig(this.options.resources as Parameters<typeof normalizeResourcesConfig>[0], this.logger)
+      resources: normalizeResourcesConfig(this.options.resources as Parameters<typeof normalizeResourcesConfig>[0], this.logger),
+      setup: options.setup
     };
 
     this.server = null;
@@ -893,6 +937,33 @@ export class ApiPlugin extends Plugin {
     return this.server ? this.server.getApp() : null;
   }
 
+  /**
+   * Returns the underlying Node.js `http.Server` (or `https.Server`) of the
+   * primary listener after it has started, or `null` if the server has not
+   * started yet.
+   *
+   * Use this to attach low-level handlers that need direct access to the
+   * Node.js server — for example a Raffel CONNECT-tunnel proxy or a forward
+   * proxy that must intercept CONNECT requests:
+   *
+   * @example
+   * await database.connect();
+   * const httpServer = apiPlugin.getHttpServer();
+   * const proxy = apiPlugin.raffel.createConnectTunnel({ mode: 'forward' });
+   * proxy.attach(httpServer);
+   */
+  getHttpServer(): import('node:http').Server | null {
+    return this.server ? this.server.getHttpServer() : null;
+  }
+
+  /**
+   * Returns the http.Server for the listener at the given index (0-based).
+   * Useful when multiple listeners are configured.
+   */
+  getHttpServerAt(index: number): import('node:http').Server | null {
+    return this._servers[index]?.getHttpServer() ?? null;
+  }
+
   async previewRuntime(): Promise<ApiRuntimeInspectionPreview> {
     return await this._withPreviewServer((server) => server.previewRuntime());
   }
@@ -979,7 +1050,8 @@ export class ApiPlugin extends Plugin {
         onError: listener.protocols.udp.onError
       } : undefined,
       customProtocols: listener.protocols.custom,
-      routeRegistry
+      routeRegistry,
+      setup: this.config.setup
     });
   }
 

@@ -98,6 +98,31 @@ export interface ApiServerOptions {
   logger?: Logger;
   docs?: Partial<DocsConfig>;
   routeRegistry?: ApiRouteRegistry;
+  /**
+   * Low-level setup hook. Called with the bare Raffel `HttpApp` and the full
+   * `raffel` module immediately after the app is created — before any s3db.js
+   * middleware, routes, or auth handlers are registered.
+   *
+   * Use this to prepend middleware, mount sub-apps, configure proxy handlers,
+   * or do anything else that must run before the built-in chain.
+   *
+   * @example
+   * setup: async ({ app, raffel, listenerName, httpServer }) => {
+   *   // Forward all /upstream/* requests to another service
+   *   app.use('/upstream/*', async (c, next) => {
+   *     const upstream = new URL(c.req.url);
+   *     upstream.hostname = 'internal-svc';
+   *     return fetch(upstream.toString(), { method: c.req.method });
+   *   });
+   * }
+   */
+  setup?: (ctx: {
+    app: HttpApp;
+    raffel: typeof import('raffel');
+    listenerName: string | undefined;
+    /** Raw Node.js http.Server — available only after the server has started. Null during the first call. */
+    httpServer: import('node:http').Server | null;
+  }) => void | Promise<void>;
   websocket?: {
     enabled: boolean;
     path?: string;
@@ -416,6 +441,16 @@ export class ApiServer {
 
       this.routeRegistry.clear();
       this.app = new HttpApp();
+
+      if (this.options.setup) {
+        const raffelModule = await import('raffel');
+        await this.options.setup({
+          app: this.app,
+          raffel: raffelModule,
+          listenerName: this.options.listenerName,
+          httpServer: this.server,
+        });
+      }
 
       if (this.failban) {
         await this.failban.initialize();
@@ -787,6 +822,23 @@ export class ApiServer {
 
   getApp(): HttpApp | null {
     return this.app;
+  }
+
+  /**
+   * Returns the underlying Node.js `http.Server` (or `https.Server`) after the
+   * server has started. Returns `null` before `start()` has resolved.
+   *
+   * Use this to attach low-level handlers that require direct access to the
+   * Node.js server — for example CONNECT-tunnel proxies, raw TCP upgrade
+   * interception, or attaching a Raffel forward proxy:
+   *
+   * @example
+   * const httpServer = apiPlugin.getHttpServer();
+   * const proxy = raffel.createHttpForwardProxy({ ... });
+   * proxy.attach(httpServer);
+   */
+  getHttpServer(): import('node:http').Server | null {
+    return this.server;
   }
 
   getWebSocket() {
