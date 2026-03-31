@@ -392,7 +392,8 @@ s3db.js is backend-portable. Same code, same resources, same plugins — just ch
 | **Turso** | `sqlite+libsql://db-org.turso.io?authToken=TOKEN` | Edge reads, any runtime |
 | **Turso** (embedded) | `sqlite+libsql:///tmp/local.db?syncUrl=libsql://db.turso.io&authToken=TOKEN` | 0ms local reads + remote sync |
 | **MinIO** | `http://user:pass@localhost:9000/bucket` | Self-hosted, local dev |
-| **SQLite** | `sqlite:///path/to/db.sqlite` | Local dev, CI, single-process |
+| **SQLite** (file) | `sqlite:///path/to/db.sqlite` | Local dev, CI, single-process |
+| **SQLite** (memory) | `sqlite:///:memory:` | Fast tests with SQLite behavior |
 | **Memory** | `memory://bucket/prefix` | Tests (100-1000x faster) |
 | **Filesystem** | `file:///path/to/data` | Local dev, debugging |
 
