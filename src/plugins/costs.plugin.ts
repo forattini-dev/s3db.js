@@ -1,7 +1,16 @@
 import { Plugin } from './plugin.class.js';
+import {
+  detectProvider,
+  getPricingForProvider,
+  type CostsProvider,
+  type TursoPlan,
+  type PricingModel,
+  type ProviderPricing
+} from './costs-pricing.js';
 
 interface Database {
   client: S3Client;
+  connectionString?: string;
   plugins?: Record<string, PluginWithEstimate>;
 }
 
@@ -11,6 +20,7 @@ interface PluginWithEstimate {
 
 interface S3Client {
   costs?: RawCostsData;
+  connectionString?: string;
   on(event: string, handler: EventHandler): void;
   off?(event: string, handler: EventHandler): void;
   removeListener?(event: string, handler: EventHandler): void;
@@ -32,6 +42,8 @@ interface S3Input {
   body?: string | Buffer | { length?: number };
 }
 
+export type { CostsProvider, TursoPlan, PricingModel } from './costs-pricing.js';
+
 export interface CostsPluginOptions {
   considerFreeTier?: boolean;
   region?: string;
@@ -39,6 +51,8 @@ export interface CostsPluginOptions {
   historyRetentionMs?: number;
   estimateDefaultWindowMs?: number;
   maxHistoryPoints?: number;
+  provider?: CostsProvider;
+  tursoPlan?: TursoPlan;
 }
 
 interface CostsConfig {
@@ -48,6 +62,9 @@ interface CostsConfig {
   historyRetentionMs: number;
   estimateDefaultWindowMs: number;
   maxHistoryPoints: number;
+  provider: CostsProvider | null;
+  tursoPlan: TursoPlan;
+  pricingModel: PricingModel;
 }
 
 interface RequestPrices {
@@ -196,6 +213,8 @@ export interface CostUsagePoint {
   requestCost: number;
   bytesIn: number;
   bytesOut: number;
+  rowsRead: number;
+  rowsWritten: number;
   key: string | null;
   resource: string | null;
   plugin: string | null;
@@ -233,6 +252,9 @@ export interface CostWindowSummary {
   requestCost: number;
   bytesIn: number;
   bytesOut: number;
+  rowsRead: number;
+  rowsWritten: number;
+  rowCost: number;
   byMethod: RequestCounts;
   byCommand: RequestEvents;
   byResource: Record<string, number>;
@@ -258,6 +280,9 @@ export interface CostsEstimateResult {
     totalRequests: number;
     byMethod: RequestCounts;
     requestCost: number;
+    rowsRead: number;
+    rowsWritten: number;
+    rowCost: number;
     bytesIn: number;
     bytesOut: number;
     dataTransferOutCost: number;
@@ -269,9 +294,28 @@ export interface CostsEstimateResult {
   pluginEstimates: Record<string, unknown>;
 }
 
+export interface RowPrices {
+  readPerMillion: number;
+  writtenPerMillion: number;
+}
+
+export interface RowCounts {
+  read: number;
+  written: number;
+}
+
+export interface RowsData {
+  prices: RowPrices;
+  counts: RowCounts;
+  subtotal: number;
+}
+
 export interface CostsData {
+  provider: CostsProvider | null;
+  pricingModel: PricingModel;
   total: number;
   requests: RequestsData;
+  rows: RowsData;
   storage: StorageData;
   dataTransfer: DataTransferData;
   usage: CostUsageData;
@@ -300,7 +344,9 @@ export class CostsPlugin extends Plugin {
       region = 'us-east-1',
       historyRetentionMs = DEFAULT_HISTORY_RETENTION_MS,
       estimateDefaultWindowMs = DEFAULT_ESTIMATE_WINDOW_MS,
-      maxHistoryPoints = DEFAULT_MAX_HISTORY_POINTS
+      maxHistoryPoints = DEFAULT_MAX_HISTORY_POINTS,
+      provider = null,
+      tursoPlan = 'developer'
     } = config;
 
     this.config = {
@@ -309,7 +355,10 @@ export class CostsPlugin extends Plugin {
       logLevel: this.logLevel,
       historyRetentionMs: Math.max(60_000, historyRetentionMs),
       estimateDefaultWindowMs: Math.max(60_000, estimateDefaultWindowMs),
-      maxHistoryPoints: Math.max(1_000, maxHistoryPoints)
+      maxHistoryPoints: Math.max(1_000, maxHistoryPoints),
+      provider: provider || null,
+      tursoPlan: tursoPlan as TursoPlan,
+      pricingModel: 'request-based'
     };
 
     this.map = {
@@ -322,33 +371,52 @@ export class CostsPlugin extends Plugin {
       ListObjectsV2Command: 'list'
     };
 
+    const initialPricing = provider
+      ? getPricingForProvider(provider, { tursoPlan: tursoPlan as TursoPlan })
+      : null;
+
+    this.config.pricingModel = initialPricing?.pricingModel || 'request-based';
+
     this.costs = {
+      provider: this.config.provider,
+      pricingModel: this.config.pricingModel,
       total: 0,
       requests: {
-        prices: {
-          put: 0.005 / 1000,
-          copy: 0.005 / 1000,
-          list: 0.005 / 1000,
-          post: 0.005 / 1000,
-          get: 0.0004 / 1000,
-          select: 0.0004 / 1000,
-          delete: 0.0004 / 1000,
-          head: 0.0004 / 1000
-        },
+        prices: initialPricing?.requests
+          ? { ...initialPricing.requests }
+          : {
+              put: 0.005 / 1000,
+              copy: 0.005 / 1000,
+              list: 0.005 / 1000,
+              post: 0.005 / 1000,
+              get: 0.0004 / 1000,
+              select: 0.0004 / 1000,
+              delete: 0.0004 / 1000,
+              head: 0.0004 / 1000
+            },
         total: 0,
         counts: createRequestCounts(),
         totalEvents: 0,
         events: createRequestEvents(),
         subtotal: 0
       },
+      rows: {
+        prices: initialPricing?.rows
+          ? { ...initialPricing.rows }
+          : { readPerMillion: 0, writtenPerMillion: 0 },
+        counts: { read: 0, written: 0 },
+        subtotal: 0
+      },
       storage: {
         totalBytes: 0,
         totalGB: 0,
-        tiers: [
-          { limit: 50 * 1024, pricePerGB: 0.023 },
-          { limit: 500 * 1024, pricePerGB: 0.022 },
-          { limit: 999999999, pricePerGB: 0.021 }
-        ],
+        tiers: initialPricing?.storage.tiers
+          ? initialPricing.storage.tiers.map(t => ({ ...t }))
+          : [
+              { limit: 50 * 1024, pricePerGB: 0.023 },
+              { limit: 500 * 1024, pricePerGB: 0.022 },
+              { limit: 999999999, pricePerGB: 0.021 }
+            ],
         currentTier: 0,
         subtotal: 0
       },
@@ -358,13 +426,15 @@ export class CostsPlugin extends Plugin {
         inCost: 0,
         outBytes: 0,
         outGB: 0,
-        tiers: [
-          { limit: 10 * 1024, pricePerGB: 0.09 },
-          { limit: 50 * 1024, pricePerGB: 0.085 },
-          { limit: 150 * 1024, pricePerGB: 0.07 },
-          { limit: 999999999, pricePerGB: 0.05 }
-        ],
-        freeTierGB: 100,
+        tiers: initialPricing?.dataTransfer.tiers
+          ? initialPricing.dataTransfer.tiers.map(t => ({ ...t }))
+          : [
+              { limit: 10 * 1024, pricePerGB: 0.09 },
+              { limit: 50 * 1024, pricePerGB: 0.085 },
+              { limit: 150 * 1024, pricePerGB: 0.07 },
+              { limit: 999999999, pricePerGB: 0.05 }
+            ],
+        freeTierGB: initialPricing?.dataTransfer.freeTierGB ?? 100,
         freeTierUsed: 0,
         currentTier: 0,
         subtotal: 0
@@ -387,7 +457,38 @@ export class CostsPlugin extends Plugin {
     }
 
     this.client = this.database.client;
+
+    if (!this.config.provider) {
+      const db = this.database as unknown as Database;
+      const connStr = db.connectionString || this.client.connectionString || '';
+      const detected = detectProvider(connStr);
+      this.config.provider = detected;
+      this._applyPricing(getPricingForProvider(detected, { tursoPlan: this.config.tursoPlan }));
+    }
+
     this.client.costs = this.costs;
+  }
+
+  private _applyPricing(pricing: ProviderPricing): void {
+    this.config.pricingModel = pricing.pricingModel;
+    this.costs.provider = pricing.provider;
+    this.costs.pricingModel = pricing.pricingModel;
+
+    this.costs.requests.prices.put = pricing.requests.put;
+    this.costs.requests.prices.copy = pricing.requests.copy;
+    this.costs.requests.prices.list = pricing.requests.list;
+    this.costs.requests.prices.post = pricing.requests.post;
+    this.costs.requests.prices.get = pricing.requests.get;
+    this.costs.requests.prices.select = pricing.requests.select;
+    this.costs.requests.prices.delete = pricing.requests.delete;
+    this.costs.requests.prices.head = pricing.requests.head;
+
+    this.costs.rows.prices.readPerMillion = pricing.rows.readPerMillion;
+    this.costs.rows.prices.writtenPerMillion = pricing.rows.writtenPerMillion;
+
+    this.costs.storage.tiers = pricing.storage.tiers.map(t => ({ ...t }));
+    this.costs.dataTransfer.tiers = pricing.dataTransfer.tiers.map(t => ({ ...t }));
+    this.costs.dataTransfer.freeTierGB = pricing.dataTransfer.freeTierGB;
   }
 
   override async onStart(): Promise<void> {
@@ -428,8 +529,21 @@ export class CostsPlugin extends Plugin {
       this.costs.requests.events[name]++;
     }
 
-    const requestCost = this.costs.requests.prices[method] || 0;
-    this.costs.requests.subtotal += requestCost;
+    const rowsRead = this._extractRowCount(response, '_rowsRead');
+    const rowsWritten = this._extractRowCount(response, '_rowsWritten');
+
+    let requestCost: number;
+    if (this.config.pricingModel === 'row-based') {
+      this.costs.rows.counts.read += rowsRead;
+      this.costs.rows.counts.written += rowsWritten;
+      this.costs.rows.subtotal =
+        (this.costs.rows.counts.read / 1_000_000) * this.costs.rows.prices.readPerMillion
+        + (this.costs.rows.counts.written / 1_000_000) * this.costs.rows.prices.writtenPerMillion;
+      requestCost = 0;
+    } else {
+      requestCost = this.costs.requests.prices[method] || 0;
+      this.costs.requests.subtotal += requestCost;
+    }
 
     const bytesIn = this._extractInputBytes(method, input);
     const bytesOut = this._extractOutputBytes(method, response);
@@ -452,6 +566,8 @@ export class CostsPlugin extends Plugin {
       requestCost,
       bytesIn,
       bytesOut,
+      rowsRead,
+      rowsWritten,
       key,
       resource: dimensions.resource,
       plugin: dimensions.plugin
@@ -569,6 +685,8 @@ export class CostsPlugin extends Plugin {
     let requestCost = 0;
     let bytesIn = 0;
     let bytesOut = 0;
+    let rowsRead = 0;
+    let rowsWritten = 0;
 
     for (const point of this.costs.usage.points) {
       if (point.timestamp < from || point.timestamp > to) {
@@ -585,6 +703,8 @@ export class CostsPlugin extends Plugin {
       requestCost += point.requestCost;
       bytesIn += point.bytesIn;
       bytesOut += point.bytesOut;
+      rowsRead += point.rowsRead || 0;
+      rowsWritten += point.rowsWritten || 0;
 
       if (point.method in byMethod) {
         byMethod[point.method as keyof RequestCounts]++;
@@ -605,7 +725,12 @@ export class CostsPlugin extends Plugin {
 
     const transferModel = this._buildTransferModel(bytesOut);
     const estimatedDataTransferOutCost = this.calculateDataTransferCost(transferModel);
-    const estimatedTotal = requestCost + estimatedDataTransferOutCost;
+
+    const rowCost = (rowsRead / 1_000_000) * this.costs.rows.prices.readPerMillion
+      + (rowsWritten / 1_000_000) * this.costs.rows.prices.writtenPerMillion;
+
+    const operationCost = this.config.pricingModel === 'row-based' ? rowCost : requestCost;
+    const estimatedTotal = operationCost + estimatedDataTransferOutCost;
 
     return {
       windowMs: to - from,
@@ -615,6 +740,9 @@ export class CostsPlugin extends Plugin {
       requestCost,
       bytesIn,
       bytesOut,
+      rowsRead,
+      rowsWritten,
+      rowCost,
       byMethod,
       byCommand,
       byResource,
@@ -642,6 +770,9 @@ export class CostsPlugin extends Plugin {
     const bytesIn = Math.ceil(observed.bytesIn * scale);
     const bytesOut = Math.ceil(observed.bytesOut * scale);
     const requestCost = observed.requestCost * scale;
+    const projectedRowsRead = Math.ceil(observed.rowsRead * scale);
+    const projectedRowsWritten = Math.ceil(observed.rowsWritten * scale);
+    const projectedRowCost = observed.rowCost * scale;
     const transferModel = this._buildTransferModel(bytesOut);
     const dataTransferOutCost = this.calculateDataTransferCost(transferModel);
     const storageCost = this.costs.storage.subtotal * (windowDays / 30);
@@ -671,6 +802,8 @@ export class CostsPlugin extends Plugin {
       }
     }
 
+    const operationCost = this.config.pricingModel === 'row-based' ? projectedRowCost : requestCost;
+
     return {
       windowDays,
       observedWindowMs,
@@ -680,11 +813,14 @@ export class CostsPlugin extends Plugin {
         totalRequests,
         byMethod,
         requestCost,
+        rowsRead: projectedRowsRead,
+        rowsWritten: projectedRowsWritten,
+        rowCost: projectedRowCost,
         bytesIn,
         bytesOut,
         dataTransferOutCost,
         storageCost,
-        totalCost: requestCost + dataTransferOutCost + storageCost,
+        totalCost: operationCost + dataTransferOutCost + storageCost,
         pluginProjectedRequests,
         combinedRequests: totalRequests + pluginProjectedRequests
       },
@@ -694,8 +830,11 @@ export class CostsPlugin extends Plugin {
 
   getCosts(): CostsData {
     return {
+      provider: this.costs.provider,
+      pricingModel: this.costs.pricingModel,
       total: this.costs.total,
       requests: this.costs.requests,
+      rows: this.costs.rows,
       storage: this.costs.storage,
       dataTransfer: this.costs.dataTransfer,
       usage: {
@@ -714,7 +853,10 @@ export class CostsPlugin extends Plugin {
   }
 
   updateTotal(): void {
-    this.costs.total = this.costs.requests.subtotal + this.costs.storage.subtotal + this.costs.dataTransfer.subtotal;
+    const operationCost = this.config.pricingModel === 'row-based'
+      ? this.costs.rows.subtotal
+      : this.costs.requests.subtotal;
+    this.costs.total = operationCost + this.costs.storage.subtotal + this.costs.dataTransfer.subtotal;
   }
 
   private _extractInputBytes(method: MethodName, input: S3Input): number {
@@ -751,6 +893,11 @@ export class CostsPlugin extends Plugin {
     const headerLength = extractNumericContentLength(headerSize);
     if (headerLength > 0) return headerLength;
     return extractNumericContentLength(response?.ContentLength);
+  }
+
+  private _extractRowCount(response: S3Response, field: '_rowsRead' | '_rowsWritten'): number {
+    const value = (response as Record<string, unknown>)?.[field];
+    return typeof value === 'number' && Number.isFinite(value) ? Math.max(0, value) : 0;
   }
 
   private _extractKey(input: S3Input): string | null {

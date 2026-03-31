@@ -14,7 +14,13 @@ export type {
   CostUsagePoint,
   CostWindowSummary,
   CostsEstimateOptions,
-  CostsEstimateResult
+  CostsEstimateResult,
+  CostsProvider,
+  TursoPlan,
+  PricingModel,
+  RowsData,
+  RowPrices,
+  RowCounts
 } from './costs.plugin.js';
 
 export { FullTextPlugin } from './fulltext.plugin.js';
