@@ -159,6 +159,9 @@ export class SqliteClient extends EventEmitter {
   private _pendingWriteLock: Promise<void> = Promise.resolve();
   private readonly _writeContext = new AsyncLocalStorage<symbol>();
   private readonly statementCache = new Map<string, SqlitePreparedStatement>();
+  private _sqliteVecEnabled = false;
+  private _sqliteVecLoaded = false;
+  private readonly _vecTables = new Set<string>();
 
   constructor(config: SqliteClientConfig = {}) {
     super();
@@ -240,6 +243,10 @@ export class SqliteClient extends EventEmitter {
     }
 
     this.db = new DatabaseSyncClass(this.basePath) as NodeSqliteDatabaseSync;
+
+    // page_size must be set before the first table is created; ignored on existing DBs
+    tryFn(() => this.db.exec('PRAGMA page_size = 8192;'));
+
     this.db.exec(`
       CREATE TABLE IF NOT EXISTS objects (
         bucket TEXT NOT NULL,
@@ -280,6 +287,13 @@ export class SqliteClient extends EventEmitter {
     this._ensureBucketStatsRow();
 
     tryFn(() => this.db.exec('PRAGMA journal_mode = WAL;'));
+    tryFn(() => this.db.exec(`
+      PRAGMA synchronous = NORMAL;
+      PRAGMA cache_size = -64000;
+      PRAGMA temp_store = MEMORY;
+      PRAGMA mmap_size = 268435456;
+      PRAGMA busy_timeout = 5000;
+    `));
 
     this.logger.debug(
       {
@@ -2711,6 +2725,148 @@ export class SqliteClient extends EventEmitter {
     }
 
     return key;
+  }
+
+  /**
+   * Attempts to dynamically load the sqlite-vec extension and bind it to this database connection.
+   * Idempotent — subsequent calls return the cached result without re-loading.
+   * Returns true if sqlite-vec is available and loaded, false otherwise.
+   */
+  async tryLoadSqliteVec(): Promise<boolean> {
+    if (this._sqliteVecLoaded) return this._sqliteVecEnabled;
+    this._sqliteVecLoaded = true;
+    try {
+      // eslint-disable-next-line @typescript-eslint/ban-ts-comment
+      // @ts-ignore — sqlite-vec is an optional peer dependency
+      const mod = await import('sqlite-vec');
+      (mod as unknown as { load: (db: unknown) => void }).load(this.db);
+      this._sqliteVecEnabled = true;
+    } catch {
+      this._sqliteVecEnabled = false;
+    }
+    return this._sqliteVecEnabled;
+  }
+
+  get hasSqliteVec(): boolean {
+    return this._sqliteVecEnabled;
+  }
+
+  /**
+   * Creates a vec0 virtual table for storing vectors associated with a resource field.
+   * Idempotent — does nothing if the table already exists.
+   */
+  ensureVecTable(tableName: string, dims: number): void {
+    if (this._vecTables.has(tableName)) return;
+    tryFn(() =>
+      this.db.exec(
+        `CREATE VIRTUAL TABLE IF NOT EXISTS "${tableName}" USING vec0(embedding FLOAT[${dims}])`
+      )
+    );
+    this._vecTables.add(tableName);
+  }
+
+  /**
+   * Inserts or replaces a vector for a given integer rowId in the specified vec0 table.
+   */
+  vecUpsert(tableName: string, rowId: number, vector: Float32Array): void {
+    this._prepareCached(`INSERT OR REPLACE INTO "${tableName}"(rowid, embedding) VALUES (?, ?)`)
+      .run(rowId, vector);
+  }
+
+  /**
+   * Removes the vector entry for a given rowId from the vec0 table.
+   */
+  vecDelete(tableName: string, rowId: number): void {
+    tryFn(() =>
+      this._prepareCached(`DELETE FROM "${tableName}" WHERE rowid = ?`).run(rowId)
+    );
+  }
+
+  /**
+   * Performs a K-nearest-neighbour search in a vec0 table and returns the top-k results
+   * sorted by ascending distance.
+   */
+  vecSearch(
+    tableName: string,
+    queryVector: Float32Array,
+    k: number
+  ): Array<{ rowId: number; distance: number }> {
+    const rows = this._prepareCached(
+      `SELECT rowid, distance FROM "${tableName}" WHERE embedding MATCH ? ORDER BY distance LIMIT ?`
+    ).all(queryVector, k) as Array<{ rowid: number; distance: number }>;
+    return rows.map((r) => ({ rowId: Number(r.rowid), distance: r.distance }));
+  }
+
+  /**
+   * Returns the string record key for a given integer rowId in the objects table.
+   * The key prefix is stripped before returning.
+   */
+  getObjectKeyByRowId(rowId: number): string | null {
+    const row = this._prepareCached('SELECT key FROM objects WHERE rowid = ?').get(
+      rowId
+    ) as { key: string } | undefined;
+    return row ? this._stripKeyPrefix(row.key) : null;
+  }
+
+  /**
+   * Returns the implicit integer rowId of the objects row for a given resource record.
+   * Used to correlate between the objects table and vec0 virtual tables.
+   */
+  getRecordRowId(resourceName: string, recordId: string): number | null {
+    const fullKey = this._applyKeyPrefix(`resource=${resourceName}/data/id=${recordId}`);
+    const row = this._prepareCached(
+      'SELECT rowid FROM objects WHERE bucket = ? AND key = ?'
+    ).get(this.bucket, fullKey) as { rowid: number } | undefined;
+    return row?.rowid ?? null;
+  }
+
+  /**
+   * Creates generated VIRTUAL columns and covering indexes on the objects table for
+   * every field referenced in a resource's partition definitions.
+   * Transforms O(n) json_extract full-table scans into O(log n) index lookups for
+   * filtered queries and resource.query() calls.
+   * Idempotent — safe to call multiple times; uses IF NOT EXISTS and checks existing columns.
+   */
+  public ensureResourceIndexes(
+    resourceName: string,
+    partitions: Record<string, { fields?: Record<string, string> }>
+  ): void {
+    if (!partitions || typeof partitions !== 'object') return;
+
+    const fieldPaths = new Set<string>();
+    for (const partition of Object.values(partitions)) {
+      if (partition?.fields && typeof partition.fields === 'object') {
+        for (const fieldName of Object.keys(partition.fields)) {
+          fieldPaths.add(fieldName);
+        }
+      }
+    }
+
+    if (fieldPaths.size === 0) return;
+
+    const tableInfo = this.db.prepare('PRAGMA table_info(objects)').all() as Array<{ name: string }>;
+    const existingColumns = new Set(tableInfo.map((row) => row.name));
+
+    for (const fieldPath of fieldPaths) {
+      const colSuffix = fieldPath.replace(/\./g, '__').replace(/[^a-zA-Z0-9_]/g, '_');
+      const colName = `_idx_${colSuffix}`;
+      const jsonPath = `$.${fieldPath}`;
+      const indexName = `idx_obj_${colSuffix}`;
+
+      if (!existingColumns.has(colName)) {
+        tryFn(() =>
+          this.db.exec(
+            `ALTER TABLE objects ADD COLUMN ${colName} TEXT GENERATED ALWAYS AS (json_extract(metadata, '${jsonPath}')) VIRTUAL`
+          )
+        );
+      }
+
+      tryFn(() =>
+        this.db.exec(
+          `CREATE INDEX IF NOT EXISTS ${indexName} ON objects (${colName}, bucket, key) WHERE ${colName} IS NOT NULL`
+        )
+      );
+    }
   }
 
   private _prepareCached(sql: string): SqlitePreparedStatement {

@@ -127,6 +127,8 @@ export class DatabaseConnection {
           restoredIdSize = versionData.idSize || 22;
         }
 
+        const restoredPartitions = resourceMetadata.partitions || versionData.partitions || {};
+
         db._resourcesMap[name] = new Resource({
           name,
           client: db.client,
@@ -138,7 +140,7 @@ export class DatabaseConnection {
           observers: [db as any],
           cache: db.cache as boolean,
           timestamps: versionData.timestamps !== undefined ? versionData.timestamps : false,
-          partitions: resourceMetadata.partitions || versionData.partitions || {},
+          partitions: restoredPartitions,
           paranoid: versionData.paranoid !== undefined ? versionData.paranoid : true,
           allNestedObjectsOptional: versionData.allNestedObjectsOptional !== undefined ? versionData.allNestedObjectsOptional : true,
           autoDecrypt: versionData.autoDecrypt !== undefined ? versionData.autoDecrypt : true,
@@ -152,6 +154,10 @@ export class DatabaseConnection {
           schemaRegistry: resourceMetadata.schemaRegistry,
           pluginSchemaRegistry: resourceMetadata.pluginSchemaRegistry as Record<string, import('../schema.class.js').PluginSchemaRegistry>
         });
+
+        if (typeof (db.client as any).ensureResourceIndexes === 'function') {
+          (db.client as any).ensureResourceIndexes(name, restoredPartitions);
+        }
 
         if (db._resourcesMap[name].schema?.needsRegistryPersistence()) {
           registryUploadNeeded = true;

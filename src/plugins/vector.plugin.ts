@@ -194,6 +194,7 @@ export class VectorPlugin extends Plugin {
 
   private _vectorFieldCache: Map<string, string | null>;
   private _throttleState: Map<string, number>;
+  private readonly _sqliteVecConfig = new Map<string, { tableName: string; field: string; client: any }>();
 
   constructor(options: VectorPluginOptions = {}) {
     super(options);
@@ -616,7 +617,126 @@ export class VectorPlugin extends Plugin {
       resourceAny.similarTo = searchMethod;
       resourceAny.findSimilar = searchMethod;
       resourceAny.distance = distanceMethod;
+
+      this._setupSqliteVec(resource).catch(() => {});
     }
+  }
+
+  private _sanitizeIdent(name: string): string {
+    return name.replace(/[^a-zA-Z0-9]/g, '_').toLowerCase();
+  }
+
+  private async _setupSqliteVec(resource: Resource): Promise<void> {
+    const client = (resource as any).client;
+    if (typeof client?.tryLoadSqliteVec !== 'function') return;
+
+    const available = await client.tryLoadSqliteVec();
+    if (!available) return;
+
+    const vectorFields = this.findVectorFields(
+      (resource as unknown as { schema: { attributes: Record<string, unknown> } }).schema.attributes
+    );
+    if (vectorFields.length === 0) return;
+
+    const vectorField = vectorFields[0]!;
+    const dims = vectorField.length || this.config.dimensions;
+    const tableName = `vec_${this._sanitizeIdent(resource.name)}_${this._sanitizeIdent(vectorField.name)}`;
+
+    client.ensureVecTable(tableName, dims);
+    this._sqliteVecConfig.set(resource.name, { tableName, field: vectorField.name, client });
+
+    const resourceWithHooks = resource as unknown as { registerHook: (event: string, handler: Function) => void };
+
+    resourceWithHooks.registerHook('afterInsert', async (data: Record<string, unknown>) => {
+      const vector = this.getNestedValue(data, vectorField.name);
+      if (!vector || !Array.isArray(vector) || vector.length === 0) return data;
+      const recordId = data.id as string;
+      if (!recordId) return data;
+      const rowId = client.getRecordRowId(resource.name, recordId);
+      if (rowId !== null) client.vecUpsert(tableName, rowId, new Float32Array(vector as number[]));
+      return data;
+    });
+
+    resourceWithHooks.registerHook('afterUpdate', async (data: Record<string, unknown>) => {
+      const vector = this.getNestedValue(data, vectorField.name);
+      if (!vector || !Array.isArray(vector) || vector.length === 0) return data;
+      const recordId = data.id as string;
+      if (!recordId) return data;
+      const rowId = client.getRecordRowId(resource.name, recordId);
+      if (rowId !== null) client.vecUpsert(tableName, rowId, new Float32Array(vector as number[]));
+      return data;
+    });
+
+    resourceWithHooks.registerHook('beforeDelete', async (id: string) => {
+      const rowId = client.getRecordRowId(resource.name, id);
+      if (rowId !== null) client.vecDelete(tableName, rowId);
+      return id;
+    });
+
+    this.emit('plg:vector:sqlite-vec-enabled', {
+      resource: resource.name,
+      vectorField: vectorField.name,
+      tableName,
+      dims,
+      timestamp: Date.now()
+    });
+
+    this.logger.info(
+      `✅ VectorPlugin: sqlite-vec enabled for '${resource.name}.${vectorField.name}' (table: ${tableName}, ${dims} dims)`
+    );
+  }
+
+  private async _sqliteVecSearch(
+    resource: Resource,
+    queryVector: number[],
+    options: VectorSearchOptions,
+    vecConfig: { tableName: string; field: string; client: any }
+  ): Promise<VectorSearchPagedResult> {
+    const startTime = Date.now();
+    const { limit = 10, threshold = null } = options;
+
+    const rawResults = vecConfig.client.vecSearch(
+      vecConfig.tableName,
+      new Float32Array(queryVector),
+      limit
+    ) as Array<{ rowId: number; distance: number }>;
+
+    const results: VectorSearchResult[] = [];
+
+    for (const { rowId, distance } of rawResults) {
+      if (threshold !== null && distance > threshold) continue;
+
+      const key = vecConfig.client.getObjectKeyByRowId(rowId);
+      if (!key) continue;
+
+      const idMatch = key.match(/\/id=([^/]+)$/);
+      if (!idMatch) continue;
+
+      const record = await (resource as any).get(idMatch[1]).catch(() => null);
+      if (!record) continue;
+
+      results.push({ record, distance });
+    }
+
+    const stats: VectorSearchStats = {
+      totalRecords: null,
+      scannedRecords: rawResults.length,
+      processedRecords: results.length,
+      pagesScanned: 1,
+      dimensionMismatches: 0,
+      durationMs: Date.now() - startTime,
+      approximate: false
+    };
+
+    this._emitEvent('vector:search-complete', {
+      resource: resource.name,
+      vectorField: vecConfig.field,
+      backend: 'sqlite-vec',
+      ...stats,
+      timestamp: Date.now()
+    });
+
+    return { results, stats };
   }
 
   createVectorSearchMethod(resource: Resource): (queryVector: number[], options?: VectorSearchOptions) => Promise<VectorSearchResult[]> {
@@ -633,6 +753,11 @@ export class VectorPlugin extends Plugin {
   }
 
   private async _vectorSearchPaged(resource: Resource, queryVector: number[], options: VectorSearchOptions = {}): Promise<VectorSearchPagedResult> {
+    const vecConfig = this._sqliteVecConfig.get(resource.name);
+    if (vecConfig) {
+      return this._sqliteVecSearch(resource, queryVector, options, vecConfig);
+    }
+
     const startTime = Date.now();
 
     let vectorField = options.vectorField;

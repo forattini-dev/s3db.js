@@ -215,6 +215,10 @@ export class DatabaseResources {
     resource.database = db as any;
     db._resourcesMap[name] = resource;
 
+    if (typeof (db.client as any).ensureResourceIndexes === 'function') {
+      (db.client as any).ensureResourceIndexes(name, normalizedPartitions);
+    }
+
     if (middlewares) {
       this._applyMiddlewares(resource, middlewares);
     }

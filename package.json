@@ -224,6 +224,7 @@
     "puppeteer-extra": "^3.0.0",
     "puppeteer-extra-plugin-stealth": "^2.0.0",
     "raffel": "^1.0.8",
+    "sqlite-vec": "^0.1.0",
     "user-agents": "^1.0.0"
   },
   "peerDependenciesMeta": {
@@ -390,6 +391,9 @@
       "optional": true
     },
     "user-agents": {
+      "optional": true
+    },
+    "sqlite-vec": {
       "optional": true
     }
   },
