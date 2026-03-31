@@ -8,5 +8,6 @@ export interface SqlExecutorResult {
 
 export interface SqlExecutor {
   execute(sql: string, args?: unknown[]): Promise<SqlExecutorResult>;
+  sync?(): Promise<void>;
   close?(): Promise<void> | void;
 }

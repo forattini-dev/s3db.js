@@ -3,17 +3,22 @@ import type { SqlExecutor, SqlExecutorResult, SqlExecutorResultRow } from './sql
 
 interface LibsqlClientLike {
   execute(input: string | { sql: string; args?: unknown[] }): Promise<{ rows?: unknown[] }>;
+  sync?(): Promise<void>;
   close(): void;
 }
 
 export class LibsqlExecutor implements SqlExecutor {
   private readonly url: string;
   private readonly authToken?: string;
+  private readonly syncUrl?: string;
+  private readonly syncInterval?: number;
   private clientPromise: Promise<LibsqlClientLike> | null = null;
 
-  constructor(config: { url: string; authToken?: string }) {
+  constructor(config: { url: string; authToken?: string; syncUrl?: string; syncInterval?: number }) {
     this.url = config.url;
     this.authToken = config.authToken;
+    this.syncUrl = config.syncUrl;
+    this.syncInterval = config.syncInterval;
   }
 
   async execute(sql: string, args: unknown[] = []): Promise<SqlExecutorResult> {
@@ -23,6 +28,11 @@ export class LibsqlExecutor implements SqlExecutor {
       ? result.rows.map(row => ({ ...(row as Record<string, unknown>) }) as SqlExecutorResultRow)
       : [];
     return { rows };
+  }
+
+  async sync(): Promise<void> {
+    const client = await this.getClient();
+    if (typeof client.sync === 'function') await client.sync();
   }
 
   async close(): Promise<void> {
@@ -53,10 +63,15 @@ export class LibsqlExecutor implements SqlExecutor {
       });
     }
 
-    const createClient = (sdk as { createClient(config: { url: string; authToken?: string }): LibsqlClientLike }).createClient;
-    return createClient({
+    const createClient = (sdk as { createClient(config: Record<string, unknown>): LibsqlClientLike }).createClient;
+    const clientConfig: Record<string, unknown> = {
       url: this.url,
       authToken: this.authToken
-    });
+    };
+    if (this.syncUrl) {
+      clientConfig.syncUrl = this.syncUrl;
+      if (this.syncInterval !== undefined) clientConfig.syncInterval = this.syncInterval;
+    }
+    return createClient(clientConfig);
   }
 }

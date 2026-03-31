@@ -245,6 +245,8 @@ export interface RemoteSqliteClientConfig {
   maxObjectSize?: number;
   authToken?: string;
   apiToken?: string;
+  syncUrl?: string;
+  syncInterval?: number;
   executor?: {
     execute(sql: string, args?: unknown[]): Promise<{ rows: Array<Record<string, unknown>> }>;
     close?(): Promise<void> | void;

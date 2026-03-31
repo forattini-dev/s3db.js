@@ -66,6 +66,8 @@ export class RemoteSqliteClient extends EventEmitter {
   private sqliteDriver: 'libsql' | 'd1';
   private authToken?: string;
   private apiToken?: string;
+  private syncUrl?: string;
+  private syncInterval?: number;
   private executor?: SqlExecutor;
   private readonly providedExecutor?: SqlExecutor;
   private initPromise: Promise<void> | null = null;
@@ -76,12 +78,14 @@ export class RemoteSqliteClient extends EventEmitter {
     this.id = config.id || idGenerator(77);
     this.logLevel = config.logLevel || 'info';
     this.enforceLimits = Boolean(config.enforceLimits);
-    this.metadataLimit = config.metadataLimit ?? 2048;
+    this.metadataLimit = config.metadataLimit ?? 1_048_576;
     this.maxObjectSize = config.maxObjectSize ?? 5 * 1024 * 1024 * 1024;
     this.endpoint = config.endpoint;
     this.sqliteDriver = config.sqliteDriver;
     this.authToken = config.authToken;
     this.apiToken = config.apiToken;
+    this.syncUrl = config.syncUrl;
+    this.syncInterval = config.syncInterval;
     this.providedExecutor = config.executor;
 
     if (config.logger) {
@@ -207,12 +211,18 @@ export class RemoteSqliteClient extends EventEmitter {
       ]
     );
 
-    return {
+    const response = {
       ETag: this.formatEtag(etag),
       VersionId: null,
       ServerSideEncryption: null,
-      Location: `${this.connectionString}/${fullKey}`
+      Location: `${this.connectionString}/${fullKey}`,
+      _rowsRead: existing ? 1 : 0,
+      _rowsWritten: 1
     };
+
+    this.emit('cl:response', 'PutObjectCommand', response, { Key: params.key, Body: bodyBuffer });
+
+    return response;
   }
 
   async getObject(key: string): Promise<S3Object> {
@@ -221,7 +231,9 @@ export class RemoteSqliteClient extends EventEmitter {
     if (!row) {
       throw new NoSuchKey({ bucket: this.bucket, key });
     }
-    return this.toS3Object(row, true);
+    const result = this.toS3Object(row, true);
+    this.emit('cl:response', 'GetObjectCommand', { ...result, _rowsRead: 1, _rowsWritten: 0 }, { Key: key });
+    return result;
   }
 
   async headObject(key: string): Promise<S3Object> {
@@ -230,7 +242,9 @@ export class RemoteSqliteClient extends EventEmitter {
     if (!row) {
       throw new NoSuchKey({ bucket: this.bucket, key });
     }
-    return this.toS3Object(row, false);
+    const result = this.toS3Object(row, false);
+    this.emit('cl:response', 'HeadObjectCommand', { ...result, _rowsRead: 1, _rowsWritten: 0 }, { Key: key });
+    return result;
   }
 
   async copyObject(params: CopyObjectParams): Promise<CopyObjectResponse> {
@@ -273,15 +287,21 @@ export class RemoteSqliteClient extends EventEmitter {
       ]
     );
 
-    return {
+    const response = {
       CopyObjectResult: {
         ETag: this.formatEtag(etag),
         LastModified: lastModified
       },
       BucketKeyEnabled: false,
       VersionId: null,
-      ServerSideEncryption: null
+      ServerSideEncryption: null,
+      _rowsRead: 1,
+      _rowsWritten: 1
     };
+
+    this.emit('cl:response', 'CopyObjectCommand', response, { Key: params.to });
+
+    return response;
   }
 
   async exists(key: string): Promise<boolean> {
@@ -293,7 +313,9 @@ export class RemoteSqliteClient extends EventEmitter {
   async deleteObject(key: string): Promise<DeleteObjectResponse> {
     await this.ensureInitialized();
     await this.exec('DELETE FROM objects WHERE bucket = ? AND key = ?', [this.bucket, this.applyKeyPrefix(key)]);
-    return { DeleteMarker: true, VersionId: null };
+    const response = { DeleteMarker: true, VersionId: null, _rowsRead: 0, _rowsWritten: 1 };
+    this.emit('cl:response', 'DeleteObjectCommand', response, { Key: key });
+    return response;
   }
 
   async deleteObjects(keys: string[]): Promise<DeleteObjectsResponse> {
@@ -314,6 +336,8 @@ export class RemoteSqliteClient extends EventEmitter {
     for (const result of results) {
       allResults.Deleted.push(...result);
     }
+
+    this.emit('cl:response', 'DeleteObjectsCommand', { ...allResults, _rowsRead: 0, _rowsWritten: allResults.Deleted.length }, { Keys: keys });
 
     return allResults;
   }
@@ -380,7 +404,7 @@ export class RemoteSqliteClient extends EventEmitter {
       ? this.encodeContinuationToken(lastKeyInPage)
       : null;
 
-    return {
+    const response = {
       Contents: contents,
       CommonPrefixes: Array.from(commonPrefixes).map(commonPrefix => ({ Prefix: commonPrefix })),
       IsTruncated: Boolean(nextContinuationToken),
@@ -390,8 +414,14 @@ export class RemoteSqliteClient extends EventEmitter {
       MaxKeys: maxKeys,
       Prefix: prefix || undefined,
       Delimiter: params.delimiter || undefined,
-      StartAfter: params.startAfter || undefined
+      StartAfter: params.startAfter || undefined,
+      _rowsRead: contents.length,
+      _rowsWritten: 0
     };
+
+    this.emit('cl:response', 'ListObjectsV2Command', response, { Prefix: prefix });
+
+    return response;
   }
 
   async getKeysPage(params: GetKeysPageParams = {}): Promise<string[]> {
@@ -489,6 +519,11 @@ export class RemoteSqliteClient extends EventEmitter {
     return results;
   }
 
+  async sync(): Promise<void> {
+    await this.ensureInitialized();
+    if (this.executor?.sync) await this.executor.sync();
+  }
+
   async destroy(): Promise<void> {
     if (this.executor?.close) {
       await this.executor.close();
@@ -527,9 +562,12 @@ export class RemoteSqliteClient extends EventEmitter {
 
   private createExecutor(): SqlExecutor {
     if (this.sqliteDriver === 'libsql') {
+      const url = this.syncUrl ? this.endpoint : this.toLibsqlUrl(this.endpoint);
       return new LibsqlExecutor({
-        url: this.toLibsqlUrl(this.endpoint),
-        authToken: this.authToken
+        url,
+        authToken: this.authToken,
+        syncUrl: this.syncUrl,
+        syncInterval: this.syncInterval
       });
     }
 
