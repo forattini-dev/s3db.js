@@ -252,6 +252,20 @@ export class VectorPlugin extends Plugin {
 
     this.validateVectorStorage();
     this.installResourceMethods();
+
+    this.database.on('db:resource-created', (name: string) => {
+      const resource = (this.database as any)._resourcesMap?.[name];
+      if (!resource) return;
+      const resourceAny = resource as unknown as Record<string, unknown>;
+      resourceAny.vectorSearch = this.createVectorSearchMethod(resource);
+      resourceAny.vectorSearchPaged = this.createVectorSearchPagedMethod(resource);
+      resourceAny.cluster = this.createClusteringMethod(resource);
+      resourceAny.vectorDistance = this.createDistanceMethod();
+      resourceAny.similarTo = resourceAny.vectorSearch;
+      resourceAny.findSimilar = resourceAny.vectorSearch;
+      resourceAny.distance = resourceAny.vectorDistance;
+      this._setupSqliteVec(resource).catch(() => {});
+    });
   }
 
   override async onStart(): Promise<void> {
