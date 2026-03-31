@@ -103,6 +103,7 @@
 - [✨ Key Features](#-key-features)
 - [🚀 Quick Start](#-quick-start)
 - [💾 Installation](#-installation)
+- [🔌 Storage Backends](#-storage-backends)
 - [🗄️ Database](#️-database)
 - [🪵 Logging](#-logging)
 - [📋 Resources](#-resources)
@@ -375,6 +376,34 @@ await generateTypes(db, { outputPath: './types/database.d.ts' });
 ```
 
 See the complete example in [`docs/examples/typescript-usage-example.ts`](docs/examples/typescript-usage-example.ts).
+
+---
+
+## 🔌 Storage Backends
+
+s3db.js is backend-portable. Same code, same resources, same plugins — just change the connection string.
+
+| Backend | Connection String | Best For |
+|---------|------------------|----------|
+| **AWS S3** | `s3://KEY:SECRET@bucket?region=us-east-1` | Production, large datasets (100 GB+) |
+| **Cloudflare R2** | `https://KEY:SECRET@ACCOUNT.r2.cloudflarestorage.com/bucket` | Production, zero egress, auto 8 KB metadata |
+| **Cloudflare D1** | `sqlite+d1://ACCOUNT/DB_ID?apiToken=TOKEN` | Read-heavy, serverless, < 10 GB |
+| **Cloudflare D1** (Worker) | `sqlite+d1://binding/DB` + `clientOptions: { d1Binding: env.DB }` | Inside Workers (~1-5ms latency) |
+| **Turso** | `sqlite+libsql://db-org.turso.io?authToken=TOKEN` | Edge reads, any runtime |
+| **Turso** (embedded) | `sqlite+libsql:///tmp/local.db?syncUrl=libsql://db.turso.io&authToken=TOKEN` | 0ms local reads + remote sync |
+| **MinIO** | `http://user:pass@localhost:9000/bucket` | Self-hosted, local dev |
+| **SQLite** | `sqlite:///path/to/db.sqlite` | Local dev, CI, single-process |
+| **Memory** | `memory://bucket/prefix` | Tests (100-1000x faster) |
+| **Filesystem** | `file:///path/to/data` | Local dev, debugging |
+
+```javascript
+// Just change the connection string — everything else stays the same
+const db = new Database({
+  connectionString: process.env.S3DB_CONNECTION_STRING
+})
+```
+
+> For detailed pricing comparison and decision guidance, see [Choosing a Backend](./docs/guides/choosing-a-backend.md).
 
 ---
 
