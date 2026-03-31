@@ -150,7 +150,9 @@ export class RemoteSqliteClient extends EventEmitter {
     const bodyBuffer = await this.toBuffer(params.body);
     this.validateLimits(bodyBuffer, params.metadata);
 
-    const existing = await this.getStoredObject(fullKey, { includeBody: false });
+    const hasPreconditions = params.ifMatch !== undefined || params.ifNoneMatch !== undefined;
+    const existing = hasPreconditions ? await this.getStoredObject(fullKey, { includeBody: false }) : null;
+
     if (params.ifMatch !== undefined) {
       const expectedEtags = normalizeEtagHeader(params.ifMatch);
       const currentEtag = existing?.etag || null;
@@ -219,7 +221,7 @@ export class RemoteSqliteClient extends EventEmitter {
       VersionId: null,
       ServerSideEncryption: null,
       Location: `${this.connectionString}/${fullKey}`,
-      _rowsRead: existing ? 1 : 0,
+      _rowsRead: hasPreconditions ? 1 : 0,
       _rowsWritten: 1
     };
 
@@ -324,20 +326,18 @@ export class RemoteSqliteClient extends EventEmitter {
   async deleteObjects(keys: string[]): Promise<DeleteObjectsResponse> {
     await this.ensureInitialized();
 
-    const batches = chunk(keys, this.taskManager.concurrency || 5);
     const allResults: DeleteObjectsResponse = { Deleted: [], Errors: [] };
+    const batches = chunk(keys, 50);
 
-    const { results } = await this.taskManager.process(batches, async batch => {
-      const deleted: Array<{ Key: string }> = [];
+    for (const batch of batches) {
+      const statements = batch.map(key => ({
+        sql: 'DELETE FROM objects WHERE bucket = ? AND key = ?',
+        args: [this.bucket, this.applyKeyPrefix(key)] as unknown[]
+      }));
+      await this.execBatch(statements);
       for (const key of batch) {
-        await this.deleteObject(key);
-        deleted.push({ Key: key });
+        allResults.Deleted.push({ Key: key });
       }
-      return deleted;
-    });
-
-    for (const result of results) {
-      allResults.Deleted.push(...result);
     }
 
     this.emit('cl:response', 'DeleteObjectsCommand', { ...allResults, _rowsRead: 0, _rowsWritten: allResults.Deleted.length }, { Keys: keys });
