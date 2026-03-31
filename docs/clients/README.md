@@ -4,12 +4,15 @@ s3db.js supports multiple storage backends through a unified client interface.
 
 ## Available Clients
 
-| Client | Use Case | Performance | Dependencies |
-|--------|----------|-------------|--------------|
-| [S3Client](s3-client.md) | Production with AWS S3, MinIO, R2 | Standard | `@aws-sdk/client-s3` |
-| [SqliteClient](sqlite-client.md) | Local persistence, integration tests, single-process workloads | Very fast | None |
-| [MemoryClient](memory-client.md) | Testing, development | 100-1000x faster | None |
-| [FilesystemClient](filesystem-client.md) | Local development, edge cases | Fast | None |
+| Client | Protocol | Use Case | Dependencies |
+|--------|----------|----------|--------------|
+| [S3Client](s3-client.md) | `s3://`, `http://`, `https://` | Production with AWS S3, MinIO, R2 | `@aws-sdk/client-s3` |
+| [RemoteSqliteClient](sqlite-client.md) | `sqlite+d1://`, `sqlite+libsql://` | Cloudflare D1, Turso/libsql | Optional: `@libsql/client` |
+| [SqliteClient](sqlite-client.md) | `sqlite://` | Local persistence, CI, single-process | None |
+| [MemoryClient](memory-client.md) | `memory://` | Testing, development | None |
+| [FilesystemClient](filesystem-client.md) | `file://` | Local development, edge cases | None |
+
+> Not sure which backend to use? See the [Choosing a Backend](/guides/choosing-a-backend.md) guide for pricing comparisons and decision flowcharts.
 
 ## Quick Comparison
 
@@ -36,7 +39,51 @@ const db = new Database({
 });
 ```
 
-### SqliteClient
+### Cloudflare D1 (RemoteSqliteClient)
+
+Serverless SQLite at the edge via the Cloudflare D1 HTTP API. Scale-to-zero, zero egress, generous free tier.
+
+```javascript
+import { Database } from 's3db.js';
+
+const db = new Database({
+  connectionString: 'sqlite+d1://ACCOUNT_ID/DATABASE_ID?apiToken=YOUR_TOKEN'
+});
+```
+
+**Best for:**
+- Read-heavy workloads with small-to-medium datasets (< 10 GB)
+- Apps where egress costs matter (zero data transfer charges)
+- Scale-to-zero deployments (no idle costs)
+
+**Current limitation:** Uses the D1 REST API (adds ~50-200ms latency per operation). Native Worker bindings are parsed but not yet implemented.
+
+See [Cloudflare D1 Pricing](https://developers.cloudflare.com/d1/platform/pricing/) and [Choosing a Backend](/guides/choosing-a-backend.md) for cost comparisons.
+
+### Turso / libsql (RemoteSqliteClient)
+
+Remote SQLite with edge replicas. Works outside the Cloudflare ecosystem.
+
+```javascript
+import { Database } from 's3db.js';
+
+const db = new Database({
+  connectionString: 'sqlite+libsql://my-db-my-org.turso.io?authToken=YOUR_TOKEN'
+});
+```
+
+Requires `@libsql/client`:
+
+```bash
+pnpm add @libsql/client
+```
+
+**Best for:**
+- Remote SQLite outside Cloudflare
+- Edge replicas with embedded sync mode
+- Low-latency reads globally
+
+### SqliteClient (local)
 
 Persistent embedded SQLite backend for local environments and CI.
 
@@ -168,32 +215,32 @@ const connStr = `s3://AKID:${encoded}@bucket?region=us-east-1`;
 ## Choosing a Client
 
 ```
-┌─────────────────────────────────────────────────────────────┐
-│                     What's your use case?                   │
-└─────────────────────────────────────────────────────────────┘
+                        What's your use case?
                               │
-              ┌───────────────┼───────────────┐
-              ▼               ▼               ▼
-        ┌─────────┐     ┌─────────┐     ┌─────────┐
-        │ Testing │     │  Local  │     │Production│
-        │         │     │   Dev   │     │         │
-        └────┬────┘     └────┬────┘     └────┬────┘
-             │               │               │
-             ▼               ▼               ▼
-      ┌────────────┐  ┌────────────┐  ┌────────────┐
-      │MemoryClient│  │Filesystem  │  │ S3Client   │
-      │            │  │  Client    │  │            │
-      │ Zero deps  │  │ or MinIO   │  │ AWS/MinIO  │
-      │ Super fast │  │            │  │ R2/Spaces  │
-      └────────────┘  └────────────┘  └────────────┘
-                         │
-                         ▼
-                     ┌────────────┐
-                     │SqliteClient│
-                     │Persistent  │
-                     │Local Disk  │
-                     └────────────┘
+            ┌─────────────────┼─────────────────┐
+            ▼                 ▼                  ▼
+       ┌─────────┐      ┌─────────┐        ┌─────────┐
+       │ Testing │      │  Local  │        │Production│
+       │         │      │   Dev   │        │         │
+       └────┬────┘      └────┬────┘        └────┬────┘
+            │                │                   │
+            ▼                ▼              ┌────┴────────┐
+     ┌────────────┐   ┌────────────┐       ▼             ▼
+     │  Memory    │   │  SQLite or │  Data < 50GB?   Data > 50GB?
+     │  Client    │   │   MinIO    │       │              │
+     └────────────┘   └────────────┘  ┌────┴────┐   ┌────┴────┐
+                                      │Read     │   │ S3 / R2 │
+                                      │heavy?   │   │         │
+                                      └────┬────┘   └─────────┘
+                                 ┌─────────┴─────────┐
+                                 ▼                   ▼
+                           ┌──────────┐        ┌──────────┐
+                           │  D1 or   │        │  S3 / R2 │
+                           │  Turso   │        │          │
+                           └──────────┘        └──────────┘
 ```
+
+For detailed pricing comparisons and scenario analysis, see [Choosing a Backend](/guides/choosing-a-backend.md).
 
 ## Client Interface
 
@@ -236,8 +283,9 @@ await users.insert({ ... });
 
 ## Next Steps
 
+- [Choosing a Backend](/guides/choosing-a-backend.md) - Pricing comparison and decision guide
 - [S3Client](s3-client.md) - Full AWS S3 documentation
-- [SqliteClient](sqlite-client.md) - SQLite persistence and limits
+- [SqliteClient](sqlite-client.md) - SQLite persistence and limits (local, D1, Turso)
 - [MemoryClient](memory-client.md) - Testing patterns
 - [FilesystemClient](filesystem-client.md) - Local storage
 - [Connection Strings](/reference/connection-strings.md) - Complete reference

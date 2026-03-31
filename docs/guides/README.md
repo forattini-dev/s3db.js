@@ -56,6 +56,16 @@ const db = new Database({
 // No AWS credentials needed
 ```
 
+### [Choosing a Backend](choosing-a-backend.md)
+
+Compare storage backends by cost, latency, and workload fit.
+
+**Covers:**
+- Pricing comparison: AWS S3 vs Cloudflare R2 vs Cloudflare D1 vs Turso vs MinIO
+- Scenario-based cost estimates (small, medium, large, read-heavy)
+- Decision flowchart for backend selection
+- How s3db.js operations map to backend billing
+
 ### [Security Best Practices](security-best-practices.md)
 
 Secure your s3db.js deployment.

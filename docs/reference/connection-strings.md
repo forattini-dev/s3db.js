@@ -67,6 +67,34 @@ sqlite://./data/s3db.sqlite
 sqlite:///:memory:
 ```
 
+### sqlite+d1:// (Cloudflare D1)
+
+```javascript
+// Via Cloudflare D1 HTTP API
+sqlite+d1://ACCOUNT_ID/DATABASE_ID?apiToken=YOUR_CLOUDFLARE_API_TOKEN
+
+// Worker binding (parsed, not yet implemented)
+sqlite+d1://binding/DB
+```
+
+The HTTP API path uses the [Cloudflare D1 REST API](https://developers.cloudflare.com/d1/platform/client-api/) from any Node.js environment. The Worker binding path is reserved for future native Cloudflare Workers runtime support.
+
+### sqlite+libsql:// (Turso / libsql)
+
+```javascript
+// Turso cloud
+sqlite+libsql://my-db-my-org.turso.io?authToken=YOUR_AUTH_TOKEN
+
+// Self-hosted libsql
+sqlite+libsql://localhost:8080
+```
+
+Requires `@libsql/client` as a peer dependency:
+
+```bash
+pnpm add @libsql/client
+```
+
 ### memory:// (In-Memory)
 
 ```javascript
@@ -185,6 +213,23 @@ https://ACCESS_KEY:SECRET_KEY@ACCOUNT_ID.r2.cloudflarestorage.com/mybucket
 
 ```javascript
 https://keyId:applicationKey@s3.us-west-000.backblazeb2.com/mybucket
+```
+
+### Cloudflare D1
+
+```javascript
+// HTTP API (from Node.js, any environment)
+sqlite+d1://abc123def456/my-database-id?apiToken=YOUR_TOKEN
+```
+
+### Turso / libsql
+
+```javascript
+// Turso cloud
+sqlite+libsql://my-db-my-org.turso.io?authToken=YOUR_TOKEN
+
+// Self-hosted libsql server
+sqlite+libsql://localhost:8080
 ```
 
 ### Testing
