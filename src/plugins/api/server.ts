@@ -98,6 +98,8 @@ export interface ApiServerOptions {
   logger?: Logger;
   docs?: Partial<DocsConfig>;
   routeRegistry?: ApiRouteRegistry;
+  /** Callback injected by ApiPlugin to register managed servers for lifecycle coupling. */
+  addManagedServer?: (server: { stop(): Promise<void> }, name?: string) => void;
   /**
    * Low-level setup hook. Called with the bare Raffel `HttpApp` and the full
    * `raffel` module immediately after the app is created — before any s3db.js
@@ -122,6 +124,13 @@ export interface ApiServerOptions {
     listenerName: string | undefined;
     /** Raw Node.js http.Server — available only after the server has started. Null during the first call. */
     httpServer: import('node:http').Server | null;
+    /**
+     * Register a Raffel server (proxy, mesh node, etc.) for automatic lifecycle coupling.
+     * The registered server's `stop()` method will be called when the API plugin stops.
+     * @param server Any object with a `stop(): Promise<void>` method.
+     * @param name   Optional name for later retrieval via `apiPlugin.getManagedServer(name)`.
+     */
+    addManagedServer: (server: { stop(): Promise<void> }, name?: string) => void;
   }) => void | Promise<void>;
   websocket?: {
     enabled: boolean;
@@ -449,6 +458,7 @@ export class ApiServer {
           raffel: raffelModule,
           listenerName: this.options.listenerName,
           httpServer: this.server,
+          addManagedServer: this.options.addManagedServer ?? (() => {}),
         });
       }
 

@@ -379,6 +379,7 @@ export interface ApiPluginConfig {
     raffel: typeof import('raffel');
     listenerName: string | undefined;
     httpServer: import('node:http').Server | null;
+    addManagedServer: (server: { stop(): Promise<void> }, name?: string) => void;
   }) => void | Promise<void>;
 }
 

@@ -159,21 +159,23 @@ export interface ApiPluginOptions {
    * after it is created — before any s3db.js middleware, routes, or auth
    * handlers are registered.
    *
-   * Receives `{ app, raffel, listenerName, httpServer }`. Use it to prepend
-   * middleware, mount sub-applications, wire up proxy handlers, or perform any
-   * other configuration that must happen before the built-in chain.
+   * Receives `{ app, raffel, listenerName, httpServer, addManagedServer }`.
+   * Use it to prepend middleware, mount sub-applications, spin up Raffel proxy
+   * or service-mesh servers, or do anything else that must happen before the
+   * built-in chain.  When multiple listeners are configured the hook is called
+   * once per listener, and `listenerName` identifies which one.
    *
-   * When multiple listeners are configured the hook is called once per
-   * listener, and `listenerName` identifies which one.
+   * Any server registered via `addManagedServer` will have its `stop()` method
+   * called automatically when the API plugin stops — so lifecycle is fully
+   * coupled.
    *
    * @example
    * import { ApiPlugin } from 's3db.js';
-   * import type { HttpApp } from 's3db.js';
    *
    * new ApiPlugin({
    *   port: 3000,
-   *   setup: async ({ app, raffel }) => {
-   *     // Transparent reverse-proxy for /api/legacy/*
+   *   setup: async ({ app, raffel, addManagedServer }) => {
+   *     // 1. Inline reverse-proxy for /api/legacy/* via Raffel middleware
    *     app.all('/api/legacy/*', async (c) => {
    *       const target = new URL(c.req.url);
    *       target.hostname = 'legacy.internal';
@@ -185,9 +187,20 @@ export interface ApiPluginOptions {
    *       });
    *     });
    *
-   *     // Or use Raffel's built-in proxy module via the http.Server hook:
-   *     // const proxy = raffel.createHttpForwardProxy({ ... });
-   *     // proxy.attach(httpServer);  ← after start(), use getHttpServer()
+   *     // 2. Full Raffel reverse proxy (standalone server, lifecycle-coupled)
+   *     const proxy = await raffel.createReverseProxy({
+   *       server: { host: '0.0.0.0', port: 8443 },
+   *       routes: [{ match: { pathPrefix: '/' }, target: 'http://127.0.0.1:3000' }],
+   *     });
+   *     addManagedServer(proxy, 'reverse-proxy');
+   *
+   *     // 3. Explicit forward proxy + SOCKS5 suite (service mesh edge node)
+   *     const mesh = await raffel.createProxySuite({
+   *       explicit: { host: '0.0.0.0', port: 3128 },
+   *       socks5:   { host: '0.0.0.0', port: 1080 },
+   *       telemetry: { sourceHeader: 'x-service-name', percentiles: ['p50', 'p95'] },
+   *     });
+   *     addManagedServer(mesh, 'proxy-suite');
    *   }
    * });
    */
@@ -195,7 +208,17 @@ export interface ApiPluginOptions {
     app: HttpApp;
     raffel: typeof import('raffel');
     listenerName: string | undefined;
+    /** Raw Node.js http.Server — available only after the server has started. Null during the first call. */
     httpServer: import('node:http').Server | null;
+    /**
+     * Register any Raffel server (reverse proxy, explicit proxy, SOCKS5, proxy
+     * suite, service-mesh node, etc.) for automatic lifecycle coupling.  Its
+     * `stop()` method will be called when the API plugin stops.
+     *
+     * Retrieve registered servers later via `apiPlugin.getManagedServer(name)`
+     * or `apiPlugin.getManagedServers()`.
+     */
+    addManagedServer: (server: { stop(): Promise<void> }, name?: string) => void;
   }) => void | Promise<void>;
 }
 
@@ -229,6 +252,8 @@ export class ApiPlugin extends Plugin {
   usersResourceName: string;
   server: ApiServer | null;
   private _servers: ApiServer[] = [];
+  private _managedServers: Map<string, { stop(): Promise<void> }> = new Map();
+  private _managedServersIdx = 0;
   usersResource: ResourceLike | null;
   compiledMiddlewares: MiddlewareHandler[];
 
@@ -758,6 +783,12 @@ export class ApiPlugin extends Plugin {
     }
     this._servers = [];
     this.server = null;
+
+    for (const [, managed] of this._managedServers) {
+      await managed.stop();
+    }
+    this._managedServers.clear();
+    this._managedServersIdx = 0;
   }
 
   private _resolveUsersResourceName(): string {
@@ -964,6 +995,28 @@ export class ApiPlugin extends Plugin {
     return this._servers[index]?.getHttpServer() ?? null;
   }
 
+  private _registerManagedServer(server: { stop(): Promise<void> }, name?: string): void {
+    const key = name ?? `managed-${this._managedServersIdx++}`;
+    this._managedServers.set(key, server);
+  }
+
+  /**
+   * Returns a Raffel server that was registered via `addManagedServer` inside
+   * the `setup` hook, identified by its name.  Returns `undefined` if no
+   * server with that name has been registered.
+   */
+  getManagedServer(name: string): { stop(): Promise<void> } | undefined {
+    return this._managedServers.get(name);
+  }
+
+  /**
+   * Returns all Raffel servers registered via `addManagedServer` inside the
+   * `setup` hook, keyed by name.
+   */
+  getManagedServers(): Map<string, { stop(): Promise<void> }> {
+    return new Map(this._managedServers);
+  }
+
   async previewRuntime(): Promise<ApiRuntimeInspectionPreview> {
     return await this._withPreviewServer((server) => server.previewRuntime());
   }
@@ -1051,6 +1104,7 @@ export class ApiPlugin extends Plugin {
       } : undefined,
       customProtocols: listener.protocols.custom,
       routeRegistry,
+      addManagedServer: (server, name) => this._registerManagedServer(server, name),
       setup: this.config.setup
     });
   }

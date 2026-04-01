@@ -1,6 +1,6 @@
 {
   "name": "s3db.js",
-  "version": "21.4.5",
+  "version": "21.4.6",
   "description": "Use AWS S3, the world's most reliable document storage, as a database with this ORM.",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -167,7 +167,7 @@
     "fuse.js": "^7.1.0",
     "glob": "^13.0.6",
     "jose": "^6.2.2",
-    "raffel": "1.0.23"
+    "raffel": "1.0.25"
   },
   "peerDependencies": {
     "@aws-sdk/client-acm": "^3.0.0",
