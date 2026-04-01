@@ -38,6 +38,12 @@
 
     "skipLibCheck": true,
 
+    "ignoreDeprecations": "6.0",
+    "baseUrl": ".",
+    "paths": {
+      "#src/*": ["./src/*"],
+      "#tests/*": ["./tests/*"]
+    },
 
     "allowJs": true,
     "checkJs": false
