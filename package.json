@@ -91,7 +91,7 @@
   ],
   "scripts": {
     "clean": "node scripts/clean-build.js",
-    "build": "pnpm run clean && tsc -p tsconfig.build.json && tsc-alias -p tsconfig.build.json && tsc -p tsconfig.mcp.json && node scripts/inject-version.js",
+    "build": "pnpm run clean && tsc -p tsconfig.build.json && tsc-alias -p tsconfig.build.json --outDir dist && tsc -p tsconfig.mcp.json && node scripts/inject-version.js",
     "typecheck": "tsc --noEmit",
     "build:cli": "node scripts/bundle-cli.js",
     "build:binary": "node scripts/build-sea.js",
@@ -167,7 +167,7 @@
     "fuse.js": "^7.1.0",
     "glob": "^13.0.6",
     "jose": "^6.2.2",
-    "raffel": "1.0.22"
+    "raffel": "1.0.23"
   },
   "peerDependencies": {
     "@aws-sdk/client-acm": "^3.0.0",
