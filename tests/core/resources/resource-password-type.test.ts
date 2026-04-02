@@ -263,6 +263,81 @@ describe('Resource - Password Type with bcrypt hashing', () => {
     await dbWithPassphrase.disconnect();
   });
 
+  test('should update secret on update() with autoDecrypt disabled', async () => {
+    const dbWithPassphrase = createDatabaseForTest('suite=resources/password-secret-update-new-value', {
+      security: {
+        passphrase: 'test-passphrase',
+        bcrypt: { rounds: 12 }
+      }
+    });
+
+    const secureResource = await dbWithPassphrase.createResource({
+      name: 'accounts_with_secret',
+      attributes: {
+        email: 'string|required|email',
+        password: 'password|required|min:8',
+        apiKey: 'secret|required'
+      },
+      autoDecrypt: false
+    });
+
+    const seed = await secureResource.insert({
+      email: 'secret@example.com',
+      password: 'OriginalPassword123',
+      apiKey: 'api-secret-key-123'
+    });
+
+    const beforeUpdate = await secureResource.get(seed.id);
+    const updated = await secureResource.update(seed.id, {
+      email: 'updated@example.com',
+      apiKey: 'api-secret-key-456'
+    });
+    const afterUpdate = await secureResource.get(seed.id);
+
+    expect(updated.password).toBe(beforeUpdate.password);
+    expect(updated.apiKey).not.toBe(beforeUpdate.apiKey);
+    expect(afterUpdate.apiKey).toBe(updated.apiKey);
+    expect(await verifyPassword('OriginalPassword123', updated.password)).toBe(true);
+
+    await dbWithPassphrase.disconnect();
+  });
+
+  test('should update secret on update() with autoDecrypt enabled', async () => {
+    const dbWithPassphrase = createDatabaseForTest('suite=resources/password-secret-update-new-value-autodecrypt', {
+      security: {
+        passphrase: 'test-passphrase',
+        bcrypt: { rounds: 12 }
+      }
+    });
+
+    const secureResource = await dbWithPassphrase.createResource({
+      name: 'accounts_with_secret',
+      attributes: {
+        email: 'string|required|email',
+        password: 'password|required|min:8',
+        apiKey: 'secret|required'
+      }
+    });
+
+    const seed = await secureResource.insert({
+      email: 'secret@example.com',
+      password: 'OriginalPassword123',
+      apiKey: 'api-secret-key-123'
+    });
+
+    const updated = await secureResource.update(seed.id, {
+      email: 'updated@example.com',
+      apiKey: 'api-secret-key-456'
+    });
+    const afterUpdate = await secureResource.get(seed.id);
+
+    expect(updated.apiKey).toBe('api-secret-key-456');
+    expect(afterUpdate.apiKey).toBe('api-secret-key-456');
+    expect(await verifyPassword('OriginalPassword123', updated.password)).toBe(true);
+
+    await dbWithPassphrase.disconnect();
+  });
+
   test('should not rehash existing password and re-encrypt existing secret on patch()', async () => {
     const dbWithPassphrase = createDatabaseForTest('suite=resources/password-secret-patch-update', {
       security: {
@@ -294,6 +369,81 @@ describe('Resource - Password Type with bcrypt hashing', () => {
 
     expect(afterPatch.password).toBe(beforePatch.password);
     expect(afterPatch.apiKey).toBe(beforePatch.apiKey);
+    expect(await verifyPassword('OriginalPassword123', afterPatch.password)).toBe(true);
+
+    await dbWithPassphrase.disconnect();
+  });
+
+  test('should update secret on patch() with autoDecrypt disabled', async () => {
+    const dbWithPassphrase = createDatabaseForTest('suite=resources/password-secret-patch-new-value', {
+      security: {
+        passphrase: 'test-passphrase',
+        bcrypt: { rounds: 12 }
+      }
+    });
+
+    const secureResource = await dbWithPassphrase.createResource({
+      name: 'accounts_with_secret',
+      attributes: {
+        email: 'string|required|email',
+        password: 'password|required|min:8',
+        apiKey: 'secret|required'
+      },
+      autoDecrypt: false
+    });
+
+    const seed = await secureResource.insert({
+      email: 'secret@example.com',
+      password: 'OriginalPassword123',
+      apiKey: 'api-secret-key-123'
+    });
+
+    const beforePatch = await secureResource.get(seed.id);
+    const afterPatch = await secureResource.patch(seed.id, {
+      email: 'patched@example.com',
+      apiKey: 'api-secret-key-456'
+    });
+    const afterRead = await secureResource.get(seed.id);
+
+    expect(afterPatch.password).toBe(beforePatch.password);
+    expect(afterPatch.apiKey).not.toBe(beforePatch.apiKey);
+    expect(afterRead.apiKey).toBe(afterPatch.apiKey);
+    expect(await verifyPassword('OriginalPassword123', afterPatch.password)).toBe(true);
+
+    await dbWithPassphrase.disconnect();
+  });
+
+  test('should update secret on patch() with autoDecrypt enabled', async () => {
+    const dbWithPassphrase = createDatabaseForTest('suite=resources/password-secret-patch-new-value-autodecrypt', {
+      security: {
+        passphrase: 'test-passphrase',
+        bcrypt: { rounds: 12 }
+      }
+    });
+
+    const secureResource = await dbWithPassphrase.createResource({
+      name: 'accounts_with_secret',
+      attributes: {
+        email: 'string|required|email',
+        password: 'password|required|min:8',
+        apiKey: 'secret|required'
+      }
+    });
+
+    const seed = await secureResource.insert({
+      email: 'secret@example.com',
+      password: 'OriginalPassword123',
+      apiKey: 'api-secret-key-123'
+    });
+
+    const afterPatch = await secureResource.patch(seed.id, {
+      email: 'patched@example.com',
+      apiKey: 'api-secret-key-456'
+    });
+    const afterRead = await secureResource.get(seed.id);
+
+    expect(afterPatch.apiKey).toBe('api-secret-key-456');
+    expect(afterRead.apiKey).toBe('api-secret-key-456');
     expect(await verifyPassword('OriginalPassword123', afterPatch.password)).toBe(true);
 
     await dbWithPassphrase.disconnect();

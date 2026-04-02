@@ -318,6 +318,17 @@ export class ResourcePersistence {
     return typeof storedValue === 'string' ? storedValue : undefined;
   }
 
+  private _shouldPreserveSecretField(
+    fieldName: string,
+    incomingFields: Record<string, unknown>,
+    currentRecord: Record<string, unknown>
+  ): boolean {
+    if (!(fieldName in currentRecord)) return false;
+    if (!(fieldName in incomingFields)) return true;
+
+    return incomingFields[fieldName] === currentRecord[fieldName];
+  }
+
   private _isKnownCoreError(error: unknown): error is Error {
     return (
       error instanceof InvalidResourceItem ||
@@ -1038,10 +1049,8 @@ export class ResourcePersistence {
     }
 
     for (const sf of secretFields) {
-      if (sf in completeRecord) {
-        if (!(sf in attrs) || attrs[sf] === completeRecord[sf]) {
-          preservedFields[sf] = this._getMetadataField(metadata, sf) ?? completeRecord[sf];
-        }
+      if (this._shouldPreserveSecretField(sf, attrs, originalData as Record<string, unknown>)) {
+        preservedFields[sf] = this._getMetadataField(metadata, sf) ?? completeRecord[sf];
       }
     }
 
@@ -1360,10 +1369,8 @@ export class ResourcePersistence {
     }
 
     for (const sf of secretFields) {
-      if (sf in mergedData) {
-        if (!(sf in fields) || fields[sf] === mergedData[sf]) {
-          preservedFields[sf] = this._getMetadataField(currentMetadata, sf) ?? mergedData[sf];
-        }
+      if (this._shouldPreserveSecretField(sf, attrs, currentData as Record<string, unknown>)) {
+        preservedFields[sf] = this._getMetadataField(currentMetadata, sf) ?? mergedData[sf];
       }
     }
 
