@@ -5,6 +5,9 @@
  *
  * Drivers:
  * - memory: In-memory queue (recker built-in, default)
+ * - sqlite: Persistent local queue (peer: better-sqlite3)
+ * - redis: Redis list + set (peer: ioredis)
+ * - bullmq: BullMQ jobs (peer: bullmq)
  * - s3: s3db resource-backed queue with visited set
  * - sqs: AWS SQS (peer: @aws-sdk/client-sqs)
  * - rabbitmq: RabbitMQ (peer: amqplib)
@@ -18,6 +21,8 @@ type CrawlQueueLoader = () => Promise<{ create: CrawlQueueFactory }>;
 const CRAWL_QUEUE_LOADERS: Record<string, CrawlQueueLoader> = {
   memory:   () => import('./memory-crawl-queue.js'),
   sqlite:   () => import('./sqlite-crawl-queue.js'),
+  redis:    () => import('./redis-crawl-queue.js'),
+  bullmq:   () => import('./bullmq-crawl-queue.js'),
   s3:       () => import('./s3-crawl-queue.js'),
   sqs:      () => import('./sqs-crawl-queue.js'),
   rabbitmq: () => import('./rabbitmq-crawl-queue.js'),

@@ -5,6 +5,9 @@
  *
  * Drivers:
  * - memory: In-memory storage (recker built-in, default)
+ * - sqlite: Persistent local storage (peer: better-sqlite3)
+ * - redis: Redis hash storage (peer: ioredis)
+ * - bullmq: BullMQ job storage (peer: bullmq)
  * - s3: s3db resource-backed results/errors storage
  * - filesystem: Local FS JSON/JSONL storage
  */
@@ -17,6 +20,8 @@ type CrawlStorageLoader = () => Promise<{ create: CrawlStorageFactory }>;
 const CRAWL_STORAGE_LOADERS: Record<string, CrawlStorageLoader> = {
   memory:     () => import('./memory-crawl-storage.js'),
   sqlite:     () => import('./sqlite-crawl-storage.js'),
+  redis:      () => import('./redis-crawl-storage.js'),
+  bullmq:     () => import('./bullmq-crawl-storage.js'),
   s3:         () => import('./s3-crawl-storage.js'),
   filesystem: () => import('./filesystem-crawl-storage.js'),
 };
