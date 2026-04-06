@@ -133,9 +133,9 @@ const pluginCatalog = {
       { name: 'GraphPlugin', description: 'Graph relationships and traversal', config: { nodeField: 'string', edgeResource: 'string' } }
     ],
     queuesScheduling: [
-      { name: 'S3QueuePlugin', description: 'S3-backed message queue', config: { prefix: 'string', visibility: 'number' } },
+      { name: 'S3QueuePlugin', description: 'S3-backed queue with metadata, partitions, per-tenant counting', config: { resource: 'string', metadata: 'Record<string, string>', partitions: 'Record<string, PartitionConfig>' } },
       { name: 'SchedulerPlugin', description: 'Cron-based task scheduling', config: { timezone: 'string' } },
-      { name: 'QueueConsumerPlugin', description: 'Queue processing workers', config: { concurrency: 'number', retries: 'number' } },
+      { name: 'QueueConsumerPlugin', description: 'Consume from SQS/RabbitMQ/Redis/BullMQ with custom handlers', config: { drivers: 'DriverDefinition[]', startConcurrency: 'number' } },
       { name: 'StateMachinePlugin', description: 'Workflow orchestration with states, guards, actions, triggers, retries, and history', config: { stateMachines: 'object', actions: 'object', guards: 'object' } }
     ],
     webScraping: [

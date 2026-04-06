@@ -352,9 +352,9 @@ const user = await users.get('user-id');
 
 **Utility** — Operations and automation:
 - **BackupPlugin**: Automated backups
-- **S3QueuePlugin**: Distributed job queue
+- **S3QueuePlugin**: Distributed job queue with metadata, partitions, per-tenant counting
 - **SchedulerPlugin**: Cron-like scheduling
-- **QueueConsumerPlugin**: Process queue messages
+- **QueueConsumerPlugin**: Consume from SQS/RabbitMQ/Redis/BullMQ with custom handlers
 - **ImporterPlugin**: Bulk data import
 
 **Specialized** — Domain-specific:
