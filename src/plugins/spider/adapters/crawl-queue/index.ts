@@ -17,6 +17,7 @@ type CrawlQueueLoader = () => Promise<{ create: CrawlQueueFactory }>;
 
 const CRAWL_QUEUE_LOADERS: Record<string, CrawlQueueLoader> = {
   memory:   () => import('./memory-crawl-queue.js'),
+  sqlite:   () => import('./sqlite-crawl-queue.js'),
   s3:       () => import('./s3-crawl-queue.js'),
   sqs:      () => import('./sqs-crawl-queue.js'),
   rabbitmq: () => import('./rabbitmq-crawl-queue.js'),

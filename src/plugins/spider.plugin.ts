@@ -212,6 +212,14 @@ export interface SpiderPluginConfig {
     maxRetries?: number;
     retryDelay?: number;
   };
+  crawl?: {
+    transport?: 'auto' | 'undici' | 'curl';
+    deduplicateContent?: boolean;
+    resume?: boolean;
+    domainRateLimit?: { maxPerSecond?: number };
+    maxRetryAttempts?: number;
+    maxDomainBlockStrikes?: number;
+  };
   logger?: any;
 }
 
@@ -1282,6 +1290,8 @@ export class SpiderPlugin extends Plugin {
   async crawl(startUrl: string, options: Record<string, any> = {}): Promise<any> {
     const { Spider } = await import('recker/scrape') as any;
 
+    const crawlConfig = this.config.crawl || {};
+
     const spiderOptions: Record<string, any> = {
       maxDepth: options.maxDepth ?? this.config.discovery?.maxDepth ?? 3,
       maxPages: options.maxPages ?? this.config.discovery?.maxUrls ?? 100,
@@ -1293,8 +1303,23 @@ export class SpiderPlugin extends Plugin {
       useSitemap: options.useSitemap ?? false,
       rotateUserAgent: options.rotateUserAgent ?? true,
       randomizeHeaders: options.randomizeHeaders ?? true,
+      transport: options.transport ?? crawlConfig.transport ?? 'auto',
+      deduplicateContent: options.deduplicateContent ?? crawlConfig.deduplicateContent ?? true,
+      resume: options.resume ?? crawlConfig.resume ?? false,
       ...options,
     };
+
+    if (crawlConfig.domainRateLimit || options.domainRateLimit) {
+      spiderOptions.domainRateLimit = options.domainRateLimit ?? crawlConfig.domainRateLimit;
+    }
+
+    if (crawlConfig.maxRetryAttempts ?? options.maxRetryAttempts) {
+      spiderOptions.maxRetryAttempts = options.maxRetryAttempts ?? crawlConfig.maxRetryAttempts;
+    }
+
+    if (crawlConfig.maxDomainBlockStrikes ?? options.maxDomainBlockStrikes) {
+      spiderOptions.maxDomainBlockStrikes = options.maxDomainBlockStrikes ?? crawlConfig.maxDomainBlockStrikes;
+    }
 
     if (this._crawlQueueAdapter) {
       spiderOptions.crawlQueue = this._crawlQueueAdapter;
@@ -1312,17 +1337,88 @@ export class SpiderPlugin extends Plugin {
       spiderOptions.extract = options.extract;
     }
 
-    if (options.onPage) {
-      spiderOptions.onPage = options.onPage;
-    }
+    const plugin = this;
 
-    if (options.onProgress) {
-      spiderOptions.onProgress = options.onProgress;
-    }
+    spiderOptions.onPage = (event: any) => {
+      plugin.emit('plg:spider:page', {
+        url: event.result?.url,
+        status: event.result?.status,
+        depth: event.result?.depth,
+        duration: event.result?.duration,
+        blocked: event.result?.blocked,
+        contentHash: event.result?.contentHash,
+        duplicate: event.result?.duplicate,
+      });
+      if (options.onPage) options.onPage(event);
+    };
+
+    spiderOptions.onBlocked = (result: any) => {
+      plugin.logger.warn({ url: result.url, reason: result.blockReason }, 'Page blocked');
+      plugin.emit('plg:spider:blocked', {
+        url: result.url,
+        reason: result.blockReason,
+        confidence: result.blockConfidence,
+        captcha: result.captchaDetected,
+        captchaProvider: result.captchaProvider,
+      });
+      if (options.onBlocked) options.onBlocked(result);
+    };
+
+    spiderOptions.onError = (result: any) => {
+      plugin.logger.warn({ url: result.url, error: result.error }, 'Crawl error');
+      plugin.emit('plg:spider:error', {
+        url: result.url,
+        error: result.error,
+        status: result.status,
+      });
+      if (options.onError) options.onError(result);
+    };
+
+    spiderOptions.onRetry = (info: any) => {
+      plugin.emit('plg:spider:retry', {
+        url: info.url,
+        attempt: info.attempt,
+        maxAttempts: info.maxAttempts,
+        delay: info.delay,
+        reason: info.reason,
+      });
+      if (options.onRetry) options.onRetry(info);
+    };
+
+    spiderOptions.onRedirect = (info: any) => {
+      plugin.emit('plg:spider:redirect', {
+        from: info.from,
+        to: info.to,
+        status: info.status,
+      });
+      if (options.onRedirect) options.onRedirect(info);
+    };
+
+    spiderOptions.onCaptchaDetected = (result: any) => {
+      plugin.logger.warn({ url: result.url, provider: result.captchaProvider }, 'CAPTCHA detected');
+      plugin.emit('plg:spider:captcha', {
+        url: result.url,
+        provider: result.captchaProvider,
+        confidence: result.captchaConfidence,
+      });
+      if (options.onCaptchaDetected) options.onCaptchaDetected(result);
+    };
+
+    spiderOptions.onProgress = (progress: any) => {
+      plugin.emit('plg:spider:progress', progress);
+      if (options.onProgress) options.onProgress(progress);
+    };
 
     const spider = new Spider(spiderOptions);
 
-    this.logger.info({ startUrl, maxPages: spiderOptions.maxPages, maxDepth: spiderOptions.maxDepth }, 'Starting recker Spider crawl');
+    this.logger.info({
+      startUrl,
+      maxPages: spiderOptions.maxPages,
+      maxDepth: spiderOptions.maxDepth,
+      transport: spiderOptions.transport,
+      dedup: spiderOptions.deduplicateContent,
+      resume: spiderOptions.resume,
+    }, 'Starting recker Spider crawl');
 
     const result = await spider.crawl(startUrl);
 
@@ -1330,6 +1426,7 @@ export class SpiderPlugin extends Plugin {
       pages: result.pages?.length ?? 0,
       errors: result.errors?.length ?? 0,
       duration: result.duration,
+      duplicatesSkipped: result.duplicatesSkipped ?? 0,
     }, 'Recker Spider crawl completed');
 
     return result;

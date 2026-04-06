@@ -16,6 +16,7 @@ type CrawlStorageLoader = () => Promise<{ create: CrawlStorageFactory }>;
 
 const CRAWL_STORAGE_LOADERS: Record<string, CrawlStorageLoader> = {
   memory:     () => import('./memory-crawl-storage.js'),
+  sqlite:     () => import('./sqlite-crawl-storage.js'),
   s3:         () => import('./s3-crawl-storage.js'),
   filesystem: () => import('./filesystem-crawl-storage.js'),
 };
