@@ -106,6 +106,9 @@ export interface ReconConfig {
     delayBetweenStages?: number;
     requestsPerMinute?: number;
   };
+  timeout?: {
+    default?: number;
+  };
   [key: string]: any;
 }
 

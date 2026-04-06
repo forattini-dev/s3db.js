@@ -185,7 +185,7 @@ export class OsintStage {
       domain,
       {
         timeout: config.timeout || 60000,
-        flags: ['--type', 'emails']
+        flags: { type: 'emails' }
       }
     );
 
@@ -218,7 +218,8 @@ export class OsintStage {
   }
 
   private async _enumerateUsernames(username: string, config: OsintFeatureConfig): Promise<UsernamesResult> {
-    const flags: string[] = config.maxSites ? ['--max-sites', String(config.maxSites)] : [];
+    const flags: Record<string, any> = {};
+    if (config.maxSites) flags['max-sites'] = config.maxSites;
 
     const rbResult = await this.commandRunner.runRedBlue(
       'recon',
@@ -260,7 +261,8 @@ export class OsintStage {
   }
 
   private async _harvestUrls(domain: string, config: OsintFeatureConfig): Promise<UrlsResult> {
-    const flags: string[] = config.wayback ? ['--wayback'] : [];
+    const flags: Record<string, any> = {};
+    if (config.wayback) flags.wayback = true;
 
     const rbResult = await this.commandRunner.runRedBlue(
       'recon',

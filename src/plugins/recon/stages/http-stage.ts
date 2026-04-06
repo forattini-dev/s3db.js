@@ -69,6 +69,12 @@ export class HttpStage {
   async execute(target: Target, featureConfig: HttpFeatureConfig = {}): Promise<HttpResult> {
     const url = this._buildUrl(target);
 
+    const flags: Record<string, any> = {};
+    if (featureConfig.follow) flags.follow = true;
+    if (featureConfig.userAgent) flags['user-agent'] = featureConfig.userAgent;
+    if (featureConfig.intel) flags.intel = true;
+    if (featureConfig.timeout) flags.timeout = Math.ceil(featureConfig.timeout / 1000);
+
     const result = await this.commandRunner.runRedBlue(
       'web',
       'asset',
@@ -76,7 +82,7 @@ export class HttpStage {
       url,
       {
         timeout: featureConfig.timeout || 30000,
-        flags: this._buildFlags(featureConfig)
+        flags
       }
     );
 
@@ -121,28 +127,6 @@ export class HttpStage {
       case 'https': return 443;
       default: return null;
     }
-  }
-
-  private _buildFlags(config: HttpFeatureConfig): string[] {
-    const flags: string[] = [];
-
-    if (config.follow) {
-      flags.push('--follow');
-    }
-
-    if (config.userAgent) {
-      flags.push('--user-agent', config.userAgent);
-    }
-
-    if (config.intel) {
-      flags.push('--intel');
-    }
-
-    if (config.timeout) {
-      flags.push('--timeout', String(Math.ceil(config.timeout / 1000)));
-    }
-
-    return flags;
   }
 
   private _normalizeHttp(data: any): HttpData {

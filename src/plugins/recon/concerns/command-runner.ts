@@ -1,11 +1,11 @@
 /**
  * CommandRunner
  *
- * Executes RedBlue CLI commands:
- * - Unified interface for all rb commands
- * - JSON output parsing
- * - Error handling
- * - Availability detection
+ * Executes RedBlue CLI commands via the redblue-cli SDK:
+ * - Lazy-loads the SDK (optional peer dependency)
+ * - Binary resolved automatically (postinstall downloads to node_modules)
+ * - Typed domain proxy: client.dns.record.all({ target })
+ * - Fallback to raw exec for system commands (dig, etc.)
  */
 
 import { spawn, type SpawnOptions } from 'child_process';
@@ -15,7 +15,8 @@ const logger = createLogger({ name: 'recon-command-runner' });
 
 export interface CommandOptions {
   timeout?: number;
-  flags?: string[];
+  flags?: Record<string, any>;
+  args?: (string | number)[];
   cwd?: string;
 }
 
@@ -42,103 +43,130 @@ export interface ReconPlugin {
 
 export class CommandRunner {
   private plugin: ReconPlugin;
-  private redBlueAvailable: boolean | null = null;
+  private _client: any = null;
+  private _clientPromise: Promise<any> | null = null;
+  private _available: boolean | null = null;
 
   constructor(plugin: ReconPlugin) {
     this.plugin = plugin;
   }
 
-  async isRedBlueAvailable(): Promise<boolean> {
-    if (this.redBlueAvailable !== null) {
-      return this.redBlueAvailable;
+  async getClient(): Promise<any> {
+    if (this._client) return this._client;
+    if (this._clientPromise) return this._clientPromise;
+
+    this._clientPromise = this._initClient();
+    try {
+      this._client = await this._clientPromise;
+      return this._client;
+    } catch (error) {
+      this._clientPromise = null;
+      throw error;
     }
+  }
+
+  private async _initClient(): Promise<any> {
+    try {
+      const sdk = await import('redblue-cli');
+      const createClient = sdk.createClient || sdk.default?.createClient;
+
+      if (!createClient) {
+        throw new Error('redblue-cli does not export createClient');
+      }
+
+      const client = await createClient();
+
+      this._available = true;
+      logger.debug('redblue-cli client initialized');
+      return client;
+    } catch (error: any) {
+      this._available = false;
+      logger.warn({ err: error }, 'Failed to initialize redblue-cli client');
+      throw error;
+    }
+  }
+
+  async isRedBlueAvailable(): Promise<boolean> {
+    if (this._available !== null) return this._available;
 
     try {
-      const result = await this._executeCommand('rb', ['--version'], { timeout: 5000 });
-      this.redBlueAvailable = result.exitCode === 0;
-    } catch (error) {
-      this.redBlueAvailable = false;
+      await this.getClient();
+      return true;
+    } catch {
+      return false;
     }
-
-    return this.redBlueAvailable;
   }
 
   async runRedBlue(
-    category: string,
-    subCategory: string,
-    command: string,
+    domain: string,
+    resource: string,
+    verb: string,
     target: string,
     options: CommandOptions = {}
   ): Promise<CommandResult> {
     const startTime = Date.now();
+    const fullCommand = `rb ${domain} ${resource} ${verb} ${target}`;
+    const timeout = options.timeout || this.plugin.config.timeout?.default || 60000;
 
-    const isAvailable = await this.isRedBlueAvailable();
-    if (!isAvailable) {
+    let client: any;
+    try {
+      client = await this.getClient();
+    } catch {
       return {
         status: 'unavailable',
-        error: 'RedBlue (rb) is not available in PATH',
+        error: 'RedBlue (rb) is not available. Install with: pnpm add redblue-cli',
         metadata: {
-          command: `rb ${category} ${subCategory} ${command} ${target}`,
+          command: fullCommand,
           duration: Date.now() - startTime,
           timestamp: new Date().toISOString()
         }
       };
     }
 
-    const args = [category, subCategory, command, target, '--json'];
-    if (options.flags && options.flags.length > 0) {
-      args.push(...options.flags);
+    const route = client[domain]?.[resource]?.[verb];
+
+    if (!route) {
+      return {
+        status: 'error',
+        error: `Unknown command: ${domain} ${resource} ${verb}`,
+        metadata: {
+          command: fullCommand,
+          duration: Date.now() - startTime,
+          timestamp: new Date().toISOString()
+        }
+      };
     }
 
-    const timeout = options.timeout || this.plugin.config.timeout?.default || 60000;
-    const fullCommand = `rb ${args.join(' ')}`;
-
     try {
-      const result = await this._executeCommand('rb', args, {
-        timeout,
-        cwd: options.cwd
-      });
+      const input: Record<string, any> = { target };
 
-      const duration = Date.now() - startTime;
-
-      if (result.exitCode !== 0) {
-        return {
-          status: 'error',
-          error: result.stderr || `Command failed with exit code ${result.exitCode}`,
-          raw: result.stdout,
-          exitCode: result.exitCode,
-          metadata: {
-            command: fullCommand,
-            duration,
-            timestamp: new Date().toISOString()
-          }
-        };
+      if (options.flags) {
+        Object.assign(input, options.flags);
       }
 
-      let data: any = null;
-      if (result.stdout) {
-        try {
-          data = JSON.parse(result.stdout);
-        } catch (parseError) {
-          data = { raw: result.stdout };
-        }
+      if (options.args) {
+        input.args = options.args.map(String);
       }
+
+      if (options.cwd) {
+        input.cwd = options.cwd;
+      }
+
+      const data = await route(input, { timeout });
 
       return {
         status: 'ok',
         data,
-        raw: result.stdout,
-        exitCode: result.exitCode,
         metadata: {
           command: fullCommand,
-          duration,
+          duration: Date.now() - startTime,
           timestamp: new Date().toISOString()
         }
       };
     } catch (error: any) {
       const duration = Date.now() - startTime;
 
-      if (error.message?.includes('timeout')) {
+      if (error.message?.includes('timeout') || duration >= timeout) {
         return {
           status: 'timeout',
           error: `Command timed out after ${timeout}ms`,
@@ -153,6 +181,8 @@ export class CommandRunner {
       return {
         status: 'error',
         error: error.message || 'Unknown error',
+        exitCode: error.code,
+        raw: error.stdout,
         metadata: {
           command: fullCommand,
           duration,

@@ -30,6 +30,10 @@ export interface SubdomainsFeatureConfig {
   threads?: number;
   checkTakeover?: boolean;
   maxSubdomains?: number;
+  spider?: boolean | {
+    maxPages?: number;
+    maxDepth?: number;
+  };
 }
 
 export interface TakeoverFingerprint {
@@ -85,6 +89,12 @@ export class SubdomainsStage {
   }
 
   async execute(target: Target, featureConfig: SubdomainsFeatureConfig = {}): Promise<SubdomainsResult> {
+    const flags: Record<string, any> = {};
+    if (featureConfig.passive) flags.passive = true;
+    if (featureConfig.recursive) flags.recursive = true;
+    if (featureConfig.wordlist) flags.wordlist = featureConfig.wordlist;
+    if (featureConfig.threads) flags.threads = featureConfig.threads;
+
     const result = await this.commandRunner.runRedBlue(
       'recon',
       'domain',
@@ -92,7 +102,7 @@ export class SubdomainsStage {
       target.host,
       {
         timeout: featureConfig.timeout || 120000,
-        flags: this._buildFlags(featureConfig)
+        flags
       }
     );
 
@@ -114,6 +124,17 @@ export class SubdomainsStage {
 
     const subdomains = this._normalizeSubdomains(result.data);
 
+    if (featureConfig.spider) {
+      const spiderSubdomains = await this._discoverViaSpider(target, featureConfig);
+      for (const sd of spiderSubdomains) {
+        if (!subdomains.list.includes(sd)) {
+          subdomains.list.push(sd);
+          subdomains.sources['spider'] = (subdomains.sources['spider'] || 0) + 1;
+        }
+      }
+      subdomains.list.sort();
+    }
+
     let takeoverResults: TakeoverResults | null = null;
     if (featureConfig.checkTakeover && subdomains.list.length > 0) {
       takeoverResults = await this._checkSubdomainTakeover(
@@ -130,28 +151,6 @@ export class SubdomainsStage {
       takeover: takeoverResults,
       metadata: result.metadata
     };
-  }
-
-  private _buildFlags(config: SubdomainsFeatureConfig): string[] {
-    const flags: string[] = [];
-
-    if (config.passive) {
-      flags.push('--passive');
-    }
-
-    if (config.recursive) {
-      flags.push('--recursive');
-    }
-
-    if (config.wordlist) {
-      flags.push('--wordlist', config.wordlist);
-    }
-
-    if (config.threads) {
-      flags.push('--threads', String(config.threads));
-    }
-
-    return flags;
   }
 
   private _normalizeSubdomains(data: any): NormalizedSubdomains {
@@ -239,7 +238,7 @@ export class SubdomainsStage {
           subdomain,
           {
             timeout: 5000,
-            flags: ['--type', 'CNAME']
+            flags: { type: 'CNAME' }
           }
         );
 
@@ -294,5 +293,54 @@ export class SubdomainsStage {
     }
 
     return null;
+  }
+
+  private async _discoverViaSpider(target: Target, featureConfig: SubdomainsFeatureConfig): Promise<string[]> {
+    try {
+      const { Spider } = await import('recker/scrape') as any;
+      const spiderOpts = typeof featureConfig.spider === 'object' ? featureConfig.spider : {};
+      const baseDomain = target.host.split('.').slice(-2).join('.');
+
+      const spider = new Spider({
+        maxPages: spiderOpts.maxPages ?? 30,
+        maxDepth: spiderOpts.maxDepth ?? 2,
+        sameDomain: false,
+        concurrency: featureConfig.threads ?? 3,
+        timeout: featureConfig.timeout || 30000,
+        respectRobotsTxt: true,
+        rotateUserAgent: true,
+      });
+
+      const protocol = target.protocol || 'https';
+      const result = await spider.crawl(`${protocol}://${target.host}`);
+
+      const subdomains = new Set<string>();
+
+      for (const page of result.pages || []) {
+        this._extractSubdomain(page.url, baseDomain, subdomains);
+
+        for (const link of page.links || []) {
+          if (link.href) {
+            this._extractSubdomain(link.href, baseDomain, subdomains);
+          }
+        }
+      }
+
+      subdomains.delete(target.host);
+      return [...subdomains].sort();
+    } catch {
+      return [];
+    }
+  }
+
+  private _extractSubdomain(url: string, baseDomain: string, subdomains: Set<string>): void {
+    try {
+      const hostname = new URL(url).hostname;
+      if (hostname.endsWith(baseDomain) && hostname !== baseDomain) {
+        subdomains.add(hostname);
+      }
+    } catch {
+      // invalid URL
+    }
   }
 }

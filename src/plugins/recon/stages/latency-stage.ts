@@ -98,10 +98,8 @@ export class LatencyStage {
     const count = config.count || this.config.ping?.count || 4;
     const timeout = config.timeout || this.config.ping?.timeout || 10000;
 
-    const flags: string[] = [
-      '--count', String(count),
-      ...(config.interval ? ['--interval', String(config.interval)] : [])
-    ];
+    const flags: Record<string, any> = { count };
+    if (config.interval) flags.interval = config.interval;
 
     const result = await this.commandRunner.runRedBlue(
       'network',

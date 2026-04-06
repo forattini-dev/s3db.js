@@ -64,6 +64,14 @@ export class PortsStage {
   }
 
   async execute(target: Target, featureConfig: PortsFeatureConfig = {}): Promise<PortsResult> {
+    const flags: Record<string, any> = {
+      preset: featureConfig.preset || 'common'
+    };
+    if (featureConfig.fast) flags.fast = true;
+    if (featureConfig.threads) flags.threads = featureConfig.threads;
+    if (featureConfig.timeout) flags.timeout = featureConfig.timeout;
+    if (featureConfig.intel) flags.intel = true;
+
     const result = await this.commandRunner.runRedBlue(
       'network',
       'ports',
@@ -71,7 +79,7 @@ export class PortsStage {
       target.host,
       {
         timeout: featureConfig.timeout || 60000,
-        flags: this._buildFlags(featureConfig)
+        flags
       }
     );
 
@@ -99,34 +107,6 @@ export class PortsStage {
       total: ports.length,
       metadata: result.metadata
     };
-  }
-
-  private _buildFlags(config: PortsFeatureConfig): string[] {
-    const flags: string[] = [];
-
-    if (config.preset) {
-      flags.push('--preset', config.preset);
-    } else {
-      flags.push('--preset', 'common');
-    }
-
-    if (config.fast) {
-      flags.push('--fast');
-    }
-
-    if (config.threads) {
-      flags.push('--threads', String(config.threads));
-    }
-
-    if (config.timeout) {
-      flags.push('--timeout', String(config.timeout));
-    }
-
-    if (config.intel) {
-      flags.push('--intel');
-    }
-
-    return flags;
   }
 
   private _normalizePorts(data: any): PortEntry[] {
@@ -206,6 +186,10 @@ export class PortsStage {
     endPort: number,
     featureConfig: PortsFeatureConfig = {}
   ): Promise<PortsResult> {
+    const flags: Record<string, any> = {};
+    if (featureConfig.fast) flags.fast = true;
+    if (featureConfig.threads) flags.threads = featureConfig.threads;
+
     const result = await this.commandRunner.runRedBlue(
       'network',
       'ports',
@@ -213,12 +197,8 @@ export class PortsStage {
       target.host,
       {
         timeout: featureConfig.timeout || 120000,
-        flags: [
-          String(startPort),
-          String(endPort),
-          ...(featureConfig.fast ? ['--fast'] : []),
-          ...(featureConfig.threads ? ['--threads', String(featureConfig.threads)] : [])
-        ]
+        args: [startPort, endPort],
+        flags
       }
     );
 

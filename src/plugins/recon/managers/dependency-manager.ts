@@ -1,8 +1,8 @@
 /**
  * DependencyManager
  *
- * Validates RedBlue (rb) availability:
- * - Single binary check (replaces ~30 individual tools)
+ * Validates RedBlue (rb) availability via redblue-cli SDK:
+ * - Smart binary resolution (PATH, install dir, auto-download)
  * - Provides installation guidance
  * - Emits warnings if rb is not found
  */
@@ -49,7 +49,7 @@ export class DependencyManager {
     if (!isAvailable) {
       const warning: DependencyWarning = {
         tool: 'rb',
-        message: 'RedBlue (rb) not found in PATH. All reconnaissance features require RedBlue.',
+        message: 'RedBlue (rb) not found. Install redblue-cli SDK or the rb binary. When autoDownload is enabled (default), the binary is fetched automatically on first use.',
         installGuide: this._getInstallGuide()
       };
 
@@ -90,21 +90,11 @@ export class DependencyManager {
   private _getInstallGuide(): string {
     return `RedBlue Installation:
 
-  Option 1 - Cargo (Rust):
-    cargo install redblue
+  pnpm add redblue-cli
 
-  Option 2 - Download binary:
-    Visit https://github.com/user/redblue/releases
-    Download the binary for your platform
-    Move to ~/.local/bin/ or /usr/local/bin/
+  The binary is downloaded automatically during postinstall.
+  No manual setup needed.
 
-  Option 3 - Build from source:
-    git clone https://github.com/user/redblue.git
-    cd redblue
-    cargo build --release
-    cp target/release/rb ~/.local/bin/
-
-  Verify installation:
-    rb --version`;
+  Verify: rb --version`;
   }
 }

@@ -77,7 +77,7 @@ export class FingerprintStage {
       url,
       {
         timeout: featureConfig.timeout || 30000,
-        flags: featureConfig.intel ? ['--intel'] : []
+        flags: featureConfig.intel ? { intel: true } : {}
       }
     );
 

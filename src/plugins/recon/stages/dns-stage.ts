@@ -64,6 +64,10 @@ export class DnsStage {
   }
 
   async execute(target: Target, featureConfig: DnsFeatureConfig = {}): Promise<DnsResult> {
+    const flags: Record<string, any> = {};
+    if (featureConfig.server) flags.server = featureConfig.server;
+    if (featureConfig.intel) flags.intel = true;
+
     const result = await this.commandRunner.runRedBlue(
       'dns',
       'record',
@@ -71,7 +75,7 @@ export class DnsStage {
       target.host,
       {
         timeout: featureConfig.timeout || 30000,
-        flags: this._buildFlags(featureConfig)
+        flags
       }
     );
 
@@ -99,20 +103,6 @@ export class DnsStage {
       errors: records.errors,
       metadata: result.metadata
     };
-  }
-
-  private _buildFlags(config: DnsFeatureConfig): string[] {
-    const flags: string[] = [];
-
-    if (config.server) {
-      flags.push('--server', config.server);
-    }
-
-    if (config.intel) {
-      flags.push('--intel');
-    }
-
-    return flags;
   }
 
   private _normalizeRecords(data: any): NormalizedRecords {

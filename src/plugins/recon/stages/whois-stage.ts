@@ -85,7 +85,7 @@ export class WhoisStage {
       domain,
       {
         timeout: featureConfig.timeout || 30000,
-        flags: featureConfig.raw ? ['--raw'] : []
+        flags: featureConfig.raw ? { raw: true } : {}
       }
     );
 

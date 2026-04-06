@@ -34,6 +34,7 @@ import { analyzeAllStorage } from './spider/storage-analyzer.js';
 import { URLPatternMatcher, type FilteredUrl } from './spider/url-pattern-matcher.js';
 import { LinkDiscoverer, type DiscoveryStats } from './spider/link-discoverer.js';
 import { DeepDiscovery } from './spider/deep-discovery.js';
+import type { AdapterDriverConfig } from './spider/adapters/index.js';
 
 type SpiderQueueBackend = 's3' | 'queue-consumer';
 type SpiderQueueProcessor = (task: any, context: any) => Promise<any>;
@@ -200,6 +201,15 @@ export interface SpiderPluginConfig {
     ignoreQueryString?: boolean;
     [key: string]: any;
   };
+  crawlQueue?: AdapterDriverConfig;
+  crawlStorage?: AdapterDriverConfig;
+  proxy?: AdapterDriverConfig;
+  processing?: {
+    autoStart?: boolean;
+    concurrency?: number;
+    maxRetries?: number;
+    retryDelay?: number;
+  };
   logger?: any;
 }
 
@@ -243,6 +253,9 @@ export class SpiderPlugin extends Plugin {
   patternMatcher: URLPatternMatcher | null;
   linkDiscoverer: LinkDiscoverer | null;
   _requestPool: any | null;
+  _crawlQueueAdapter: any | null;
+  _crawlStorageAdapter: any | null;
+  _proxyAdapter: any | null;
   initialized: boolean = false;
   override namespace: string;
 
@@ -440,6 +453,11 @@ export class SpiderPlugin extends Plugin {
     this.linkDiscoverer = null;
     this._requestPool = null;
 
+    // Adapter instances (recker pluggable interfaces)
+    this._crawlQueueAdapter = null;
+    this._crawlStorageAdapter = null;
+    this._proxyAdapter = null;
+
     // Initialize pattern matcher if patterns configured
     if (Object.keys(this.config.patterns).length > 0) {
       this.patternMatcher = new URLPatternMatcher(this.config.patterns);
@@ -459,6 +477,72 @@ export class SpiderPlugin extends Plugin {
       return 'queue-consumer';
     }
     return 's3';
+  }
+
+  _migrateQueueConfig(): void {
+    if (this.config.crawlQueue) return;
+
+    const queue = this.config.queue;
+    if (!queue || !queue.backend) {
+      this.config.crawlQueue = { driver: 'memory' };
+      this.config.crawlStorage = this.config.crawlStorage || { driver: 'memory' };
+      return;
+    }
+
+    const backend = this._resolveQueueBackend(queue.backend);
+
+    if (backend === 's3') {
+      this.config.crawlQueue = { driver: 's3', config: { ...(queue.s3 || {}) } };
+      this.config.crawlStorage = this.config.crawlStorage || { driver: 's3' };
+    } else {
+      const consumers = queue.consumer?.consumers || queue.consumers || [];
+      const firstConsumer = consumers[0] as any;
+      const driver = firstConsumer?.driver || 'sqs';
+      this.config.crawlQueue = {
+        driver,
+        config: { ...(firstConsumer?.config || {}), consumers }
+      };
+      this.config.crawlStorage = this.config.crawlStorage || { driver: 's3' };
+    }
+
+    this.config.processing = {
+      autoStart: queue.autoStart,
+      concurrency: queue.concurrency,
+      maxRetries: queue.maxRetries,
+      retryDelay: queue.retryDelay,
+    };
+
+    this.logger.warn('SpiderPlugin "queue" config is deprecated. Use "crawlQueue", "crawlStorage", and "proxy" instead.');
+  }
+
+  async _initializeAdapters(): Promise<void> {
+    const database = (this as any).database;
+    const context = { database, namespace: this.namespace, logger: this.logger };
+
+    this._migrateQueueConfig();
+
+    const queueCfg = this.config.crawlQueue || { driver: 'memory' };
+    const { createCrawlQueue } = await import('./spider/adapters/crawl-queue/index.js');
+    this._crawlQueueAdapter = await createCrawlQueue(queueCfg.driver, queueCfg.config || {}, context);
+
+    const storageCfg = this.config.crawlStorage || { driver: 'memory' };
+    const { createCrawlStorage } = await import('./spider/adapters/crawl-storage/index.js');
+    this._crawlStorageAdapter = await createCrawlStorage(storageCfg.driver, storageCfg.config || {}, context);
+
+    if (this.config.proxy) {
+      const { createProxyAdapter } = await import('./spider/adapters/proxy/index.js');
+      this._proxyAdapter = await createProxyAdapter(
+        this.config.proxy.driver,
+        this.config.proxy.config || {},
+        context
+      );
+    }
+
+    this.logger.debug({
+      crawlQueue: queueCfg.driver,
+      crawlStorage: storageCfg.driver,
+      proxy: this.config.proxy?.driver || 'none',
+    }, 'Spider adapters initialized');
   }
 
   async _initializeQueuePlugin(): Promise<void> {
@@ -635,6 +719,9 @@ export class SpiderPlugin extends Plugin {
       this.techDetector = new TechDetector(this.config.techDetection);
       this.securityAnalyzer = new SecurityAnalyzer(this.config.security);
 
+      // Initialize adapters (crawlQueue, crawlStorage, proxy)
+      await this._initializeAdapters();
+
       // Create resources
       await this._createResources();
 
@@ -644,7 +731,8 @@ export class SpiderPlugin extends Plugin {
       // Initialize queue backend
       await this._initializeQueuePlugin();
 
-      if (this.config.queue.autoStart !== false) {
+      const autoStart = this.config.processing?.autoStart ?? this.config.queue?.autoStart ?? true;
+      if (autoStart !== false) {
         await this.startProcessing();
       }
 
@@ -1182,6 +1270,67 @@ export class SpiderPlugin extends Plugin {
     if (this.queuePlugin && typeof (this.queuePlugin as any).setProcessor === 'function') {
       (this.queuePlugin as any).setProcessor(processor);
     }
+  }
+
+  /**
+   * Full-site crawl using recker's Spider engine.
+   * Passes the s3db adapters (crawlQueue, crawlStorage, proxy) to recker,
+   * inheriting all anti-bot, retry, and transport fallback features.
+   */
+  async crawl(startUrl: string, options: Record<string, any> = {}): Promise<any> {
+    const { Spider } = await import('recker/scrape') as any;
+
+    const spiderOptions: Record<string, any> = {
+      maxDepth: options.maxDepth ?? this.config.discovery?.maxDepth ?? 3,
+      maxPages: options.maxPages ?? this.config.discovery?.maxUrls ?? 100,
+      sameDomain: options.sameDomain ?? this.config.discovery?.sameDomainOnly ?? true,
+      concurrency: options.concurrency ?? this.config.rateLimit?.concurrency ?? 5,
+      delay: options.delay ?? (this.config.rateLimit?.interval ?? 100),
+      timeout: options.timeout ?? 10000,
+      respectRobotsTxt: options.respectRobotsTxt ?? this.config.discovery?.respectRobotsTxt ?? true,
+      useSitemap: options.useSitemap ?? false,
+      rotateUserAgent: options.rotateUserAgent ?? true,
+      randomizeHeaders: options.randomizeHeaders ?? true,
+      ...options,
+    };
+
+    if (this._crawlQueueAdapter) {
+      spiderOptions.crawlQueue = this._crawlQueueAdapter;
+    }
+
+    if (this._crawlStorageAdapter) {
+      spiderOptions.crawlStorage = this._crawlStorageAdapter;
+    }
+
+    if (this._proxyAdapter) {
+      spiderOptions.proxy = this._proxyAdapter;
+    }
+
+    if (options.extract) {
+      spiderOptions.extract = options.extract;
+    }
+
+    if (options.onPage) {
+      spiderOptions.onPage = options.onPage;
+    }
+
+    if (options.onProgress) {
+      spiderOptions.onProgress = options.onProgress;
+    }
+
+    const spider = new Spider(spiderOptions);
+
+    this.logger.info({ startUrl, maxPages: spiderOptions.maxPages, maxDepth: spiderOptions.maxDepth }, 'Starting recker Spider crawl');
+
+    const result = await spider.crawl(startUrl);
+
+    this.logger.info({
+      pages: result.pages?.length ?? 0,
+      errors: result.errors?.length ?? 0,
+      duration: result.duration,
+    }, 'Recker Spider crawl completed');
+
+    return result;
   }
 
   /**
@@ -1764,6 +1913,14 @@ export class SpiderPlugin extends Plugin {
         await this.ttlPlugin.stop();
         await (this.ttlPlugin as any).destroy?.();
       }
+
+      await this._crawlQueueAdapter?.close?.();
+      await this._crawlStorageAdapter?.close?.();
+      await this._proxyAdapter?.close?.();
+
+      this._crawlQueueAdapter = null;
+      this._crawlStorageAdapter = null;
+      this._proxyAdapter = null;
 
       this.initialized = false;
     } catch (error) {

@@ -1497,6 +1497,105 @@ declare module 'puppeteer-core' {
   export const defaultArgs: (options?: { args?: string[]; userDataDir?: string; devtools?: boolean; headless?: boolean | 'new' }) => string[];
 }
 
+declare module 'recker/scrape/crawl-queue' {
+  export interface CrawlQueueItem {
+    url: string;
+    depth: number;
+    priority?: number;
+    discoveredFrom?: string;
+  }
+
+  export interface CrawlQueueAdapter {
+    push(item: CrawlQueueItem): Promise<void>;
+    pushBatch?(items: CrawlQueueItem[]): Promise<void>;
+    pop(): Promise<CrawlQueueItem | null>;
+    hasVisited(url: string): Promise<boolean>;
+    hasVisitedBatch?(urls: string[]): Promise<Set<string>>;
+    markVisited(url: string): Promise<void>;
+    size(): Promise<number>;
+    clear(): Promise<void>;
+    close?(): Promise<void>;
+  }
+
+  export class InMemoryCrawlQueue implements CrawlQueueAdapter {
+    push(item: CrawlQueueItem): Promise<void>;
+    pushBatch(items: CrawlQueueItem[]): Promise<void>;
+    pop(): Promise<CrawlQueueItem | null>;
+    hasVisited(url: string): Promise<boolean>;
+    hasVisitedBatch(urls: string[]): Promise<Set<string>>;
+    markVisited(url: string): Promise<void>;
+    size(): Promise<number>;
+    clear(): Promise<void>;
+    close(): Promise<void>;
+    getVisited(): Set<string>;
+  }
+}
+
+declare module 'recker/scrape/crawl-storage' {
+  export interface CrawlStorageAdapter {
+    saveResult(result: any): Promise<void>;
+    saveError(error: { url: string; error: string }): Promise<void>;
+    getResultCount(): Promise<number>;
+    getResults(): Promise<any[]>;
+    getErrors(): Promise<Array<{ url: string; error: string }>>;
+    clear(): Promise<void>;
+    close?(): Promise<void>;
+  }
+
+  export class InMemoryCrawlStorage implements CrawlStorageAdapter {
+    saveResult(result: any): Promise<void>;
+    saveError(error: { url: string; error: string }): Promise<void>;
+    getResultCount(): Promise<number>;
+    getResults(): Promise<any[]>;
+    getErrors(): Promise<Array<{ url: string; error: string }>>;
+    clear(): Promise<void>;
+    close(): Promise<void>;
+  }
+}
+
+declare module 'recker/scrape/proxy-adapter' {
+  export interface ProxyAdapter {
+    getProxy(): Promise<string | null>;
+    reportResult?(proxy: string, success: boolean): Promise<void>;
+    close?(): Promise<void>;
+  }
+
+  export class ListProxyAdapter implements ProxyAdapter {
+    constructor(proxies: string[]);
+    getProxy(): Promise<string>;
+    close(): Promise<void>;
+  }
+}
+
+declare module 'redblue-cli' {
+  interface CreateClientOptions {
+    binaryPath?: string;
+    autoDownload?: boolean;
+    channel?: string;
+    targetDir?: string;
+    cwd?: string;
+    env?: Record<string, string>;
+    timeout?: number;
+    maxBuffer?: number;
+  }
+
+  type RouteInvoke = (input?: Record<string, any>, execOptions?: Record<string, any>) => Promise<any>;
+
+  interface RedBlueClient {
+    readonly $binaryPath: string;
+    readonly $manifest: any;
+    $exec(args: string[], execOptions?: Record<string, any>): Promise<any>;
+    $spawn(args: string[], spawnOptions?: Record<string, any>): any;
+    [domain: string]: Record<string, Record<string, RouteInvoke>>;
+  }
+
+  export function createClient(options?: CreateClientOptions): Promise<RedBlueClient>;
+  export function downloadBinary(options?: Record<string, any>): Promise<string>;
+  export function resolveBinary(options?: Record<string, any>): Promise<string>;
+  export function resolveAssetName(options?: Record<string, any>): string;
+  export function getManifest(options?: Record<string, any>): Promise<{ binaryPath: string; manifest: any }>;
+}
+
 declare module 'ws' {
   import type { IncomingMessage } from 'node:http';
   import type { Duplex } from 'node:stream';

@@ -127,3 +127,16 @@ export type {
   ActivityPreset,
   ValidationResult
 } from './task-activities.js';
+
+export {
+  createCrawlQueue,
+  createCrawlStorage,
+  createProxyAdapter,
+  AVAILABLE_CRAWL_QUEUE_DRIVERS,
+  AVAILABLE_CRAWL_STORAGE_DRIVERS,
+  AVAILABLE_PROXY_DRIVERS
+} from './adapters/index.js';
+export type {
+  AdapterContext,
+  AdapterDriverConfig
+} from './adapters/index.js';
