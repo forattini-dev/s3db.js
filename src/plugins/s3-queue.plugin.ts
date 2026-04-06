@@ -23,6 +23,8 @@ interface Resource {
   renewQueueLock?: (queueId: string, lockToken: string, extraMilliseconds: number) => Promise<boolean>;
   clearQueueCache?: () => void;
   countQueue?: (status?: QueueMessageStatusQuery) => Promise<number>;
+  countQueueBy?: (filter: Record<string, unknown>) => Promise<number>;
+  queueStatsBy?: (filter: Record<string, unknown>) => Promise<QueueStats>;
   truncateQueue?: (options?: QueuePurgeOptions) => Promise<QueuePurgeResult>;
   deleteQueue?: (options?: QueueDeleteOptions) => Promise<QueueDeleteResult>;
   estimateQueueUsage?: (options?: QueueUsageEstimateOptions) => QueueUsageEstimate;
@@ -67,6 +69,7 @@ interface QueueEntry {
 
 interface EnqueueOptions {
   maxAttempts?: number;
+  metadata?: Record<string, unknown>;
 }
 
 interface QueueStats {
@@ -300,6 +303,8 @@ export interface S3QueuePluginOptions extends CoordinatorConfig {
   consumerJitterMs?: number;
   retryJitterMs?: number;
   autoAcknowledge?: boolean;
+  metadata?: Record<string, string>;
+  partitions?: Record<string, PartitionConfig>;
 }
 
 interface S3QueueConfig {
@@ -332,6 +337,8 @@ interface S3QueueConfig {
   consumerJitterMs: number;
   retryJitterMs: number;
   autoAcknowledge: boolean;
+  metadata: Record<string, string>;
+  partitions: Record<string, PartitionConfig>;
 }
 
 export class S3QueuePlugin extends CoordinatorPlugin<S3QueuePluginOptions> {
@@ -414,6 +421,8 @@ export class S3QueuePlugin extends CoordinatorPlugin<S3QueuePluginOptions> {
       consumerJitterMs = 0,
       retryJitterMs = 0,
       autoAcknowledge = false,
+      metadata = {},
+      partitions = {},
       ...rest
     } = this.options;
 
@@ -480,7 +489,9 @@ export class S3QueuePlugin extends CoordinatorPlugin<S3QueuePluginOptions> {
       heartbeatTTL,
       consumerJitterMs: Math.max(0, Math.floor(consumerJitterMs)),
       retryJitterMs: Math.max(0, Math.floor(retryJitterMs)),
-      autoAcknowledge
+      autoAcknowledge,
+      metadata,
+      partitions
     };
 
     if (this.config.failureStrategy.deadLetterQueue) {
@@ -573,13 +584,15 @@ export class S3QueuePlugin extends CoordinatorPlugin<S3QueuePluginOptions> {
           error: 'string|optional',
           result: 'json|optional',
           createdAt: 'datetime|required',
-          completedAt: 'datetime|optional'
+          completedAt: 'datetime|optional',
+          ...this.config.metadata
         },
         behavior: 'body-overflow',
         timestamps: true,
         asyncPartitions: true,
         partitions: {
-          byStatus: { fields: { status: 'string' } }
+          byStatus: { fields: { status: 'string' } },
+          ...this.config.partitions
         }
       })
     );
@@ -654,7 +667,8 @@ export class S3QueuePlugin extends CoordinatorPlugin<S3QueuePluginOptions> {
         attempts: 0,
         maxAttempts: maxAttemptsForMessage,
         queuedAt: now,
-        createdAt: new Date(now).toISOString()
+        createdAt: new Date(now).toISOString(),
+        ...(options.metadata || {})
       };
 
       await plugin.queueResource!.insert(queueEntry);
@@ -693,6 +707,14 @@ export class S3QueuePlugin extends CoordinatorPlugin<S3QueuePluginOptions> {
 
     resource.clearQueueCache = function(): void {
       plugin.clearProcessedCache();
+    };
+
+    resource.countQueueBy = async function(filter: Record<string, unknown>): Promise<number> {
+      return await plugin.countQueueBy(filter);
+    };
+
+    resource.queueStatsBy = async function(filter: Record<string, unknown>): Promise<QueueStats> {
+      return await plugin.queueStatsBy(filter);
     };
 
     resource.truncateQueue = async function(options: QueuePurgeOptions = {}): Promise<QueuePurgeResult> {
@@ -1955,6 +1977,105 @@ export class S3QueuePlugin extends CoordinatorPlugin<S3QueuePluginOptions> {
     }
 
     return (count as number) || 0;
+  }
+
+  private _resolveFilterToPartition(filter: Record<string, unknown>): { partition: string; partitionValues: Record<string, unknown> } | null {
+    const allPartitions: Record<string, PartitionConfig> = {
+      byStatus: { fields: { status: 'string' } },
+      ...this.config.partitions
+    };
+
+    const filterKeys = Object.keys(filter).sort();
+
+    let bestMatch: { partition: string; partitionValues: Record<string, unknown> } | null = null;
+    let bestMatchSize = 0;
+
+    for (const [partitionName, partitionDef] of Object.entries(allPartitions)) {
+      const partitionFields = Object.keys(partitionDef.fields).sort();
+      const allFieldsPresent = partitionFields.every(f => f in filter);
+
+      if (allFieldsPresent && partitionFields.length > bestMatchSize) {
+        const partitionValues: Record<string, unknown> = {};
+        for (const f of partitionFields) {
+          partitionValues[f] = filter[f];
+        }
+        bestMatch = { partition: partitionName, partitionValues };
+        bestMatchSize = partitionFields.length;
+      }
+    }
+
+    return bestMatch;
+  }
+
+  async countQueueBy(filter: Record<string, unknown>): Promise<number> {
+    if (!this.queueResource) {
+      return 0;
+    }
+
+    const resolved = this._resolveFilterToPartition(filter);
+    const countArgs = resolved
+      ? { partition: resolved.partition, partitionValues: resolved.partitionValues }
+      : {};
+
+    const [ok, err, count] = await tryFn(() =>
+      this.queueResource!.count(countArgs as Record<string, unknown>)
+    );
+
+    if (!ok) {
+      this.logger.warn(
+        { filter, error: (err as Error).message },
+        `Failed to count queue messages with filter: ${(err as Error).message}`
+      );
+      return 0;
+    }
+
+    return (count as number) || 0;
+  }
+
+  async queueStatsBy(filter: Record<string, unknown>): Promise<QueueStats> {
+    if (!this.queueResource) {
+      return { total: 0, pending: 0, processing: 0, completed: 0, failed: 0, dead: 0 };
+    }
+
+    const statusKeys: Array<'pending' | 'processing' | 'completed' | 'failed' | 'dead'> = ['pending', 'processing', 'completed', 'failed', 'dead'];
+    const stats: QueueStats = { total: 0, pending: 0, processing: 0, completed: 0, failed: 0, dead: 0 };
+
+    const counts = await Promise.all(
+      statusKeys.map(status => {
+        const statusFilter = { ...filter, status };
+        const resolved = this._resolveFilterToPartition(statusFilter);
+        const countArgs = resolved
+          ? { partition: resolved.partition, partitionValues: resolved.partitionValues }
+          : {};
+        return tryFn(() => this.queueResource!.count(countArgs as Record<string, unknown>));
+      })
+    );
+
+    let derivedTotal = 0;
+    counts.forEach(([ok, err, count], index) => {
+      const status = statusKeys[index]!;
+      if (ok) {
+        stats[status] = (count as number) || 0;
+        derivedTotal += (count as number) || 0;
+      } else {
+        this.logger.warn(
+          { status, filter, error: (err as Error)?.message },
+          `Failed to count status '${status}' with filter: ${(err as Error)?.message}`
+        );
+      }
+    });
+
+    const resolved = this._resolveFilterToPartition(filter);
+    const totalArgs = resolved
+      ? { partition: resolved.partition, partitionValues: resolved.partitionValues }
+      : {};
+    const [totalOk, , totalCount] = await tryFn(() =>
+      this.queueResource!.count(totalArgs as Record<string, unknown>)
+    );
+
+    stats.total = totalOk ? ((totalCount as number) || 0) : derivedTotal;
+
+    return stats;
   }
 
   async createDeadLetterResource(): Promise<void> {
