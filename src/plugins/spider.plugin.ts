@@ -5,7 +5,7 @@ import { requirePluginDependency } from './concerns/plugin-dependencies.js';
 import { getValidatedNamespace } from './namespace.js';
 import { PuppeteerPlugin } from './puppeteer.plugin.js';
 import { S3QueuePlugin } from './s3-queue.plugin.js';
-import { QueueConsumerPlugin, type QueueConsumerPluginOptions } from './queue-consumer.plugin.js';
+import { QueueConsumerPlugin, type QueueConsumerPluginOptions, type DriverDefinition } from './queue-consumer.plugin.js';
 import { TTLPlugin } from './ttl.plugin.js';
 import tryFn from '../concerns/try-fn.js';
 import { PluginError } from '../errors.js';
@@ -101,6 +101,8 @@ export interface SpiderQueueConfig {
   retryDelay?: number;
   s3?: Record<string, any>;
   consumer?: SpiderQueueConsumerOptions;
+  drivers?: DriverDefinition[];
+  /** @deprecated Use `drivers` instead */
   consumers?: QueueConsumerPluginOptions['consumers'];
   [key: string]: any;
 }

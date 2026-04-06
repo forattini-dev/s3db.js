@@ -28,18 +28,25 @@ interface Consumer {
   publish(data: unknown, options?: unknown): Promise<unknown>;
 }
 
-interface ConsumerDefinition {
+export interface QueueDefinition {
   name?: string;
-  resources: string | string[];
+  resources?: string | string[];
+  onMessage?: (message: QueueMessage, context: QueueMessageContext) => Promise<unknown>;
   queueUrl?: string;
   queueName?: string;
   [key: string]: unknown;
 }
 
-interface DriverDefinition {
+export interface DriverDefinition {
   driver: string;
-  config?: Record<string, unknown>;
-  consumers?: ConsumerDefinition[];
+  queues?: QueueDefinition[];
+  [key: string]: unknown;
+}
+
+export interface QueueMessageContext {
+  driver: string;
+  queueName: string;
+  raw: unknown;
 }
 
 interface QueueMessage {
@@ -47,11 +54,12 @@ interface QueueMessage {
   action?: string;
   data?: Record<string, unknown>;
   $body?: QueueMessage;
+  [key: string]: unknown;
 }
 
 interface StartTask {
   driver: string;
-  resource: string;
+  queueName: string;
   start: () => Promise<void>;
 }
 
@@ -60,12 +68,30 @@ interface StopTask {
   stop: () => Promise<void>;
 }
 
+/** @deprecated Use DriverDefinition instead */
+interface LegacyDriverDefinition {
+  driver: string;
+  config?: Record<string, unknown>;
+  consumers?: LegacyConsumerDefinition[];
+}
+
+/** @deprecated Use QueueDefinition instead */
+interface LegacyConsumerDefinition {
+  name?: string;
+  resources: string | string[];
+  queueUrl?: string;
+  queueName?: string;
+  [key: string]: unknown;
+}
+
 export interface QueueConsumerPluginOptions {
-  consumers?: DriverDefinition[];
+  drivers?: DriverDefinition[];
   startConcurrency?: number;
   stopConcurrency?: number;
   logger?: Logger;
   logLevel?: string;
+  /** @deprecated Use `drivers` instead */
+  consumers?: LegacyDriverDefinition[];
 }
 
 export class QueueConsumerPlugin extends Plugin {
@@ -88,40 +114,80 @@ export class QueueConsumerPlugin extends Plugin {
       this.logger = createLogger({ name: 'QueueConsumerPlugin', level: logLevel as any });
     }
 
-    this.driversConfig = Array.isArray(options.consumers) ? options.consumers : [];
+    this.driversConfig = this._normalizeDriversConfig(options);
     this.consumers = [];
     this.startConcurrency = Math.max(1, options.startConcurrency ?? 5);
     this.stopConcurrency = Math.max(1, options.stopConcurrency ?? this.startConcurrency);
+  }
+
+  private _normalizeDriversConfig(options: QueueConsumerPluginOptions): DriverDefinition[] {
+    if (options.drivers) {
+      return options.drivers;
+    }
+
+    if (options.consumers) {
+      return options.consumers.map((legacy: LegacyDriverDefinition) => {
+        const { driver, config = {}, consumers: legacyQueues = [], ...rest } = legacy;
+        return {
+          driver,
+          ...config,
+          ...rest,
+          queues: legacyQueues.map((q: LegacyConsumerDefinition) => ({ ...q }))
+        } as DriverDefinition;
+      });
+    }
+
+    return [];
   }
 
   override async onInstall(): Promise<void> {
     const startTasks: StartTask[] = [];
 
     for (const driverDef of this.driversConfig) {
-      const { driver, config: driverConfig = {}, consumers: consumerDefs = [] } = driverDef;
+      const { driver, queues = [], ...driverConfig } = driverDef;
 
-      for (const consumerDef of consumerDefs) {
-        const { resources, name: explicitName, ...consumerConfig } = consumerDef;
-        const resourceList = Array.isArray(resources) ? resources : [resources];
+      for (const queueDef of queues) {
+        const { resources, name: explicitName, onMessage: customHandler, ...queueConfig } = queueDef;
+        const queueName = explicitName || this._deriveQueueName(driver, { ...driverConfig, ...queueConfig }, String(resources || 'custom'));
 
-        for (const resource of resourceList) {
+        if (customHandler) {
           startTasks.push({
             driver,
-            resource,
+            queueName,
             start: async () => {
-              const mergedConfig = { ...driverConfig, ...consumerConfig };
+              const mergedConfig = { ...driverConfig, ...queueConfig };
               const consumer = await createConsumer(driver, {
                 ...mergedConfig,
-                onMessage: (msg: QueueMessage) => this._handleMessage(msg, resource),
-                onError: (err: Error, raw: unknown) => this._handleError(err, raw, resource)
+                onMessage: (msg: QueueMessage) => customHandler(msg, { driver, queueName, raw: msg }),
+                onError: (err: Error, raw: unknown) => this._handleError(err, raw, queueName)
               });
               await consumer.start();
               this.consumers.push(consumer);
-
-              const consumerName = explicitName || this._deriveConsumerName(driver, mergedConfig, resource);
-              this._consumersByName.set(consumerName, consumer);
+              this._consumersByName.set(queueName, consumer);
             }
           });
+        } else {
+          const resourceList = Array.isArray(resources) ? resources : [resources].filter(Boolean);
+
+          for (const resource of resourceList) {
+            const resourceQueueName = explicitName || this._deriveQueueName(driver, { ...driverConfig, ...queueConfig }, resource as string);
+
+            startTasks.push({
+              driver,
+              queueName: resourceQueueName,
+              start: async () => {
+                const mergedConfig = { ...driverConfig, ...queueConfig };
+                const consumer = await createConsumer(driver, {
+                  ...mergedConfig,
+                  onMessage: (msg: QueueMessage) => this._handleMessage(msg, resource as string),
+                  onError: (err: Error, raw: unknown) => this._handleError(err, raw, resource as string)
+                });
+                await consumer.start();
+                this.consumers.push(consumer);
+                this._consumersByName.set(resourceQueueName, consumer);
+              }
+            });
+          }
         }
       }
     }
@@ -134,7 +200,7 @@ export class QueueConsumerPlugin extends Plugin {
       startTasks,
       async (task: StartTask) => {
         await task.start();
-        return `${task.driver}:${task.resource}`;
+        return `${task.driver}:${task.queueName}`;
       },
       { concurrency: this.startConcurrency }
     );
@@ -143,7 +209,7 @@ export class QueueConsumerPlugin extends Plugin {
       const messages = errors.map((errorInfo) => {
         const task = errorInfo.item as StartTask | undefined;
         const reason = errorInfo.error;
-        const identifier = task ? `${task.driver || 'unknown'}:${task.resource || 'unknown'}` : 'unknown';
+        const identifier = task ? `${task.driver || 'unknown'}:${task.queueName || 'unknown'}` : 'unknown';
         return `[${identifier}] ${reason?.message || reason}`;
       });
 
@@ -280,9 +346,14 @@ export class QueueConsumerPlugin extends Plugin {
     return Array.from(this._consumersByName.keys());
   }
 
-  _deriveConsumerName(driver: string, config: Record<string, unknown>, resource: string): string {
+  _deriveQueueName(driver: string, config: Record<string, unknown>, resource: string): string {
     const queueId = config.queueUrl || config.queue || config.key || config.stream || (config.channels as string[])?.[0] || resource;
     return `${driver}:${queueId}`;
+  }
+
+  /** @deprecated Use _deriveQueueName instead */
+  _deriveConsumerName(driver: string, config: Record<string, unknown>, resource: string): string {
+    return this._deriveQueueName(driver, config, resource);
   }
 
   _handleError(_err: Error, _raw: unknown, _resourceName: string): void {

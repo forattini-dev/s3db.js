@@ -215,6 +215,7 @@ export { ReconPlugin } from './recon.plugin.js';
 export { GeoPlugin } from './geo.plugin.js';
 export { ReplicatorPlugin } from './replicator.plugin.js';
 export { QueueConsumerPlugin } from './queue-consumer.plugin.js';
+export type { QueueConsumerPluginOptions, DriverDefinition, QueueDefinition, QueueMessageContext } from './queue-consumer.plugin.js';
 export { WebSocketPlugin, WebSocketServer } from './websocket/index.js';
 
 export type {
