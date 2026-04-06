@@ -54,6 +54,7 @@ await tasks.enqueue({ type: 'send-email', data: {...} });
 - ✅ Automatic retry with exponential backoff
 - ✅ Dead letter queue
 - ✅ Configurable worker pool
+- ✅ Custom metadata & partitions (per-client queues, count by partition)
 
 **When to use:**
 - 📧 Email/SMS queues

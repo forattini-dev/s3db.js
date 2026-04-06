@@ -10,14 +10,11 @@
 
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
-| `enabled` | boolean | `true` | Enable/disable queue consumption |
-| `consumers` | array | `[]` | Array of consumer configurations |
-| `batchSize` | number | `10` | Messages to process per batch |
-| `concurrency` | number | `5` | Concurrent message processing |
-| `retryAttempts` | number | `3` | Retry failed message processing |
-| `retryDelay` | number | `1000` | Delay between retries (ms) |
-| `deadLetterQueue` | string | `null` | DLQ for failed messages |
-| `logLevel` | string | `'info'` | Logging level (debug/info/warn/error) |
+| `drivers` | array | `[]` | Driver configurations (new API) |
+| `consumers` | array | `[]` | Legacy format (deprecated, auto-normalized to `drivers`) |
+| `startConcurrency` | number | `5` | Concurrent driver startup |
+| `stopConcurrency` | number | same as start | Concurrent driver shutdown |
+| `logLevel` | string | `'info'` | Logging level (debug/info/warn/error/silent) |
 
 ---
 
@@ -27,6 +24,10 @@
 |--------|---------|---------|-----------------|
 | `sqs` | `@aws-sdk/client-sqs` | `^3.0.0` | `pnpm add @aws-sdk/client-sqs` |
 | `rabbitmq` | `amqplib` | `^0.10.0` | `pnpm add amqplib` |
+| `redis-list` | `ioredis` | `^5.4.1` | `pnpm add ioredis` |
+| `redis-stream` | `ioredis` | `^5.4.1` | `pnpm add ioredis` |
+| `redis-pubsub` | `ioredis` | `^5.4.1` | `pnpm add ioredis` |
+| `bullmq` | `bullmq` | `>=5.0.0` | `pnpm add bullmq` |
 
 ---
 
@@ -35,28 +36,18 @@
 ```javascript
 {
   driver: 'sqs',
-  config: {
-    queueUrl: 'https://sqs.us-east-1.amazonaws.com/123456789012/my-queue',
-    region: 'us-east-1',
-    credentials: {
-      accessKeyId: process.env.AWS_ACCESS_KEY_ID,
-      secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY
-    },
-    pollingInterval: 1000,      // Polling frequency (ms)
-    maxMessages: 10,            // Max messages per poll
-    visibilityTimeout: 300,     // Message visibility timeout (seconds)
-    waitTimeSeconds: 20,        // Long polling duration
-    deleteAfterProcessing: true // Auto-delete processed messages
+  queueUrl: 'https://sqs.us-east-1.amazonaws.com/123456789012/my-queue',
+  region: 'us-east-1',
+  credentials: {
+    accessKeyId: process.env.AWS_ACCESS_KEY_ID,
+    secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY
   },
-  consumers: [
+  poolingInterval: 1000,      // Polling frequency (ms)
+  maxMessages: 10,            // Max messages per poll
+  queues: [
     {
       resources: ['users', 'products'],
-      queueUrl: 'specific-queue-url',  // Override default queue
-      concurrency: 10,
-      transform: (message) => ({
-        ...message,
-        processed_at: new Date().toISOString()
-      })
+      queueUrl: 'specific-queue-url'  // Override default queue
     }
   ]
 }
@@ -100,25 +91,13 @@
 ```javascript
 {
   driver: 'rabbitmq',
-  config: {
-    amqpUrl: 'amqp://user:pass@localhost:5672',
-    exchange: 'my-exchange',
-    exchangeType: 'topic',      // Exchange type: direct, topic, fanout
-    prefetch: 10,               // Message prefetch count
-    reconnectInterval: 2000,    // Reconnection interval (ms)
-    heartbeat: 60,              // Heartbeat interval (seconds)
-    durable: true               // Durable connections and queues
-  },
-  consumers: [
+  amqpUrl: 'amqp://user:pass@localhost:5672',
+  queue: 'orders-queue',
+  prefetch: 10,
+  reconnectInterval: 2000,
+  queues: [
     {
-      resources: ['orders'],
-      queue: 'orders-queue',
-      routingKey: 'order.*',    // Routing key pattern
-      transform: (message) => ({
-        ...message.content,
-        routing_key: message.fields.routingKey,
-        received_at: new Date().toISOString()
-      })
+      resources: ['orders']
     }
   ]
 }
@@ -171,24 +150,31 @@ Expected message structure:
 
 ---
 
-## Consumer Configuration
+## Configuration Interfaces
 
-```javascript
-interface ConsumerConfig {
-  driver: 'sqs' | 'rabbitmq' | string;
-  config: DriverConfig;
-  consumers: ResourceConsumer[];
+```typescript
+interface DriverDefinition {
+  driver: string;                  // 'sqs' | 'rabbitmq' | 'redis-list' | 'redis-stream' | 'redis-pubsub' | 'bullmq'
+  queues?: QueueDefinition[];      // Queue definitions
+  [key: string]: unknown;          // Driver-specific config (flattened at top level)
 }
 
-interface ResourceConsumer {
-  resources: string | string[];   // Target resource(s)
-  queue?: string;                 // RabbitMQ queue name
-  queueUrl?: string;              // SQS queue URL override
-  routingKey?: string;            // RabbitMQ routing key
-  concurrency?: number;           // Per-consumer concurrency
-  transform?: (message: any) => any;  // Message transformation
+interface QueueDefinition {
+  name?: string;                   // Explicit name (used for publish/getPublisher)
+  resources?: string | string[];   // Target resource(s) for CRUD routing
+  onMessage?: (msg, ctx) => Promise<unknown>;  // Custom handler (no resource needed)
+  [key: string]: unknown;          // Queue-specific overrides
+}
+
+interface QueueMessageContext {
+  driver: string;                  // Driver name
+  queueName: string;               // Resolved queue name
+  raw: unknown;                    // Raw message from driver
 }
 ```
+
+When `onMessage` is set on a queue, it bypasses the resource+action CRUD flow entirely.
+When `resources` is set without `onMessage`, the default handler expects messages with `{ resource, action, data }`.
 
 ---
 
@@ -251,13 +237,10 @@ plugin.on('consumer_disconnected', (data) => {
 
 ```javascript
 new QueueConsumerPlugin({
-  enabled?: boolean,
-  consumers: ConsumerConfig[],
-  batchSize?: number,
-  concurrency?: number,
-  retryAttempts?: number,
-  retryDelay?: number,
-  deadLetterQueue?: string,
+  drivers?: DriverDefinition[],     // New API
+  consumers?: LegacyFormat[],       // Deprecated, auto-normalized
+  startConcurrency?: number,
+  stopConcurrency?: number,
   logLevel?: string
 })
 ```
@@ -266,36 +249,36 @@ new QueueConsumerPlugin({
 
 | Method | Description | Returns |
 |--------|-------------|---------|
-| `start()` | Start consuming messages | `Promise<void>` |
-| `stop()` | Stop consuming messages | `Promise<void>` |
-| `isProcessing()` | Check if currently processing | `boolean` |
-| `getStats()` | Get processing statistics | `ProcessingStats` |
-
-### start()
-
-```javascript
-await queueConsumerPlugin.start();
-// Queue consumer started! Listening for messages...
-```
+| `stop()` | Stop all consumers | `Promise<void>` |
+| `publish(target, data, options?)` | Publish to a named consumer | `Promise<unknown>` |
+| `getPublisher(target)` | Get a consumer instance by name | `Consumer \| undefined` |
+| `listPublishers()` | List all registered consumer names | `string[]` |
 
 ### stop()
 
 ```javascript
-await queueConsumerPlugin.stop();
-// Queue consumer stopped. Current messages will finish processing.
+await plugin.stop();
+// All consumers stopped. Current messages will finish processing.
 ```
 
-### getStats()
+### publish()
 
 ```javascript
-const stats = queueConsumerPlugin.getStats();
-// {
-//   processed: 10000,
-//   failed: 50,
-//   retries: 120,
-//   uptime: 3600000,
-//   messagesPerSecond: 2.78
-// }
+await plugin.publish('sqs:https://sqs.../queue', {
+  resource: 'users',
+  action: 'insert',
+  data: { name: 'Alice' }
+});
+```
+
+### getPublisher() / listPublishers()
+
+```javascript
+const publishers = plugin.listPublishers();
+// ['sqs:https://sqs.../queue', 'bullmq:email-jobs']
+
+const sqsPublisher = plugin.getPublisher('sqs:https://sqs.../queue');
+await sqsPublisher.publish({ ... });
 ```
 
 ---
@@ -314,16 +297,11 @@ const getQueueConfig = () => {
   if (env === 'production') {
     return {
       ...baseConfig,
-      batchSize: 50,
-      concurrency: 20,
-      consumers: [{
+      drivers: [{
         driver: 'sqs',
-        config: {
-          queueUrl: process.env.PROD_SQS_QUEUE_URL,
-          region: process.env.AWS_REGION,
-          visibilityTimeout: 300
-        },
-        consumers: [{ resources: ['users', 'orders'] }]
+        queueUrl: process.env.PROD_SQS_QUEUE_URL,
+        region: process.env.AWS_REGION,
+        queues: [{ resources: ['users', 'orders'] }]
       }]
     };
   }
@@ -331,15 +309,11 @@ const getQueueConfig = () => {
   if (env === 'staging') {
     return {
       ...baseConfig,
-      batchSize: 20,
-      concurrency: 5,
-      consumers: [{
+      drivers: [{
         driver: 'sqs',
-        config: {
-          queueUrl: process.env.STAGING_SQS_QUEUE_URL,
-          region: process.env.AWS_REGION
-        },
-        consumers: [{ resources: ['users'] }]
+        queueUrl: process.env.STAGING_SQS_QUEUE_URL,
+        region: process.env.AWS_REGION,
+        queues: [{ resources: ['users'] }]
       }]
     };
   }

@@ -34,6 +34,16 @@ new S3QueuePlugin({
   autoStart: true,                // Start workers immediately
   logLevel: 'silent',                 // Enable debug logging
 
+  // === Custom Metadata & Partitions ===
+  metadata: {                       // Extra attributes on queue entries
+    clientId: 'string|required',
+    priority: 'string|optional'
+  },
+  partitions: {                     // Custom S3 partition indexes
+    byClient: { fields: { clientId: 'string' } },
+    byStatusAndClient: { fields: { status: 'string', clientId: 'string' } }
+  },
+
   // === Callbacks ===
   onError: (error, record) => {
     // Handle errors
@@ -46,6 +56,8 @@ new S3QueuePlugin({
 
 Key tuning knobs:
 
+- `metadata` – extra attributes stored on each queue entry (e.g., `clientId`). These become part of the queue resource schema.
+- `partitions` – custom S3 partition indexes merged with the default `byStatus` partition. Enable efficient counting and querying by custom fields.
 - `pollBatchSize` – caps how many pending items each worker fetches per poll.
 - `maxPollInterval` – enables adaptive polling when the queue is empty.
 - `recoveryInterval` – controls how often the plugin scans for stalled messages.

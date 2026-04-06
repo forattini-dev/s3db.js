@@ -1,31 +1,31 @@
 # Queue Consumer Plugin
 
-> **Bridge SQS and RabbitMQ messages into S3DB insert/update/delete operations.**
+> **Bridge external queues (SQS, RabbitMQ, Redis, BullMQ) into S3DB operations or custom handlers.**
 
 ---
 
 ## TLDR
 
-**Consumes messages from SQS/RabbitMQ and automatically processes them as insert/update/delete operations on your S3DB resources.**
+**Consumes messages from external queues. Route them to S3DB resources (insert/update/delete) or handle with custom logic.**
 
 **2 lines to get started:**
 ```javascript
-const consumer = new QueueConsumerPlugin({ consumers: [{ driver: 'sqs', config: { queueUrl: '...' }, consumers: [{ resources: 'users' }] }] });
-await db.usePlugin(consumer); await consumer.start();
+const consumer = new QueueConsumerPlugin({ drivers: [{ driver: 'sqs', queueUrl: '...', queues: [{ resources: 'users' }] }] });
+await db.usePlugin(consumer);
 ```
 
 **Key features:**
-- 2 Drivers (SQS, RabbitMQ)
-- Auto-processing: message → insert/update/delete
-- Concurrent processing + batching
-- Retry logic + dead letter queue
-- Custom message transformations
+- 6 Drivers (SQS, RabbitMQ, Redis List, Redis Stream, Redis PubSub, BullMQ)
+- Auto-processing: message → insert/update/delete on resources
+- Custom `onMessage` handlers (no resource required)
+- Concurrent startup + graceful shutdown
+- Publish back to any queue
 
 **Use cases:**
 - Event-driven architectures
 - Microservices communication
 - Real-time data sync
-- Webhook processing
+- Custom event listeners without S3DB resources
 
 ---
 
@@ -46,26 +46,42 @@ const users = await db.createResource({
   }
 });
 
+// Route SQS messages to a resource (insert/update/delete)
 const queueConsumerPlugin = new QueueConsumerPlugin({
-  consumers: [{
+  drivers: [{
     driver: 'sqs',
-    config: {
-      queueUrl: 'https://sqs.us-east-1.amazonaws.com/123456789012/my-queue',
-      region: 'us-east-1'
-    },
-    consumers: [{
-      resources: 'users',
-      concurrency: 5
+    queueUrl: 'https://sqs.us-east-1.amazonaws.com/123456789012/my-queue',
+    region: 'us-east-1',
+    queues: [{
+      resources: 'users'
     }]
   }]
 });
 
 await db.usePlugin(queueConsumerPlugin);
-await queueConsumerPlugin.start();
 
 // Messages are automatically processed!
-// { "resource": "users", "action": "inserted", "data": { "name": "Alice" } }
+// { "resource": "users", "action": "insert", "data": { "name": "Alice" } }
 // → users.insert({ name: "Alice" })
+```
+
+### Custom Handler (no resource required)
+
+```javascript
+const consumer = new QueueConsumerPlugin({
+  drivers: [{
+    driver: 'sqs',
+    queueUrl: 'https://sqs.../events',
+    region: 'us-east-1',
+    queues: [{
+      name: 'event-listener',
+      onMessage: async (msg, context) => {
+        console.log('Event received:', msg.$body);
+        console.log('Driver:', context.driver, 'Queue:', context.queueName);
+      }
+    }]
+  }]
+});
 ```
 
 ---
@@ -75,17 +91,20 @@ await queueConsumerPlugin.start();
 **Peer Dependencies:** (install only what you need)
 
 ```bash
-# For AWS SQS
-pnpm add @aws-sdk/client-sqs
-
-# For RabbitMQ
-pnpm add amqplib
+pnpm add @aws-sdk/client-sqs   # SQS
+pnpm add amqplib                # RabbitMQ
+pnpm add ioredis                # Redis List / Stream / PubSub
+pnpm add bullmq                 # BullMQ
 ```
 
-| Driver | Package | Version | Required |
-|--------|---------|---------|----------|
-| SQS | `@aws-sdk/client-sqs` | `^3.0.0` | Optional |
-| RabbitMQ | `amqplib` | `^0.10.0` | Optional |
+| Driver | Package | Version |
+|--------|---------|---------|
+| `sqs` | `@aws-sdk/client-sqs` | `^3.0.0` |
+| `rabbitmq` | `amqplib` | `^0.10.0` |
+| `redis-list` | `ioredis` | `^5.4.1` |
+| `redis-stream` | `ioredis` | `^5.4.1` |
+| `redis-pubsub` | `ioredis` | `^5.4.1` |
+| `bullmq` | `bullmq` | `>=5.0.0` |
 
 ---
 
@@ -105,20 +124,22 @@ pnpm add amqplib
 
 | Driver | Description | Features |
 |--------|-------------|----------|
-| **SQS** | AWS Simple Queue Service | Long polling, visibility timeout, FIFO support |
-| **RabbitMQ** | AMQP message broker | Exchanges, routing keys, prefetch |
+| **sqs** | AWS Simple Queue Service | Long polling, visibility timeout, FIFO support |
+| **rabbitmq** | AMQP message broker | Exchanges, routing keys, prefetch |
+| **redis-list** | Redis List (LPUSH/BRPOP) | FIFO/LIFO, blocking pop |
+| **redis-stream** | Redis Streams + Consumer Groups | XREADGROUP, auto-claim stalled |
+| **redis-pubsub** | Redis Pub/Sub | Channels, pattern subscriptions |
+| **bullmq** | BullMQ (Redis-backed) | Job scheduling, rate limiting, concurrency |
 
 ### Core Options
 
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
-| `enabled` | boolean | `true` | Enable/disable consumption |
-| `consumers` | array | Required | Consumer configurations |
-| `batchSize` | number | `10` | Messages per batch |
-| `concurrency` | number | `5` | Concurrent processing |
-| `retryAttempts` | number | `3` | Retry failed messages |
-| `retryDelay` | number | `1000` | Delay between retries (ms) |
-| `deadLetterQueue` | string | `null` | DLQ for failed messages |
+| `drivers` | array | `[]` | Driver configurations (new API) |
+| `consumers` | array | `[]` | Legacy format (auto-normalized, deprecated) |
+| `startConcurrency` | number | `5` | Concurrent driver startup |
+| `stopConcurrency` | number | same as start | Concurrent driver shutdown |
+| `logLevel` | string | `'info'` | Log level |
 
 ### Message Format
 
@@ -134,18 +155,17 @@ pnpm add amqplib
 ### Plugin Methods
 
 ```javascript
-// Start consuming
-await plugin.start();
-
-// Stop consuming
+// Stop all consumers
 await plugin.stop();
 
-// Check status
-plugin.isProcessing();
+// Publish to a named consumer
+await plugin.publish('sqs:https://sqs.../queue', { resource: 'users', action: 'insert', data: {...} });
 
-// Get statistics
-plugin.getStats();
-// { processed: 10000, failed: 50, retries: 120, uptime: 3600000 }
+// Get a publisher instance
+const publisher = plugin.getPublisher('sqs:https://sqs.../queue');
+
+// List all registered publishers
+plugin.listPublishers(); // ['sqs:https://sqs.../queue', 'bullmq:jobs']
 ```
 
 ### Events
@@ -182,15 +202,11 @@ plugin.on('batch_completed', (data) => {
 
 ```javascript
 new QueueConsumerPlugin({
-  consumers: [{
+  drivers: [{
     driver: 'sqs',
-    config: {
-      queueUrl: 'https://sqs.us-east-1.amazonaws.com/.../my-queue',
-      region: 'us-east-1',
-      visibilityTimeout: 300,
-      waitTimeSeconds: 20
-    },
-    consumers: [{ resources: 'users', concurrency: 10 }]
+    queueUrl: 'https://sqs.us-east-1.amazonaws.com/.../my-queue',
+    region: 'us-east-1',
+    queues: [{ resources: 'users' }]
   }]
 })
 ```
@@ -199,37 +215,64 @@ new QueueConsumerPlugin({
 
 ```javascript
 new QueueConsumerPlugin({
-  consumers: [{
+  drivers: [{
     driver: 'rabbitmq',
-    config: {
-      amqpUrl: 'amqp://user:pass@localhost:5672',
-      exchange: 'events',
-      exchangeType: 'topic',
-      prefetch: 10
-    },
-    consumers: [{
-      resources: 'orders',
-      queue: 'order-queue',
-      routingKey: 'order.*'
+    amqpUrl: 'amqp://user:pass@localhost:5672',
+    queue: 'order-queue',
+    prefetch: 10,
+    queues: [{
+      resources: 'orders'
     }]
   }]
 })
 ```
 
-### Message Transform
+### Redis Stream Consumer
 
 ```javascript
 new QueueConsumerPlugin({
-  consumers: [{
+  drivers: [{
+    driver: 'redis-stream',
+    host: 'localhost',
+    port: 6379,
+    stream: 'events',
+    group: 'my-group',
+    consumer: 'worker-1',
+    queues: [{ resources: 'events' }]
+  }]
+})
+```
+
+### BullMQ Consumer
+
+```javascript
+new QueueConsumerPlugin({
+  drivers: [{
+    driver: 'bullmq',
+    connection: { host: 'localhost', port: 6379 },
+    queue: 'email-jobs',
+    concurrency: 5,
+    queues: [{ resources: 'emails' }]
+  }]
+})
+```
+
+### Custom Handler (no resource)
+
+```javascript
+new QueueConsumerPlugin({
+  drivers: [{
     driver: 'sqs',
-    config: { queueUrl: '...' },
-    consumers: [{
-      resources: 'users',
-      transform: (message) => ({
-        ...message.data,
-        email: message.data.email.toLowerCase(),
-        processed_at: new Date().toISOString()
-      })
+    queueUrl: 'https://sqs.../events',
+    region: 'us-east-1',
+    queues: [{
+      name: 'webhook-listener',
+      onMessage: async (msg, ctx) => {
+        await fetch('https://api.example.com/webhook', {
+          method: 'POST',
+          body: JSON.stringify(msg.$body)
+        });
+      }
     }]
   }]
 })

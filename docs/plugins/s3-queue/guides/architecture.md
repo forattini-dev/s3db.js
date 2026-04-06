@@ -229,9 +229,9 @@ console.log(stats);
 
 These methods are added to your resource:
 
-#### `resource.enqueue(data)`
+#### `resource.enqueue(data, options?)`
 
-Add a message to the queue.
+Add a message to the queue. When using custom `metadata`, pass metadata values in `options.metadata`.
 
 ```javascript
 const message = await tasks.enqueue({
@@ -240,6 +240,12 @@ const message = await tasks.enqueue({
 });
 
 console.log(message.id); // 'task-123'
+
+// With custom metadata (requires metadata option in plugin config)
+const email = await emails.enqueue(
+  { to: 'user@example.com', body: 'Hello' },
+  { metadata: { clientId: 'acme', priority: 'high' } }
+);
 ```
 
 #### `resource.queueStats()`
@@ -262,6 +268,26 @@ const dead = await tasks.countQueue('dead');
 ```
 
 Status options: `'pending' | 'processing' | 'completed' | 'failed' | 'dead' | 'all'`.
+
+#### `resource.countQueueBy(filter)`
+
+Count messages matching a filter. Automatically resolves the best partition for efficient S3 prefix-based counting.
+
+```javascript
+const acmeCount = await emails.countQueueBy({ clientId: 'acme' });
+const pendingAcme = await emails.countQueueBy({ status: 'pending', clientId: 'acme' });
+```
+
+Requires `metadata` and `partitions` configured on the plugin.
+
+#### `resource.queueStatsBy(filter)`
+
+Get full status breakdown (pending/processing/completed/failed/dead) filtered by custom partition fields.
+
+```javascript
+const stats = await emails.queueStatsBy({ clientId: 'acme' });
+// { total: 120, pending: 80, processing: 5, completed: 30, failed: 3, dead: 2 }
+```
 
 #### `resource.startProcessing(handler, options?)`
 

@@ -26,38 +26,29 @@ const users = await db.createResource({
 });
 
 const queueConsumerPlugin = new QueueConsumerPlugin({
-  consumers: [{
+  drivers: [{
     driver: 'sqs',
-    config: {
-      queueUrl: 'https://sqs.us-east-1.amazonaws.com/123456789012/my-queue',
-      region: 'us-east-1'
-    },
-    consumers: [{
-      resources: 'users',
-      concurrency: 5
+    queueUrl: 'https://sqs.us-east-1.amazonaws.com/123456789012/my-queue',
+    region: 'us-east-1',
+    queues: [{
+      resources: 'users'
     }]
   }]
 });
 
 await db.usePlugin(queueConsumerPlugin);
-await queueConsumerPlugin.start();
 ```
 
 ### RabbitMQ Consumer
 
 ```javascript
 const queueConsumerPlugin = new QueueConsumerPlugin({
-  consumers: [{
+  drivers: [{
     driver: 'rabbitmq',
-    config: {
-      amqpUrl: 'amqp://user:pass@localhost:5672',
-      exchange: 'events',
-      exchangeType: 'topic'
-    },
-    consumers: [{
-      resources: 'orders',
-      queue: 'order-queue',
-      routingKey: 'order.*'
+    amqpUrl: 'amqp://user:pass@localhost:5672',
+    queue: 'order-queue',
+    queues: [{
+      resources: 'orders'
     }]
   }]
 });
@@ -71,64 +62,41 @@ const queueConsumerPlugin = new QueueConsumerPlugin({
 
 ```javascript
 const queueConsumerPlugin = new QueueConsumerPlugin({
-  enabled: true,
-  batchSize: 20,
-  concurrency: 10,
-  retryAttempts: 5,
-  retryDelay: 2000,
-
-  consumers: [
+  drivers: [
     // SQS Consumer for user events
     {
       driver: 'sqs',
-      config: {
-        queueUrl: 'https://sqs.us-east-1.amazonaws.com/123456789012/user-events',
-        region: 'us-east-1',
-        maxMessages: 10,
-        visibilityTimeout: 300
-      },
-      consumers: [{
-        resources: ['users'],
-        transform: (message) => ({
-          ...message,
-          source: 'user-service',
-          processed_at: new Date().toISOString()
-        })
+      queueUrl: 'https://sqs.us-east-1.amazonaws.com/123456789012/user-events',
+      region: 'us-east-1',
+      maxMessages: 10,
+      queues: [{
+        resources: ['users']
       }]
     },
 
     // RabbitMQ Consumer for order events
     {
       driver: 'rabbitmq',
-      config: {
-        amqpUrl: process.env.RABBITMQ_URL,
-        exchange: 'order-events',
-        exchangeType: 'topic'
-      },
-      consumers: [
-        {
-          resources: ['orders'],
-          queue: 'order-processing',
-          routingKey: 'order.created',
-          transform: (message) => ({
-            ...message.content,
-            event_type: message.fields.routingKey,
-            processed_at: new Date().toISOString()
-          })
-        },
-        {
-          resources: ['order_analytics'],
-          queue: 'order-analytics',
-          routingKey: 'order.*',
-          transform: (message) => ({
-            order_id: message.content.id,
-            action: message.fields.routingKey.split('.')[1],
-            customer_id: message.content.userId,
-            amount: message.content.amount,
-            timestamp: new Date().toISOString()
-          })
+      amqpUrl: process.env.RABBITMQ_URL,
+      queue: 'order-processing',
+      queues: [{
+        resources: ['orders']
+      }]
+    },
+
+    // Custom handler (no resource)
+    {
+      driver: 'redis-stream',
+      host: 'localhost',
+      stream: 'events',
+      group: 'workers',
+      consumer: 'worker-1',
+      queues: [{
+        name: 'event-processor',
+        onMessage: async (msg, ctx) => {
+          console.log('Event:', msg.$body, 'from', ctx.driver);
         }
-      ]
+      }]
     }
   ]
 });
@@ -138,10 +106,11 @@ const queueConsumerPlugin = new QueueConsumerPlugin({
 
 ```javascript
 new QueueConsumerPlugin({
-  consumers: [{
+  drivers: [{
     driver: 'sqs',
-    config: { region: 'us-east-1', credentials: {...} },
-    consumers: [
+    region: 'us-east-1',
+    credentials: { ... },
+    queues: [
       { resources: 'users', queueUrl: 'https://sqs...users' },
       { resources: 'orders', queueUrl: 'https://sqs...orders' },
       { resources: 'products', queueUrl: 'https://sqs...products' }
@@ -499,16 +468,16 @@ consumers: [{
 
 ```javascript
 new QueueConsumerPlugin({
-  consumers: [{
+  drivers: [{
     driver: 'sqs',
-    config: { region: 'us-east-1' },
-    consumers: [
-      // High priority - more concurrency
-      { resources: 'urgent_tasks', queueUrl: '...high-priority', concurrency: 20 },
+    region: 'us-east-1',
+    queues: [
+      // High priority
+      { resources: 'urgent_tasks', queueUrl: '...high-priority' },
       // Normal priority
-      { resources: 'normal_tasks', queueUrl: '...normal', concurrency: 10 },
-      // Low priority - less concurrency
-      { resources: 'batch_tasks', queueUrl: '...low-priority', concurrency: 2 }
+      { resources: 'normal_tasks', queueUrl: '...normal' },
+      // Low priority
+      { resources: 'batch_tasks', queueUrl: '...low-priority' }
     ]
   }]
 })
