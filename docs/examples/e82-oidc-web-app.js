@@ -39,7 +39,16 @@ async function setupWebApp() {
       authorId: 'string|required',
       createdAt: 'datetime|optional'
     },
-    timestamps: true
+    timestamps: true,
+    api: {
+      guard: {
+        list: 'openid',  // Requires the 'openid' scope (all authenticated users have it)
+        get: 'openid',
+        create: 'profile',  // Requer scope 'profile'
+        update: 'profile',
+        delete: 'profile'
+      }
+    }
   });
 
   // 3. Configurar API Plugin com OIDC
@@ -202,18 +211,6 @@ async function setupWebApp() {
   });
 
   await db.usePlugin(apiPlugin);
-
-  // 4. Configurar guards no resource
-  postsResource.config = {
-    ...postsResource.config,
-    guards: {
-      list: 'openid',  // Requires the 'openid' scope (all authenticated users have it)
-      get: 'openid',
-      create: 'profile',  // Requer scope 'profile'
-      update: 'profile',
-      delete: 'profile'
-    }
-  };
 
   return { db, postsResource };
 }
