@@ -105,6 +105,7 @@
 - [💾 Installation](#-installation)
 - [🔌 Storage Backends](#-storage-backends)
 - [🗄️ Database](#️-database)
+- [🔀 DatabaseManager](#-databasemanager--multiple-backends)
 - [🪵 Logging](#-logging)
 - [📋 Resources](#-resources)
 - [⚡ Performance & Concurrency](#-performance--concurrency)
@@ -396,6 +397,7 @@ s3db.js is backend-portable. Same code, same resources, same plugins — just ch
 | **SQLite** (memory) | `sqlite:///:memory:` | Fast tests with SQLite behavior |
 | **Memory** | `memory://bucket/prefix` | Tests (100-1000x faster) |
 | **Filesystem** | `file:///path/to/data` | Local dev, debugging |
+| **RedDB** | `reddb://TOKEN@host:8080/prefix` | Multi-structure (tables, graphs, vectors) |
 
 ```javascript
 // Just change the connection string — everything else stays the same
@@ -908,6 +910,67 @@ httpClientOptions: {
 </details>
 
 **Complete documentation**: See above for all Database configuration options
+
+---
+
+## 🔀 DatabaseManager — Multiple Backends
+
+When you need resources across different storage backends (S3 + RedDB + SQLite, etc.), `DatabaseManager` orchestrates multiple `Database` instances with a unified API.
+
+```javascript
+import { DatabaseManager } from 's3db.js'
+
+const manager = new DatabaseManager({
+  connections: {
+    primary: { connectionString: 's3://KEY:SECRET@bucket?region=us-east-1' },
+    analytics: { connectionString: 'reddb://localhost:8080' },
+    cache: { connectionString: 'sqlite:///tmp/cache.db' },
+  },
+  default: 'primary',
+})
+
+await manager.connect()  // connects all in parallel
+
+// Create resources — `connection` field specifies which backend
+const users = await manager.createResource({
+  name: 'users',
+  connection: 'primary',
+  attributes: { email: 'email|required', name: 'string' },
+})
+
+const events = await manager.createResource({
+  name: 'events',
+  connection: 'analytics',
+  attributes: { type: 'string', data: 'json' },
+})
+
+// Without `connection` — uses default
+const settings = await manager.createResource({
+  name: 'settings',
+  attributes: { key: 'string', value: 'json' },
+})
+
+// Unified resource lookup across all connections
+manager.resource('users')                    // from primary
+manager.resource('events')                   // from analytics
+manager.resources                            // merged view of all
+
+// Direct database access
+manager.connection('analytics')              // Database instance
+manager.getConnectionForResource('events')   // 'analytics'
+
+await manager.disconnect()
+```
+
+**Key points:**
+- Resource names must be globally unique across connections
+- Each `Database` has its own metadata, plugins, and client — full isolation
+- Plugins are configured per-connection in the `DatabaseOptions`
+- Events are forwarded with connection prefix: `manager.on('analytics:db:resource-created', ...)`
+
+> **When to use:** Use `Database` when all resources live on the same backend. Use `DatabaseManager` when you need resources on different backends.
+
+> **Full documentation:** See [DatabaseManager docs](./docs/core/database-manager.md)
 
 ---
 
