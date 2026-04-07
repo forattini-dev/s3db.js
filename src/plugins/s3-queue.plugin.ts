@@ -393,7 +393,7 @@ export class S3QueuePlugin extends CoordinatorPlugin<S3QueuePluginOptions> {
       resource,
       resourceNames = {},
       visibilityTimeout = 30000,
-      pollInterval = 1000,
+      pollInterval = 5000,
       maxAttempts = 3,
       concurrency = 1,
       deadLetterResource = null,
