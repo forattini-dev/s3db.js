@@ -11,6 +11,7 @@ s3db.js supports multiple storage backends through a unified client interface.
 | [SqliteClient](sqlite-client.md) | `sqlite://` | Local persistence, CI, single-process | None |
 | [MemoryClient](memory-client.md) | `memory://` | Testing, development | None |
 | [FilesystemClient](filesystem-client.md) | `file://` | Local development, edge cases | None |
+| [RedDbClient](reddb-client.md) | `reddb://` | Multi-structure DB (tables, graphs, vectors) | None |
 
 > Not sure which backend to use? See the [Choosing a Backend](/guides/choosing-a-backend.md) guide for pricing comparisons and decision flowcharts.
 
@@ -186,6 +187,10 @@ memory://test-bucket/test-db
 
 # Filesystem
 file:///home/user/data/s3db
+
+# RedDB
+reddb://localhost:8080
+reddb://authToken@localhost:8080/prefix?collection=myCollection
 ```
 
 ### SQLite Query Parameters
@@ -288,4 +293,5 @@ await users.insert({ ... });
 - [SqliteClient](sqlite-client.md) - SQLite persistence and limits (local, D1, Turso)
 - [MemoryClient](memory-client.md) - Testing patterns
 - [FilesystemClient](filesystem-client.md) - Local storage
+- [RedDbClient](reddb-client.md) - RedDB multi-structure database
 - [Connection Strings](/reference/connection-strings.md) - Complete reference

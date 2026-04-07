@@ -27,6 +27,7 @@
     - [Events](/core/events.md)
     - [Encryption](/core/encryption.md)
     - [Streaming](/core/streaming.md)
+  - [Database Manager](/core/database-manager.md)
   - [Storage Clients](/clients/README.md)
   - [Choosing a Backend](/guides/choosing-a-backend.md)
   - [Pricing Reference](/pricing/README.md)

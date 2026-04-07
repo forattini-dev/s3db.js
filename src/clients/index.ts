@@ -14,6 +14,7 @@ export { FileSystemClient } from './filesystem-client.class.js';
 export { FileSystemStorage } from './filesystem-storage.class.js';
 export { SqliteClient } from './sqlite-client.class.js';
 export { RemoteSqliteClient } from './remote-sqlite-client.class.js';
+export { RedDbClient } from './reddb-client.class.js';
 export { ReckerHttpHandler } from './recker-http-handler.js';
 export { HTTP_CLIENT_PROFILES } from './types.js';
 
@@ -25,6 +26,7 @@ export type {
   FileSystemClientConfig,
   SqliteClientConfig,
   RemoteSqliteClientConfig,
+  RedDbClientConfig,
   S3Object,
   PutObjectParams,
   PutObjectResponse,

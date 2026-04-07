@@ -361,6 +361,21 @@ export class Database extends SafeEventEmitter {
             }, mergedClientOptions as any) as any);
             return new SqliteClient(sqliteOptions) as unknown as Client;
           };
+        } else if (url.protocol === 'reddb:') {
+          this._clientFactory = async () => {
+            const { RedDbClient } = await import('./clients/reddb-client.class.js');
+            const reddbOptions = this._applyTaskExecutorMonitoring(this._deepMerge({
+              baseUrl: (connStr as any)?.redDbBaseUrl || `http://${url.hostname || 'localhost'}:${url.port || '8080'}`,
+              authToken: (connStr as any)?.redDbAuthToken,
+              writeToken: (connStr as any)?.redDbWriteToken,
+              collection: (connStr as any)?.redDbCollection,
+              bucket: (connStr as any)?.bucket,
+              keyPrefix: (connStr as any)?.keyPrefix,
+              logLevel: this.logger.level,
+              region: 'reddb',
+            }, mergedClientOptions as any) as any);
+            return new RedDbClient(reddbOptions) as unknown as Client;
+          };
         } else if (url.protocol === 'sqlite+libsql:' || url.protocol === 'sqlite+d1:') {
           this._clientFactory = async () => {
             const { RemoteSqliteClient } = await import('./clients/remote-sqlite-client.class.js');

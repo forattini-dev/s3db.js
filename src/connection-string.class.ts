@@ -5,7 +5,7 @@ import { ConnectionStringError } from './errors.js';
 export const S3_DEFAULT_REGION = 'us-east-1';
 export const S3_DEFAULT_ENDPOINT = 'https://s3.us-east-1.amazonaws.com';
 
-export type ClientType = 'filesystem' | 'memory' | 's3' | 'sqlite' | 'sqlite-remote' | 'custom';
+export type ClientType = 'filesystem' | 'memory' | 's3' | 'sqlite' | 'sqlite-remote' | 'reddb' | 'custom';
 
 export interface ClientOptions {
   [key: string]: unknown;
@@ -25,6 +25,10 @@ export class ConnectionString {
   clientType?: ClientType;
   basePath?: string;
   sqliteDriver?: 'libsql' | 'd1';
+  redDbBaseUrl?: string;
+  redDbAuthToken?: string;
+  redDbWriteToken?: string;
+  redDbCollection?: string;
   clientOptions: ClientOptions;
 
   constructor(connectionString: string) {
@@ -53,6 +57,7 @@ export class ConnectionString {
     else if (uri.protocol === 'sqlite:') this.defineFromSqliteUri(uri);
     else if (uri.protocol === 'sqlite+libsql:') this.defineFromRemoteSqliteUri(uri, 'libsql');
     else if (uri.protocol === 'sqlite+d1:') this.defineFromRemoteSqliteUri(uri, 'd1');
+    else if (uri.protocol === 'reddb:') this.defineFromRedDbUri(uri);
     else this.defineFromCustomUri(uri);
 
     // Parse querystring parameters (supports nested dot notation)
@@ -330,6 +335,38 @@ export class ConnectionString {
     this.keyPrefix = '';
     this.region = 'sqlite';
     this.endpoint = `sqlite:///${encodeURI(this.basePath).replace(/^\//, '')}`;
+  }
+
+  private defineFromRedDbUri(uri: URL): void {
+    this.clientType = 'reddb';
+    this.forcePathStyle = true;
+    this.accessKeyId = undefined;
+    this.secretAccessKey = undefined;
+
+    const host = uri.hostname || 'localhost';
+    const port = uri.port || '8080';
+    this.redDbBaseUrl = `http://${host}:${port}`;
+
+    if (uri.username) {
+      const [okToken, , decodedToken] = tryFnSync(() => decodeURIComponent(uri.username));
+      this.redDbAuthToken = okToken ? decodedToken : uri.username;
+    }
+
+    if (uri.password) {
+      const [okWrite, , decodedWrite] = tryFnSync(() => decodeURIComponent(uri.password));
+      this.redDbWriteToken = okWrite ? decodedWrite : uri.password;
+    }
+
+    const pathname = uri.pathname || '';
+    if (pathname && pathname !== '/') {
+      const segments = pathname.split('/').filter(Boolean);
+      this.keyPrefix = segments.join('/');
+    }
+
+    this.redDbCollection = uri.searchParams.get('collection') || undefined;
+    this.bucket = this.redDbCollection || 's3db';
+    this.region = 'reddb';
+    this.endpoint = this.redDbBaseUrl;
   }
 
   private defineFromRemoteSqliteUri(uri: URL, driver: 'libsql' | 'd1'): void {
