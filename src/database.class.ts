@@ -1,6 +1,7 @@
 import tryFn, { tryFnSync } from './concerns/try-fn.js';
 import { getVersion } from './version.js';
 import type { SecurityConfig } from './concerns/password-hashing.js';
+import type { CompressionConfig } from './concerns/text-compression.js';
 import { ConnectionString } from './connection-string.class.js';
 import { idGenerator } from './concerns/id.js';
 import { ProcessManager } from './concerns/process-manager.js';
@@ -101,6 +102,7 @@ export interface DatabaseOptions {
   cronManager?: CronManager;
   exitOnSignal?: boolean;
   autoCleanup?: boolean;
+  compression?: CompressionConfig;
 }
 
 export class Database extends SafeEventEmitter {
@@ -117,6 +119,7 @@ export class Database extends SafeEventEmitter {
   public plugins: StringRecord<Plugin>;
   public cache: CacheConfig | boolean | undefined;
   public security: SecurityConfig;
+  public compression: CompressionConfig | undefined;
   public versioningEnabled: boolean;
   public strictValidation: boolean;
   public strictHooks: boolean;
@@ -232,6 +235,7 @@ export class Database extends SafeEventEmitter {
     this.plugins = this.pluginRegistry;
     this.cache = options.cache;
     this.security = options.security ?? { passphrase: 'secret', bcrypt: { rounds: 12 } };
+    this.compression = options.compression;
     this.versioningEnabled = options.versioningEnabled ?? false;
     this.strictValidation = (options.strictValidation ?? true) !== false;
     this.strictHooks = options.strictHooks ?? false;

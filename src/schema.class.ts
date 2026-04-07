@@ -21,6 +21,7 @@ import { encode as toBase62, decode as fromBase62, encodeKey, decodeKey, encodeD
 import { encodeIPv4, decodeIPv4, encodeIPv6, decodeIPv6, isValidIPv4, isValidIPv6 } from "./concerns/ip.js";
 import { encodeBuffer, decodeBuffer, encodeBits, decodeBits } from "./concerns/binary.js";
 import { encodeGeoLat, decodeGeoLat, encodeGeoLon, decodeGeoLon, encodeGeoPoint, decodeGeoPoint } from "./concerns/geo-encoding.js";
+import { compressText as compressTextFn, decompressText as decompressTextFn, type CompressionConfig } from "./concerns/text-compression.js";
 import {
   generateSchemaFingerprint,
   getCachedValidator,
@@ -91,6 +92,7 @@ export interface SchemaConstructorArgs {
   schemaRegistry?: SchemaRegistry;
   /** Existing plugin schema registry from s3db.json */
   pluginSchemaRegistry?: Record<string, PluginSchemaRegistry>;
+  compression?: CompressionConfig;
 }
 
 export interface SchemaExport {
@@ -845,6 +847,24 @@ export const SchemaActions = {
     const [ok, , decoded] = tryFnSync(() => decodeGeoPoint(value, precision));
     return ok ? decoded : value;
   },
+
+  compressText: (value: unknown, { level, threshold, encoding }: ActionContext = {}): unknown => {
+    if (value === null || value === undefined) return value;
+    const str = typeof value === 'string' ? value : String(value);
+    const [ok, , compressed] = tryFnSync(() => compressTextFn(str, {
+      level: typeof level === 'number' ? level : undefined,
+      threshold: typeof threshold === 'number' ? threshold : undefined,
+      encoding: encoding === 'base85' ? 'base85' : 'base64',
+    }));
+    return ok ? compressed : value;
+  },
+
+  decompressText: (value: unknown): unknown => {
+    if (value === null || value === undefined) return value;
+    if (typeof value !== 'string') return value;
+    const [ok, , decompressed] = tryFnSync(() => decompressTextFn(value));
+    return ok ? decompressed : value;
+  },
 };
 
 export class Schema {
@@ -868,6 +888,7 @@ export class Schema {
   _pluginSchemaRegistry?: Record<string, PluginSchemaRegistry>;
   /** Whether the registry was modified and needs persistence */
   _registryChanged: boolean = false;
+  _compression?: CompressionConfig;
 
   constructor(args: SchemaConstructorArgs) {
     const {
@@ -881,7 +902,8 @@ export class Schema {
       _pluginAttributeMetadata,
       _pluginAttributes,
       schemaRegistry,
-      pluginSchemaRegistry
+      pluginSchemaRegistry,
+      compression,
     } = args;
 
     this.name = name;
@@ -893,6 +915,7 @@ export class Schema {
 
     this._pluginAttributeMetadata = _pluginAttributeMetadata || {};
     this._pluginAttributes = _pluginAttributes || {};
+    this._compression = compression;
 
     const processedAttributes = this.preprocessAttributesForValidation(this.attributes);
 
@@ -1339,6 +1362,50 @@ export class Schema {
 
         this.addHook("beforeMap", name, "encodeDecimalFixed", { precision });
         this.addHook("afterUnmap", name, "decodeDecimalFixed", { precision });
+        continue;
+      }
+
+      if (defStr === 'text' || defStr.startsWith('text|') || defType === 'text') {
+        let level: number | undefined;
+        let threshold: number | undefined;
+        let encoding: string | undefined;
+        let disabled = false;
+
+        const compressMatch = defStr.match(/compress:(\w+)/);
+        if (compressMatch) {
+          const val = compressMatch[1]!;
+          if (val === 'false' || val === '0') {
+            disabled = true;
+          } else if (val !== 'true') {
+            const parsed = parseInt(val, 10);
+            if (!isNaN(parsed)) {
+              if (parsed === 0) {
+                disabled = true;
+              } else {
+                level = parsed;
+              }
+            }
+          }
+        }
+
+        const thresholdMatch = defStr.match(/threshold:(\d+)/);
+        if (thresholdMatch) threshold = parseInt(thresholdMatch[1]!, 10);
+
+        const encodingMatch = defStr.match(/encoding:(base64|base85)/);
+        if (encodingMatch) encoding = encodingMatch[1];
+
+        if (!disabled) {
+          const params: Record<string, unknown> = {};
+          if (this._compression?.level !== undefined) params.level = this._compression.level;
+          if (this._compression?.threshold !== undefined) params.threshold = this._compression.threshold;
+          if (this._compression?.encoding !== undefined) params.encoding = this._compression.encoding;
+          if (level !== undefined) params.level = level;
+          if (threshold !== undefined) params.threshold = threshold;
+          if (encoding !== undefined) params.encoding = encoding;
+
+          this.addHook("beforeMap", name, "compressText", params);
+          this.addHook("afterUnmap", name, "decompressText", {});
+        }
         continue;
       }
 
@@ -1936,6 +2003,11 @@ export class Schema {
         }
         if (value === 'bits' || value.startsWith('bits:') || value.startsWith('bits|')) {
           processed[key] = 'any';
+          continue;
+        }
+        if (value === 'text' || value.startsWith('text|')) {
+          const rest = value.replace(/^text/, '').replace(/\|compress:\w+/g, '').replace(/\|threshold:\d+/g, '').replace(/\|encoding:\w+/g, '');
+          processed[key] = `string${rest}`;
           continue;
         }
         if (value === 'money' || value.startsWith('money:') || value.startsWith('money|') ||

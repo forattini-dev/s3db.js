@@ -50,6 +50,7 @@ function mapFieldTypeToTypeScript(fieldType: string): string {
 
   const typeMap: Record<string, string> = {
     'string': 'string',
+    'text': 'string',
     'number': 'number',
     'integer': 'number',
     'boolean': 'boolean',
@@ -62,8 +63,28 @@ function mapFieldTypeToTypeScript(fieldType: string): string {
     'url': 'string',
     'date': 'string',
     'datetime': 'string',
+    'dateonly': 'string',
+    'timeonly': 'string',
+    'uuid': 'string',
     'ip4': 'string',
     'ip6': 'string',
+    'mac': 'string',
+    'cidr': 'string',
+    'phone': 'string',
+    'color': 'string',
+    'semver': 'string',
+    'cron': 'string',
+    'locale': 'string',
+    'currency': 'string',
+    'country': 'string',
+    'ean': 'string',
+    'duration': 'string',
+    'password': 'string',
+    'money': 'number',
+    'crypto': 'number',
+    'decimal': 'number',
+    'buffer': 'Buffer',
+    'bits': 'number',
   };
 
   if (baseType.startsWith('embedding:')) {

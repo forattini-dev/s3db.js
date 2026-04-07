@@ -1,4 +1,5 @@
 import type { SecurityConfig } from './concerns/password-hashing.js';
+import type { CompressionConfig } from './concerns/text-compression.js';
 import { join } from 'path';
 import { createHash } from 'crypto';
 import jsonStableStringify from 'json-stable-stringify';
@@ -114,6 +115,7 @@ export interface ResourceConfig {
   pluginSchemaRegistry?: Record<string, import('./schema.class.js').PluginSchemaRegistry>;
   /** Defer schema/validator compilation until first CRUD operation (default: false) */
   lazySchema?: boolean;
+  compression?: CompressionConfig;
 }
 
 export interface ResourceApiConfig {
@@ -143,6 +145,7 @@ export interface ResourceInternalConfig {
   asyncPartitions: boolean;
   strictPartitions: boolean;
   createdBy: string;
+  compression?: CompressionConfig;
 }
 
 export interface ResourceExport {
@@ -438,6 +441,7 @@ export class Resource extends AsyncEventEmitter implements Disposable {
       asyncPartitions,
       strictPartitions,
       createdBy,
+      compression: config.compression,
     };
 
     this._lazySchema = lazySchema;
@@ -483,7 +487,8 @@ export class Resource extends AsyncEventEmitter implements Disposable {
           autoDecrypt
         },
         schemaRegistry: this._schemaRegistry,
-        pluginSchemaRegistry: this._pluginSchemaRegistry
+        pluginSchemaRegistry: this._pluginSchemaRegistry,
+        compression: config.compression,
       }));
       this._schemaCompiled = true;
     }
@@ -639,7 +644,8 @@ export class Resource extends AsyncEventEmitter implements Disposable {
         autoDecrypt: cfg.autoDecrypt
       },
       schemaRegistry: this._schemaRegistry,
-      pluginSchemaRegistry: this._pluginSchemaRegistry
+      pluginSchemaRegistry: this._pluginSchemaRegistry,
+      compression: this.config.compression,
     }));
     this._schemaCompiled = true;
     this._pendingSchemaConfig = null;
@@ -751,7 +757,8 @@ export class Resource extends AsyncEventEmitter implements Disposable {
         },
         map: map || this.map,
         schemaRegistry: this._schemaRegistry,
-        pluginSchemaRegistry: this._pluginSchemaRegistry
+        pluginSchemaRegistry: this._pluginSchemaRegistry,
+        compression: this.config.compression,
       }));
 
       if (this.validator) {

@@ -13,6 +13,7 @@ The core compression primitive is **Base62** — an alphabet of `0-9a-zA-Z` (62 
 | Type | Syntax | Compression | Storage Format |
 |------|--------|-------------|----------------|
 | `string` | `'string'` | 0% | UTF-8 as-is |
+| `text` | `'text'` | ~20-50% | `z:` + deflate+base64 |
 | `number` | `'number'` | ~40-60% | Base62 |
 | `boolean` | `'boolean'` or `'bool'` | ~80-95% | `'1'` / `'0'` |
 | `date` | `'date'` | 0% | ISO 8601 (native validator) |
@@ -63,6 +64,109 @@ Armazenada como UTF-8 diretamente no metadata. Strings com caracteres fora do AS
 attributes: {
   name: 'string|required|min:2|max:100',
   bio: 'string|optional'
+}
+```
+
+### text
+
+Comprime strings usando deflate (LZ77 + Huffman do `zlib` nativo do Node.js) + codificação base64 para maximizar o limite de 2KB do metadata S3. Zero dependencias externas.
+
+**Compressao adaptativa:** se o resultado comprimido+codificado for >= o tamanho original, armazena como string pura (sem overhead de compressao).
+
+```
+"Lorem ipsum dolor sit amet, consectetur adipiscing elit..."
+  →  deflateRawSync(value, level=6)
+  →  base64 encode
+  →  "z:" + resultado
+  →  "z:eJzLSM3JyVcozy/KSQEAGgsEHQ=="
+```
+
+**Decode:**
+```
+"z:eJzLSM3JyVcozy/KSQEAGgsEHQ=="
+  →  remove "z:" prefix
+  →  base64 decode
+  →  inflateRawSync()
+  →  "Lorem ipsum dolor sit amet, consectetur adipiscing elit..."
+```
+
+**Threshold:** por padrao, so comprime valores >= 100 bytes. Abaixo disso, o overhead do base64 (~33%) anula o ganho da compressao.
+
+#### Modifiers
+
+Todos os modifiers sao separados por `|` (pipe):
+
+| Modifier | Descricao | Exemplo |
+|----------|-----------|---------|
+| `compress:N` | Nivel de compressao 1-9 (default: 6). `0` ou `false` desabilita | `text\|compress:9` |
+| `threshold:N` | Minimo de bytes para comprimir (default: 100) | `text\|threshold:50` |
+| `encoding:base64\|base85` | Encoding dos bytes comprimidos (default: base64) | `text\|encoding:base85` |
+| `required` | fastest-validator: campo obrigatorio | `text\|required` |
+| `optional` | fastest-validator: campo opcional | `text\|optional` |
+| `min:N` | fastest-validator: tamanho minimo da string | `text\|min:10` |
+| `max:N` | fastest-validator: tamanho maximo da string | `text\|max:5000` |
+
+Todos os modifiers do fastest-validator para strings funcionam porque `text` e validado como `string` internamente.
+
+#### Encodings
+
+| Encoding | Prefixo | Overhead | Status |
+|----------|---------|----------|--------|
+| base64 | `z:` | ~33% | **Default** - padrao da industria, battle-tested |
+| base85 | `z85:` | ~25% | **Beta** - 7% mais eficiente, nao testado em escala com S3 metadata |
+
+#### Hierarquia de configuracao (3 niveis)
+
+A configuracao do `text` segue 3 niveis de prioridade (do mais baixo ao mais alto):
+
+```javascript
+// Nivel 1: Defaults do Database
+const db = new Database({
+  compression: { level: 6, threshold: 100, encoding: 'base64' }
+})
+
+// Nivel 2: Override por Resource
+await db.createResource({
+  name: 'tickets',
+  compression: { level: 9, threshold: 80 },
+  attributes: { description: 'text' }
+})
+
+// Nivel 3: Override por atributo (maior prioridade)
+attributes: {
+  bio: 'text',                           // usa defaults do resource/db
+  notes: 'text|compress:9',              // override do nivel de compressao
+  raw: 'text|compress:false',            // desabilita compressao
+  html: 'text|encoding:base85',          // usa base85 (beta)
+  summary: 'text|threshold:50',          // comprime a partir de 50 bytes
+  full: 'text|optional|compress:9|threshold:99|encoding:base64'  // todas as opcoes
+}
+```
+
+#### Quando usar `text` vs `string`
+
+| Use `string` quando | Use `text` quando |
+|---|---|
+| Valores curtos (<100 bytes) | Descricoes, bios, notas |
+| Valores tipo enum (status, role) | Mensagens de log, detalhes de erro |
+| Identificadores, codigos | Comentarios, reviews, tickets |
+| Valores que nao se beneficiam de compressao | Qualquer texto livre que pode ser longo |
+
+#### Benchmarks de compressao
+
+| Tamanho do texto | Compressao deflate | Apos base64 | Economia liquida |
+|------------------|-------------------|--------------|------------------|
+| 50 bytes | Nao comprimido (abaixo do threshold) | N/A | 0% |
+| 100 bytes | ~30% | ~10% | ~4% |
+| 200 bytes | ~35% | ~15-20% | ~15% |
+| 500 bytes | ~45% | ~25-30% | ~25% |
+| 1000 bytes | ~55% | ~35-40% | ~35% |
+
+```javascript
+attributes: {
+  description: 'text|required',
+  notes: 'text|optional|compress:9',
+  changelog: 'text|max:5000'
 }
 ```
 

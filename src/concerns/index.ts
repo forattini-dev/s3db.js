@@ -50,3 +50,4 @@ export * from './memory-profiler.js';
 export * from './failban-manager.js';
 export * from './typescript-generator.js';
 export * from './ring-buffer.js';
+export * from './text-compression.js';

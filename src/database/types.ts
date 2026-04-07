@@ -1,4 +1,5 @@
 import type { SecurityConfig } from '../concerns/password-hashing.js';
+import type { CompressionConfig } from '../concerns/text-compression.js';
 import type { Client } from '../clients/types.js';
 import type { BehaviorType } from '../behaviors/types.js';
 import type { LogLevel, StringRecord as CommonStringRecord, EventHandler } from '../types/common.types.js';
@@ -185,6 +186,7 @@ export interface DatabaseRef {
   deferMetadataWrites: boolean;
   metadataWriteDelay: number;
   cache: CacheConfig | boolean | undefined;
+  compression: CompressionConfig | undefined;
   processManager: ProcessManager;
   cronManager: CronManager;
   executorPool: ExecutorPoolConfig;

@@ -1,4 +1,5 @@
 import type { SecurityConfig } from '../concerns/password-hashing.js';
+import type { CompressionConfig } from '../concerns/text-compression.js';
 import { ResourceNotFound, SchemaError } from '../errors.js';
 import type { BehaviorType } from '../behaviors/types.js';
 import type Resource from '../resource.class.js';
@@ -52,6 +53,7 @@ export interface CreateResourceConfig {
   api?: ResourceApiConfig;
   description?: string;
   lazySchema?: boolean;
+  compression?: CompressionConfig;
 }
 
 export interface HashExistsResult {
@@ -209,7 +211,8 @@ export class DatabaseResources {
       createdBy: config.createdBy || 'user',
       api: config.api,
       description: config.description,
-      lazySchema: config.lazySchema
+      lazySchema: config.lazySchema,
+      compression: config.compression ? { ...db.compression, ...config.compression } : db.compression,
     });
 
     resource.database = db as any;

@@ -446,6 +446,22 @@ export const fieldTypes: FieldTypeDoc[] = [
     validators: ['required', 'optional', 'min', 'max', 'length', 'pattern', 'enum', 'lowercase', 'uppercase', 'trim', 'empty', 'contains', 'numeric', 'alpha', 'alphanum', 'alphadash', 'hex', 'singleLine', 'base64', 'default'],
   },
   {
+    name: 'text',
+    syntax: "'text' | 'text|compress:9' | 'text|optional|compress:9|threshold:99|encoding:base64'",
+    compression: '~20-50% — deflate (LZ77+Huffman) + base64 encoding. Adaptive: only compresses if result is smaller than original.',
+    description: 'Compressed string field using deflate + base64 (default) or base85 (beta). Ideal for long-form text (descriptions, bios, notes, comments) that would otherwise waste the 2KB S3 metadata limit. Validated as "string" internally, so all string validators work. Three compression modifiers: compress:N sets deflate level 1-9 (default 6, use 0 or false to disable), threshold:N sets minimum bytes to trigger compression (default 100), encoding:base64|base85 selects the binary-to-text encoding (base64 is default and production-ready, base85 saves ~7% more space but is beta). Compressed values are prefixed with "z:" (base64) or "z85:" (base85) in metadata. Values below threshold or where compression does not save space are stored as plain strings. Configuration can be set at database level (compression option), resource level, or per-attribute via modifiers — attribute modifiers take highest priority.',
+    examples: [
+      "bio: 'text'",
+      "description: 'text|required'",
+      "notes: 'text|compress:9'",
+      "raw: 'text|compress:false'",
+      "content: 'text|encoding:base85'",
+      "summary: 'text|threshold:50'",
+      "full: 'text|optional|compress:9|threshold:99|encoding:base64'",
+    ],
+    validators: ['required', 'optional', 'min', 'max', 'length', 'pattern', 'compress', 'threshold', 'encoding', 'default'],
+  },
+  {
     name: 'number',
     syntax: "'number' | 'number|min:0|max:100' | 'number|integer'",
     compression: 'Base62 encoded — integers as base62 string, floats as base62 decimal. Reduces storage for large numbers.',

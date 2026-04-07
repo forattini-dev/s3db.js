@@ -24,6 +24,7 @@ describe('Fastest-validator conflict check', () => {
       barcode: 'ean',
       mail: 'email',
       link: 'url',
+      txt: 'text',
     },
   });
 
@@ -49,6 +50,7 @@ describe('Fastest-validator conflict check', () => {
       barcode: '7891234567890',
       mail: 'test@example.com',
       link: 'https://example.com',
+      txt: 'This text needs to be long enough to exceed the default compression threshold of one hundred bytes. It must contain enough repetitive patterns so that deflate can compress it effectively and efficiently.',
     };
 
     const mapped = await schema.mapper(input);
@@ -73,6 +75,7 @@ describe('Fastest-validator conflict check', () => {
     expect(unmapped.barcode).toBe('7891234567890');
     expect(unmapped.mail).toBe('test@example.com');
     expect(unmapped.link).toBe('https://example.com');
+    expect(unmapped.txt).toBe('This text needs to be long enough to exceed the default compression threshold of one hundred bytes. It must contain enough repetitive patterns so that deflate can compress it effectively and efficiently.');
   });
 
   test('compressed types actually compress (mapped values differ from input)', async () => {
@@ -97,11 +100,13 @@ describe('Fastest-validator conflict check', () => {
       barcode: '12345678',
       mail: 'a@b.c',
       link: 'https://t.co',
+      txt: 'This text needs to be long enough to exceed the default compression threshold of one hundred bytes. It must contain enough repetitive patterns so that deflate can compress it effectively and efficiently.',
     };
 
     const mapped = await schema.mapper(input);
     const mappedValues = Object.values(mapped);
 
+    expect(mappedValues).not.toContain(input.txt);
     expect(mappedValues).not.toContain(input.dt);
     expect(mappedValues).not.toContain(input.donly);
     expect(mappedValues).not.toContain(input.tonly);
@@ -632,6 +637,66 @@ describe('Data integrity - no data loss', () => {
       expect((gtin14[key] as string)[0]).toBe('3');
     });
   });
+
+  describe('text', () => {
+    const schema = new Schema({ name: 'text-test', attributes: { v: 'text' } });
+    const roundTrip = async (val: string) => {
+      const result = await schema.unmapper(await schema.mapper({ v: val }));
+      return result.v as string;
+    };
+
+    test('short text (below threshold) passes through unchanged', async () => {
+      expect(await roundTrip('Hello')).toBe('Hello');
+      expect(await roundTrip('')).toBe('');
+    });
+
+    test('long ASCII text round-trips', async () => {
+      const long = 'Lorem ipsum dolor sit amet, consectetur adipiscing elit. Sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris.';
+      expect(await roundTrip(long)).toBe(long);
+    });
+
+    test('long UTF-8 text with accents', async () => {
+      const text = 'Senior software engineer with ten years of experience in web and mobile development. Specialist in microservices architectures, Kubernetes and cloud computing in the New York metropolitan area.';
+      expect(await roundTrip(text)).toBe(text);
+    });
+
+    test('long text with emoji', async () => {
+      const text = 'Project 🚀 cloud migration ☁️ with automatic deploy 🔄 and real-time monitoring 📊 dashboard. Status: in progress ✅ since January. Team of five developers 👨‍💻 working on the main module of the platform.';
+      expect(await roundTrip(text)).toBe(text);
+    });
+
+    test('repeated patterns compress well', async () => {
+      const text = 'status=active,status=active,status=active,status=active,status=active,status=active,status=active,status=active,status=active,status=active';
+      expect(await roundTrip(text)).toBe(text);
+    });
+
+    test('JSON-like content', async () => {
+      const text = 'Config payload: name=John Silva, email=john@example.com, role=admin, status=active, department=engineering, location=New York, plan=enterprise';
+      expect(await roundTrip(text)).toBe(text);
+    });
+
+    test('multiline text', async () => {
+      const text = 'Line 1: Document header and introduction\nLine 2: Main system content and details\nLine 3: Important technical specifications\nLine 4: Conclusion and next steps forward';
+      expect(await roundTrip(text)).toBe(text);
+    });
+
+    test('text with special characters', async () => {
+      const text = 'Price: $1,234.56 | Discount: 15% | Code: #ABC-123 | Email: user@test.com | URL: https://example.com/path?q=1&lang=en | Tags: <html> & "quotes"';
+      expect(await roundTrip(text)).toBe(text);
+    });
+
+    test('exactly at threshold boundary', async () => {
+      const exactly100 = 'x'.repeat(100);
+      expect(await roundTrip(exactly100)).toBe(exactly100);
+      const below = 'x'.repeat(99);
+      expect(await roundTrip(below)).toBe(below);
+    });
+
+    test('very long text (2KB+)', async () => {
+      const veryLong = 'This is a very long text to test the compression. '.repeat(50);
+      expect(await roundTrip(veryLong)).toBe(veryLong);
+    });
+  });
 });
 
 describe('Batch round-trip stress test', () => {
@@ -842,6 +907,7 @@ describe('Null and undefined handling', () => {
     cur: 'currency',
     cc: 'country',
     barcode: 'ean',
+    txt: 'text',
   };
 
   const schema = new Schema({ name: 'null-test', attributes: allTypes });
@@ -1002,5 +1068,70 @@ describe('Type isolation - no cross-contamination', () => {
 
     expect(secondPass).toEqual(firstPass);
     expect(thirdPass).toEqual(firstPass);
+  });
+});
+
+describe('text with modifiers', () => {
+  test('text|compress:9 round-trips', async () => {
+    const schema = new Schema({ name: 'text-c9', attributes: { v: 'text|compress:9' } });
+    const long = 'Long text to test compression with level nine that should work correctly across all normal usage scenarios in production.';
+    const result = await schema.unmapper(await schema.mapper({ v: long }));
+    expect(result.v).toBe(long);
+  });
+
+  test('text|compress:false preserves value unchanged', async () => {
+    const schema = new Schema({ name: 'text-nocomp', attributes: { v: 'text|compress:false' } });
+    const long = 'Long text that should not be compressed even though it exceeds the default threshold of one hundred bytes in the system.';
+    const mapped = await schema.mapper({ v: long });
+    const values = Object.values(mapped).filter(v => typeof v === 'string');
+    expect(values.every(v => !(v as string).startsWith('z:'))).toBe(true);
+  });
+
+  test('text|compress:0 preserves value unchanged', async () => {
+    const schema = new Schema({ name: 'text-c0', attributes: { v: 'text|compress:0' } });
+    const long = 'Long text that should not be compressed because the compression level is zero which means disabled entirely.';
+    const mapped = await schema.mapper({ v: long });
+    const values = Object.values(mapped).filter(v => typeof v === 'string');
+    expect(values.every(v => !(v as string).startsWith('z:'))).toBe(true);
+  });
+
+  test('text|encoding:base85 uses z85: prefix', async () => {
+    const schema = new Schema({ name: 'text-b85', attributes: { v: 'text|encoding:base85' } });
+    const long = 'Long text to test base eighty five beta encoding that uses z85 colon prefix before compressed data payload. This text needs to be sufficiently long with repetitive patterns so that deflate compression can reduce its size effectively even after the base85 encoding overhead is applied to the output.';
+    const mapped = await schema.mapper({ v: long });
+    const values = Object.values(mapped).filter(v => typeof v === 'string');
+    expect(values.some(v => (v as string).startsWith('z85:'))).toBe(true);
+    const result = await schema.unmapper(mapped);
+    expect(result.v).toBe(long);
+  });
+
+  test('text|threshold:50 compresses shorter texts', async () => {
+    const schema = new Schema({ name: 'text-t50', attributes: { v: 'text|threshold:50' } });
+    const medium = 'This text has more than fifty bytes and should be compressed with the fifty byte threshold defined in the attribute.';
+    const result = await schema.unmapper(await schema.mapper({ v: medium }));
+    expect(result.v).toBe(medium);
+  });
+
+  test('full modifier combination: text|optional|encoding:base64|compress:9|threshold:99', async () => {
+    const schema = new Schema({
+      name: 'text-full',
+      attributes: { v: 'text|optional|encoding:base64|compress:9|threshold:99' },
+    });
+    const long = 'Full text with all options configured: optional, encoding base64, compress level 9 and threshold 99 bytes set up.';
+    const result = await schema.unmapper(await schema.mapper({ v: long }));
+    expect(result.v).toBe(long);
+
+    const resultNull = await schema.unmapper(await schema.mapper({ v: undefined }));
+    expect(resultNull.v).toBeUndefined();
+  });
+
+  test('text|required validates presence', async () => {
+    const schema = new Schema({
+      name: 'text-req',
+      attributes: { v: 'text|required' },
+    });
+    const long = 'Required text that must be validated as required by the fastest validator before compression is applied.';
+    const result = await schema.unmapper(await schema.mapper({ v: long }));
+    expect(result.v).toBe(long);
   });
 });

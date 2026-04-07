@@ -1,4 +1,5 @@
 import { dictionaryEncode, dictionaryDecode } from './dictionary-encoding.js';
+import { decompressText } from './text-compression.js';
 
 export type EncodingType = 'none' | 'special' | 'ascii' | 'url' | 'base64' | 'dictionary';
 
@@ -269,7 +270,7 @@ export function metadataEncode(value: unknown): EncodeResult {
 
   const stringValue = String(value);
 
-  if (stringValue.startsWith('d:') || stringValue.startsWith('u:') || stringValue.startsWith('b:')) {
+  if (stringValue.startsWith('d:') || stringValue.startsWith('u:') || stringValue.startsWith('b:') || stringValue.startsWith('z:') || stringValue.startsWith('z85:')) {
     return {
       encoded: 'b:' + Buffer.from(stringValue, 'utf8').toString('base64'),
       encoding: 'base64',
@@ -342,6 +343,24 @@ export function metadataDecode(value: unknown): unknown {
     const decoded = dictionaryDecode(value);
     if (decoded !== null) {
       return decoded;
+    }
+  }
+
+  if (value.startsWith('z85:')) {
+    if (value.length <= 4) return value;
+    try {
+      return decompressText(value);
+    } catch {
+      return value;
+    }
+  }
+
+  if (value.startsWith('z:')) {
+    if (value.length <= 2) return value;
+    try {
+      return decompressText(value);
+    } catch {
+      return value;
     }
   }
 
