@@ -8,6 +8,7 @@ import type Resource from './resource.class.js';
 
 export interface DatabaseManagerOptions {
   connections: Record<string, DatabaseOptions>;
+  defaults?: Omit<DatabaseOptions, 'connectionString' | 'client' | 'plugins'>;
   default?: string;
 }
 
@@ -49,8 +50,11 @@ export class DatabaseManager extends EventEmitter {
     this._databases = new Map();
     this._resourceIndex = new Map();
 
+    const { defaults = {} } = options;
+
     for (const [name, dbOptions] of Object.entries(options.connections)) {
-      const db = new Database(dbOptions);
+      const merged = { ...defaults, ...dbOptions } as DatabaseOptions;
+      const db = new Database(merged);
       this._databases.set(name, db);
       this._forwardEvents(name, db);
     }

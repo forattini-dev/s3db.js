@@ -12,8 +12,12 @@ If all your resources live on the same backend, use `Database` directly.
 import { DatabaseManager } from 's3db.js';
 
 const manager = new DatabaseManager({
+  defaults: { logLevel: 'info', security: { passphrase: 'my-secret' } },
   connections: {
-    primary: { connectionString: 's3://KEY:SECRET@main-bucket?region=us-east-1' },
+    primary: {
+      connectionString: 's3://KEY:SECRET@main-bucket?region=us-east-1',
+      plugins: [new CachePlugin()],
+    },
     analytics: { connectionString: 'reddb://localhost:8080' },
     cache: { connectionString: 'sqlite:///tmp/cache.db' },
   },
@@ -45,10 +49,28 @@ await manager.disconnect();
 
 ```javascript
 const manager = new DatabaseManager({
+  // Shared defaults — applied to all connections (connection-specific values override)
+  defaults: {
+    logLevel: 'silent',
+    security: { passphrase: 'my-secret' },
+    strictValidation: true,
+  },
+
   // Required: at least one named connection
   connections: {
-    primary: { connectionString: 's3://...' },
-    analytics: { connectionString: 'reddb://...' },
+    primary: {
+      connectionString: 's3://...',
+      plugins: [new CachePlugin(), new MetricsPlugin()],
+    },
+    analytics: {
+      connectionString: 'reddb://...',
+      plugins: [new CostsPlugin()],
+      logLevel: 'debug',  // overrides defaults.logLevel for this connection
+    },
+    cache: {
+      connectionString: 'sqlite:///tmp/cache.db',
+      // no plugins — inherits defaults only
+    },
   },
 
   // Optional: which connection to use when none is specified (defaults to first)
@@ -56,7 +78,20 @@ const manager = new DatabaseManager({
 });
 ```
 
-Each value in `connections` is a standard `DatabaseOptions` object -- the same options you pass to `new Database()`. See [Database](/core/database.md) for all available options including plugins, security, logging, and executor pool configuration.
+Each value in `connections` is a standard `DatabaseOptions` object -- the same options you pass to `new Database()`. See [Database](/core/database.md) for all available options.
+
+### Defaults vs Connection Options
+
+`defaults` sets shared configuration applied to every connection. Connection-specific values override defaults.
+
+| Option | Where to set | Why |
+|--------|-------------|-----|
+| `logLevel`, `security`, `strictValidation` | `defaults` | Same across all backends |
+| `connectionString` | per-connection | Each backend has its own |
+| `plugins` | per-connection | Each backend has different needs |
+| `client` | per-connection | Pre-built client for a specific backend |
+
+`defaults` deliberately excludes `connectionString`, `client`, and `plugins` — these are always per-connection.
 
 ## Core Methods
 
@@ -158,6 +193,7 @@ manager.on('db:resource-created', (connectionName, resourceName) => {
 ```typescript
 interface DatabaseManagerOptions {
   connections: Record<string, DatabaseOptions>;
+  defaults?: Omit<DatabaseOptions, 'connectionString' | 'client' | 'plugins'>;
   default?: string;
 }
 

@@ -921,9 +921,18 @@ When you need resources across different storage backends (S3 + RedDB + SQLite, 
 import { DatabaseManager } from 's3db.js'
 
 const manager = new DatabaseManager({
+  // Shared config — applied to all connections
+  defaults: { logLevel: 'info', security: { passphrase: 'my-secret' } },
+  // Per-connection config (plugins go here, not in defaults)
   connections: {
-    primary: { connectionString: 's3://KEY:SECRET@bucket?region=us-east-1' },
-    analytics: { connectionString: 'reddb://localhost:8080' },
+    primary: {
+      connectionString: 's3://KEY:SECRET@bucket?region=us-east-1',
+      plugins: [new CachePlugin(), new MetricsPlugin()],
+    },
+    analytics: {
+      connectionString: 'reddb://localhost:8080',
+      plugins: [new CostsPlugin()],
+    },
     cache: { connectionString: 'sqlite:///tmp/cache.db' },
   },
   default: 'primary',
@@ -963,9 +972,10 @@ await manager.disconnect()
 ```
 
 **Key points:**
+- `defaults` sets shared config (logLevel, security, etc.) applied to all connections — connection values override
+- `plugins` are always per-connection (excluded from defaults) — each backend has different needs
 - Resource names must be globally unique across connections
 - Each `Database` has its own metadata, plugins, and client — full isolation
-- Plugins are configured per-connection in the `DatabaseOptions`
 - Events are forwarded with connection prefix: `manager.on('analytics:db:resource-created', ...)`
 
 > **When to use:** Use `Database` when all resources live on the same backend. Use `DatabaseManager` when you need resources on different backends.
