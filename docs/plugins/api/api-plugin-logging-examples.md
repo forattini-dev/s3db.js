@@ -4,7 +4,7 @@ This document shows real logging outputs from the API Plugin in different scenar
 
 ---
 
-## 📋 Table of Contents
+## Table of Contents
 
 1. [Startup Logs (Verbose Mode)](#startup-logs-verbose-mode)
 2. [Startup Logs (Minimal Mode)](#startup-logs-minimal-mode)
@@ -17,7 +17,7 @@ This document shows real logging outputs from the API Plugin in different scenar
 
 ---
 
-## 🚀 Startup Logs (Verbose Mode)
+## Startup Logs (Verbose Mode)
 
 When `logLevel: 'debug'`, you get detailed initialization logs:
 
@@ -47,7 +47,7 @@ $ node my-api.js
 [HealthManager]   GET /health/ready
 [API Plugin] Server listening on http://0.0.0.0:3000
 
-  🗄️  s3db.js API ready
+   s3db.js API ready
      - Local:    http://localhost:3000/api/v1
      - Network:  http://192.168.1.100:3000/api/v1
      - Docs:     http://localhost:3000/api/v1/docs
@@ -68,18 +68,18 @@ $ node my-api.js
 | **Context** | `[API Router] Context injection` | Database resource access |
 | **Routes** | `[API Router] Mounted ...` | Each route/resource mounted |
 | **Health** | `[HealthManager] Health endpoints` | Health check endpoints |
-| **Startup Banner** | `🗄️ s3db.js API ...` | Server info & routes summary |
+| **Startup Banner** | `s3db.js API ...` | Server info & routes summary |
 
 ---
 
-## 🔇 Startup Logs (Minimal Mode)
+## Startup Logs (Minimal Mode)
 
 When `logLevel: 'silent'` (default), you only see the startup banner:
 
 ```bash
 $ node my-api.js
 
-  🗄️  s3db.js API ready
+   s3db.js API ready
      - Local:    http://localhost:3000
      - Network:  http://192.168.1.100:3000
      - Docs:     http://localhost:3000/docs
@@ -97,7 +97,7 @@ new ApiPlugin({
 
 ---
 
-## 📡 Request Logs
+## Request Logs
 
 ### Default Format (Colorized)
 
@@ -112,12 +112,12 @@ http  GET    /health                ⇒ 200  (0.543 ms, –)
 ```
 
 **Colors** (when terminal supports ANSI):
-- 🟣 Protocol: Soft purple
-- 🔵 Method: Light blue
-- 🩵 URL: Light cyan
-- ⚪ Arrow: Gray
-- 🟡 Time: Orange/pink
-- 🔷 Size: Lavender
+- Protocol: Soft purple
+- Method: Light blue
+- URL: Light cyan
+- Arrow: Gray
+- Time: Orange/pink
+- Size: Lavender
 
 > Health check paths (`/health`, `/health/live`, `/health/ready`, `/readiness`, `/liveness`) are always logged at `debug` level, regardless of `logging.logLevel`.
 
@@ -155,7 +155,7 @@ http DELETE /users/abc123 204 (34 ms)
 
 ---
 
-## 🔌 Protocol-Aware Logging
+## Protocol-Aware Logging
 
 The API Plugin supports multiple transport protocols. Each has its own log level configuration and emits specific log events.
 
@@ -301,7 +301,7 @@ new ApiPlugin({
 
 ---
 
-## 🎯 Event Logs
+## Event Logs
 
 When `events.enabled: true` and `events.logLevel: 'debug'`:
 
@@ -319,7 +319,7 @@ new ApiPlugin({
 ```bash
 [ApiEventEmitter] Emitted request:start for /users
 [ApiEventEmitter] Emitted request:end for /users (200, 45ms)
-[ApiEventEmitter] Emitted resource:insert for users (id: abc123)
+[ApiEventEmitter] Emitted resource:created for users (id: abc123)
 [ApiEventEmitter] Emitted request:start for /posts
 [ApiEventEmitter] Emitted request:error for /posts (500, 67ms)
 ```
@@ -335,15 +335,15 @@ apiPlugin.on('request:end', (data) => {
   console.log(`← ${data.method} ${data.path} ${data.status} (${data.duration}ms)`);
 });
 
-apiPlugin.on('resource:insert', (data) => {
-  console.log(`✓ Created ${data.resource} record: ${data.id}`);
+apiPlugin.on('resource:created', (data) => {
+  console.log(`Created ${data.resource} record: ${data.id}`);
 });
 ```
 
 **Output:**
 ```bash
 → POST /users [abc-123-def]
-✓ Created users record: user_abc123
+Created users record: user_abc123
 ← POST /users 201 (123ms)
 
 → GET /users [def-456-ghi]
@@ -352,7 +352,7 @@ apiPlugin.on('resource:insert', (data) => {
 
 ---
 
-## 📊 Metrics Logs
+## Metrics Logs
 
 When `metrics.enabled: true` and `metrics.logLevel: 'debug'`:
 
@@ -425,7 +425,7 @@ $ curl http://localhost:3000/metrics
 
 ---
 
-## ❌ Error Logs
+## Error Logs
 
 ### Validation Errors
 
@@ -505,7 +505,7 @@ GET /api/v1/users/abc123 => 500 (45 ms, 123 bytes)
 
 ---
 
-## 🏭 Production JSON Logs
+## Production JSON Logs
 
 For log aggregation systems (ELK, Datadog, Splunk):
 
@@ -561,15 +561,15 @@ new ApiPlugin({
 
 ### Structured Logging Benefits
 
-✅ **Easy to parse** - Each line is valid JSON
-✅ **Query-friendly** - Filter by level, status, duration
-✅ **Aggregation** - Works with ELK, Datadog, Splunk
-✅ **Alerting** - Trigger alerts on error levels
-✅ **Analytics** - Analyze performance patterns
+**Easy to parse** - Each line is valid JSON
+**Query-friendly** - Filter by level, status, duration
+**Aggregation** - Works with ELK, Datadog, Splunk
+**Alerting** - Trigger alerts on error levels
+**Analytics** - Analyze performance patterns
 
 ---
 
-## 🎛️ Log Level Control
+## Log Level Control
 
 ### Disable Specific Logs
 
@@ -589,22 +589,22 @@ new ApiPlugin({
 
 ```javascript
 new ApiPlugin({
-  logLevel: 'debug',           // ✓ All startup details
+  logLevel: 'debug',           // All startup details
   logging: {
     enabled: true,
-    logLevel: 'debug'          // ✓ All HTTP requests at debug
+    logLevel: 'debug'          // All HTTP requests at debug
   },
   websocket: {
     enabled: true,
-    logLevel: 'debug'          // ✓ WS connect/close at debug
+    logLevel: 'debug'          // WS connect/close at debug
   },
   events: {
     enabled: true,
-    logLevel: 'debug'          // ✓ Event details
+    logLevel: 'debug'          // Event details
   },
   metrics: {
     enabled: true,
-    logLevel: 'debug'          // ✓ Metrics details
+    logLevel: 'debug'          // Metrics details
   }
 })
 ```
@@ -635,7 +635,7 @@ new ApiPlugin({
 
 ---
 
-## 📝 Best Practices
+## Best Practices
 
 ### 1. Use Verbose Mode in Development
 
@@ -700,12 +700,11 @@ new ApiPlugin({
 
 ---
 
-## 🔗 Related Documentation
+## Related Documentation
 
-- [API Plugin Configuration](./plugins/api.md)
-- [Route Order](./api-plugin-route-order.md)
-- [Middleware Guide](./api-plugin-middleware.md)
-- [Events Reference](./api-plugin-events.md)
+- [API Plugin Configuration](./README.md)
+- [Route Order](./reference/routing.md)
+- [Middleware Guide](./reference/configuration.md)
 
 ---
 

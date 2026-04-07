@@ -4,7 +4,7 @@ How to enable and customize HTTP request logs in the API Plugin.
 
 ---
 
-## ✅ Basic Activation (1 line!)
+## Basic Activation (1 line!)
 
 ```javascript
 import { Database } from 's3db.js';
@@ -27,8 +27,8 @@ await db.createResource({
 const apiPlugin = new ApiPlugin({
   port: 3000,
 
-  // 👇 Enable logging here
-  logging: true,  // ✨ That's it!
+  // Enable logging here
+  logging: true,  // That's it!
 
   resources: {
     users: { methods: ['GET', 'POST', 'PUT', 'DELETE'] }
@@ -51,22 +51,22 @@ POST /users ⇒ 400 (20.792 ms, –)
 ```
 
 **Color legend:**
-- 🟢 **200-299** (success): green
-- 🔵 **300-399** (redirect): cyan
-- 🟡 **400-499** (client error): yellow
-- 🔴 **500-599** (server error): red
+- **200-299** (success): green
+- **300-399** (redirect): cyan
+- **400-499** (client error): yellow
+- **500-599** (server error): red
 
 ---
 
-## 🎛️ Configuration Syntax
+## Configuration Syntax
 
 The `logging` option accepts three forms:
 
 ### 1. Boolean (simplest)
 
 ```javascript
-logging: true   // ✅ Turns it on with default settings
-logging: false  // ❌ Fully disables logging
+logging: true   // Turns it on with default settings
+logging: false  // Fully disables logging
 ```
 
 ### 2. Shorthand object (auto-enabled)
@@ -75,7 +75,7 @@ Passing an object **automatically enables logging** even without `enabled: true`
 
 ```javascript
 logging: {
-  format: ':method :url :status'  // ✅ Auto-enabled
+  format: ':method :url :status'  // Auto-enabled
 }
 ```
 
@@ -92,7 +92,7 @@ logging: {
 
 ---
 
-## 🎨 Formatting Options
+## Formatting Options
 
 ### Default (verbose)
 
@@ -165,7 +165,7 @@ logging: {
 
 ---
 
-## 🏷️ Available Tokens
+## Available Tokens
 
 | Token | Description | Example |
 |-------|-------------|---------|
@@ -182,7 +182,7 @@ logging: {
 
 ---
 
-## 🎯 Common Use Cases
+## Common Use Cases
 
 ### Development: maximum detail
 
@@ -200,9 +200,9 @@ logging: {
 ```
 
 **Benefits:**
-- ✅ Colors make it easy to spot errors
-- ✅ Response time is always visible
-- ✅ Shows payload size
+- Colors make it easy to spot errors
+- Response time is always visible
+- Shows payload size
 
 ### Production: clean format
 
@@ -243,7 +243,7 @@ logging: {
 
 ---
 
-## 🔕 Turning Logging Off
+## Turning Logging Off
 
 ### Disable entirely
 
@@ -263,7 +263,7 @@ logging: {
 
 ---
 
-## 🚀 Full Example
+## Full Example
 
 ```javascript
 import { Database } from 's3db.js';
@@ -314,13 +314,13 @@ const apiPlugin = new ApiPlugin({
 
 await db.usePlugin(apiPlugin);
 
-console.log('✅ API started with request logging enabled!');
+console.log('API started with request logging enabled!');
 ```
 
 ### Output (development)
 
 ```bash
-✅ API started with request logging enabled!
+API started with request logging enabled!
 
 GET /products ⇒ 200 (13.497 ms, 256)
 POST /products ⇒ 201 (20.276 ms, 512)
@@ -332,7 +332,7 @@ DELETE /products/abc123 ⇒ 204 (8.776 ms, –)
 ### Output (production)
 
 ```bash
-✅ API started with request logging enabled!
+API started with request logging enabled!
 
 GET /products 200 (13.497 ms)
 POST /products 201 (20.276 ms)
@@ -343,7 +343,7 @@ DELETE /products/abc123 204 (8.776 ms)
 
 ---
 
-## 💡 Tips
+## Tips
 
 ### 1. Combine with events for structured logs
 
@@ -394,7 +394,7 @@ logging: {
 // Flag slow requests
 apiPlugin.on('request:end', (data) => {
   if (data.duration > 1000) {
-    console.warn(`⚠️ Slow request: ${data.method} ${data.path} (${data.duration}ms)`);
+    console.warn(`Slow request: ${data.method} ${data.path} (${data.duration}ms)`);
   }
 });
 ```
@@ -424,7 +424,7 @@ logging: {
 
 ---
 
-## 📚 More Information
+## More Information
 
 - [API Plugin Logging Examples](./api-plugin-logging-examples.md) - Complete outputs
 - [API Plugin Configuration](./plugins/api.md) - Every option explained

@@ -1,4 +1,4 @@
-# 🔐 Authentication Guide
+# Authentication Guide
 
 > **Complete guide to all authentication methods: JWT • Basic Auth • API Keys • Header Secret • OAuth2/OIDC**
 
@@ -6,7 +6,7 @@
 
 ---
 
-## ⚡ Quick Start
+## Quick Start
 
 ### Choose Your Method
 
@@ -20,7 +20,7 @@
 
 ---
 
-## ⚠️ Performance: User Lookup Strategy (CRITICAL)
+## Performance: User Lookup Strategy (CRITICAL)
 
 > **Every resource-backed auth request needs to find a user.** By default, this can become an **O(n) full scan** of your users resource. This section shows how to keep it O(1).
 
@@ -34,7 +34,7 @@ authResource.query({ email: 'user@example.com' })  // O(n) — scans ALL users
 
 ### The Solution: Three Strategies (fastest to slowest)
 
-#### Strategy 1: `lookupById` — O(1) via `resource.get()` ⚡
+#### Strategy 1: `lookupById` — O(1) via `resource.get()`
 
 **Use when: the user's ID IS the lookup field** (e.g., `user.id === user.email`).
 
@@ -61,7 +61,7 @@ await db.usePlugin(new ApiPlugin({
     drivers: {
       jwt: {
         secret: process.env.JWT_SECRET,
-        lookupById: true  // ⚡ O(1) — uses resource.get(email) instead of query
+        lookupById: true  // O(1) — uses resource.get(email) instead of query
       }
     }
   }
@@ -103,7 +103,7 @@ drivers: {
 }
 ```
 
-#### Strategy 2: Partitions — O(1) via `listPartition()` ⚡
+#### Strategy 2: Partitions — O(1) via `listPartition()`
 
 **Use when: the lookup field is NOT the resource ID** (e.g., ID is UUID but you look up by email).
 
@@ -146,7 +146,7 @@ drivers: {
 }
 ```
 
-#### Strategy 3: Query scan — O(n) ❌ (last resort)
+#### Strategy 3: Query scan — O(n) (last resort)
 
 If neither `lookupById` nor a partition is configured, the system falls back to `resource.query()`. This triggers a **loud warning on first use**:
 
@@ -162,9 +162,9 @@ WARN (AuthLookup): Auth lookup for field "email" is doing an O(n) full scan.
 
 ```
 Is the lookup field the resource ID? (e.g., user.id === user.email)
-  ├─ YES → lookupById: true                    ⚡ O(1) get()
+  ├─ YES → lookupById: true                    O(1) get()
   └─ NO  → Does a partition exist for the field?
-              ├─ YES → Automatic                ⚡ O(1) listPartition()
+              ├─ YES → Automatic                O(1) listPartition()
               └─ NO  → Add partition or change ID strategy
 ```
 
@@ -192,7 +192,7 @@ await db.usePlugin(new ApiPlugin({
       jwt: {
         secret: process.env.JWT_SECRET,  // REQUIRED
         expiresIn: '7d',                 // Token lifetime
-        lookupById: true,                // ⚡ O(1) lookup (when user.id = email)
+        lookupById: true,                // O(1) lookup (when user.id = email)
         algorithm: 'HS256'               // HMAC SHA-256
       }
     },
@@ -212,7 +212,7 @@ jwt: {
   algorithm: 'HS256',                  // Signing algorithm
   issuer: 'my-api',                    // Token issuer (optional)
   audience: 'my-app',                  // Token audience (optional)
-  lookupById: true,                    // ⚡ O(1) via get() when user.id = userField value
+  lookupById: true,                    // O(1) via get() when user.id = userField value
 
   // Performance optimization
   cache: {
@@ -260,15 +260,15 @@ curl http://localhost:3000/api/orders?token=eyJhbGc...
 JWT also supports custom field configuration at the driver level:
 
 ```javascript
-// ✅ PATTERN: Driver-level configuration for JWT
+// PATTERN: Driver-level configuration for JWT
 await db.usePlugin(new ApiPlugin({
   auth: {
     drivers: [{
       driver: 'jwt',
       config: {
         jwtSecret: process.env.JWT_SECRET,
-        usernameField: 'id',        // 🎯 Field to lookup user (default: 'userId')
-        passwordField: 'apiToken'   // 🎯 Field for password comparison (default: 'apiToken')
+        usernameField: 'id',        // Field to lookup user (default: 'userId')
+        passwordField: 'apiToken'   // Field for password comparison (default: 'apiToken')
       }
     }],
     resource: 'users'
@@ -291,14 +291,14 @@ routes: {
 
 ### Security Best Practices
 
-✅ **DO:**
+**DO:**
 - Use strong secrets (32+ characters, random)
 - Set reasonable expiration (`expiresIn: '7d'`)
 - Include minimal claims (sub, email, role, scopes)
 - Use HTTPS in production
 - Rotate secrets periodically
 
-❌ **DON'T:**
+**DON'T:**
 - Store sensitive data in JWT (passwords, API keys)
 - Use predictable secrets
 - Set very long expiration (>30 days)
@@ -337,7 +337,7 @@ basic: {
   realm: 'API Access',                 // Realm name (shown in browser prompt)
   usernameField: 'email',              // User field to match (default: 'email')
   passwordField: 'apiToken',           // Password field (default: 'password')
-  lookupById: true,                    // ⚡ O(1) via get() when user.id = usernameField value
+  lookupById: true,                    // O(1) via get() when user.id = usernameField value
 }
 ```
 
@@ -374,15 +374,15 @@ return { apiToken: user.apiToken };
 Field configuration is at the driver level for better clarity:
 
 ```javascript
-// ✅ PATTERN: Driver-level configuration
+// PATTERN: Driver-level configuration
 await db.usePlugin(new ApiPlugin({
   auth: {
     drivers: [{
       driver: 'basic',
       config: {
         realm: 'API Access',
-        usernameField: 'id',        // 🎯 Custom username field
-        passwordField: 'apiToken'   // 🎯 Custom password field
+        usernameField: 'id',        // Custom username field
+        passwordField: 'apiToken'   // Custom password field
       }
     }],
     resource: 'users'
@@ -392,7 +392,7 @@ await db.usePlugin(new ApiPlugin({
 
 ### Security Notes
 
-⚠️ **Important:**
+**Important:**
 - Always use HTTPS in production (credentials sent in every request)
 - API tokens are preferred over passwords
 - Use long, random tokens (32+ characters)
@@ -431,7 +431,7 @@ apikey: {
   headerName: 'X-API-Key',             // Header name (default: 'X-API-Key')
   keyField: 'apiKey',                   // User field with the key (default: 'apiKey')
   queryParam: 'apikey',                // Optional: allow ?apikey=xxx
-  lookupById: true,                    // ⚡ O(1) via get() when user.id = API key value
+  lookupById: true,                    // O(1) via get() when user.id = API key value
   partitionName: 'byApiKey',           // Override auto-detected partition name (optional)
 }
 ```
@@ -656,7 +656,7 @@ await db.usePlugin(new ApiPlugin({
         redirectUri: 'http://localhost:3000/auth/callback',
         cookieSecret: process.env.COOKIE_SECRET,  // 32+ characters
 
-        // ✨ Auto token refresh, continue URL, provider quirks
+        // Auto token refresh, continue URL, provider quirks
       }
     },
     pathRules: [
@@ -684,7 +684,7 @@ oidc: {
   clientSecret: 'YOUR_CLIENT_SECRET',
   redirectUri: 'http://localhost:3000/auth/callback',
   cookieSecret: process.env.COOKIE_SECRET,
-  lookupById: true                     // ⚡ O(1) for fallback lookupFields when that value is the resource ID
+  lookupById: true                     // O(1) for fallback lookupFields when that value is the resource ID
 }
 ```
 
@@ -713,28 +713,28 @@ oidc: {
 
 ### OIDC Enhancements
 
-✨ **Production-grade features enabled by default:**
+**Production-grade features enabled by default:**
 
-- **🔄 Implicit Token Refresh** - Active users never see session expiration
-- **🔗 Continue URL** - Preserves destination after login
-- **🌐 Provider Quirks** - Google, Azure, Auth0 auto-configured
-- **🍪 Dual-Cookie Deletion** - Cross-subdomain logout works
-- **🔒 Cache-Control Headers** - Prevents CDN caching
-- **⚡ Discovery Cache** - Thread-safe, per-request cache
+- **Implicit Token Refresh** - Active users never see session expiration
+- **Continue URL** - Preserves destination after login
+- **Provider Quirks** - Google, Azure, Auth0 auto-configured
+- **Dual-Cookie Deletion** - Cross-subdomain logout works
+- **Cache-Control Headers** - Prevents CDN caching
+- **Discovery Cache** - Thread-safe, per-request cache
 
 **[→ Complete OIDC Guide](/plugins/api/guides/oidc.md)** - Deep dive with all features, configuration, troubleshooting
 
 ### OIDC vs OAuth2 Resource Server
 
 **OIDC (Identity Provider Integration)** - Use when:
-- ✅ You want to integrate with Azure AD, Google, Keycloak
-- ✅ You handle login/logout flows
-- ✅ You manage user sessions
+- You want to integrate with Azure AD, Google, Keycloak
+- You handle login/logout flows
+- You manage user sessions
 
 **OAuth2 Resource Server** - Use when:
-- ✅ Another service handles authentication
-- ✅ You only validate access tokens
-- ✅ You're building a microservice
+- Another service handles authentication
+- You only validate access tokens
+- You're building a microservice
 
 ```javascript
 // Resource Server (validate tokens only)
@@ -760,7 +760,7 @@ await db.usePlugin(new ApiPlugin({
         cacheTTL: 3_600_000,                       // JWKS cache: 1 hour (default)
         clockTolerance: 60,                        // Clock skew tolerance in seconds
         fetchUserInfo: true,                       // Look up user in local DB (default)
-        lookupById: true,                          // ⚡ O(1) for fallback field lookups such as email
+        lookupById: true,                          // O(1) for fallback field lookups such as email
         userMapping: {                             // Map token claims to user fields
           id: 'sub',
           email: 'email',
@@ -1059,12 +1059,14 @@ node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
 ```
 
 **Q: Can I customize auth logic?**
-A: Yes! Use guards for fine-grained authorization:
+A: Yes! Use guards for fine-grained authorization (inside `createResource`):
 ```javascript
-guard: {
-  list: (ctx) => {
-    // Custom logic here
-    return ctx.user.role === 'admin';
+api: {
+  guard: {
+    list: (ctx) => {
+      // Custom logic here
+      return ctx.user.role === 'admin';
+    }
   }
 }
 ```

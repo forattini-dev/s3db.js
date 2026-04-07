@@ -1,4 +1,4 @@
-# 📋 Configuration Options (Canonical)
+# Configuration Options (Canonical)
 
 This section is the single source of truth for all ApiPlugin options. Other guides link here and avoid repeating config.
 
@@ -119,7 +119,7 @@ User Lookup Performance (auth.drivers[].config — resource-backed drivers)
 - partitionName: string | null — Explicit override for the API Key driver. Other resource-backed drivers auto-detect standard partition names such as `byEmail` and `byApiKey` when they exist.
 
 Lookup priority: lookupById (O(1) get) → partition (O(1) listPartition) → query (O(n) scan + warning).
-See [Authentication Guide: Performance](../guides/authentication.md#️-performance-user-lookup-strategy-critical) for full details.
+See [Authentication Guide: Performance](../guides/authentication.md#-performance-user-lookup-strategy-critical) for full details.
 
 Driver‑specific (exemplos)
 - JWT: { secret: string; expiresIn?: string; lookupById?: boolean }
@@ -425,7 +425,7 @@ The API plugin does not auto-install other plugins, but it will detect an existi
 - `blockDurationMs` (number, default `300000`): how long an offending IP remains banned.
 - `maxEntries` (number, default `10000`): cap for tracked IP entries to keep the in-memory cache bounded.
 
-> 💡 When Identity plugin is installed under the same namespace, the API plugin automatically shares the user resource and inherits the Identity rate limit guardrails, so you only need to configure `auth.registration`/`auth.loginThrottle` when diverging from those defaults.
+> When Identity plugin is installed under the same namespace, the API plugin automatically shares the user resource and inherits the Identity rate limit guardrails, so you only need to configure `auth.registration`/`auth.loginThrottle` when diverging from those defaults.
 
 ---
 
@@ -842,7 +842,7 @@ middlewares: [
 
 ---
 
-## 🚀 OIDC Enhancements
+## OIDC Enhancements
 
 The OIDC driver received significant enhancements. See **[OIDC Guide](/plugins/api/guides/oidc.md)** for complete documentation.
 
@@ -871,14 +871,14 @@ auth: {
     redirectUri: 'http://localhost:3000/auth/callback',
     cookieSecret: process.env.COOKIE_SECRET,
 
-    // 🎯 NEW: Implicit token refresh (enabled by default)
+    // NEW: Implicit token refresh (enabled by default)
     autoRefreshTokens: true,      // Seamless sessions - no expiration for active users
     refreshThreshold: 300000,     // Refresh 5 min before expiry
 
-    // 🎯 NEW: Continue URL with reverse proxy support
+    // NEW: Continue URL with reverse proxy support
     externalUrl: 'https://api.example.com',  // Public-facing URL
 
-    // 🎯 NEW: Cross-subdomain authentication
+    // NEW: Cross-subdomain authentication
     cookieDomain: '.example.com',  // Works for a.example.com, b.example.com
 
     // Session duration

@@ -1,65 +1,65 @@
 # Auth Drivers - Resource Management Strategy
 
-## 🎯 Problema
+## Problem
 
-Cada driver de autenticação precisa de um resource com campos específicos. Como gerenciar isso?
+Each authentication driver needs a resource with specific fields. How should this be managed?
 
-**Opções:**
-1. ✅ **Auto-create**: Driver cria resource automaticamente com campos mínimos
-2. ✅ **Use existing**: Driver usa resource existente (validando campos necessários)
-3. ✅ **Hybrid**: Configurável via `createResource` flag
+**Options:**
+1. **Auto-create**: Driver creates resource automatically with minimal fields
+2. **Use existing**: Driver uses an existing resource (validating required fields)
+3. **Hybrid**: Configurable via `createResource` flag
 
-## 📋 Design Proposto
+## Proposed Design
 
-### Configuração por Driver
+### Per-Driver Configuration
 
 ```javascript
 {
   driver: 'jwt',
   config: {
-    // 🆕 Resource management
-    resource: 'users',           // Nome do resource (default: 'plg_api_{driver}_users')
-    createResource: true,        // Se true, cria automaticamente (default: true)
+    // Resource management
+    resource: 'users',           // Resource name (default: 'plg_api_{driver}_users')
+    createResource: true,        // If true, creates automatically (default: true)
 
-    // 🆕 Field mapping (usado para validação E criação)
-    userField: 'email',          // Campo de identificação do usuário
-    passwordField: 'password',   // Campo de senha (se aplicável)
+    // Field mapping (used for validation AND creation)
+    userField: 'email',          // User identification field
+    passwordField: 'password',   // Password field (if applicable)
 
-    // Configs específicas do driver
+    // Driver-specific configs
     secret: 'my-secret',
     expiresIn: '7d'
   }
 }
 ```
 
-### Comportamento
+### Behavior
 
-#### Modo 1: Auto-create (createResource: true) - PADRÃO
+#### Mode 1: Auto-create (createResource: true) - DEFAULT
 
 ```javascript
-// Usuário não especifica resource, driver cria automaticamente
+// User does not specify resource, driver creates automatically
 {
   driver: 'jwt',
   config: {
-    // Sem resource especificado → cria 'plg_api_jwt_users'
+    // No resource specified -> creates 'plg_api_jwt_users'
     secret: 'secret'
   }
 }
 ```
 
-**O que acontece:**
-1. Driver verifica se resource existe
-2. Se NÃO existe → **cria automaticamente** com schema mínimo
-3. Se existe → **valida** se tem os campos necessários
+**What happens:**
+1. Driver checks if resource exists
+2. If it does NOT exist -> **creates automatically** with minimal schema
+3. If it exists -> **validates** that it has the required fields
 
-**Schema criado automaticamente (JWT):**
+**Schema created automatically (JWT):**
 ```javascript
 {
   name: 'plg_api_jwt_users',
   attributes: {
     id: 'string|required',
-    email: 'string|required|email',      // userField padrão
-    password: 'secret|required|minlength:8', // passwordField padrão
+    email: 'string|required|email',      // default userField
+    password: 'secret|required|minlength:8', // default passwordField
     role: 'string|default:user',
     scopes: 'array|items:string|optional',
     active: 'boolean|default:true',
@@ -72,28 +72,28 @@ Cada driver de autenticação precisa de um resource com campos específicos. Co
 }
 ```
 
-#### Modo 2: Use Existing (createResource: false)
+#### Mode 2: Use Existing (createResource: false)
 
 ```javascript
 {
   driver: 'jwt',
   config: {
     resource: 'my_custom_users',
-    createResource: false,  // NÃO cria, só usa
-    userField: 'username',  // Campo customizado
-    passwordField: 'pass',   // Campo customizado
+    createResource: false,  // Do NOT create, only use existing
+    userField: 'username',  // Custom field
+    passwordField: 'pass',   // Custom field
     secret: 'secret'
   }
 }
 ```
 
-**O que acontece:**
-1. Driver procura resource `my_custom_users`
-2. Se NÃO existe → **ERRO** (não cria)
-3. Se existe → **valida** campos necessários
-4. Se falta campo → **ERRO com sugestão**
+**What happens:**
+1. Driver looks for resource `my_custom_users`
+2. If it does NOT exist -> **ERROR** (does not create)
+3. If it exists -> **validates** required fields
+4. If a field is missing -> **ERROR with suggestion**
 
-**Validação de campos:**
+**Field validation:**
 ```javascript
 const requiredFields = {
   [config.userField || 'email']: true,
@@ -114,17 +114,17 @@ if (missingFields.length > 0) {
 }
 ```
 
-#### Modo 3: Shared Resource (múltiplos drivers)
+#### Mode 3: Shared Resource (multiple drivers)
 
 ```javascript
 auth: {
-  // Resource compartilhado entre drivers
+  // Shared resource across drivers
   drivers: [
     {
       driver: 'jwt',
       config: {
-        resource: 'users',        // Usa mesmo resource
-        createResource: false,    // Não cria (já existe)
+        resource: 'users',        // Uses same resource
+        createResource: false,    // Does not create (already exists)
         userField: 'email',
         passwordField: 'password',
         secret: 'jwt-secret'
@@ -133,8 +133,8 @@ auth: {
     {
       driver: 'basic',
       config: {
-        resource: 'users',        // Usa mesmo resource
-        createResource: false,    // Não cria (já existe)
+        resource: 'users',        // Uses same resource
+        createResource: false,    // Does not create (already exists)
         usernameField: 'email',
         passwordField: 'password',
         realm: 'API'
@@ -143,16 +143,16 @@ auth: {
     {
       driver: 'apiKey',
       config: {
-        resource: 'users',        // Usa mesmo resource
-        createResource: false,    // Não cria (já existe)
-        keyField: 'apiKey'        // Precisa ter campo apiKey!
+        resource: 'users',        // Uses same resource
+        createResource: false,    // Does not create (already exists)
+        keyField: 'apiKey'        // Requires apiKey field
       }
     }
   ]
 }
 ```
 
-**Criação manual do resource compartilhado:**
+**Manual creation of the shared resource:**
 ```javascript
 await database.createResource({
   name: 'users',
@@ -170,11 +170,11 @@ await database.createResource({
 
 ---
 
-## 🔧 Implementação
+## Implementation
 
-### 1. Schema Mínimo por Driver
+### 1. Minimal Schema per Driver
 
-Cada driver define seu schema mínimo:
+Each driver defines its minimal schema:
 
 #### JWT Driver
 ```javascript
@@ -209,7 +209,7 @@ const APIKEY_MINIMAL_SCHEMA = {
 #### OAuth2 Driver (Resource Server)
 ```javascript
 const OAUTH2_MINIMAL_SCHEMA = {
-  id: 'string|required',  // Mapeia de 'sub' claim
+  id: 'string|required',  // Maps from 'sub' claim
   email: 'string|optional|email',
   username: 'string|optional',
   role: 'string|default:user',
@@ -221,14 +221,14 @@ const OAUTH2_MINIMAL_SCHEMA = {
 #### OIDC Driver
 ```javascript
 const OIDC_MINIMAL_SCHEMA = {
-  id: 'string|required',  // Mapeia de config.userMapping.id → 'sub'
+  id: 'string|required',  // Maps from config.userMapping.id -> 'sub'
   email: 'string|required|email',
   username: 'string|optional',
   role: 'string|default:user',
   scopes: 'array|items:string|optional',
   active: 'boolean|default:true',
   provider: 'string|optional',  // 'azure', 'google', etc.
-  providerId: 'string|optional', // ID no provedor externo
+  providerId: 'string|optional', // ID in external provider
   lastLoginAt: 'datetime|optional'
 };
 ```
@@ -490,7 +490,7 @@ export async function createJWTHandler(config, database) {
 
 ---
 
-## 📚 Examples
+## Examples
 
 ### Example 1: Auto-create (Simplest)
 
@@ -641,7 +641,7 @@ const api = new ApiPlugin({
 
 ---
 
-## ⚠️ Edge Cases
+## Edge Cases
 
 ### Case 1: Resource Exists but Missing Fields
 
@@ -722,7 +722,7 @@ await database.createResource({
 
 ---
 
-## 🎯 Summary
+## Summary
 
 | Scenario | createResource | resource | Result |
 |----------|---------------|----------|--------|

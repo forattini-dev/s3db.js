@@ -50,7 +50,90 @@ await db.createResource({
       fields: { userId: 'string' }
     }
   },
-  timestamps: true
+  timestamps: true,
+  api: {
+    guard: {
+      /**
+       * LIST: Filter by userId partition for tenant isolation
+       * - Admin sees everything
+       * - Regular user sees only their URLs (O(1) via partition!)
+       */
+      list: (ctx) => {
+        console.log(`[Guard] list() - user: ${ctx.user.email}, role: ${ctx.user.role}`);
+
+        // Admin bypasses filter
+        if (ctx.user.scopes?.includes('preset:admin')) {
+          console.log('[Guard] Admin - sees all URLs');
+          return true;
+        }
+
+        // Regular user: filter by partition (O(1)!)
+        console.log(`[Guard] User - filtered to userId=${ctx.user.id} (via partition)`);
+        ctx.setPartition('byUserId', { userId: ctx.user.id });
+        return true;
+      },
+
+      /**
+       * CREATE: Auto-inject userId for tenant isolation
+       * - Prevents users from creating URLs for other users
+       */
+      create: (ctx) => {
+        console.log(`[Guard] create() - user: ${ctx.user.email}`);
+
+        // Auto-inject userId (can't be overridden)
+        ctx.c.req.body = ctx.c.req.body || {};
+        ctx.c.req.body.userId = ctx.user.id;
+
+        console.log(`[Guard] Auto-injected userId=${ctx.user.id}`);
+        return true;
+      },
+
+      /**
+       * UPDATE: Only owner or admin can update
+       * - Receives (ctx, record) where record is the existing URL
+       */
+      update: async (ctx, record) => {
+        console.log(`[Guard] update() - user: ${ctx.user.email}, urlId: ${record.id}`);
+
+        // Admin can update anything
+        if (ctx.user.scopes?.includes('preset:admin')) {
+          console.log('[Guard] Admin - can update any URL');
+          return true;
+        }
+
+        // User can only update their own URLs
+        if (record.userId !== ctx.user.id) {
+          console.log(`[Guard] Forbidden - URL belongs to ${record.userId}, not ${ctx.user.id}`);
+          throw new Error('Forbidden: You can only update your own URLs');
+        }
+
+        console.log('[Guard] User owns this URL');
+        return true;
+      },
+
+      /**
+       * DELETE: Only owner or admin can delete
+       */
+      delete: async (ctx, record) => {
+        console.log(`[Guard] delete() - user: ${ctx.user.email}, urlId: ${record.id}`);
+
+        // Admin can delete anything
+        if (ctx.user.scopes?.includes('preset:admin')) {
+          console.log('[Guard] Admin - can delete any URL');
+          return true;
+        }
+
+        // User can only delete their own URLs
+        if (record.userId !== ctx.user.id) {
+          console.log(`[Guard] Forbidden - URL belongs to ${record.userId}, not ${ctx.user.id}`);
+          throw new Error('Forbidden: You can only delete your own URLs');
+        }
+
+        console.log('[Guard] User owns this URL');
+        return true;
+      }
+    }
+  }
 });
 
 // Seed data: 2 users, 4 URLs (2 per user)
@@ -107,100 +190,6 @@ await urls.insert({
 
 console.log('✅ Seeded database: 2 users, 4 URLs (2 per user)');
 console.log('');
-
-// ============================================
-// Configure Guards with RouteContext
-// ============================================
-
-/**
- * ✅ NEW: Guards receive RouteContext (ctx) instead of just user object
- *
- * Benefits:
- * - Access to ctx.user, ctx.resources, ctx.param(), ctx.query()
- * - Use ctx.setPartition() for O(1) tenant isolation
- * - Clean, dev-friendly API
- */
-urls.guard = {
-  /**
-   * LIST: Filter by userId partition for tenant isolation
-   * - Admin sees everything
-   * - Regular user sees only their URLs (O(1) via partition!)
-   */
-  list: (ctx) => {
-    console.log(`[Guard] list() - user: ${ctx.user.email}, role: ${ctx.user.role}`);
-
-    // Admin bypasses filter
-    if (ctx.user.scopes?.includes('preset:admin')) {
-      console.log('[Guard] ✅ Admin - sees all URLs');
-      return true;
-    }
-
-    // Regular user: filter by partition (O(1)!)
-    console.log(`[Guard] ✅ User - filtered to userId=${ctx.user.id} (via partition)`);
-    ctx.setPartition('byUserId', { userId: ctx.user.id });
-    return true;
-  },
-
-  /**
-   * CREATE: Auto-inject userId for tenant isolation
-   * - Prevents users from creating URLs for other users
-   */
-  create: (ctx) => {
-    console.log(`[Guard] create() - user: ${ctx.user.email}`);
-
-    // Auto-inject userId (can't be overridden)
-    ctx.c.req.body = ctx.c.req.body || {};
-    ctx.c.req.body.userId = ctx.user.id;
-
-    console.log(`[Guard] ✅ Auto-injected userId=${ctx.user.id}`);
-    return true;
-  },
-
-  /**
-   * UPDATE: Only owner or admin can update
-   * - Receives (ctx, record) where record is the existing URL
-   */
-  update: async (ctx, record) => {
-    console.log(`[Guard] update() - user: ${ctx.user.email}, urlId: ${record.id}`);
-
-    // Admin can update anything
-    if (ctx.user.scopes?.includes('preset:admin')) {
-      console.log('[Guard] ✅ Admin - can update any URL');
-      return true;
-    }
-
-    // User can only update their own URLs
-    if (record.userId !== ctx.user.id) {
-      console.log(`[Guard] ❌ Forbidden - URL belongs to ${record.userId}, not ${ctx.user.id}`);
-      throw new Error('Forbidden: You can only update your own URLs');
-    }
-
-    console.log('[Guard] ✅ User owns this URL');
-    return true;
-  },
-
-  /**
-   * DELETE: Only owner or admin can delete
-   */
-  delete: async (ctx, record) => {
-    console.log(`[Guard] delete() - user: ${ctx.user.email}, urlId: ${record.id}`);
-
-    // Admin can delete anything
-    if (ctx.user.scopes?.includes('preset:admin')) {
-      console.log('[Guard] ✅ Admin - can delete any URL');
-      return true;
-    }
-
-    // User can only delete their own URLs
-    if (record.userId !== ctx.user.id) {
-      console.log(`[Guard] ❌ Forbidden - URL belongs to ${record.userId}, not ${ctx.user.id}`);
-      throw new Error('Forbidden: You can only delete your own URLs');
-    }
-
-    console.log('[Guard] ✅ User owns this URL');
-    return true;
-  }
-};
 
 // ============================================
 // Setup API Plugin

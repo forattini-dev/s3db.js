@@ -1,4 +1,4 @@
-# 🚦 Routing
+# Routing
 
 This page summarizes all ways to expose routes with the ApiPlugin, when to use each, and how precedence and paths work — without overlap or surprises.
 

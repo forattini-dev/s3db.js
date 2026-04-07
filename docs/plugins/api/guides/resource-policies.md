@@ -1,4 +1,4 @@
-# 📖 Resource Policies
+# Resource Policies
 
 > **What this guide covers:** How to model visibility, projections, and mutability directly in `resource.api`
 

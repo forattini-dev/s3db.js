@@ -4,12 +4,12 @@
 
 | Driver | Status | User Resource Lookup | O(1) Options | Notes |
 |--------|--------|----------------------|--------------|-------|
-| **JWT** | ✅ Production-ready | `userField` / `passwordField` | `lookupById`, auto-detected partitions | Best fit for local user resources |
-| **Basic** | ✅ Production-ready | `usernameField` / `passwordField` | `lookupById`, auto-detected partitions | Supports admin bypass and token cookie fallback |
-| **API Key** | ✅ Production-ready | `keyField` | `lookupById`, auto-detected partitions, manual `partitionName` | Only driver with explicit `partitionName` config |
-| **OAuth2** | ✅ Production-ready | `userMapping` + local resource fallback | Direct claim ID lookup, `lookupById`, auto-detected partitions | Hybrid flow: tries mapped ID claim before field fallback |
-| **OIDC** | ✅ Production-ready | `userMapping` and `lookupFields` fallback | Direct claim ID lookup, `lookupById`, auto-detected partitions | Hybrid flow: tries candidate IDs before fallback lookups |
-| **Header Secret** | ✅ Production-ready | None | Not applicable | Injects an in-memory identity, no user resource lookup |
+| **JWT** | Production-ready | `userField` / `passwordField` | `lookupById`, auto-detected partitions | Best fit for local user resources |
+| **Basic** | Production-ready | `usernameField` / `passwordField` | `lookupById`, auto-detected partitions | Supports admin bypass and token cookie fallback |
+| **API Key** | Production-ready | `keyField` | `lookupById`, auto-detected partitions, manual `partitionName` | Only driver with explicit `partitionName` config |
+| **OAuth2** | Production-ready | `userMapping` + local resource fallback | Direct claim ID lookup, `lookupById`, auto-detected partitions | Hybrid flow: tries mapped ID claim before field fallback |
+| **OIDC** | Production-ready | `userMapping` and `lookupFields` fallback | Direct claim ID lookup, `lookupById`, auto-detected partitions | Hybrid flow: tries candidate IDs before fallback lookups |
+| **Header Secret** | Production-ready | None | Not applicable | Injects an in-memory identity, no user resource lookup |
 
 ## Lookup Semantics
 

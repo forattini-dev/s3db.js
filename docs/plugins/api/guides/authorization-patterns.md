@@ -1,23 +1,23 @@
-# 🎯 Advanced Authorization Patterns
+# Advanced Authorization Patterns
 
-> **Advanced guide** - For basics, start with [Guards Guide](./guards.md)
+> For guard basics (syntax, placement, precedence), see the [Guards Guide](./guards.md). This guide focuses on **advanced** patterns built on top of guards.
 
-Authentication answers **"who are you?"**, authorization answers **"what can you do?"**.
-
-This guide shows **advanced** authorization patterns using s3db.js:
-- **Granular Scopes** - Scalable scope structure
-- **Row-Level Security (RLS)** - Per-row access control using partitions
-- **Multi-Tenancy** - Complete data isolation per tenant
-- **Attribute-Based Access Control (ABAC)** - Attribute-based policies
+This guide covers:
+- **Granular Scopes** -- Scalable scope structure and hierarchy
+- **Row-Level Security (RLS)** -- Per-row access control via partitions
+- **Multi-Tenancy** -- Complete data isolation per tenant
+- **Guard Helpers** -- Reusable authorization functions
+- **ABAC** -- Attribute-based access control policies
+- **Advanced Patterns** -- Hierarchical permissions, time-based access, dynamic scopes, audit trails
 
 ---
 
-## 📋 Table of Contents
+## Table of Contents
 
 1. [Granular Scopes](#granular-scopes)
 2. [Row-Level Security (RLS)](#row-level-security-rls)
 3. [Multi-Tenancy with Partitions](#multi-tenancy-with-partitions)
-4. [Authorization Middleware](#authorization-middleware)
+4. [Guard Helpers](#guard-helpers)
 5. [ABAC (Attribute-Based Access Control)](#abac-attribute-based-access-control)
 6. [Advanced Patterns](#advanced-patterns)
 
@@ -25,7 +25,7 @@ This guide shows **advanced** authorization patterns using s3db.js:
 
 ## Granular Scopes
 
-### ❌ Problem: Overly Broad Scopes
+### Problem: Overly Broad Scopes
 
 ```javascript
 // BAD - Too permissive
@@ -36,23 +36,20 @@ const scopes = [
 ];
 ```
 
-### ✅ Solution: Scopes with Permission Levels
+### Solution: Scopes with Permission Levels
 
 ```javascript
 // GOOD - Granular and scalable
 const scopes = [
-  // Read permissions
   'orders:read:own',       // Read only own orders
   'orders:read:team',      // Read team orders
   'orders:read:org',       // Read organization orders
   'orders:read:all',       // Admin - read everything
 
-  // Write permissions
   'orders:write:own',      // Edit only own orders
   'orders:write:team',     // Edit team orders
   'orders:write:all',      // Admin - edit everything
 
-  // Special permissions
   'orders:delete:own',     // Delete own orders
   'orders:delete:all',     // Admin - delete any order
   'orders:approve',        // Approve orders (workflow)
@@ -66,53 +63,81 @@ const scopes = [
 <resource>:<action>:<scope>:<constraint?>
 
 Examples:
-- orders:read:own           → Read own orders
-- orders:read:team:pending  → Read pending team orders
-- orders:write:org          → Edit org orders
-- orders:delete:all         → Delete any order
-- users:read:own            → Read own profile
-- users:write:team          → Edit team users
-- analytics:read:org        → Read org analytics
+- orders:read:own           -> Read own orders
+- orders:read:team:pending  -> Read pending team orders
+- orders:write:org          -> Edit org orders
+- orders:delete:all         -> Delete any order
+- users:read:own            -> Read own profile
+- analytics:read:org        -> Read org analytics
 ```
 
 ### Scope Hierarchy
 
 ```javascript
 const SCOPE_HIERARCHY = {
-  own: 1,    // Lowest permission
+  own: 1,
   team: 2,
   org: 3,
-  all: 4     // Highest permission (admin)
+  all: 4
 };
 
-function hasPermission(userScope, requiredScope) {
+function hasScopeLevel(userScope, requiredScope) {
   return SCOPE_HIERARCHY[userScope] >= SCOPE_HIERARCHY[requiredScope];
 }
 
-// Example:
 // User has 'orders:read:org' (level 3)
 // Endpoint requires 'orders:read:team' (level 2)
-// hasPermission('org', 'team') → true ✅
+// hasScopeLevel('org', 'team') -> true
+```
+
+Use scope hierarchies inside guard functions:
+
+```javascript
+const ordersResource = await db.createResource({
+  name: 'orders',
+  attributes: {
+    userId: 'string|required',
+    teamId: 'string|required',
+    total: 'number'
+  },
+  partitions: {
+    byUser: { fields: { userId: 'string' } },
+    byTeam: { fields: { teamId: 'string' } }
+  },
+  api: {
+    guard: {
+      list: (ctx) => {
+        const level = getScopeLevel(ctx.auth.scopes, 'orders:read');
+
+        if (level >= SCOPE_HIERARCHY.all) return true;
+        if (level >= SCOPE_HIERARCHY.team) {
+          ctx.setPartition('byTeam', { teamId: ctx.auth.claims.teamId });
+          return true;
+        }
+        if (level >= SCOPE_HIERARCHY.own) {
+          ctx.setPartition('byUser', { userId: ctx.auth.principalId });
+          return true;
+        }
+        return false;
+      }
+    }
+  }
+});
 ```
 
 ---
 
 ## Row-Level Security (RLS)
 
-**Concept**: Each row/document is only accessible by authorized users.
+Each row is only accessible by authorized users.
 
-### Pattern 1: Partition by User ID
+### Declarative Guard Approach (Preferred)
 
 ```javascript
-import { PluginError } from 's3db.js';
-
-// ========================================
-// 1. Create resource with partition by userId
-// ========================================
 const ordersResource = await db.createResource({
   name: 'orders',
   attributes: {
-    userId: 'string|required',      // Order owner
+    userId: 'string|required',
     productId: 'string|required',
     quantity: 'number',
     total: 'number',
@@ -120,114 +145,93 @@ const ordersResource = await db.createResource({
   },
   partitions: {
     byUser: {
-      fields: { userId: 'string' }  // Partition key = userId
+      fields: { userId: 'string' }
     }
   },
-  timestamps: true
-});
-
-// ========================================
-// 2. Automatic RLS middleware
-// ========================================
-function rlsMiddleware(req, res, next) {
-  // Inject userId from token into all queries
-  req.userId = req.user.sub;  // User ID from token (Azure AD oid, Keycloak sub)
-
-  // Force filter by userId in ALL queries
-  req.rlsFilter = { userId: req.userId };
-
-  next();
-}
-
-apiPlugin.use(rlsMiddleware);
-
-// ========================================
-// 3. Routes with automatic RLS
-// ========================================
-apiPlugin.addRoute({
-  path: '/api/orders',
-  method: 'GET',
-  handler: async (req, res) => {
-    // Query automatically filtered by userId via partition
-    const orders = await ordersResource.listPartition('byUser', {
-      userId: req.userId  // O(1) lookup via partition!
-    });
-
-    res.json({ orders });
-  },
-  auth: 'oauth2'
-});
-
-apiPlugin.addRoute({
-  path: '/api/orders',
-  method: 'POST',
-  handler: async (req, res) => {
-    const { productId, quantity, total } = req.body;
-
-    // Force userId from token (don't trust request body)
-    const order = await ordersResource.insert({
-      userId: req.userId,  // Always from token, never trust input
-      productId,
-      quantity,
-      total,
-      status: 'pending'
-    });
-
-    res.status(201).json(order);
-  },
-  auth: 'oauth2'
-});
-
-apiPlugin.addRoute({
-  path: '/api/orders/:id',
-  method: 'GET',
-  handler: async (req, res) => {
-    const { id } = req.params;
-
-    // Fetch order
-    const order = await ordersResource.get(id);
-
-    if (!order) {
-      return res.status(404).json({ error: 'Order not found' });
+  timestamps: true,
+  api: {
+    guard: {
+      '*': (ctx) => {
+        ctx.userId = ctx.auth.principalId;
+        return !!ctx.userId;
+      },
+      list: (ctx) => {
+        // O(1) partition lookup instead of O(n) scan
+        ctx.setPartition('byUser', { userId: ctx.userId });
+        return true;
+      },
+      create: (ctx) => {
+        // Force userId from token -- never trust request body
+        ctx.body.userId = ctx.userId;
+        return true;
+      },
+      get: (ctx, resource) => resource.userId === ctx.userId,
+      update: (ctx, resource) => resource.userId === ctx.userId,
+      delete: (ctx, resource) => resource.userId === ctx.userId
     }
+  }
+});
 
-    // RLS Check - only return if it belongs to the user
-    if (order.userId !== req.userId) {
-      return res.status(404).json({ error: 'Order not found' });  // 404, not 403!
+await db.usePlugin(new ApiPlugin({ port: 3000, auth: { driver: 'jwt' } }));
+```
+
+### Custom Route Approach
+
+For endpoints that go beyond standard CRUD:
+
+```javascript
+const ordersResource = await db.createResource({
+  name: 'orders',
+  attributes: { userId: 'string|required', status: 'string', total: 'number' },
+  partitions: { byUser: { fields: { userId: 'string' } } },
+  api: {
+    guard: {
+      '*': (ctx) => {
+        ctx.userId = ctx.auth.principalId;
+        return !!ctx.userId;
+      }
+    },
+
+    'GET /my-summary': async (c, ctx) => {
+      const orders = await ctx.services.resource.listPartition('byUser', {
+        userId: ctx.auth.principalId
+      });
+
+      const total = orders.reduce((sum, o) => sum + (o.total || 0), 0);
+
+      return ctx.success({
+        count: orders.length,
+        total,
+        userId: ctx.auth.principalId
+      });
     }
-
-    res.json(order);
-  },
-  auth: 'oauth2'
+  }
 });
 ```
 
-**Performance**: Partition `byUser` transforms O(n) query into O(1) lookup!
+**Performance**: Partition `byUser` transforms O(n) query into O(1) lookup.
 
 ---
 
 ## Multi-Tenancy with Partitions
 
-**Concept**: Each tenant (organization) has completely isolated data.
+Each tenant (organization) has completely isolated data.
 
-### Pattern: Partition by Tenant ID
+### Declarative Guard Approach (Preferred)
 
 ```javascript
-// ========================================
-// 1. Resource with partition by tenantId
-// ========================================
 const ordersResource = await db.createResource({
   name: 'orders',
   attributes: {
-    tenantId: 'string|required',    // Organization ID
-    userId: 'string|required',      // User within tenant
+    tenantId: 'string|required',
+    userId: 'string|required',
     productId: 'string|required',
     quantity: 'number',
     total: 'number'
   },
   partitions: {
     byTenant: {
-      fields: { tenantId: 'string' }  // Complete isolation per tenant
+      fields: { tenantId: 'string' }
     },
     byTenantUser: {
       fields: {
@@ -236,285 +240,209 @@ const ordersResource = await db.createResource({
       }
     }
   },
-  timestamps: true
-});
-
-// ========================================
-// 2. Multi-Tenant Middleware
-// ========================================
-function multiTenantMiddleware(req, res, next) {
-  // TenantId comes from JWT token (custom claim)
-  req.tenantId = req.user.tenantId || req.user.tid;  // Azure AD tid, Keycloak custom
-  req.userId = req.user.sub;
-
-  // Validate that tenant exists
-  if (!req.tenantId) {
-    return res.status(403).json({
-      error: 'forbidden',
-      error_description: 'Tenant ID missing in token'
-    });
-  }
-
-  // Force tenant filter in ALL queries
-  req.tenantFilter = { tenantId: req.tenantId };
-
-  next();
-}
-
-apiPlugin.use(multiTenantMiddleware);
-
-// ========================================
-// 3. Multi-Tenant Routes
-// ========================================
-apiPlugin.addRoute({
-  path: '/api/orders',
-  method: 'GET',
-  handler: async (req, res) => {
-    // Fetch only orders from user's tenant
-    const orders = await ordersResource.listPartition('byTenant', {
-      tenantId: req.tenantId
-    });
-
-    res.json({
-      orders,
-      tenant: req.tenantId
-    });
-  },
-  auth: 'oauth2'
-});
-
-apiPlugin.addRoute({
-  path: '/api/orders/my',
-  method: 'GET',
-  handler: async (req, res) => {
-    // Fetch user's orders within tenant (double partition!)
-    const orders = await ordersResource.listPartition('byTenantUser', {
-      tenantId: req.tenantId,
-      userId: req.userId
-    });
-
-    res.json({ orders });
-  },
-  auth: 'oauth2'
-});
-
-apiPlugin.addRoute({
-  path: '/api/orders',
-  method: 'POST',
-  handler: async (req, res) => {
-    const { productId, quantity, total } = req.body;
-
-    // NEVER accept tenantId/userId from request - always from token!
-    const order = await ordersResource.insert({
-      tenantId: req.tenantId,  // From token
-      userId: req.userId,      // From token
-      productId,
-      quantity,
-      total,
-      status: 'pending'
-    });
-
-    res.status(201).json(order);
-  },
-  auth: 'oauth2'
-});
-
-// ========================================
-// 4. Admin can see all tenants
-// ========================================
-apiPlugin.addRoute({
-  path: '/api/admin/orders',
-  method: 'GET',
-  handler: async (req, res) => {
-    // Check super-admin role
-    const roles = req.user.realm_access?.roles || [];
-    if (!roles.includes('super-admin')) {
-      return res.status(403).json({ error: 'Forbidden' });
+  timestamps: true,
+  api: {
+    guard: {
+      '*': (ctx) => {
+        ctx.tenantId = ctx.auth.tenantId || ctx.auth.claims.tid;
+        ctx.userId = ctx.auth.principalId;
+        return !!ctx.tenantId;
+      },
+      list: (ctx) => {
+        ctx.setPartition('byTenantUser', {
+          tenantId: ctx.tenantId,
+          userId: ctx.userId
+        });
+        return true;
+      },
+      create: (ctx) => {
+        // NEVER accept tenantId/userId from request body
+        ctx.body.tenantId = ctx.tenantId;
+        ctx.body.userId = ctx.userId;
+        return true;
+      },
+      update: (ctx, resource) => {
+        return resource.tenantId === ctx.tenantId
+            && resource.userId === ctx.userId;
+      },
+      delete: (ctx, resource) => {
+        return resource.tenantId === ctx.tenantId
+            && resource.userId === ctx.userId;
+      }
     }
-
-    // Admin can list EVERYTHING (no tenant filter)
-    const orders = await ordersResource.list({ limit: 1000 });
-
-    res.json({ orders });
-  },
-  auth: 'oauth2'
+  }
 });
+```
+
+### Custom Route Approach
+
+For admin cross-tenant views or tenant-scoped aggregations:
+
+```javascript
+const ordersResource = await db.createResource({
+  name: 'orders',
+  attributes: { tenantId: 'string|required', userId: 'string|required', total: 'number' },
+  partitions: {
+    byTenant: { fields: { tenantId: 'string' } },
+    byTenantUser: { fields: { tenantId: 'string', userId: 'string' } }
+  },
+  api: {
+    guard: {
+      '*': (ctx) => {
+        ctx.tenantId = ctx.auth.tenantId || ctx.auth.claims.tid;
+        return !!ctx.tenantId;
+      }
+    },
+
+    // Tenant-scoped listing (all users in the tenant)
+    'GET /tenant-all': async (c, ctx) => {
+      const orders = await ctx.services.resource.listPartition('byTenant', {
+        tenantId: ctx.auth.tenantId
+      });
+      return ctx.success({ orders, tenant: ctx.auth.tenantId });
+    },
+
+    // User's orders within tenant (double partition)
+    'GET /my': async (c, ctx) => {
+      const orders = await ctx.services.resource.listPartition('byTenantUser', {
+        tenantId: ctx.auth.tenantId,
+        userId: ctx.auth.principalId
+      });
+      return ctx.success({ orders });
+    }
+  }
+});
+
+// Admin route at the plugin level (cross-tenant)
+await db.usePlugin(new ApiPlugin({
+  port: 3000,
+  auth: { driver: 'jwt' },
+  routes: {
+    'GET /admin/orders': async (c, ctx) => {
+      ctx.auth.requireRole('super-admin');
+      const orders = await ctx.services.resources.orders.list({ limit: 1000 });
+      return ctx.success({ orders });
+    }
+  }
+}));
 ```
 
 ### Custom Claims in Keycloak for Multi-Tenancy
 
 ```javascript
 // Keycloak: Protocol Mappers to include tenantId in token
-
-// 1. Client → orders-api → Mappers → Create
+//
+// 1. Client -> orders-api -> Mappers -> Create
 // 2. Mapper Type: User Attribute
 // 3. Name: tenantId
 // 4. User Attribute: tenantId
 // 5. Token Claim Name: tenantId
 // 6. Claim JSON Type: String
 // 7. Add to access token: ON
-
-// Now the token will have:
+//
+// Token payload:
 {
   "sub": "user-123",
   "email": "john@acme.com",
-  "tenantId": "acme-corp",  // ✅ Custom claim
+  "tenantId": "acme-corp",
   "preferred_username": "john.doe"
 }
 ```
 
 ---
 
-## Authorization Middleware
+## Guard Helpers
 
-Reusable middleware to check scopes and permissions.
+Reusable functions that encapsulate common authorization checks. Use them inside `resource.api.guard` definitions.
 
 ```javascript
 // ========================================
-// authorization-middleware.js
+// guard-helpers.js
 // ========================================
 
 /**
- * Check if user has required scope
+ * Require a specific scope. Returns a guard function.
  */
 function requireScope(scope) {
-  return (req, res, next) => {
-    const userScopes = req.user.scope?.split(' ') || [];
-
-    if (!userScopes.includes(scope)) {
-      return res.status(403).json({
-        error: 'insufficient_scope',
-        error_description: `Scope "${scope}" required`,
-        required_scope: scope,
-        user_scopes: userScopes
-      });
+  return (ctx) => {
+    if (!ctx.auth.hasScope(scope)) {
+      return false;
     }
-
-    next();
+    return true;
   };
 }
 
 /**
- * Check if user has any of the scopes (OR)
+ * Require any of the given scopes (OR). Returns a guard function.
  */
 function requireAnyScope(...scopes) {
-  return (req, res, next) => {
-    const userScopes = req.user.scope?.split(' ') || [];
-    const hasAny = scopes.some(scope => userScopes.includes(scope));
-
-    if (!hasAny) {
-      return res.status(403).json({
-        error: 'insufficient_scope',
-        error_description: `One of scopes required: ${scopes.join(', ')}`,
-        required_scopes: scopes,
-        user_scopes: userScopes
-      });
-    }
-
-    next();
-  };
+  return (ctx) => ctx.auth.hasAnyScope(...scopes);
 }
 
 /**
- * Check if user has all scopes (AND)
+ * Require all of the given scopes (AND). Returns a guard function.
  */
 function requireAllScopes(...scopes) {
-  return (req, res, next) => {
-    const userScopes = req.user.scope?.split(' ') || [];
-    const hasAll = scopes.every(scope => userScopes.includes(scope));
+  return (ctx) => ctx.auth.hasAllScopes(...scopes);
+}
 
-    if (!hasAll) {
-      return res.status(403).json({
-        error: 'insufficient_scope',
-        error_description: `All scopes required: ${scopes.join(', ')}`,
-        required_scopes: scopes,
-        user_scopes: userScopes
-      });
-    }
+/**
+ * Require a specific role. Returns a guard function.
+ */
+function requireRole(role) {
+  return (ctx) => ctx.auth.hasRole(role);
+}
 
-    next();
+/**
+ * Check resource ownership. Returns a guard function for get/update/delete.
+ */
+function requireOwnership(userIdField = 'userId') {
+  return (ctx, resource) => {
+    if (!resource) return false;
+    // Return false (404) instead of throwing (403) to avoid leaking existence
+    return resource[userIdField] === ctx.auth.principalId;
   };
 }
 
 /**
- * Check if user has required role
+ * Require tenant isolation. Returns a guard function.
  */
-function requireRole(role, level = 'client') {
-  return (req, res, next) => {
-    let userRoles = [];
-
-    if (level === 'realm') {
-      // Keycloak realm roles
-      userRoles = req.user.realm_access?.roles || [];
-    } else if (level === 'client') {
-      // Keycloak client roles
-      const clientId = req.user.azp || process.env.CLIENT_ID;
-      userRoles = req.user.resource_access?.[clientId]?.roles || [];
-    } else {
-      // Azure AD roles
-      userRoles = req.user.roles || [];
-    }
-
-    if (!userRoles.includes(role)) {
-      return res.status(403).json({
-        error: 'insufficient_permissions',
-        error_description: `Role "${role}" required`,
-        required_role: role,
-        user_roles: userRoles
-      });
-    }
-
-    next();
+function requireTenant(tenantField = 'tenantId') {
+  return (ctx) => {
+    const tenantId = ctx.auth.tenantId || ctx.auth.claims.tid;
+    if (!tenantId) return false;
+    ctx.tenantId = tenantId;
+    return true;
   };
 }
 
 /**
- * Check resource ownership
+ * Combine multiple guard functions (AND -- all must pass).
  */
-function requireOwnership(resourceGetter, userIdField = 'userId') {
-  return async (req, res, next) => {
-    try {
-      const resource = await resourceGetter(req);
-
-      if (!resource) {
-        return res.status(404).json({ error: 'Resource not found' });
-      }
-
-      const resourceUserId = resource[userIdField];
-      const requestUserId = req.user.sub;
-
-      if (resourceUserId !== requestUserId) {
-        // 404 instead of 403 to avoid leaking existence
-        return res.status(404).json({ error: 'Resource not found' });
-      }
-
-      // Attach resource to request for handler
-      req.resource = resource;
-      next();
-    } catch (err) {
-      res.status(500).json({ error: 'Internal server error' });
+function allOf(...guards) {
+  return async (ctx, resource) => {
+    for (const guard of guards) {
+      const result = typeof guard === 'function'
+        ? await guard(ctx, resource)
+        : guard;
+      if (!result) return false;
     }
+    return true;
   };
 }
 
 /**
- * Check tenant isolation
+ * Combine multiple guard functions (OR -- any can pass).
  */
-function requireTenant() {
-  return (req, res, next) => {
-    const tenantId = req.user.tenantId || req.user.tid;
-
-    if (!tenantId) {
-      return res.status(403).json({
-        error: 'forbidden',
-        error_description: 'Tenant ID missing in token'
-      });
+function anyOf(...guards) {
+  return async (ctx, resource) => {
+    for (const guard of guards) {
+      const result = typeof guard === 'function'
+        ? await guard(ctx, resource)
+        : guard;
+      if (result) return true;
     }
-
-    req.tenantId = tenantId;
-    req.userId = req.user.sub;
-
-    next();
+    return false;
   };
 }
 
@@ -524,127 +452,74 @@ export {
   requireAllScopes,
   requireRole,
   requireOwnership,
-  requireTenant
+  requireTenant,
+  allOf,
+  anyOf
 };
 ```
 
-### Using Authorization Middleware
+### Using Guard Helpers
 
 ```javascript
 import {
   requireScope,
   requireAnyScope,
+  requireAllScopes,
   requireRole,
   requireOwnership,
-  requireTenant
-} from './authorization-middleware.js';
+  requireTenant,
+  allOf,
+  anyOf
+} from './guard-helpers.js';
 
-// ========================================
-// Scope-based authorization
-// ========================================
-apiPlugin.addRoute({
-  path: '/api/orders',
-  method: 'POST',
-  middleware: [requireScope('orders:write:own')],
-  handler: async (req, res) => {
-    // Handler only executes if correct scope
-    const order = await ordersResource.insert({
-      userId: req.user.sub,
-      ...req.body
-    });
-    res.status(201).json(order);
+const ordersResource = await db.createResource({
+  name: 'orders',
+  attributes: {
+    tenantId: 'string|required',
+    userId: 'string|required',
+    productId: 'string|required',
+    total: 'number',
+    status: 'string'
   },
-  auth: 'oauth2'
-});
+  api: {
+    guard: {
+      // Scope-based: require write scope to create
+      create: requireScope('orders:write:own'),
 
-// ========================================
-// Multi-scope (OR) - accepts any one
-// ========================================
-apiPlugin.addRoute({
-  path: '/api/orders/export',
-  method: 'GET',
-  middleware: [requireAnyScope('orders:export', 'orders:read:all')],
-  handler: async (req, res) => {
-    // Executes if has orders:export OR orders:read:all
-    const orders = await ordersResource.list();
-    res.json(orders);
-  },
-  auth: 'oauth2'
-});
+      // Multi-scope (OR): export OR read-all
+      list: requireAnyScope('orders:export', 'orders:read:all'),
 
-// ========================================
-// Multi-scope (AND) - needs all
-// ========================================
-apiPlugin.addRoute({
-  path: '/api/orders/:id/approve',
-  method: 'POST',
-  middleware: [requireAllScopes('orders:read:all', 'orders:approve')],
-  handler: async (req, res) => {
-    // Needs both scopes
-    const order = await ordersResource.update(req.params.id, { status: 'approved' });
-    res.json(order);
-  },
-  auth: 'oauth2'
-});
+      // Multi-scope (AND): needs both scopes to approve
+      // (used on a custom route, shown below)
 
-// ========================================
-// Role-based authorization
-// ========================================
-apiPlugin.addRoute({
-  path: '/api/admin/users',
-  method: 'GET',
-  middleware: [requireRole('admin', 'client')],
-  handler: async (req, res) => {
-    // Only admins can access
-    const users = await usersResource.list();
-    res.json({ users });
-  },
-  auth: 'oauth2'
-});
+      // Ownership: only the owner can update
+      update: requireOwnership('userId'),
 
-// ========================================
-// Ownership check
-// ========================================
-apiPlugin.addRoute({
-  path: '/api/orders/:id',
-  method: 'DELETE',
-  middleware: [
-    requireOwnership(async (req) => {
-      return await ordersResource.get(req.params.id);
-    }, 'userId')
-  ],
-  handler: async (req, res) => {
-    // Ownership already validated, resource in req.resource
-    await ordersResource.delete(req.params.id);
-    res.status(204).send();
-  },
-  auth: 'oauth2'
-});
+      // Combined: owner OR admin can delete
+      delete: anyOf(
+        requireOwnership('userId'),
+        requireRole('admin')
+      ),
 
-// ========================================
-// Multi-tenancy + ownership
-// ========================================
-apiPlugin.addRoute({
-  path: '/api/orders/:id',
-  method: 'GET',
-  middleware: [
-    requireTenant(),
-    requireOwnership(async (req) => {
-      const order = await ordersResource.get(req.params.id);
+      // Chained: tenant isolation AND ownership
+      get: allOf(
+        requireTenant(),
+        requireOwnership('userId')
+      )
+    },
 
-      // Validate tenant before ownership
-      if (order && order.tenantId !== req.tenantId) {
-        return null;  // Returns 404
-      }
+    'POST /:id/approve': async (c, ctx) => {
+      ctx.auth.require({ scopes: ['orders:read:all', 'orders:approve'] });
 
-      return order;
-    })
-  ],
-  handler: async (req, res) => {
-    // Tenant and ownership validated
-    res.json(req.resource);
-  },
-  auth: 'oauth2'
+      const order = await ctx.services.resource.update(ctx.input.params.id, {
+        status: 'approved',
+        approvedBy: ctx.auth.principalId,
+        approvedAt: new Date().toISOString()
+      });
+
+      return ctx.success(order);
+    }
+  }
 });
 ```
 
@@ -652,7 +527,7 @@ apiPlugin.addRoute({
 
 ## ABAC (Attribute-Based Access Control)
 
-Authorization policies based on user and resource attributes.
+Authorization policies based on user attributes, resource attributes, and environmental context.
 
 ```javascript
 // ========================================
@@ -670,10 +545,6 @@ class ABACPolicy {
   }
 }
 
-// ========================================
-// Example policies
-// ========================================
-
 // Policy: User can edit own orders
 const canEditOwnOrder = new ABACPolicy('canEditOwnOrder', async (ctx) => {
   return ctx.resource.userId === ctx.user.sub;
@@ -681,29 +552,22 @@ const canEditOwnOrder = new ABACPolicy('canEditOwnOrder', async (ctx) => {
 
 // Policy: Manager can edit team orders
 const canEditTeamOrder = new ABACPolicy('canEditTeamOrder', async (ctx) => {
-  const userTeam = ctx.user.team;
-  const orderTeam = ctx.resource.team;
   const isManager = ctx.user.roles?.includes('manager');
-
-  return isManager && userTeam === orderTeam;
+  return isManager && ctx.user.team === ctx.resource.team;
 });
 
-// Policy: Can approve orders above limit if has permission
+// Policy: Approval limit check
 const canApproveHighValueOrder = new ABACPolicy('canApproveHighValueOrder', async (ctx) => {
-  const orderTotal = ctx.resource.total;
-  const userApprovalLimit = ctx.user.approvalLimit || 0;
-
-  return orderTotal <= userApprovalLimit;
+  return ctx.resource.total <= (ctx.user.approvalLimit || 0);
 });
 
-// Policy: Business hours (9am-6pm)
-const isBusinessHours = new ABACPolicy('isBusinessHours', async (ctx) => {
-  const now = new Date();
-  const hour = now.getHours();
+// Policy: Business hours only (9am-6pm)
+const isBusinessHours = new ABACPolicy('isBusinessHours', async () => {
+  const hour = new Date().getHours();
   return hour >= 9 && hour < 18;
 });
 
-// Policy: Tenant isolation
+// Policy: Same tenant
 const sameTenant = new ABACPolicy('sameTenant', async (ctx) => {
   return ctx.resource.tenantId === ctx.user.tenantId;
 });
@@ -726,15 +590,7 @@ class PolicyEngine {
 
     for (const name of policyNames) {
       const policy = this.policies.get(name);
-
-      if (!policy) {
-        throw new PluginError(`Policy "${name}" not found`, {
-          statusCode: 500,
-          retriable: false,
-          suggestion: 'Register the policy with engine.register() before evaluation.',
-          metadata: { missingPolicy: name, availablePolicies: [...this.policies.keys()] }
-        });
-      }
+      if (!policy) throw new Error(`Policy "${name}" not found`);
 
       const result = await policy.check(context);
       results.push({ policy: name, result });
@@ -748,84 +604,92 @@ class PolicyEngine {
   }
 }
 
-// ========================================
-// ABAC Middleware
-// ========================================
+export { ABACPolicy, PolicyEngine };
+```
 
+### Using ABAC with Guards
+
+Create a guard helper that wraps the policy engine:
+
+```javascript
+import { PolicyEngine, canEditOwnOrder, sameTenant, isBusinessHours, canApproveHighValueOrder } from './abac-policies.js';
+
+const policyEngine = new PolicyEngine();
+policyEngine.register(canEditOwnOrder);
+policyEngine.register(sameTenant);
+policyEngine.register(isBusinessHours);
+policyEngine.register(canApproveHighValueOrder);
+
+/**
+ * Guard helper that evaluates ABAC policies against a resource.
+ */
 function requirePolicies(...policyNames) {
-  return async (req, res, next) => {
-    const context = {
-      user: req.user,
-      resource: req.resource,  // Needs to be populated before (via requireOwnership or similar)
-      request: req,
+  return async (ctx, record) => {
+    const policyCtx = {
+      user: ctx.auth.claims,
+      resource: record,
       timestamp: new Date().toISOString()
     };
 
-    const result = await policyEngine.evaluate(policyNames, context);
-
-    if (!result.allowed) {
-      return res.status(403).json({
-        error: 'policy_violation',
-        error_description: `Policy "${result.failedPolicy}" denied access`,
-        failed_policy: result.failedPolicy,
-        policies_evaluated: result.results
-      });
-    }
-
-    next();
+    const result = await policyEngine.evaluate(policyNames, policyCtx);
+    return result.allowed;
   };
 }
 
-// ========================================
-// Using ABAC
-// ========================================
-
-// Register policies
-const policyEngine = new PolicyEngine();
-policyEngine.register(canEditOwnOrder);
-policyEngine.register(canEditTeamOrder);
-policyEngine.register(canApproveHighValueOrder);
-policyEngine.register(isBusinessHours);
-policyEngine.register(sameTenant);
-
-// Route with multiple policies
-apiPlugin.addRoute({
-  path: '/api/orders/:id',
-  method: 'PATCH',
-  middleware: [
-    requireTenant(),
-    requireOwnership(async (req) => await ordersResource.get(req.params.id)),
-    requirePolicies('sameTenant', 'canEditOwnOrder', 'isBusinessHours')
-  ],
-  handler: async (req, res) => {
-    // All policies passed
-    const order = await ordersResource.update(req.params.id, req.body);
-    res.json(order);
+const ordersResource = await db.createResource({
+  name: 'orders',
+  attributes: {
+    tenantId: 'string|required',
+    userId: 'string|required',
+    team: 'string',
+    total: 'number',
+    status: 'string'
   },
-  auth: 'oauth2'
-});
+  api: {
+    guard: {
+      '*': (ctx) => {
+        ctx.tenantId = ctx.auth.tenantId;
+        return !!ctx.tenantId;
+      },
 
-// Approve order - complex policies
-apiPlugin.addRoute({
-  path: '/api/orders/:id/approve',
-  method: 'POST',
-  middleware: [
-    requireTenant(),
-    requireOwnership(async (req) => await ordersResource.get(req.params.id)),
-    requirePolicies('sameTenant', 'canApproveHighValueOrder')
-  ],
-  handler: async (req, res) => {
-    const order = await ordersResource.update(req.params.id, {
-      status: 'approved',
-      approvedBy: req.user.sub,
-      approvedAt: new Date().toISOString()
-    });
-    res.json(order);
-  },
-  auth: 'oauth2'
-});
+      // ABAC on update: same tenant + own order + business hours
+      update: requirePolicies('sameTenant', 'canEditOwnOrder', 'isBusinessHours'),
 
-export { ABACPolicy, PolicyEngine, requirePolicies, policyEngine };
+      // ABAC on delete: same tenant + own order
+      delete: requirePolicies('sameTenant', 'canEditOwnOrder')
+    },
+
+    // Complex ABAC on approval
+    'POST /:id/approve': async (c, ctx) => {
+      ctx.auth.requireAuth();
+      const order = await ctx.services.resource.get(ctx.input.params.id);
+      if (!order) return ctx.notFound();
+
+      const policyCtx = {
+        user: ctx.auth.claims,
+        resource: order,
+        timestamp: new Date().toISOString()
+      };
+
+      const result = await policyEngine.evaluate(
+        ['sameTenant', 'canApproveHighValueOrder'],
+        policyCtx
+      );
+
+      if (!result.allowed) {
+        return ctx.forbidden(`Policy "${result.failedPolicy}" denied access`);
+      }
+
+      const updated = await ctx.services.resource.update(order.id, {
+        status: 'approved',
+        approvedBy: ctx.auth.principalId,
+        approvedAt: new Date().toISOString()
+      });
+
+      return ctx.success(updated);
+    }
+  }
+});
 ```
 
 ---
@@ -836,140 +700,160 @@ export { ABACPolicy, PolicyEngine, requirePolicies, policyEngine };
 
 ```javascript
 // User inherits permissions from group/org
-const userPermissions = new Set([
-  ...userOwnPermissions,
-  ...teamPermissions,
-  ...orgPermissions
-]);
-
-// Hierarchy: User → Team → Org → Global
+// Hierarchy: User -> Team -> Org -> Global
 function getEffectivePermissions(user) {
   const permissions = new Set();
 
-  // User-level permissions
   user.permissions?.forEach(p => permissions.add(p));
 
-  // Team-level permissions
   user.teams?.forEach(team => {
     team.permissions?.forEach(p => permissions.add(p));
   });
 
-  // Org-level permissions
   user.organization?.permissions?.forEach(p => permissions.add(p));
 
   return Array.from(permissions);
+}
+
+// Use in a guard
+api: {
+  guard: {
+    list: (ctx) => {
+      const effective = getEffectivePermissions(ctx.auth.claims);
+      return effective.includes('orders:read');
+    }
+  }
 }
 ```
 
 ### 2. Time-Based Permissions
 
 ```javascript
-// Temporary permissions (expire)
 const temporaryAccess = new ABACPolicy('temporaryAccess', async (ctx) => {
   const grantedAt = new Date(ctx.resource.accessGrantedAt);
-  const expiresAt = new Date(grantedAt.getTime() + 24 * 60 * 60 * 1000);  // 24h
-  const now = new Date();
-
-  return now < expiresAt;
+  const expiresAt = new Date(grantedAt.getTime() + 24 * 60 * 60 * 1000); // 24h
+  return new Date() < expiresAt;
 });
 ```
 
 ### 3. Dynamic Scopes (Context-Aware)
 
 ```javascript
-// Scope changes based on context
-function getDynamicScopes(user, context) {
+function getDynamicScopes(user) {
   const scopes = [...user.baseScopes];
 
-  // Add emergency scopes outside business hours
   const hour = new Date().getHours();
-  if (hour < 9 || hour >= 18) {
-    if (user.roles.includes('on-call')) {
-      scopes.push('orders:emergency:write');
-    }
+  if ((hour < 9 || hour >= 18) && user.roles.includes('on-call')) {
+    scopes.push('orders:emergency:write');
   }
 
-  // Add regional scopes
-  if (user.region === context.region) {
+  if (user.region) {
     scopes.push(`orders:read:${user.region}`);
   }
 
   return scopes;
+}
+
+// Use in a guard
+api: {
+  guard: {
+    update: (ctx, resource) => {
+      const dynamicScopes = getDynamicScopes(ctx.auth.claims);
+      return dynamicScopes.includes('orders:write:own')
+          && resource.userId === ctx.auth.principalId;
+    }
+  }
 }
 ```
 
 ### 4. Audit Trail for Authorization
 
 ```javascript
-// Log all authorization decisions
-function auditAuthorization(decision, context) {
-  auditResource.insert({
-    userId: context.user.sub,
-    resource: context.resource.id,
-    action: context.action,
-    decision: decision.allowed ? 'allowed' : 'denied',
-    reason: decision.failedPolicy || 'all_policies_passed',
+async function auditDecision(auditResource, ctx, action, allowed, reason) {
+  await auditResource.insert({
+    userId: ctx.auth.principalId,
+    action,
+    decision: allowed ? 'allowed' : 'denied',
+    reason,
     timestamp: new Date().toISOString(),
-    userScopes: context.user.scope?.split(' '),
-    userRoles: context.user.roles
+    scopes: ctx.auth.scopes,
+    roles: ctx.auth.roles
   });
+}
+
+// Wrap a guard with auditing
+function audited(auditResource, action, guardFn) {
+  return async (ctx, resource) => {
+    const result = await guardFn(ctx, resource);
+    await auditDecision(auditResource, ctx, action, result, result ? 'passed' : 'denied');
+    return result;
+  };
+}
+
+// Usage
+api: {
+  guard: {
+    delete: audited(auditResource, 'orders:delete', requireOwnership('userId'))
+  }
 }
 ```
 
 ---
 
-## 🎯 Summary: Authorization Layers
+## Summary: Authorization Layers
 
 ```
-┌─────────────────────────────────────────┐
-│  1. Authentication (OAuth2/OIDC)        │  ← Who are you?
-│     ✅ Valid JWT token                   │
-└─────────────────────────────────────────┘
-              ↓
-┌─────────────────────────────────────────┐
-│  2. Tenant Isolation (Multi-tenancy)    │  ← Which organization?
-│     ✅ tenantId in token                 │
-│     ✅ Partition by tenant               │
-└─────────────────────────────────────────┘
-              ↓
-┌─────────────────────────────────────────┐
-│  3. Scope Check (Permissions)           │  ← What type of access?
-│     ✅ orders:read:own                   │
-│     ✅ orders:write:team                 │
-└─────────────────────────────────────────┘
-              ↓
-┌─────────────────────────────────────────┐
-│  4. Role Check (RBAC)                   │  ← What role?
-│     ✅ admin, manager, user              │
-└─────────────────────────────────────────┘
-              ↓
-┌─────────────────────────────────────────┐
-│  5. Ownership Check (RLS)               │  ← Is it yours?
-│     ✅ resource.userId === token.sub     │
-│     ✅ Partition by userId               │
-└─────────────────────────────────────────┘
-              ↓
-┌─────────────────────────────────────────┐
-│  6. ABAC Policies (Business Rules)      │  ← Business rules
-│     ✅ Business hours                    │
-│     ✅ Approval limit                    │
-│     ✅ Allowed region                    │
-└─────────────────────────────────────────┘
-              ↓
-         ✅ ALLOWED
++------------------------------------------+
+|  1. Authentication (OAuth2/OIDC)         |  <- Who are you?
+|     Valid JWT token                       |
++------------------------------------------+
+              |
+              v
++------------------------------------------+
+|  2. Tenant Isolation (Multi-tenancy)     |  <- Which organization?
+|     ctx.auth.tenantId from token         |
+|     ctx.setPartition('byTenant', ...)    |
++------------------------------------------+
+              |
+              v
++------------------------------------------+
+|  3. Scope Check (Permissions)            |  <- What type of access?
+|     ctx.auth.hasScope('orders:read:own') |
+|     Hierarchical scope levels            |
++------------------------------------------+
+              |
+              v
++------------------------------------------+
+|  4. Role Check (RBAC)                    |  <- What role?
+|     ctx.auth.hasRole('admin')            |
+|     ['admin', 'manager', 'user']         |
++------------------------------------------+
+              |
+              v
++------------------------------------------+
+|  5. Ownership Check (RLS)               |  <- Is it yours?
+|     resource.userId === ctx.auth.principalId
+|     ctx.setPartition('byUser', ...)      |
++------------------------------------------+
+              |
+              v
++------------------------------------------+
+|  6. ABAC Policies (Business Rules)       |  <- Business rules
+|     Business hours                       |
+|     Approval limits                      |
+|     Region restrictions                  |
++------------------------------------------+
+              |
+              v
+         ALLOWED
 ```
 
 ---
 
-## 🚀 Next Steps
+## Key Principles
 
-1. **Implement complete example** - See `docs/examples/e64-authorization-complete.js`
-2. **Authorization Plugin** - Reusable plugin for authorization
-3. **Admin Dashboard** - UI to manage scopes, roles, policies
-4. **Authorization tests** - Ensure RLS/ABAC work
-
-**Remember:**
-- **Partitions are key** for performance and isolation
-- **Never trust user input** for tenantId/userId
-- **Always use 404 instead of 403** to avoid information leakage
-- **Audit trail** for all critical decisions
+- **Partitions are key** for performance and isolation -- use `ctx.setPartition()` for O(1) RLS
+- **Never trust user input** for tenantId/userId -- always derive from `ctx.auth`
+- **Use 404 instead of 403** for ownership failures to avoid leaking resource existence
+- **Audit trail** for all critical authorization decisions
+- **Compose guards** with `allOf()` and `anyOf()` helpers for readable, reusable logic

@@ -78,15 +78,15 @@ Useful when you validate custom routes with your own schema layer.
 
 | Feature | Package | Required |
 |---------|---------|----------|
-| Core API runtime | `s3db.js` | ✅ |
-| Standalone Raffel apps | `raffel` | ❌ |
-| JWT auth | `jose` | ❌ |
-| OIDC flows | `openid-client` | ❌ |
-| GeoIP rules | `@maxmind/geoip2-node` | ❌ |
-| Enhanced HTTP logging | `pino-http` | ❌ |
-| EJS templates | `ejs` | ❌ |
-| Pug templates | `pug` | ❌ |
-| Custom route validation | `zod` | ❌ |
+| Core API runtime | `s3db.js` | |
+| Standalone Raffel apps | `raffel` | |
+| JWT auth | `jose` | |
+| OIDC flows | `openid-client` | |
+| GeoIP rules | `@maxmind/geoip2-node` | |
+| Enhanced HTTP logging | `pino-http` | |
+| EJS templates | `ejs` | |
+| Pug templates | `pug` | |
+| Custom route validation | `zod` | |
 
 ## Installation Patterns
 

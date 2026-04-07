@@ -1,4 +1,4 @@
-# 🐳 Production Deployment
+# Production Deployment
 
 > **Navigation:** [← Back to API Plugin](/plugins/api/README.md) | [Configuration →](/plugins/api/reference/configuration.md) | [Guards →](/plugins/api/guides/guards.md)
 
@@ -9,7 +9,7 @@
 - [Docker Setup](#docker-setup)
 - [Kubernetes Deployment](#kubernetes-deployment)
 - [AWS IAM Policy](#aws-iam-policy-for-s3-access)
-- [Limits & Constraints](#️-limits--constraints)
+- [Limits & Constraints](#limits--constraints)
 - [Production Best Practices](#production-best-practices)
 - [Performance Tuning](#performance-tuning)
 - [Prometheus Monitoring](#prometheus-monitoring)
@@ -591,7 +591,7 @@ kubectl -n s3db-api rollout history deployment/s3db-api
 
 ---
 
-## ⚠️ Limits & Constraints
+## Limits & Constraints
 
 **Production planning guide** - understand the boundaries before scaling.
 
@@ -623,22 +623,22 @@ kubectl -n s3db-api rollout history deployment/s3db-api
 ### Scaling Limits
 
 **Single Instance (4 vCPU, 8 GB RAM):**
-- ✅ **27,000 req/s** (simple GET, as per benchmarks)
-- ✅ **9,000 req/s** (complex query with filters)
-- ✅ **24,000 req/s** (POST/PUT/DELETE)
-- ⚠️ **Memory**: Peaks at ~120 MB under 100 RPS load
-- ⚠️ **CPU**: 80-90% utilization at max throughput
+- **27,000 req/s** (simple GET, as per benchmarks)
+- **9,000 req/s** (complex query with filters)
+- **24,000 req/s** (POST/PUT/DELETE)
+- **Memory**: Peaks at ~120 MB under 100 RPS load
+- **CPU**: 80-90% utilization at max throughput
 
 **Horizontal Scaling:**
-- ✅ **Stateless** - safe to run multiple instances
-- ✅ **Load balancer-friendly** - ALB, NGINX, Traefik
-- ✅ **Kubernetes-ready** - health probes, graceful shutdown
-- ⚠️ **S3 rate limits apply globally** - distribute across partitions
+- **Stateless** - safe to run multiple instances
+- **Load balancer-friendly** - ALB, NGINX, Traefik
+- **Kubernetes-ready** - health probes, graceful shutdown
+- **S3 rate limits apply globally** - distribute across partitions
 
 **Vertical Scaling:**
-- ✅ **Linear CPU scaling** - 8 vCPU → ~54k req/s
-- ✅ **Memory-efficient** - 8 GB handles 100+ RPS easily
-- ⚠️ **Diminishing returns** - beyond 16 vCPU, horizontal scaling better
+- **Linear CPU scaling** - 8 vCPU → ~54k req/s
+- **Memory-efficient** - 8 GB handles 100+ RPS easily
+- **Diminishing returns** - beyond 16 vCPU, horizontal scaling better
 
 ### Database Size Constraints
 
@@ -660,35 +660,35 @@ kubectl -n s3db-api rollout history deployment/s3db-api
 ## Production Best Practices
 
 **1. Security:**
-- ✅ Use IRSA instead of access keys (no secrets in pods)
-- ✅ Run as non-root user (UID 1001)
-- ✅ Read-only root filesystem when possible
-- ✅ Drop all Linux capabilities
-- ✅ Use secrets for sensitive data
-- ✅ Enable TLS/HTTPS via Ingress
-- ✅ Use NetworkPolicies to restrict traffic
+- Use IRSA instead of access keys (no secrets in pods)
+- Run as non-root user (UID 1001)
+- Read-only root filesystem when possible
+- Drop all Linux capabilities
+- Use secrets for sensitive data
+- Enable TLS/HTTPS via Ingress
+- Use NetworkPolicies to restrict traffic
 
 **2. Reliability:**
-- ✅ Set resource requests and limits
-- ✅ Configure liveness and readiness probes
-- ✅ Use PodDisruptionBudget (min 1 pod available)
-- ✅ Enable HPA for auto-scaling
-- ✅ Use RollingUpdate strategy with maxUnavailable: 0
-- ✅ Set proper termination grace period (30s)
+- Set resource requests and limits
+- Configure liveness and readiness probes
+- Use PodDisruptionBudget (min 1 pod available)
+- Enable HPA for auto-scaling
+- Use RollingUpdate strategy with maxUnavailable: 0
+- Set proper termination grace period (30s)
 
 **3. Monitoring:**
-- ✅ Expose metrics endpoint (Prometheus)
-- ✅ Configure structured logging
-- ✅ Use APM tools (DataDog, New Relic, etc.)
-- ✅ Set up alerts for health probe failures
-- ✅ Monitor S3 costs and API calls
+- Expose metrics endpoint (Prometheus)
+- Configure structured logging
+- Use APM tools (DataDog, New Relic, etc.)
+- Set up alerts for health probe failures
+- Monitor S3 costs and API calls
 
 **4. High Availability:**
-- ✅ Run minimum 2 replicas (3+ recommended)
-- ✅ Spread pods across availability zones
-- ✅ Use pod anti-affinity for spreading
-- ✅ Configure backup S3 buckets
-- ✅ Implement circuit breakers for S3 calls
+- Run minimum 2 replicas (3+ recommended)
+- Spread pods across availability zones
+- Use pod anti-affinity for spreading
+- Configure backup S3 buckets
+- Implement circuit breakers for S3 calls
 
 **Example pod anti-affinity:**
 ```yaml

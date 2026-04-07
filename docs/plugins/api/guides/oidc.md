@@ -1,4 +1,4 @@
-# 🔐 OIDC Authentication Guide
+# OIDC Authentication Guide
 
 > **Complete OAuth2/OIDC setup for Azure AD, Google, Keycloak, Auth0, and any OIDC provider**
 
@@ -6,7 +6,7 @@
 
 ---
 
-## ⚡ Quick Start (30 seconds)
+## Quick Start (30 seconds)
 
 ```javascript
 import { Database } from 's3db.js';
@@ -25,7 +25,7 @@ await db.usePlugin(new ApiPlugin({
       redirectUri: 'http://localhost:3000/auth/callback',
       cookieSecret: process.env.COOKIE_SECRET,  // 32+ characters
 
-      // ✨ Everything else works automatically:
+      // Everything else works automatically:
       // - Token refresh (autoRefreshTokens: true)
       // - Continue URL (externalUrl support)
       // - Google quirks (access_type=offline)
@@ -37,38 +37,38 @@ await db.usePlugin(new ApiPlugin({
 ```
 
 **Result:**
-- ✅ Users login via Google
-- ✅ Sessions **never expire** if active (automatic refresh)
-- ✅ After login, return to **original destination**
-- ✅ `refresh_token` obtained automatically
-- ✅ Production-ready security
+- Users login via Google
+- Sessions **never expire** if active (automatic refresh)
+- After login, return to **original destination**
+- `refresh_token` obtained automatically
+- Production-ready security
 
 ---
 
-## 🆕 Key Enhancements
+## Key Enhancements
 
 | Feature | Benefit | Status |
 |---------|---------|--------|
-| **🔄 Implicit Token Refresh** | Active users never see session expiration | ✅ Default |
-| **🔗 Continue URL** | Preserves destination after login | ✅ Automatic |
-| **🌐 Provider Quirks** | Google, Azure, Auth0 auto-configured | ✅ Automatic |
-| **🍪 Dual-Cookie Deletion** | Cross-subdomain logout works | ✅ Automatic |
-| **🔒 Cache-Control Headers** | Prevents CDN caching | ✅ Automatic |
-| **⚡ Discovery Cache** | Thread-safe, per-request cache | ✅ Automatic |
+| **Implicit Token Refresh** | Active users never see session expiration | Default |
+| **Continue URL** | Preserves destination after login | Automatic |
+| **Provider Quirks** | Google, Azure, Auth0 auto-configured | Automatic |
+| **Dual-Cookie Deletion** | Cross-subdomain logout works | Automatic |
+| **Cache-Control Headers** | Prevents CDN caching | Automatic |
+| **Discovery Cache** | Thread-safe, per-request cache | Automatic |
 
 **All features are backward-compatible and enabled by default.**
 
 ---
 
-## 🔥 Security & Scalability Upgrades
+## Security & Scalability Upgrades
 
 **Phase 1 Security & Scalability Improvements** (Inspired by Auth0's express-openid-connect):
 
 | Feature | Benefit | Impact |
 |---------|---------|--------|
-| **🔐 HKDF Key Derivation** | RFC 5869 - Separate keys for signing/encryption | 🟢 Security |
-| **🍪 Cookie Chunking** | Handles large sessions (>4KB) automatically | 🔴 Critical |
-| **⏱️ Rolling Duration** | Idle timeout + absolute max (enterprise) | 🟡 UX |
+| **HKDF Key Derivation** | RFC 5869 - Separate keys for signing/encryption | Security |
+| **Cookie Chunking** | Handles large sessions (>4KB) automatically | Critical |
+| **Rolling Duration** | Idle timeout + absolute max (enterprise) | UX |
 
 **Why Cookie Chunking is Critical:**
 - Without it: OIDC sessions with large tokens can exceed 4KB → **431 Request Header Fields Too Large** errors
@@ -84,11 +84,11 @@ await db.usePlugin(new ApiPlugin({
 
 | Feature | Benefit | Impact |
 |---------|---------|--------|
-| **💾 External Session Store** | Redis, Memory - Horizontal scaling | 🟣 Enterprise |
-| **⚡ WeakMap Token Caching** | Per-request caching - Zero decode overhead | 🟢 Performance |
-| **⚡ O(1) User Lookup** | Direct claim ID lookup, `lookupById`, or auto-detected partitions | 🟢 Performance |
+| **External Session Store** | Redis, Memory - Horizontal scaling | Enterprise |
+| **WeakMap Token Caching** | Per-request caching - Zero decode overhead | Performance |
+| **O(1) User Lookup** | Direct claim ID lookup, `lookupById`, or auto-detected partitions | Performance |
 
-> **⚡ User Lookup Performance:** OIDC already tries candidate ID claims with direct `get()` lookups. Add `lookupById: true` when your fallback `lookupFields` value is also the resource ID, for example when `user.id = email`. If your user ID is different, add a standard partition such as `byEmail` to your users resource so the fallback remains O(1). OIDC does not expose a driver-level `partitionName` override. See [Authentication Guide: Performance](authentication.md#️-performance-user-lookup-strategy-critical) for details.
+> **User Lookup Performance:** OIDC already tries candidate ID claims with direct `get()` lookups. Add `lookupById: true` when your fallback `lookupFields` value is also the resource ID, for example when `user.id = email`. If your user ID is different, add a standard partition such as `byEmail` to your users resource so the fallback remains O(1). OIDC does not expose a driver-level `partitionName` override. See [Authentication Guide: Performance](authentication.md#-performance-user-lookup-strategy-critical) for details.
 
 **Why Session Stores Matter:**
 - Without: Sessions stored in cookies (4-40KB) → Large headers, bandwidth waste
@@ -104,9 +104,9 @@ await db.usePlugin(new ApiPlugin({
 
 | Feature | Benefit | Impact |
 |---------|---------|--------|
-| **✅ Token Validation** | OIDC spec-compliant validation | 🟢 Security |
-| **🎨 Error Pages** | Beautiful, user-friendly error pages | 🟡 UX |
-| **🔄 Session Regeneration** | Prevent session fixation attacks | 🟢 Security |
+| **Token Validation** | OIDC spec-compliant validation | Security |
+| **Error Pages** | Beautiful, user-friendly error pages | UX |
+| **Session Regeneration** | Prevent session fixation attacks | Security |
 
 **Why Token Validation Matters:**
 - Without: Accepts invalid tokens (security risk)
@@ -127,11 +127,11 @@ await db.usePlugin(new ApiPlugin({
 
 | Feature | Benefit | Impact |
 |---------|---------|--------|
-| **🔍 Provider Compatibility** | Pre-flight validation, early error detection | 🟢 DevEx |
-| **👻 Silent Login** | Auto-login if IDP session exists (prompt=none) | 🟡 UX |
-| **🔐 PAR (RFC 9126)** | Push authorization params securely | 🟢 Security |
-| **🔑 Client Assertion (JWK)** | Asymmetric authentication with private_key_jwt | 🟢 Security |
-| **📡 Backchannel Logout** | IDP-initiated logout (multi-device/app) | 🔴 Enterprise |
+| **Provider Compatibility** | Pre-flight validation, early error detection | DevEx |
+| **Silent Login** | Auto-login if IDP session exists (prompt=none) | UX |
+| **PAR (RFC 9126)** | Push authorization params securely | Security |
+| **Client Assertion (JWK)** | Asymmetric authentication with private_key_jwt | Security |
+| **Backchannel Logout** | IDP-initiated logout (multi-device/app) | Enterprise |
 
 **Why Provider Compatibility Matters:**
 - Without: Runtime failures (unsupported algorithms, missing scopes)
@@ -160,7 +160,7 @@ await db.usePlugin(new ApiPlugin({
 
 ---
 
-## 📖 Table of Contents
+## Table of Contents
 
 - [Quick Start](#-quick-start-30-seconds)
 - [Key Enhancements](#-key-enhancements)
@@ -202,7 +202,7 @@ await db.usePlugin(new ApiPlugin({
 
 ---
 
-## 🌐 Supported Providers
+## Supported Providers
 
 **Works with ANY OIDC-compliant provider:**
 
@@ -215,7 +215,7 @@ await db.usePlugin(new ApiPlugin({
 
 ---
 
-## 🚀 Getting Started
+## Getting Started
 
 ### Google OAuth2
 
@@ -236,7 +236,7 @@ auth: {
     redirectUri: 'http://localhost:3000/auth/callback',
     cookieSecret: process.env.COOKIE_SECRET,
 
-    // ✅ Google quirks applied automatically:
+    // Google quirks applied automatically:
     // - access_type=offline (required for refresh_token)
     // - prompt=consent (required on first login)
   }
@@ -368,7 +368,7 @@ config: {
 
 ---
 
-## ⚙️ Configuration
+## Configuration
 
 ### Basic Options
 
@@ -396,14 +396,14 @@ config: {
 
 ```javascript
 config: {
-  // ✨ NEW: Implicit token refresh (default: enabled)
+  // NEW: Implicit token refresh (default: enabled)
   autoRefreshTokens: true,           // Active users never see expiration
   refreshThreshold: 300000,          // Refresh 5 min before expiry (ms)
 
-  // ✨ NEW: Continue URL support (reverse proxy)
+  // NEW: Continue URL support (reverse proxy)
   externalUrl: 'https://api.example.com',  // Public-facing URL
 
-  // ✨ NEW: Cross-subdomain authentication
+  // NEW: Cross-subdomain authentication
   cookieDomain: '.example.com',      // Share auth across *.example.com
 
   // Provider quirks applied automatically based on issuer
@@ -452,9 +452,9 @@ config: {
 
 ---
 
-## 🎯 Features Deep Dive
+## Features Deep Dive
 
-### 🔄 Implicit Token Refresh
+### Implicit Token Refresh
 
 **Problem:** Traditional sessions expire after fixed time, forcing users to re-authenticate during active use.
 
@@ -489,7 +489,7 @@ config: {
 
 ---
 
-### 🔗 Continue URL Pattern
+### Continue URL Pattern
 
 **Problem:** Users redirected to fixed post-login URL, losing original destination.
 
@@ -498,7 +498,7 @@ config: {
 **Example:**
 ```
 User visits:     /dashboard?tab=settings#profile
-After login:     /dashboard?tab=settings#profile ✅
+After login:     /dashboard?tab=settings#profile
 ```
 
 **Reverse proxy support:**
@@ -514,7 +514,7 @@ config: {
 
 ---
 
-### 🌐 Provider Quirks (Auto-Configuration)
+### Provider Quirks (Auto-Configuration)
 
 **Problem:** Different providers require provider-specific parameters.
 
@@ -533,7 +533,7 @@ config: {
 
 ---
 
-### 🍪 Dual-Cookie Deletion
+### Dual-Cookie Deletion
 
 **Problem:** When using `cookieDomain`, logout only deletes host-only cookie, leaving domain cookie intact.
 
@@ -550,11 +550,11 @@ config: {
 ```
 
 **Before these enhancements:** User stuck logged in after logout
-**After these enhancements:** Clean logout ✅
+**After these enhancements:** Clean logout
 
 ---
 
-### 🔒 Cache-Control Headers
+### Cache-Control Headers
 
 **Problem:** CDNs/proxies cache authenticated responses, leaking data between users.
 
@@ -573,7 +573,7 @@ Cache-Control: private, no-cache, no-store, must-revalidate
 
 ---
 
-### ⚡ Discovery Cache
+### Discovery Cache
 
 **Problem:** OIDC discovery endpoint called multiple times per request, causing race conditions.
 
@@ -597,7 +597,7 @@ config: {
 
 ---
 
-## 🔧 Common Configurations
+## Common Configurations
 
 ### Reverse Proxy
 
@@ -653,7 +653,7 @@ config: {
 
 ---
 
-## 🔧 Advanced Features
+## Advanced Features
 
 ### HKDF Key Derivation
 
@@ -678,10 +678,10 @@ await encrypt(data, current.encryption);   // Derived encryption key
 ```
 
 **Benefits:**
-- ✅ Separate keys for signing vs encryption (security)
-- ✅ Key rotation support (array of secrets)
-- ✅ No breaking changes (existing secrets work)
-- ✅ Zero configuration needed
+- Separate keys for signing vs encryption (security)
+- Key rotation support (array of secrets)
+- No breaking changes (existing secrets work)
+- Zero configuration needed
 
 **Key Rotation Example:**
 ```javascript
@@ -720,10 +720,10 @@ setChunkedCookie(c, 'oidc_session', sessionJWT, {
 });
 
 // Result in browser:
-// ✅ oidc_session.0 = "eyJhbGc..." (4000 bytes)
-// ✅ oidc_session.1 = "iOiJKV1Q..." (4000 bytes)
-// ✅ oidc_session.2 = "dCI6MTY..." (192 bytes)
-// ✅ oidc_session.__chunks = "3"
+// oidc_session.0 = "eyJhbGc..." (4000 bytes)
+// oidc_session.1 = "iOiJKV1Q..." (4000 bytes)
+// oidc_session.2 = "dCI6MTY..." (192 bytes)
+// oidc_session.__chunks = "3"
 
 // Reading is automatic:
 const sessionJWT = getChunkedCookie(c, 'oidc_session');
@@ -731,11 +731,11 @@ const sessionJWT = getChunkedCookie(c, 'oidc_session');
 ```
 
 **Benefits:**
-- ✅ Zero configuration needed
-- ✅ Handles sessions up to 40KB (10 chunks)
-- ✅ Automatic cleanup of old chunks
-- ✅ Works with all OIDC providers
-- ✅ No breaking changes
+- Zero configuration needed
+- Handles sessions up to 40KB (10 chunks)
+- Automatic cleanup of old chunks
+- Works with all OIDC providers
+- No breaking changes
 
 **When does it activate?**
 - Automatically when session > 4KB
@@ -830,10 +830,10 @@ config: {
 
 | Store | Use Case | Persistence | Horizontal Scaling |
 |-------|----------|-------------|-------------------|
-| `MemoryStore` | Development, testing | ❌ Restart wipes data | ❌ Local only |
-| `RedisStore` | Production, high-throughput | ✅ In-memory (volatile) | ✅ Yes |
-| `S3DBSessionStore` | Production, S3-backed | ✅ Persistent (S3) | ✅ Yes |
-| Custom (MongoDB, PostgreSQL) | Custom backends | ✅ Yes | ✅ Yes |
+| `MemoryStore` | Development, testing | Restart wipes data | Local only |
+| `RedisStore` | Production, high-throughput | In-memory (volatile) | Yes |
+| `S3DBSessionStore` | Production, S3-backed | Persistent (S3) | Yes |
+| Custom (MongoDB, PostgreSQL) | Custom backends | Yes | Yes |
 
 **Quick Comparison:**
 - **MemoryStore**: Dev/testing only (fast, loses data on restart)
@@ -941,7 +941,7 @@ class MongoSessionStore extends SessionStore {
     clientSecret: 'your-client-secret',
     redirectUri: 'http://localhost:3000/auth/callback',
 
-    // 🎯 Session store using S3DB resource driver
+    // Session store using S3DB resource driver
     sessionStore: {
       driver: 's3db',          // ← Use s3db.js resource
       config: {
@@ -997,12 +997,12 @@ await apiPlugin.initialize(db);
 ```
 
 **Benefits:**
-- ✅ 99% smaller cookies (50 bytes vs 4-40KB)
-- ✅ Horizontal scaling (load balancers, Kubernetes)
-- ✅ Shared sessions across microservices
-- ✅ Faster requests (smaller headers)
-- ✅ Lower bandwidth costs
-- ✅ Serverless-compatible (CloudFront limits)
+- 99% smaller cookies (50 bytes vs 4-40KB)
+- Horizontal scaling (load balancers, Kubernetes)
+- Shared sessions across microservices
+- Faster requests (smaller headers)
+- Lower bandwidth costs
+- Serverless-compatible (CloudFront limits)
 
 **When to Use Each Store:**
 
@@ -1018,10 +1018,10 @@ Custom backend           Custom (MongoDB/etc)     Full control
 ```
 
 **Choosing a Store Quickly:**
-1. **Do you already use s3db.js?** → Use `S3DBSessionStore` ✨
-2. **Need production reliability?** → Use `RedisStore` 🚀
-3. **Just testing/developing?** → Use `MemoryStore` ⚡
-4. **Custom requirements?** → Implement `SessionStore` interface 🔧
+1. **Do you already use s3db.js?** → Use `S3DBSessionStore`
+2. **Need production reliability?** → Use `RedisStore`
+3. **Just testing/developing?** → Use `MemoryStore`
+4. **Custom requirements?** → Implement `SessionStore` interface
 
 **Monitoring:**
 ```javascript
@@ -1138,11 +1138,11 @@ async function getCachedSession(context, cookieName) {
 4. **Logging/metrics**: Multiple middlewares logging user context
 
 **Benefits:**
-- ✅ **Zero configuration** (automatic)
-- ✅ **2-3x faster** middleware chains
-- ✅ **Automatic cleanup** (WeakMap)
-- ✅ **Memory safe** (no leaks)
-- ✅ **Request-scoped** (no cross-request contamination)
+- **Zero configuration** (automatic)
+- **2-3x faster** middleware chains
+- **Automatic cleanup** (WeakMap)
+- **Memory safe** (no leaks)
+- **Request-scoped** (no cross-request contamination)
 
 **Why WeakMap?**
 - Traditional cache: Risk of memory leaks (must manually clean up)
@@ -1231,12 +1231,12 @@ config: {
 ```
 
 **Benefits:**
-- ✅ **OIDC spec-compliant** (RFC 6749, RFC 7519, OpenID Connect Core)
-- ✅ **Prevents replay attacks** (nonce validation)
-- ✅ **Rejects expired tokens** (exp, iat validation)
-- ✅ **Validates token origin** (issuer, audience)
-- ✅ **Multi-audience support** (azp validation)
-- ✅ **Clock skew tolerance** (60-second default)
+- **OIDC spec-compliant** (RFC 6749, RFC 7519, OpenID Connect Core)
+- **Prevents replay attacks** (nonce validation)
+- **Rejects expired tokens** (exp, iat validation)
+- **Validates token origin** (issuer, audience)
+- **Multi-audience support** (azp validation)
+- **Clock skew tolerance** (60-second default)
 
 ---
 
@@ -1279,7 +1279,7 @@ Beautiful HTML error pages with actionable guidance:
 </head>
 <body>
   <div class="error-container">
-    <div class="error-icon">🔒</div>
+    <div class="error-icon"></div>
     <h1>Session Expired</h1>
     <p>Your session has expired. Please sign in again to continue.</p>
 
@@ -1351,12 +1351,12 @@ app.use(async (c, next) => {
 ```
 
 **Benefits:**
-- ✅ **User-friendly** (no technical jargon)
-- ✅ **Actionable guidance** (clear next steps)
-- ✅ **Beautiful design** (responsive, mobile-first)
-- ✅ **Content negotiation** (HTML for browsers, JSON for APIs)
-- ✅ **Debugging support** (collapsible technical details)
-- ✅ **Zero configuration** (works automatically)
+- **User-friendly** (no technical jargon)
+- **Actionable guidance** (clear next steps)
+- **Beautiful design** (responsive, mobile-first)
+- **Content negotiation** (HTML for browsers, JSON for APIs)
+- **Debugging support** (collapsible technical details)
+- **Zero configuration** (works automatically)
 
 ---
 
@@ -1502,11 +1502,11 @@ async function regenerateSession(c, sessionData) {
 ```
 
 **Benefits:**
-- ✅ **Prevents session fixation** (attacker can't predict session ID)
-- ✅ **OWASP recommended** (security best practice)
-- ✅ **Preserves session data** (seamless for user)
-- ✅ **Works with external stores** (Redis, Memory)
-- ✅ **Automatic cleanup** (old session destroyed)
+- **Prevents session fixation** (attacker can't predict session ID)
+- **OWASP recommended** (security best practice)
+- **Preserves session data** (seamless for user)
+- **Works with external stores** (Redis, Memory)
+- **Automatic cleanup** (old session destroyed)
 
 **Security Notes:**
 - **Always regenerate** after privilege changes
@@ -1542,12 +1542,12 @@ const discovery = await fetchDiscoveryDocument(config.issuer);
 const validation = validateProviderCompatibility(discovery, config);
 
 if (validation.errors.length > 0) {
-  console.error('❌ Provider incompatible:', validation.errors);
+  console.error('Provider incompatible:', validation.errors);
   process.exit(1);
 }
 
 if (validation.warnings.length > 0) {
-  console.warn('⚠️ Provider warnings:', validation.warnings);
+  console.warn('Provider warnings:', validation.warnings);
 }
 
 // Check provider capabilities
@@ -1629,11 +1629,11 @@ const capabilities = getProviderCapabilities(discovery);
 ```
 
 **Benefits:**
-- ✅ **Early error detection** (startup vs runtime)
-- ✅ **Actionable warnings** (specific configuration issues)
-- ✅ **Provider capability discovery** (feature availability)
-- ✅ **Configuration validation** (before deployment)
-- ✅ **Debugging support** (clear error messages)
+- **Early error detection** (startup vs runtime)
+- **Actionable warnings** (specific configuration issues)
+- **Provider capability discovery** (feature availability)
+- **Configuration validation** (before deployment)
+- **Debugging support** (clear error messages)
 
 **Use Cases:**
 - CI/CD validation (fail build if incompatible)
@@ -1680,8 +1680,8 @@ config: {
 2. shouldAttemptSilentLogin() → Check conditions
 3. Redirect to IDP with prompt=none
 4. IDP checks active session:
-   ✅ Session exists → Redirect back with code
-   ❌ No session → Error: login_required
+   Session exists → Redirect back with code
+   No session → Error: login_required
 5. If login_required → Redirect to interactive login
 6. Set cookie: _silent_login_attempted (prevent loop)
 ```
@@ -1757,12 +1757,12 @@ GET /dashboard
 ```
 
 **Benefits:**
-- ✅ **Better UX** (no unnecessary login clicks)
-- ✅ **SSO-like experience** (seamless re-authentication)
-- ✅ **Loop prevention** (cookie-based tracking)
-- ✅ **Content negotiation** (HTML only, APIs skip)
-- ✅ **Path control** (include/exclude paths)
-- ✅ **Automatic fallback** (interactive login if needed)
+- **Better UX** (no unnecessary login clicks)
+- **SSO-like experience** (seamless re-authentication)
+- **Loop prevention** (cookie-based tracking)
+- **Content negotiation** (HTML only, APIs skip)
+- **Path control** (include/exclude paths)
+- **Automatic fallback** (interactive login if needed)
 
 **Use Cases:**
 - Intranet applications (users already logged in to company IDP)
@@ -1810,12 +1810,12 @@ const discovery = await fetchDiscoveryDocument(config.issuer);
 const supportsPAR = providerSupportsPAR(discovery);
 
 if (supportsPAR) {
-  console.log('✅ Provider supports PAR:', discovery.pushed_authorization_request_endpoint);
+  console.log('Provider supports PAR:', discovery.pushed_authorization_request_endpoint);
 
   // 2. Validate configuration
   const validation = validatePARConfig(config, discovery);
   if (!validation.valid) {
-    console.error('❌ PAR config invalid:', validation.errors);
+    console.error('PAR config invalid:', validation.errors);
   }
 }
 
@@ -1868,10 +1868,10 @@ config: {
 
 | Method | Security | Use Case |
 |--------|----------|----------|
-| `client_secret_basic` | ⚠️ Shared secret | Development, basic apps |
-| `client_secret_post` | ⚠️ Shared secret | POST body auth |
-| `private_key_jwt` | ✅ Asymmetric | Production, compliance (FAPI) |
-| `none` | ❌ Public client | Mobile apps, SPAs |
+| `client_secret_basic` | Shared secret | Development, basic apps |
+| `client_secret_post` | Shared secret | POST body auth |
+| `private_key_jwt` | Asymmetric | Production, compliance (FAPI) |
+| `none` | Public client | Mobile apps, SPAs |
 
 **Manual Usage:**
 ```javascript
@@ -1917,12 +1917,12 @@ return c.redirect(authUrl);
 ```
 
 **Benefits:**
-- ✅ **FAPI compliant** (Open Banking, financial services)
-- ✅ **Better security** (no sensitive data in URL)
-- ✅ **Phishing protection** (pre-validated redirect_uri)
-- ✅ **Large requests** (no URL length limits)
-- ✅ **Early validation** (errors before user sees browser)
-- ✅ **Cleaner URLs** (browser history, logs)
+- **FAPI compliant** (Open Banking, financial services)
+- **Better security** (no sensitive data in URL)
+- **Phishing protection** (pre-validated redirect_uri)
+- **Large requests** (no URL length limits)
+- **Early validation** (errors before user sees browser)
+- **Cleaner URLs** (browser history, logs)
 
 **Error Handling:**
 ```javascript
@@ -1944,10 +1944,10 @@ try {
 ```javascript
 const discovery = await fetchDiscoveryDocument(issuer);
 if (discovery.pushed_authorization_request_endpoint) {
-  console.log('✅ Provider supports PAR');
+  console.log('Provider supports PAR');
   config.usePAR = true;
 } else {
-  console.log('❌ Provider does not support PAR');
+  console.log('Provider does not support PAR');
   config.usePAR = false;
 }
 ```
@@ -2006,9 +2006,9 @@ config: {
 
 | Type | Algorithm | Security | Use Case |
 |------|-----------|----------|----------|
-| **RSA** | RS256, RS384, RS512 | ⭐⭐⭐ | Most compatible |
-| **EC** | ES256, ES384, ES512 | ⭐⭐⭐⭐ | Smaller keys, faster |
-| **OKP** | EdDSA (Ed25519) | ⭐⭐⭐⭐⭐ | Newest, best performance |
+| **RSA** | RS256, RS384, RS512 || Most compatible |
+| **EC** | ES256, ES384, ES512 || Smaller keys, faster |
+| **OKP** | EdDSA (Ed25519) || Newest, best performance |
 
 **How It Works:**
 ```
@@ -2084,16 +2084,16 @@ const tokens = await response.json();
 
 **Key Storage:**
 ```javascript
-// ❌ BAD: Hardcoded in code
+// BAD: Hardcoded in code
 const privateKey = { kty: 'RSA', d: '...' };
 
-// ✅ GOOD: Environment variable (development)
+// GOOD: Environment variable (development)
 const privateKey = JSON.parse(process.env.OIDC_PRIVATE_KEY);
 
-// ✅ BETTER: Secrets manager (production)
+// BETTER: Secrets manager (production)
 const privateKey = await secretsManager.getSecret('oidc-private-key');
 
-// ✅ BEST: Hardware Security Module (enterprise)
+// BEST: Hardware Security Module (enterprise)
 const privateKey = await hsm.getKey('oidc-key-id');
 ```
 
@@ -2148,12 +2148,12 @@ config: {
 ```
 
 **Benefits:**
-- ✅ **Better security** (no shared secrets)
-- ✅ **FAPI compliant** (financial services)
-- ✅ **Key rotation** (zero downtime)
-- ✅ **Compromise isolation** (only one client affected)
-- ✅ **Audit trail** (key ID in JWT)
-- ✅ **Regulatory compliance** (healthcare, government)
+- **Better security** (no shared secrets)
+- **FAPI compliant** (financial services)
+- **Key rotation** (zero downtime)
+- **Compromise isolation** (only one client affected)
+- **Audit trail** (key ID in JWT)
+- **Regulatory compliance** (healthcare, government)
 
 **Provider Support:**
 - **Requires**: `private_key_jwt` in `token_endpoint_auth_methods_supported`
@@ -2351,10 +2351,10 @@ app.post('/auth/backchannel-logout', async (c) => {
   );
 
   if (result.success) {
-    console.log(`✅ Logged out ${result.sessionsLoggedOut} sessions`);
+    console.log(`Logged out ${result.sessionsLoggedOut} sessions`);
     return c.text('', 200);
   } else {
-    console.error(`❌ Backchannel logout failed:`, result.error);
+    console.error(`Backchannel logout failed:`, result.error);
     return c.json({ error: result.error }, result.statusCode);
   }
 });
@@ -2409,12 +2409,12 @@ console.log('Register this URI:', backchannelUri);
 ```
 
 **Benefits:**
-- ✅ **Multi-device logout** (log out everywhere simultaneously)
-- ✅ **Real-time** (immediate session termination)
-- ✅ **Centralized control** (IDP manages all sessions)
-- ✅ **Compliance** (enterprise security requirements)
-- ✅ **Audit trail** (onBackchannelLogout hook for logging)
-- ✅ **Session consistency** (no orphaned sessions)
+- **Multi-device logout** (log out everywhere simultaneously)
+- **Real-time** (immediate session termination)
+- **Centralized control** (IDP manages all sessions)
+- **Compliance** (enterprise security requirements)
+- **Audit trail** (onBackchannelLogout hook for logging)
+- **Session consistency** (no orphaned sessions)
 
 **Provider Support:**
 - **Requires**: `backchannel_logout_supported: true` in discovery document
@@ -2447,7 +2447,7 @@ config: {
 
 ---
 
-## ♻️ Lifecycle & Cleanup
+## Lifecycle & Cleanup
 
 `ApiPlugin` calls OIDC cleanup hooks during shutdown (`onStop()`/`stop()`), including:
 
@@ -2460,18 +2460,18 @@ This keeps plugin restarts leak-free in long-running environments.
 
 ---
 
-## 🐛 Troubleshooting
+## Troubleshooting
 
 ### No `refresh_token` returned
 
 **Google:**
-- ✅ Provider quirks should auto-add `access_type=offline`
-- ✅ First login only returns `refresh_token` with `prompt=consent`
-- ✅ Delete Google app permission and re-authenticate
+- Provider quirks should auto-add `access_type=offline`
+- First login only returns `refresh_token` with `prompt=consent`
+- Delete Google app permission and re-authenticate
 
 **Azure AD:**
-- ✅ Check `offline_access` scope is included
-- ✅ Ensure app has "Allow public client flows" enabled
+- Check `offline_access` scope is included
+- Ensure app has "Allow public client flows" enabled
 
 **Check logs:**
 ```javascript
@@ -2506,7 +2506,7 @@ config: {
 ```javascript
 config: {
   cookieDomain: '.example.com',  // Ensure domain matches
-  // Dual-cookie deletion handles this automatically ✅
+  // Dual-cookie deletion handles this automatically
 }
 ```
 
@@ -2525,7 +2525,7 @@ config: {
 
 ---
 
-## ❓ FAQ
+## FAQ
 
 **Q: Is implicit refresh enabled by default?**
 A: Yes! `autoRefreshTokens: true` is the default. Disable explicitly if needed.
@@ -2591,7 +2591,7 @@ auth: {
 
 ---
 
-## 📚 See Also
+## See Also
 
 - [Authentication Overview](/plugins/api/guides/authentication.md) - All auth methods
 - [Configuration Reference](/plugins/api/reference/configuration.md) - Complete options

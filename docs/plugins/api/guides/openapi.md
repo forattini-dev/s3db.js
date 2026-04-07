@@ -1,4 +1,4 @@
-# 📝 OpenAPI & USD Documentation
+# OpenAPI & USD Documentation
 
 > **Navigation:** [← Back to API Plugin](./README.md) | [Authentication →](./authentication.md) | [Guards →](./guards.md)
 
@@ -11,7 +11,7 @@ Docs endpoints:
 
 ---
 
-## 🎯 Quick Start
+## Quick Start
 
 ```javascript
 import { Database } from 's3db.js';
@@ -50,14 +50,14 @@ await db.usePlugin(new ApiPlugin({
   }
 }));
 
-// ✨ Visit http://localhost:3000/docs
+// Visit http://localhost:3000/docs
 ```
 
 ---
 
-## 📚 Three Ways to Add Descriptions
+## Three Ways to Add Descriptions
 
-### 1️⃣ Simple Resource Description
+### 1. Simple Resource Description
 
 Add a single description for the entire resource:
 
@@ -80,7 +80,7 @@ await db.createResource({
 
 ---
 
-### 2️⃣ Per-Attribute Descriptions (Object Format)
+### 2. Per-Attribute Descriptions (Object Format)
 
 Provide detailed descriptions for each attribute using the `description` object:
 
@@ -115,7 +115,7 @@ await db.createResource({
 
 ---
 
-### 3️⃣ Inline Descriptions (Object Notation)
+### 3. Inline Descriptions (Object Notation)
 
 Define descriptions directly in the attribute definition:
 
@@ -160,7 +160,7 @@ await db.createResource({
 
 ---
 
-## 🎨 Complete Example
+## Complete Example
 
 Here's a fully documented e-commerce API:
 
@@ -220,10 +220,10 @@ await db.usePlugin(new ApiPlugin({
   }
 }));
 
-console.log('🚀 API running at http://localhost:3000');
-console.log('📚 Docs UI at http://localhost:3000/docs');
-console.log('📄 OpenAPI spec at http://localhost:3000/openapi.json');
-console.log('📄 USD spec at http://localhost:3000/api.usd.json');
+console.log('API running at http://localhost:3000');
+console.log('Docs UI at http://localhost:3000/docs');
+console.log('OpenAPI spec at http://localhost:3000/openapi.json');
+console.log('USD spec at http://localhost:3000/api.usd.json');
 ```
 
 **Result:** Self-documenting API docs with:
@@ -235,27 +235,27 @@ console.log('📄 USD spec at http://localhost:3000/api.usd.json');
 
 ---
 
-## 📊 What Gets Documented Automatically
+## What Gets Documented Automatically
 
 The OpenAPI generator automatically includes:
 
 | Feature | Appears in Docs UI | Source |
 |---------|----------------------|--------|
-| **Field types** | ✅ String, number, boolean, array, object | `attributes` definition |
-| **Validation rules** | ✅ Min/max, length, pattern, format | String notation (`\|min:0\|max:100`) |
-| **Required fields** | ✅ Red asterisk (*) | `required` rule or `\|required` |
-| **Default values** | ✅ Shown in schema and examples | `default:` rule |
-| **Enum values** | ✅ Dropdown list | `enum: [...]` array |
-| **Descriptions** | ✅ Custom text below fields | `description` (3 methods above) |
-| **Partitions** | ✅ Query parameters (`?partition=`, `?partitionValues=`) | `partitions` config |
-| **Relations** | ✅ `?populate=` parameter | RelationPlugin integration |
-| **Timestamps** | ✅ `createdAt`, `updatedAt` fields | `timestamps: true` |
-| **Pagination** | ✅ `?limit=`, `?cursor=`, `?page=` parameters | Always included (cursor-based) |
-| **Plugin attributes** | ❌ Hidden (internal use only) | Auto-filtered (see below) |
+| **Field types** | String, number, boolean, array, object | `attributes` definition |
+| **Validation rules** | Min/max, length, pattern, format | String notation (`\|min:0\|max:100`) |
+| **Required fields** | Red asterisk (*) | `required` rule or `\|required` |
+| **Default values** | Shown in schema and examples | `default:` rule |
+| **Enum values** | Dropdown list | `enum: [...]` array |
+| **Descriptions** | Custom text below fields | `description` (3 methods above) |
+| **Partitions** | Query parameters (`?partition=`, `?partitionValues=`) | `partitions` config |
+| **Relations** | `?populate=` parameter | RelationPlugin integration |
+| **Timestamps** | `createdAt`, `updatedAt` fields | `timestamps: true` |
+| **Pagination** | `?limit=`, `?cursor=`, `?page=` parameters | Always included (cursor-based) |
+| **Plugin attributes** | Hidden (internal use only) | Auto-filtered (see below) |
 
 ---
 
-## 🏷️ Automatic Tags for Custom Routes
+## Automatic Tags for Custom Routes
 
 The docs UI groups operations by **tags**. The API plugin infers tags for custom routes so your `/docs` sidebar stays organized without manual tagging.
 
@@ -305,7 +305,7 @@ Use nested segments to group related actions (`payments`, `audit`, `webhooks`, e
 
 ---
 
-## 🚫 What's Automatically Hidden
+## What's Automatically Hidden
 
 **Plugin attributes are filtered from OpenAPI schemas** to keep your API documentation clean and focused on user-defined fields:
 
@@ -325,7 +325,7 @@ Use nested segments to group related actions (`payments`, `audit`, `webhooks`, e
 ```javascript
 // You can still access plugin attributes in your code
 const doc = await resource.get('doc123');
-console.log(doc._hasEmbedding);  // ✅ Works!
+console.log(doc._hasEmbedding);  // Works!
 
 // But they won't appear in:
 // - Docs UI
@@ -338,12 +338,12 @@ console.log(doc._hasEmbedding);  // ✅ Works!
 
 ---
 
-## 💡 Best Practices
+## Best Practices
 
-### ✅ DO: Write Clear, Helpful Descriptions
+### DO: Write Clear, Helpful Descriptions
 
 ```javascript
-// ✅ GOOD: Clear, explains purpose and format
+// GOOD: Clear, explains purpose and format
 price: {
   type: 'number',
   required: true,
@@ -359,10 +359,10 @@ status: {
 }
 ```
 
-### ✅ DO: Document Units and Formats
+### DO: Document Units and Formats
 
 ```javascript
-// ✅ GOOD: Specifies units
+// GOOD: Specifies units
 weight: {
   type: 'number',
   min: 0,
@@ -382,10 +382,10 @@ lastSyncedAt: {
 }
 ```
 
-### ✅ DO: Explain Enum Values
+### DO: Explain Enum Values
 
 ```javascript
-// ✅ GOOD: Each enum value is documented
+// GOOD: Each enum value is documented
 priority: {
   type: 'string',
   enum: ['low', 'medium', 'high', 'urgent'],
@@ -394,10 +394,10 @@ priority: {
 }
 ```
 
-### ✅ DO: Clarify Optional vs Required
+### DO: Clarify Optional vs Required
 
 ```javascript
-// ✅ GOOD: Explains when field is needed
+// GOOD: Explains when field is needed
 phoneNumber: {
   type: 'string',
   optional: true,
@@ -405,10 +405,10 @@ phoneNumber: {
 }
 ```
 
-### ❌ DON'T: Repeat Validation in Description
+### DON'T: Repeat Validation in Description
 
 ```javascript
-// ❌ BAD: Repeats what's already in the schema
+// BAD: Repeats what's already in the schema
 name: {
   type: 'string',
   required: true,
@@ -417,7 +417,7 @@ name: {
   description: 'Required name field with min 3 and max 100 characters'
 }
 
-// ✅ GOOD: Explains the "why" and "what"
+// GOOD: Explains the "why" and "what"
 name: {
   type: 'string',
   required: true,
@@ -427,17 +427,17 @@ name: {
 }
 ```
 
-### ❌ DON'T: Use Vague Descriptions
+### DON'T: Use Vague Descriptions
 
 ```javascript
-// ❌ BAD: Doesn't add value
+// BAD: Doesn't add value
 email: {
   type: 'string',
   required: true,
   description: 'The email field'
 }
 
-// ✅ GOOD: Adds context
+// GOOD: Adds context
 email: {
   type: 'string',
   required: true,
@@ -445,17 +445,17 @@ email: {
 }
 ```
 
-### ❌ DON'T: Skip Descriptions for Complex Fields
+### DON'T: Skip Descriptions for Complex Fields
 
 ```javascript
-// ❌ BAD: Complex field without explanation
+// BAD: Complex field without explanation
 metadata: {
   type: 'object',
   optional: true
   // No description!
 }
 
-// ✅ GOOD: Explains structure and purpose
+// GOOD: Explains structure and purpose
 metadata: {
   type: 'object',
   optional: true,
@@ -465,7 +465,7 @@ metadata: {
 
 ---
 
-## 🎛️ Docs UI Settings
+## Docs UI Settings
 
 The API Plugin uses Raffel's USD docs UI. You can control theme and interaction behavior:
 
@@ -512,7 +512,7 @@ The interactive docs UI at `/docs` uses the USD format internally. Both formats 
 
 ---
 
-## 🤖 Exposing Your API as an MCP Server
+## Exposing Your API as an MCP Server
 
 Since the API Plugin generates a standard **OpenAPI 3.1** spec, you can instantly turn your API into an MCP (Model Context Protocol) server using [`dynamic-openapi-mcp`](https://www.npmjs.com/package/dynamic-openapi-mcp). This allows AI agents (Claude, Cursor, etc.) to interact with your resources through natural language.
 
@@ -577,7 +577,7 @@ You can also point directly to your running API:
 
 ---
 
-## 🔗 Related Guides
+## Related Guides
 
 - **[API Plugin README](./README.md)** - Main plugin documentation
 - **[Authentication](./authentication.md)** - Secure your API
@@ -587,7 +587,7 @@ You can also point directly to your running API:
 
 ---
 
-## 📦 Additional Notes
+## Additional Notes
 
 ### API Metadata
 
@@ -601,4 +601,4 @@ There is currently no public `docs.cache` setting or `invalidateOpenAPICache()` 
 
 ---
 
-**Status**: ✅ Production-ready - Powers enterprise APIs with beautiful, auto-generated documentation
+**Status**: Production-ready - Powers enterprise APIs with beautiful, auto-generated documentation

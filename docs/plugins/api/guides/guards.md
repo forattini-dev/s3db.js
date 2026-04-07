@@ -1,6 +1,6 @@
-# 🛡️ Declarative Guards (Authorization)
+# Declarative Guards (Authorization)
 
-> **Quick Jump:** [🎯 Why Guards?](#-why-guards) | [📖 Syntax](#-guard-syntax) | [🔌 Integration](#-framework-integration) | [🎯 Patterns](#-common-patterns) | [📚 Helpers](#-helper-functions)
+> **Quick Jump:** [Why Guards?](#-why-guards) | [Syntax](#-guard-syntax) | [Integration](#-framework-integration) | [Patterns](#-common-patterns) | [Helpers](#-helper-functions)
 
 > **Navigation:** [← Back to API Plugin](/plugins/api/README.md) | [Authentication →](/plugins/api/guides/authentication.md) | [Deployment →](/plugins/api/guides/deployment.md)
 
@@ -12,7 +12,7 @@
 
 If you also need to model response shape and field mutability on the resource, pair this guide with [Resource Policies](./resource-policies.md).
 
-> **⏱️ Guards in 30 Seconds**
+> **Guards in 30 Seconds**
 >
 > ```javascript
 > // Multi-tenant SaaS with row-level security - ONE config block!
@@ -48,19 +48,19 @@ If you also need to model response shape and field mutability on the resource, p
 > ```
 >
 > **What you get:**
-> - ✅ **Zero trust by default** - Every request validates tenant/user
-> - ✅ **Impossible to bypass** - Guards run BEFORE resource operations
-> - ✅ **Auto-partition isolation** - O(1) queries, not O(n) scans
-> - ✅ **DRY** - Write once, works for ALL CRUD operations
-> - ✅ **Framework-agnostic** - Same code works with Raffel, Express, Fastify
+> - **Zero trust by default** - Every request validates tenant/user
+> - **Impossible to bypass** - Guards run BEFORE resource operations
+> - **Auto-partition isolation** - O(1) queries, not O(n) scans
+> - **DRY** - Write once, works for ALL CRUD operations
+> - **Framework-agnostic** - Same code works with Raffel, Express, Fastify
 
 ---
 
-## 🎯 Why Guards?
+## Why Guards?
 
 **Before Guards (Manual Authorization):**
 ```javascript
-// ❌ 70+ lines of repetitive middleware
+// 70+ lines of repetitive middleware
 app.get('/orders', requireAuth, async (req, res) => {
   // Manual tenant check
   if (!req.user.tenantId) return res.status(403).json({ error: 'Forbidden' });
@@ -91,7 +91,7 @@ app.post('/orders', requireAuth, async (req, res) => {
 
 **With Guards (Declarative Authorization):**
 ```javascript
-// ✅ 25 lines - Impossible to forget!
+// 25 lines - Impossible to forget!
 const ordersResource = await db.createResource({
   name: 'orders',
   attributes: { tenantId: 'string|required', userId: 'string|required', ... },
@@ -139,16 +139,16 @@ const ordersResource = await db.createResource({
 ```
 
 **Benefits:**
-- ✅ **70+ lines → 20 lines** (DRY principle)
-- ✅ **Impossible to forget** protection (defined once, applied everywhere)
-- ✅ **O(1) Row-Level Security** via automatic partitions
-- ✅ **Framework-agnostic** (works with Raffel, Express, Fastify)
-- ✅ **Type-safe** authorization logic
-- ✅ **Centralized** security rules
+- **70+ lines → 20 lines** (DRY principle)
+- **Impossible to forget** protection (defined once, applied everywhere)
+- **O(1) Row-Level Security** via automatic partitions
+- **Framework-agnostic** (works with Raffel, Express, Fastify)
+- **Type-safe** authorization logic
+- **Centralized** security rules
 
 ---
 
-## 📖 Guard Syntax
+## Guard Syntax
 
 Guards are defined inside the `api` configuration block:
 
@@ -204,7 +204,7 @@ type GuardFunction = (
 
 ---
 
-## 📍 Guards Placement & Precedence
+## Guards Placement & Precedence
 
 Guards can be defined in two places with clear precedence:
 
@@ -224,7 +224,7 @@ await db.createResource({
     internalNotes: 'string',    // Sensitive field
     auditTrail: 'object'        // Internal data
   },
-  api: {  // ✅ API-specific configuration
+  api: {  // API-specific configuration
     description: 'Order management endpoints',  // OpenAPI description
     protected: ['internalNotes', 'auditTrail', 'metadata.internal'],  // Fields hidden from API responses
     guard: {  // Authorization rules
@@ -272,7 +272,7 @@ await db.createResource({
 ```javascript
 await db.usePlugin(new ApiPlugin({
   port: 3000,
-  guards: {  // ✅ Global guards (NEW!)
+  guards: {  // Global guards (NEW!)
     // Require authentication for ALL list operations across ALL resources
     list: (ctx) => !!ctx.user,
 
@@ -307,9 +307,11 @@ await db.usePlugin(new ApiPlugin({
 await db.createResource({
   name: 'public_articles',
   attributes: { title: 'string', content: 'string' },
-  guards: {
-    list: true,  // ✅ Override: Public listing (ignores global guard)
-    delete: ['admin', 'editor']  // ✅ Override: Editors can also delete
+  api: {
+    guard: {
+      list: true,  // Override: Public listing (ignores global guard)
+      delete: ['admin', 'editor']  // Override: Editors can also delete
+    }
   }
 });
 
@@ -317,23 +319,23 @@ await db.createResource({
 await db.createResource({
   name: 'orders',
   attributes: { total: 'number' }
-  // ✅ Uses global guards (requires auth for list, admin for delete)
+  // Uses global guards (requires auth for list, admin for delete)
 });
 ```
 
 ### Use Cases
 
 **Global Guards** are perfect for:
-- ✅ Baseline authentication requirements across ALL resources
-- ✅ Organization-wide policies (e.g., "only admins can delete")
-- ✅ Default multi-tenancy rules
-- ✅ Compliance requirements (GDPR, SOC2)
+- Baseline authentication requirements across ALL resources
+- Organization-wide policies (e.g., "only admins can delete")
+- Default multi-tenancy rules
+- Compliance requirements (GDPR, SOC2)
 
 **Resource Guards** are perfect for:
-- ✅ Resource-specific authorization logic
-- ✅ Overriding global guards for public resources
-- ✅ Complex ownership checks
-- ✅ Fine-grained partition isolation
+- Resource-specific authorization logic
+- Overriding global guards for public resources
+- Complex ownership checks
+- Fine-grained partition isolation
 
 **Example: Enterprise SaaS with Global Baseline**
 
@@ -365,10 +367,12 @@ await db.usePlugin(new ApiPlugin({
 await db.createResource({
   name: 'blog_posts',
   attributes: { title: 'string', content: 'string' },
-  guards: {
-    list: true,   // Public listing
-    get: true     // Public viewing
-    // create/update/delete still use global guards
+  api: {
+    guard: {
+      list: true,   // Public listing
+      get: true     // Public viewing
+      // create/update/delete still use global guards
+    }
   }
 });
 
@@ -376,28 +380,30 @@ await db.createResource({
 await db.createResource({
   name: 'orders',
   attributes: { userId: 'string', total: 'number' },
-  guards: {
-    // Inherits global '*', 'list', 'create' guards
-    update: (ctx, record) => record.userId === ctx.user.sub,  // Ownership check
-    delete: (ctx, record) => {
-      // Override global: Owners can delete their own orders
-      const isOwner = record.userId === ctx.user.sub;
-      const isAdmin = ctx.user?.role === 'admin';
-      return isOwner || isAdmin;
+  api: {
+    guard: {
+      // Inherits global '*', 'list', 'create' guards
+      update: (ctx, record) => record.userId === ctx.user.sub,  // Ownership check
+      delete: (ctx, record) => {
+        // Override global: Owners can delete their own orders
+        const isOwner = record.userId === ctx.user.sub;
+        const isAdmin = ctx.user?.role === 'admin';
+        return isOwner || isAdmin;
+      }
     }
   }
 });
 ```
 
 **Benefits:**
-- ✅ **DRY** - Write tenant isolation once, applies everywhere
-- ✅ **Safe by Default** - New resources automatically get global guards
-- ✅ **Flexible** - Override global guards per-resource when needed
-- ✅ **Maintainable** - Update global policy in one place
+- **DRY** - Write tenant isolation once, applies everywhere
+- **Safe by Default** - New resources automatically get global guards
+- **Flexible** - Override global guards per-resource when needed
+- **Maintainable** - Update global policy in one place
 
 ---
 
-## 🔌 Framework Integration
+## Framework Integration
 
 **Raffel / native runtime:**
 ```javascript
@@ -446,70 +452,78 @@ fastify.get('/orders', async (request, reply) => {
 
 ---
 
-## 🎯 Common Patterns
+## Common Patterns
 
 **Multi-Tenancy (Tenant Isolation):**
 ```javascript
-guard: {
-  '*': (ctx) => {
-    ctx.tenantId = ctx.user.tenantId;
-    return !!ctx.tenantId;
-  },
-  list: (ctx) => {
-    ctx.setPartition('byTenant', { tenantId: ctx.tenantId });
-    return true;
-  },
-  insert: (ctx) => {
-    ctx.body.tenantId = ctx.tenantId;  // Force tenant
-    return true;
+api: {
+  guard: {
+    '*': (ctx) => {
+      ctx.tenantId = ctx.user.tenantId;
+      return !!ctx.tenantId;
+    },
+    list: (ctx) => {
+      ctx.setPartition('byTenant', { tenantId: ctx.tenantId });
+      return true;
+    },
+    insert: (ctx) => {
+      ctx.body.tenantId = ctx.tenantId;  // Force tenant
+      return true;
+    }
   }
 }
 ```
 
 **Ownership Checks:**
 ```javascript
-guard: {
-  get: (ctx, resource) => resource.userId === ctx.user.sub,
-  update: (ctx, resource) => resource.userId === ctx.user.sub,
-  delete: (ctx, resource) => resource.userId === ctx.user.sub
+api: {
+  guard: {
+    get: (ctx, resource) => resource.userId === ctx.user.sub,
+    update: (ctx, resource) => resource.userId === ctx.user.sub,
+    delete: (ctx, resource) => resource.userId === ctx.user.sub
+  }
 }
 ```
 
 **Role-Based Access Control (RBAC):**
 ```javascript
-guard: {
-  list: ['user', 'admin'],           // Users and admins can list
-  insert: ['user', 'admin'],         // Users and admins can create
-  update: (ctx, resource) => {       // Only owners or admins can update
-    const isOwner = resource.userId === ctx.user.sub;
-    const isAdmin = ctx.user.roles?.includes('admin');
-    return isOwner || isAdmin;
-  },
-  delete: ['admin']                  // Only admins can delete
+api: {
+  guard: {
+    list: ['user', 'admin'],           // Users and admins can list
+    insert: ['user', 'admin'],         // Users and admins can create
+    update: (ctx, resource) => {       // Only owners or admins can update
+      const isOwner = resource.userId === ctx.user.sub;
+      const isAdmin = ctx.user.roles?.includes('admin');
+      return isOwner || isAdmin;
+    },
+    delete: ['admin']                  // Only admins can delete
+  }
 }
 ```
 
 **Scope-Based Authorization:**
 ```javascript
-guard: {
-  list: (ctx) => {
-    const scopes = ctx.user.scope?.split(' ') || [];
-    if (scopes.includes('orders:read:all')) {
-      // Admin: see all orders
-      return true;
-    } else if (scopes.includes('orders:read:own')) {
-      // User: see only own orders
-      ctx.setPartition('byUser', { userId: ctx.user.sub });
-      return true;
+api: {
+  guard: {
+    list: (ctx) => {
+      const scopes = ctx.user.scope?.split(' ') || [];
+      if (scopes.includes('orders:read:all')) {
+        // Admin: see all orders
+        return true;
+      } else if (scopes.includes('orders:read:own')) {
+        // User: see only own orders
+        ctx.setPartition('byUser', { userId: ctx.user.sub });
+        return true;
+      }
+      return false;
     }
-    return false;
   }
 }
 ```
 
 ---
 
-## 📚 Helper Functions
+## Helper Functions
 
 Import from `s3db.js/concerns/guards-helpers`:
 
@@ -530,7 +544,7 @@ applyGuardsToDelete(resource, context, record)   // Throws if denied
 
 ---
 
-## 🔧 Implementation Details
+## Implementation Details
 
 ### Guard Execution in Resource Methods
 
@@ -603,14 +617,14 @@ const hasPermission = requiredRolesScopes.some(required =>
 **404 vs 403 for Ownership Failures:**
 
 ```javascript
-// ✅ GOOD - Use 404 for ownership failures
+// GOOD - Use 404 for ownership failures
 get: async (ctx, resource) => {
   const allowed = resource.userId === ctx.user.sub;
   if (!allowed) return null;  // Returns 404, doesn't leak existence
   return resource;
 }
 
-// ❌ BAD - Don't throw 403 for ownership
+// BAD - Don't throw 403 for ownership
 get: async (ctx, resource) => {
   if (resource.userId !== ctx.user.sub) {
     throw new Error('Forbidden');  // Leaks that resource exists!
@@ -629,13 +643,13 @@ get: async (ctx, resource) => {
 **Partition-based RLS is O(1):**
 
 ```javascript
-// ❌ SLOW - O(n) full table scan
+// SLOW - O(n) full table scan
 list: async (ctx) => {
   const allRecords = await resource.list();
   return allRecords.filter(r => r.userId === ctx.user.sub);  // Filter in memory
 }
 
-// ✅ FAST - O(1) partition lookup
+// FAST - O(1) partition lookup
 list: (ctx) => {
   ctx.setPartition('byUser', { userId: ctx.user.sub });  // Direct S3 prefix
   return true;
@@ -662,7 +676,7 @@ guard: {
 
 ---
 
-## 🔗 Examples & Documentation
+## Examples & Documentation
 
 - **Complete Example**: [docs/examples/e66-guards-live.js](/examples/e66-guards-live.js)
 - **Before/After Comparison**: [docs/examples/e65-guards-comparison.js](/examples/e65-guards-comparison.js)
@@ -670,9 +684,9 @@ guard: {
 
 ---
 
-## ⚠️ Important Notes
+## Important Notes
 
-1. **Guards ARE automatic for resource routes** — Guards defined in `resource.guard` (single resource) or plugin-level `guards` (global) are automatically applied to all auto-generated CRUD endpoints (list, get, create, update, delete). No manual wiring needed.
+1. **Guards ARE automatic for resource routes** — Guards defined in `resource.api.guard` (single resource) or plugin-level `guards` (global) are automatically applied to all auto-generated CRUD endpoints (list, get, create, update, delete). No manual wiring needed.
 2. **Custom routes need manual guards** — If you define custom routes via `routes: {}`, you must apply guard logic yourself in the handler or use global guards at plugin level.
 3. **Never trust request body** - Always force `tenantId`/`userId` from token in guards
 4. **Use 404 instead of 403** - Prevents information leakage (don't reveal resource exists)
@@ -682,15 +696,15 @@ guard: {
 
 ---
 
-## 🎯 Summary
+## Summary
 
 You learned:
-- ✅ **Declarative Guards** - Define authorization rules in resource config (not middleware)
-- ✅ **70+ lines → 20 lines** - DRY principle with impossible-to-forget protection
-- ✅ **Multi-Tenancy** - Row-level security with O(1) partition isolation
-- ✅ **Ownership Checks** - Ensure users can only modify their own resources
-- ✅ **RBAC** - Role-based and scope-based authorization
-- ✅ **Framework Integration** - Works with Raffel, Express, Fastify
+- **Declarative Guards** - Define authorization rules in resource config (not middleware)
+- **70+ lines → 20 lines** - DRY principle with impossible-to-forget protection
+- **Multi-Tenancy** - Row-level security with O(1) partition isolation
+- **Ownership Checks** - Ensure users can only modify their own resources
+- **RBAC** - Role-based and scope-based authorization
+- **Framework Integration** - Works with Raffel, Express, Fastify
 
 **Next Steps:**
 1. Try the examples: [e66-guards-live.js](/examples/e66-guards-live.js) | [e65-guards-comparison.js](/examples/e65-guards-comparison.js)
@@ -700,10 +714,10 @@ You learned:
 
 ---
 
-## 🔗 See Also
+## See Also
 
 **Related Documentation:**
-- **[Authorization Patterns](/plugins/api/guides/authorization-patterns.md)** - ✨ Advanced patterns (ABAC, granular scopes, middleware)
+- **[Authorization Patterns](/plugins/api/guides/authorization-patterns.md)** - Advanced patterns (ABAC, granular scopes, middleware)
 - [API Plugin](/plugins/api/README.md) - Main API Plugin documentation
 - [Authentication](/plugins/api/guides/authentication.md) - Set up JWT/OIDC authentication
 - [OIDC Guide](/plugins/api/guides/oidc.md) - OAuth2/OIDC setup

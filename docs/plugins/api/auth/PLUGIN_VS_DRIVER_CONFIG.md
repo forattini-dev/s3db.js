@@ -1,6 +1,6 @@
 # API Plugin: Plugin-Level vs Driver-Specific Configuration
 
-## 📋 Overview
+## Overview
 
 The API Plugin has **two levels of configuration**:
 
@@ -9,7 +9,7 @@ The API Plugin has **two levels of configuration**:
 
 ---
 
-## 🌍 Plugin-Level Configuration (Shared)
+## Plugin-Level Configuration (Shared)
 
 These settings apply to the **entire API Plugin**, not specific to any auth driver:
 
@@ -143,7 +143,7 @@ These settings apply to the **entire API Plugin**, not specific to any auth driv
 
 ---
 
-## 🔐 Authentication Configuration (Plugin-Level)
+## Authentication Configuration (Plugin-Level)
 
 These auth settings are **shared across all drivers**:
 
@@ -198,7 +198,7 @@ These auth settings are **shared across all drivers**:
 
 ---
 
-## 🎯 Driver-Specific Configuration
+## Driver-Specific Configuration
 
 Each driver in the `drivers` array has its **own configuration**:
 
@@ -210,7 +210,7 @@ JWT, Basic, API Key, OAuth2, and OIDC can all use `lookupById` for O(1) user res
 {
   driver: 'jwt',  // or 'basic', 'apiKey', 'oauth2', 'oidc'
   config: {
-    // ⚡ O(1) lookup: use when user.id = lookup field value (e.g., id = email)
+    // O(1) lookup: use when user.id = lookup field value (e.g., id = email)
     lookupById: true
   }
 }
@@ -219,7 +219,7 @@ JWT, Basic, API Key, OAuth2, and OIDC can all use `lookupById` for O(1) user res
 `partitionName` is an explicit public option only on the API Key driver. The other resource-backed drivers auto-detect standard partition names such as `byEmail` when those partitions exist.
 
 **Lookup priority:** `lookupById` (O(1) get) → partition (O(1) listPartition) → query (O(n) scan + warning).
-See [Authentication Guide: Performance](../guides/authentication.md#️-performance-user-lookup-strategy-critical) for details.
+See [Authentication Guide: Performance](../guides/authentication.md#-performance-user-lookup-strategy-critical) for details.
 
 ### JWT Driver
 ```javascript
@@ -239,7 +239,7 @@ See [Authentication Guide: Performance](../guides/authentication.md#️-performa
     passwordField: 'password',
 
     // User lookup performance
-    lookupById: true,          // ⚡ O(1) when user.id = userField value
+    lookupById: true,          // O(1) when user.id = userField value
 
     // Encryption
     passphrase: 'secret',
@@ -270,7 +270,7 @@ See [Authentication Guide: Performance](../guides/authentication.md#️-performa
     keyField: 'apiKey',
 
     // User lookup performance
-    lookupById: true,                // ⚡ O(1) when user.id = API key
+    lookupById: true,                // O(1) when user.id = API key
     partitionName: 'byApiKey',       // Or use partition (auto-detected from keyField)
 
     optional: false
@@ -293,7 +293,7 @@ See [Authentication Guide: Performance](../guides/authentication.md#️-performa
     passwordField: 'password',
 
     // User lookup performance
-    lookupById: true,          // ⚡ O(1) when user.id = usernameField value
+    lookupById: true,          // O(1) when user.id = usernameField value
 
     // Encryption
     passphrase: 'secret',
@@ -337,7 +337,7 @@ See [Authentication Guide: Performance](../guides/authentication.md#️-performa
     },
 
     // User lookup performance
-    lookupById: true,          // ⚡ O(1) for fallback field lookups such as email
+    lookupById: true,          // O(1) for fallback field lookups such as email
 
     // Caching
     cacheTTL: 3600000,         // 1 hour
@@ -386,7 +386,7 @@ OAuth2 first tries the mapped ID claim, usually `userMapping.id` or `sub`, with 
     autoCreateUser: true,
 
     // User lookup performance
-    lookupById: true           // ⚡ O(1) for fallback lookupFields such as email
+    lookupById: true           // O(1) for fallback lookupFields such as email
   }
 }
 ```
@@ -395,7 +395,7 @@ OIDC first tries candidate IDs from claims via direct `get()`. `lookupById` help
 
 ---
 
-## 🔄 Complete Example: Plugin-Level + Driver-Specific
+## Complete Example: Plugin-Level + Driver-Specific
 
 ```javascript
 const apiPlugin = new ApiPlugin({
@@ -478,7 +478,7 @@ const apiPlugin = new ApiPlugin({
 
 ---
 
-## 📊 Quick Reference Table
+## Quick Reference Table
 
 | Config | Scope | Example |
 |--------|-------|---------|
@@ -496,7 +496,7 @@ const apiPlugin = new ApiPlugin({
 
 ---
 
-## 🎯 Key Takeaways
+## Key Takeaways
 
 1. **Plugin-Level** = One config for the entire API
    - Server, docs, CORS, rate limiting, logging

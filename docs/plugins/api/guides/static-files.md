@@ -1,6 +1,6 @@
-# 📁 Static File Serving
+# Static File Serving
 
-> **Quick Jump:** [💾 Filesystem](#filesystem-driver) | [☁️ S3 Driver](#s3-driver) | [⚛️ SPA Support](#spa-single-page-application-support) | [📦 PWA + React Router](#pwa--react-router-production-pattern) | [🔐 With Auth](#combining-with-authentication) | [⚙️ Config](#configuration-options)
+> **Quick Jump:** [Filesystem](#filesystem-driver) | [S3 Driver](#s3-driver) | [SPA Support](#spa-single-page-application-support) | [PWA + React Router](#pwa--react-router-production-pattern) | [With Auth](#combining-with-authentication) | [Config](#configuration-options)
 
 > **Navigation:** [← Back to API Plugin](/plugins/api/README.md) | [Authentication →](/plugins/api/guides/authentication.md) | [Configuration →](/plugins/api/reference/configuration.md)
 
@@ -22,12 +22,12 @@ The API Plugin supports **two drivers** for static file serving:
 | **s3** | Serve files from S3 bucket | Streaming or presigned URL redirect, ETag, Range requests |
 
 Both drivers support:
-- ✅ **ETag support** (304 Not Modified responses)
-- ✅ **Range requests** (206 Partial Content for video/audio streaming)
-- ✅ **Cache-Control headers** (client-side caching)
-- ✅ **CORS support** (cross-origin requests)
-- ✅ **Content-Type detection** (automatic MIME type detection)
-- ✅ **Path traversal prevention** (security)
+- **ETag support** (304 Not Modified responses)
+- **Range requests** (206 Partial Content for video/audio streaming)
+- **Cache-Control headers** (client-side caching)
+- **CORS support** (cross-origin requests)
+- **Content-Type detection** (automatic MIME type detection)
+- **Path traversal prevention** (security)
 
 ---
 
@@ -80,7 +80,7 @@ static: [
     path: '/app',              // Mount React app at /app/*
     root: './build',           // React build directory
     config: {
-      fallback: 'index.html',  // ⭐ Serve index.html for missing files
+      fallback: 'index.html',  // Serve index.html for missing files
       fallbackIgnore: ['/api', '/ws'], // Keeps API/WebSocket routes untouched
       maxAge: 3600000,         // Cache for 1 hour
       etag: true,
@@ -225,11 +225,11 @@ config: {
   streaming: true  // Server fetches from S3 and streams to client
 }
 ```
-- ✅ Server proxies the file
-- ✅ Better for small files or when S3 is private
-- ✅ Allows middleware/authentication before serving
-- ⚠️ Higher server bandwidth usage
-- ⚠️ Slower than direct S3 access
+- Server proxies the file
+- Better for small files or when S3 is private
+- Allows middleware/authentication before serving
+- Higher server bandwidth usage
+- Slower than direct S3 access
 
 **2. Presigned URL Redirect (streaming: false)**
 ```javascript
@@ -238,11 +238,11 @@ config: {
   signedUrlExpiry: 300    // URL valid for 5 minutes
 }
 ```
-- ✅ Client downloads directly from S3 (fastest)
-- ✅ Lower server bandwidth usage
-- ✅ Better for large files (videos, downloads)
-- ⚠️ Exposes S3 URL to client (temporary)
-- ⚠️ Less control over delivery
+- Client downloads directly from S3 (fastest)
+- Lower server bandwidth usage
+- Better for large files (videos, downloads)
+- Exposes S3 URL to client (temporary)
+- Less control over delivery
 
 ---
 
@@ -531,15 +531,15 @@ auth: {
 
 ---
 
-## 🎯 Summary
+## Summary
 
 You learned:
-- ✅ **Filesystem Driver** - Serve local files with ETag, Range requests, directory index
-- ✅ **S3 Driver** - Serve files from S3 with streaming or presigned URL redirect
-- ✅ **SPA Support** - Fallback to index.html for client-side routing (React Router, Vue Router)
-- ✅ **Multiple Mount Points** - Serve different directories/buckets at different paths
-- ✅ **Authentication Integration** - Protect static files with path-based authentication
-- ✅ **Advanced Features** - ETag (304), Range requests (206), CORS, cache control
+- **Filesystem Driver** - Serve local files with ETag, Range requests, directory index
+- **S3 Driver** - Serve files from S3 with streaming or presigned URL redirect
+- **SPA Support** - Fallback to index.html for client-side routing (React Router, Vue Router)
+- **Multiple Mount Points** - Serve different directories/buckets at different paths
+- **Authentication Integration** - Protect static files with path-based authentication
+- **Advanced Features** - ETag (304), Range requests (206), CORS, cache control
 
 **Next Steps:**
 1. Protect your SPA: [Authentication →](/plugins/api/guides/authentication.md)
@@ -550,7 +550,7 @@ You learned:
 
 ---
 
-## 🔗 See Also
+## See Also
 
 **Related Documentation:**
 - [API Plugin](/plugins/api/README.md) - Main API Plugin documentation

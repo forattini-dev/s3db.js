@@ -1,4 +1,4 @@
-# ❓ API Plugin FAQ
+# API Plugin FAQ
 
 > **Common questions and troubleshooting for s3db.js API Plugin**
 
@@ -30,12 +30,12 @@ You get: Auto CRUD • Auth • Guards • Metrics • Docs • Security
 ### Is this production-ready?
 
 **Yes!** Used in production with:
-- ✅ Automatic IP banning (Failban + GeoIP)
-- ✅ Rate limiting per route/user/IP
-- ✅ Real-time metrics (p50/p95/p99)
-- ✅ Kubernetes health probes
-- ✅ Graceful shutdown
-- ✅ Security headers (CSP, HSTS, etc)
+- Automatic IP banning (Failban + GeoIP)
+- Rate limiting per route/user/IP
+- Real-time metrics (p50/p95/p99)
+- Kubernetes health probes
+- Graceful shutdown
+- Security headers (CSP, HSTS, etc)
 
 **[→ Deployment guide](/plugins/api/guides/deployment.md)**
 
@@ -205,14 +205,16 @@ auth: {
 Use **guards with partitions** for O(1) tenant isolation:
 
 ```javascript
-guard: {
-  list: (ctx) => {
-    ctx.setPartition('byTenant', { tenantId: ctx.user.tenantId });
-    return true;
-  },
-  create: (ctx) => {
-    ctx.body.tenantId = ctx.user.tenantId;  // Auto-inject
-    return true;
+api: {
+  guard: {
+    list: (ctx) => {
+      ctx.setPartition('byTenant', { tenantId: ctx.user.tenantId });
+      return true;
+    },
+    create: (ctx) => {
+      ctx.body.tenantId = ctx.user.tenantId;  // Auto-inject
+      return true;
+    }
   }
 }
 ```
@@ -242,11 +244,13 @@ auth: {
   pathRules: [{ path: '/api/**', methods: ['jwt'] }]
 }
 
-// Guards: Control what users can access
-guard: {
-  list: (ctx) => {
-    ctx.setPartition('byUser', { userId: ctx.user.sub });
-    return true;
+// Guards: Control what users can access (inside createResource)
+api: {
+  guard: {
+    list: (ctx) => {
+      ctx.setPartition('byUser', { userId: ctx.user.sub });
+      return true;
+    }
   }
 }
 ```
@@ -409,8 +413,8 @@ config: {
 **Common causes:**
 
 **Google:**
-- Missing `access_type=offline` parameter (auto-added by provider quirks ✅)
-- Missing `prompt=consent` on first login (auto-added ✅)
+- Missing `access_type=offline` parameter (auto-added by provider quirks)
+- Missing `prompt=consent` on first login (auto-added)
 - Need to revoke app permission and re-authenticate
 
 **Azure AD:**
@@ -675,7 +679,7 @@ config: {
 ```javascript
 config: {
   cookieDomain: '.example.com',  // Ensure domain matches
-  // Dual-cookie deletion handles this automatically ✅
+  // Dual-cookie deletion handles this automatically
 }
 ```
 
@@ -713,14 +717,14 @@ Check route precedence:
 Custom routes use one supported contract: `(c, ctx)`.
 
 ```javascript
-// ✅ Use RouteContext directly
+// Use RouteContext directly
 routes: {
   '/custom': async (c, ctx) => {
     const user = ctx.user;  // Works!
   }
 }
 
-// ✅ Also valid when you do not need ctx
+// Also valid when you do not need ctx
 routes: {
   '/custom': async (c) => {
     return c.json({ ok: true });
@@ -734,10 +738,10 @@ routes: {
 
 ## Still Need Help?
 
-- **📖 [Documentation](/plugins/api/README.md)** - Complete guides
-- **🎯 [Examples](/examples/)** - Working code examples
-- **🐛 [GitHub Issues](https://github.com/forattini-dev/s3db.js/issues)** - Report bugs
-- **💬 [Discussions](https://github.com/forattini-dev/s3db.js/discussions)** - Ask questions
+- **[Documentation](/plugins/api/README.md)** - Complete guides
+- **[Examples](/examples/)** - Working code examples
+- **[GitHub Issues](https://github.com/forattini-dev/s3db.js/issues)** - Report bugs
+- **[Discussions](https://github.com/forattini-dev/s3db.js/discussions)** - Ask questions
 
 ---
 

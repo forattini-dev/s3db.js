@@ -38,7 +38,16 @@ async function setupResourceServer() {
       price: 'number|required',
       createdAt: 'datetime|optional'
     },
-    timestamps: true
+    timestamps: true,
+    api: {
+      guard: {
+        list: 'read:api',      // Require read:api scope to list
+        get: 'read:api',       // Require read:api scope to fetch
+        create: 'write:api',   // Require write:api scope to create
+        update: 'write:api',   // Require write:api scope to update
+        delete: 'write:api'    // Require write:api scope to delete
+      }
+    }
   });
 
   // 3. Configure the API Plugin with an OAuth2 client
@@ -72,18 +81,6 @@ async function setupResourceServer() {
   });
 
   await db.usePlugin(apiPlugin);
-
-  // 4. Configure guards on the resource (authorization by scope)
-  carsResource.config = {
-    ...carsResource.config,
-    guards: {
-      list: 'read:api',      // Require read:api scope to list
-      get: 'read:api',       // Require read:api scope to fetch
-      create: 'write:api',   // Require write:api scope to create
-      update: 'write:api',   // Require write:api scope to update
-      delete: 'write:api'    // Require write:api scope to delete
-    }
-  };
 
   return { db, carsResource };
 }

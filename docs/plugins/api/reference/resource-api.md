@@ -1,4 +1,4 @@
-# 📘 `resource.api` Reference
+# `resource.api` Reference
 
 > **What this reference covers:** The full `resource.api` surface used by `ApiPlugin` native CRUD routes
 
