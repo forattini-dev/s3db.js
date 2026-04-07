@@ -1,7 +1,8 @@
-import EventEmitter from 'events';
+import { merge } from 'lodash-es';
 
 import { Database } from './database.class.js';
 import { DatabaseError } from './errors.js';
+import { SafeEventEmitter } from './concerns/safe-event-emitter.js';
 import type { DatabaseOptions } from './database.class.js';
 import type { CreateResourceConfig } from './database/database-resources.class.js';
 import type Resource from './resource.class.js';
@@ -21,10 +22,12 @@ export interface ManagerCreateResourceConfig extends CreateResourceConfig {
  *
  * Resources can be created on specific connections, with unified lookup across all databases.
  */
-export class DatabaseManager extends EventEmitter {
+export class DatabaseManager extends SafeEventEmitter {
   private _databases: Map<string, Database>;
   private _resourceIndex: Map<string, string>;
   private _defaultConnection: string;
+  private _eventCleanups: Array<() => void> = [];
+  private _connected = false;
 
   constructor(options: DatabaseManagerOptions) {
     super();
@@ -53,7 +56,7 @@ export class DatabaseManager extends EventEmitter {
     const { defaults = {} } = options;
 
     for (const [name, dbOptions] of Object.entries(options.connections)) {
-      const merged = { ...defaults, ...dbOptions } as DatabaseOptions;
+      const merged = merge({}, defaults, dbOptions) as DatabaseOptions;
       const db = new Database(merged);
       this._databases.set(name, db);
       this._forwardEvents(name, db);
@@ -121,9 +124,11 @@ export class DatabaseManager extends EventEmitter {
     const connectionName = this._resourceIndex.get(name);
 
     if (connectionName) {
-      const db = this._databases.get(connectionName)!;
-      const res = db.resources[name];
-      if (res) return res;
+      const db = this._databases.get(connectionName);
+      if (db) {
+        const res = db.resources[name];
+        if (res) return res;
+      }
     }
 
     for (const [connName, db] of this._databases) {
@@ -185,10 +190,14 @@ export class DatabaseManager extends EventEmitter {
 
   /**
    * Connects all databases in parallel.
+   * On partial failure, disconnects successfully-connected databases before re-throwing.
    */
   async connect(): Promise<void> {
-    await Promise.all(
-      Array.from(this._databases.entries()).map(async ([name, db]) => {
+    if (this._connected) return;
+
+    const entries = Array.from(this._databases.entries());
+    const results = await Promise.allSettled(
+      entries.map(async ([name, db]) => {
         try {
           await db.connect();
         } catch (err) {
@@ -201,17 +210,48 @@ export class DatabaseManager extends EventEmitter {
       })
     );
 
+    const failures = results.filter((r): r is PromiseRejectedResult => r.status === 'rejected');
+    if (failures.length > 0) {
+      await Promise.allSettled(
+        entries
+          .filter((_, i) => results[i]!.status === 'fulfilled')
+          .map(([, db]) => db.disconnect())
+      );
+      throw failures[0]!.reason;
+    }
+
+    this._connected = true;
     this._rebuildResourceIndex();
   }
 
   /**
    * Disconnects all databases in parallel.
+   * Always attempts to disconnect all databases, even if some fail.
    */
   async disconnect(): Promise<void> {
-    await Promise.all(
-      Array.from(this._databases.values()).map((db) => db.disconnect())
+    const results = await Promise.allSettled(
+      Array.from(this._databases.entries()).map(async ([name, db]) => {
+        try {
+          await db.disconnect();
+        } catch (err) {
+          throw new DatabaseError(`Failed to disconnect "${name}": ${(err as Error).message}`, {
+            operation: 'disconnect',
+            original: err,
+            retriable: false,
+          });
+        }
+      })
     );
+
+    for (const cleanup of this._eventCleanups) cleanup();
+    this._eventCleanups = [];
     this._resourceIndex.clear();
+    this._connected = false;
+
+    const failures = results.filter((r): r is PromiseRejectedResult => r.status === 'rejected');
+    if (failures.length > 0) {
+      throw failures[0]!.reason;
+    }
   }
 
   /**
@@ -227,6 +267,13 @@ export class DatabaseManager extends EventEmitter {
   private _rebuildResourceIndex(): void {
     for (const [connName, db] of this._databases) {
       for (const resourceName of Object.keys(db.resources)) {
+        const existing = this._resourceIndex.get(resourceName);
+        if (existing && existing !== connName) {
+          throw new DatabaseError(
+            `Resource "${resourceName}" exists on both "${existing}" and "${connName}". Resource names must be unique across connections.`,
+            { operation: 'connect', retriable: false }
+          );
+        }
         this._resourceIndex.set(resourceName, connName);
       }
     }
@@ -243,10 +290,12 @@ export class DatabaseManager extends EventEmitter {
     ];
 
     for (const event of forwardedEvents) {
-      db.on(event, (...args: unknown[]) => {
+      const handler = (...args: unknown[]) => {
         this.emit(`${connectionName}:${event}`, ...args);
         this.emit(event, connectionName, ...args);
-      });
+      };
+      db.on(event, handler);
+      this._eventCleanups.push(() => db.off(event, handler));
     }
   }
 }

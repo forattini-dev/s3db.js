@@ -928,4 +928,130 @@ describe('DatabaseManager', () => {
       expect(connName).toBe('secondary');
     });
   });
+
+  describe('defaults deep merge', () => {
+    it('should deep merge defaults with connection options', async () => {
+      manager = new DatabaseManager({
+        connections: {
+          primary: {
+            ...mockDbOptions('defaults-deep'),
+            security: { passphrase: 'conn-specific' },
+          },
+        },
+        defaults: {
+          security: { pepper: 'global-pepper' },
+        } as any,
+      });
+      await manager.connect();
+
+      const db = manager.connection('primary');
+      // Deep merge should preserve both fields
+      expect(db.security.pepper).toBe('global-pepper');
+      expect(db.security.passphrase).toBe('conn-specific');
+    });
+  });
+
+  describe('connect idempotency', () => {
+    it('should be a no-op when already connected', async () => {
+      manager = new DatabaseManager({
+        connections: { primary: mockDbOptions('idem') },
+      });
+
+      await manager.connect();
+      expect(manager.isConnected()).toBe(true);
+
+      // Second connect should not throw
+      await manager.connect();
+      expect(manager.isConnected()).toBe(true);
+    });
+  });
+
+  describe('partial connect failure cleanup', () => {
+    it('should disconnect successfully-connected databases on partial failure', async () => {
+      manager = new DatabaseManager({
+        connections: {
+          good: mockDbOptions('partial-good'),
+          bad: mockDbOptions('partial-bad'),
+        },
+      });
+
+      // Make the 'bad' connection's connect() throw
+      const badDb = manager.connection('bad');
+      vi.spyOn(badDb, 'connect').mockRejectedValue(new Error('connection refused'));
+
+      await expect(manager.connect()).rejects.toThrow(/Failed to connect "bad"/);
+
+      // The good connection should have been cleaned up
+      const goodDb = manager.connection('good');
+      expect(goodDb.isConnected()).toBe(false);
+    });
+  });
+
+  describe('disconnect error handling', () => {
+    it('should disconnect all databases even if one fails', async () => {
+      manager = new DatabaseManager({
+        connections: {
+          first: mockDbOptions('disc-err-1'),
+          second: mockDbOptions('disc-err-2'),
+        },
+      });
+      await manager.connect();
+
+      // Make the first DB's disconnect fail
+      const firstDb = manager.connection('first');
+      const originalDisconnect = firstDb.disconnect.bind(firstDb);
+      firstDb.disconnect = vi.fn().mockRejectedValue(new Error('disconnect failed'));
+
+      const secondDb = manager.connection('second');
+      const disconnectSpy = vi.spyOn(secondDb, 'disconnect');
+
+      await expect(manager.disconnect()).rejects.toThrow(/Failed to disconnect "first"/);
+
+      // Second DB should still have been attempted
+      expect(disconnectSpy).toHaveBeenCalled();
+    });
+  });
+
+  describe('resource name collision on rebuild', () => {
+    it('should throw when two connections have resources with the same name', async () => {
+      manager = new DatabaseManager({
+        connections: {
+          alpha: mockDbOptions('collision-a'),
+          beta: mockDbOptions('collision-b'),
+        },
+      });
+
+      // Connect both databases
+      const alphaDb = manager.connection('alpha');
+      const betaDb = manager.connection('beta');
+      await alphaDb.connect();
+      await betaDb.connect();
+
+      // Create same-named resource on both connections directly
+      await alphaDb.createResource({ name: 'shared', attributes: { v: 'string' } });
+      await betaDb.createResource({ name: 'shared', attributes: { v: 'string' } });
+
+      // Rebuild index should detect collision
+      expect(() => (manager as any)._rebuildResourceIndex()).toThrow(
+        /Resource "shared" exists on both "alpha" and "beta"/
+      );
+    });
+  });
+
+  describe('event listener cleanup', () => {
+    it('should remove forwarded event listeners on disconnect', async () => {
+      manager = new DatabaseManager({
+        connections: { primary: mockDbOptions('evt-cleanup') },
+      });
+      await manager.connect();
+
+      const db = manager.connection('primary');
+      const listenersBefore = db.listenerCount('db:resource-created');
+
+      await manager.disconnect();
+
+      const listenersAfter = db.listenerCount('db:resource-created');
+      expect(listenersAfter).toBeLessThan(listenersBefore);
+    });
+  });
 });
