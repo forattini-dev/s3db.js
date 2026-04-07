@@ -201,8 +201,8 @@ importers:
         specifier: ^2.0.0
         version: 2.11.2(puppeteer-extra@3.3.6(puppeteer-core@24.40.0)(puppeteer@24.40.0(typescript@6.0.2)))
       recker:
-        specifier: 1.0.96
-        version: 1.0.96(ioredis@5.10.1)(socks@2.8.7)(ws@8.20.0)
+        specifier: 1.0.98
+        version: 1.0.98(ioredis@5.10.1)(socks@2.8.7)(ws@8.20.0)
       redblue-cli:
         specifier: ^0.1.0
         version: 0.1.0
@@ -4493,8 +4493,8 @@ packages:
     resolution: {integrity: sha512-/vxpCXddiX8NGfGO/mTafwjq4aFa/71pvamip0++IQk3zG8cbCj0fifNPrjjF1XMXUne91jL9OoxmdykoEtifQ==}
     engines: {node: '>= 10.13.0'}
 
-  recker@1.0.96:
-    resolution: {integrity: sha512-K3zXATvEQRSkVyBFpY8ltWxVEQ1ajCm92wds+RlSG01k3QK+OQpQ0vjnHDIfQ/4m4egICGck31fXPHecnm0gaw==}
+  recker@1.0.98:
+    resolution: {integrity: sha512-h2XVRcwjqcgrac63SNLJ7IziaFiunFVjWQ0E8XlZDQSr+kWBPaE1l0DhFOgG7cVNtrLo5c5p5u9aOrfwHp2qhQ==}
     engines: {node: '>=18'}
     hasBin: true
     peerDependencies:
@@ -11599,7 +11599,7 @@ snapshots:
     dependencies:
       resolve: 1.22.11
 
-  recker@1.0.96(ioredis@5.10.1)(socks@2.8.7)(ws@8.20.0):
+  recker@1.0.98(ioredis@5.10.1)(socks@2.8.7)(ws@8.20.0):
     dependencies:
       '@maxmind/geoip2-node': 6.3.4
       cli-args-parser: 1.0.6
