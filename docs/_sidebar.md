@@ -36,6 +36,7 @@
     - [Cloudflare D1](/pricing/cloudflare-d1.md)
     - [Cloudflare Durable Objects](/pricing/cloudflare-durable-objects.md)
     - [Turso](/pricing/turso.md)
+  - [Files and Images](/guides/files-and-images.md)
   - [Guides](/guides/README.md)
   - [Reference](/reference/README.md)
   - [Examples](/examples/README.md)

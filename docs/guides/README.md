@@ -39,6 +39,20 @@ Optimize s3db.js for your workload.
 - Batch operations and streaming
 - Caching strategies
 
+### [Files and Images](files-and-images.md)
+
+Store images, PDFs, and binary files as searchable resources. Single PUT with metadata + binary, serve via presigned URLs.
+
+```javascript
+await images.insert({
+  title: 'hero.jpg',
+  tags: 'product,hero',
+}, {
+  content: imageBuffer,
+  contentType: 'image/jpeg',
+});
+```
+
 ### [Testing Strategies](testing-strategies.md)
 
 Best practices for testing s3db.js applications.
