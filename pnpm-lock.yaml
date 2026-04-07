@@ -99,8 +99,8 @@ importers:
         specifier: ^3.0.0
         version: 3.1021.0
       '@aws-sdk/client-s3':
-        specifier: ^3.1024.0
-        version: 3.1024.0
+        specifier: ^3.1025.0
+        version: 3.1025.0
       '@aws-sdk/client-secrets-manager':
         specifier: ^3.0.0
         version: 3.1021.0
@@ -201,8 +201,8 @@ importers:
         specifier: ^2.0.0
         version: 2.11.2(puppeteer-extra@3.3.6(puppeteer-core@24.40.0)(puppeteer@24.40.0(typescript@6.0.2)))
       recker:
-        specifier: 1.0.87
-        version: 1.0.87(ioredis@5.10.1)(socks@2.8.7)(ws@8.20.0)
+        specifier: 1.0.96
+        version: 1.0.96(ioredis@5.10.1)(socks@2.8.7)(ws@8.20.0)
       redblue-cli:
         specifier: ^0.1.0
         version: 0.1.0
@@ -293,11 +293,11 @@ importers:
         version: 4.3.6
     optionalDependencies:
       '@aws-sdk/credential-providers':
-        specifier: ^3.1024.0
-        version: 3.1024.0
+        specifier: ^3.1025.0
+        version: 3.1025.0
       '@aws-sdk/s3-request-presigner':
-        specifier: ^3.1024.0
-        version: 3.1024.0
+        specifier: ^3.1025.0
+        version: 3.1025.0
       '@modelcontextprotocol/sdk':
         specifier: ^1.29.0
         version: 1.29.0(zod@4.3.6)
@@ -308,8 +308,8 @@ importers:
         specifier: ^6.0.0
         version: 6.0.0
       dotenv:
-        specifier: ^17.4.0
-        version: 17.4.0
+        specifier: ^17.4.1
+        version: 17.4.1
       fuse.js:
         specifier: ^7.3.0
         version: 7.3.0
@@ -384,8 +384,8 @@ packages:
     resolution: {integrity: sha512-v4F9LTPZ/wMSY24P9AWHRjafbTRL0ShaBmL52xHw0Y3VIS9MqfH0sc9puT412YGFIdsN6Cl5986YbeFK21DiRg==}
     engines: {node: '>=20.0.0'}
 
-  '@aws-sdk/client-cognito-identity@3.1024.0':
-    resolution: {integrity: sha512-PhbZl7TT+SBAsNxeC4vjRCqnkKYadRPKpsX4s0CtsVZz3QJ6UWBO7nBCHV5Pdv1f+YJD+UbCxGBj389vOPLmsw==}
+  '@aws-sdk/client-cognito-identity@3.1025.0':
+    resolution: {integrity: sha512-ke7vyS7Dmo3St1a354AlpAjocZpG25Ql52XQ1AXRD3VQ791FBT7vX+EqGCfAEIWLPxpcldaW2Nny6P6klEOkkw==}
     engines: {node: '>=20.0.0'}
 
   '@aws-sdk/client-config-service@3.1021.0':
@@ -456,8 +456,8 @@ packages:
     resolution: {integrity: sha512-jPv3ShXmyxBm9CrICBhTSeNiaw1cVwBfHGaGwmR1kJ+OrIaDTO+ZaNPQOLM6wcrTfaGVQ2ff++4vQoL0iMYCug==}
     engines: {node: '>=20.0.0'}
 
-  '@aws-sdk/client-s3@3.1024.0':
-    resolution: {integrity: sha512-8qdO5aLCzaf9l0RdrSBW1iIroRKP2QBqtZ6lkrtHKiaaH0B18xEn+lrEgiN/eCf3uRAYk4cqbnI2XcWzm+7dDQ==}
+  '@aws-sdk/client-s3@3.1025.0':
+    resolution: {integrity: sha512-9Byz2fPnuGRRL8DTTD5bYPl1Iwm+ysLiCMgptffa3lNkVLCiUZc5e5TAaOjk0MvyeXieq+jn35AmQL6cgN2KHQ==}
     engines: {node: '>=20.0.0'}
 
   '@aws-sdk/client-secrets-manager@3.1021.0':
@@ -536,8 +536,8 @@ packages:
     resolution: {integrity: sha512-d+6h0SD8GGERzKe27v5rOzNGKOl0D+l0bWJdqrxH8WSQzHzjsQFIAPgIeOTUwBHVsKKwtSxc91K/SWax6XgswQ==}
     engines: {node: '>=20.0.0'}
 
-  '@aws-sdk/credential-providers@3.1024.0':
-    resolution: {integrity: sha512-5aVZ74iKJ3InT/s4H2tVzAjH48SdegJU0Y0RaAYToQbmrS1R17tipw0jVQrFzajX6W5sbG6xfLcTNIGL33ODMQ==}
+  '@aws-sdk/credential-providers@3.1025.0':
+    resolution: {integrity: sha512-hOMHzYetTwnpvfbLN8emaw+nnQrqlEV0I5rTrgRKTAx1anzEvls/rD1IXwOvX8Z+B9mgbK+yNFqO3wQkBghI1g==}
     engines: {node: '>=20.0.0'}
 
   '@aws-sdk/dynamodb-codec@3.972.27':
@@ -620,8 +620,8 @@ packages:
     resolution: {integrity: sha512-1dq9ToC6e070QvnVhhbAs3bb5r6cQ10gTVc6cyRV5uvQe7P138TV2uG2i6+Yok4bAkVAcx5AqkTEBUvWEtBlsQ==}
     engines: {node: '>=20.0.0'}
 
-  '@aws-sdk/s3-request-presigner@3.1024.0':
-    resolution: {integrity: sha512-KNoGsXnTfBxPqrtV2Owd4mrLnhTHRsOz6Hdaz+As5czGMQuPchoRvG1BJzn2NFRGLt/HSJAXVn+G6IhtRIDe+Q==}
+  '@aws-sdk/s3-request-presigner@3.1025.0':
+    resolution: {integrity: sha512-5kiXbyfUjPJIIVIvKoLNaiHk0vh93UeB5QUjJa4ZTGPr08dJh7oCzY3JKT/dNdr20uUO+qxVkhVQ4ZI9Tmhx8A==}
     engines: {node: '>=20.0.0'}
 
   '@aws-sdk/signature-v4-multi-region@3.996.15':
@@ -2996,8 +2996,8 @@ packages:
   domutils@3.2.2:
     resolution: {integrity: sha512-6kZKyUajlDuqlHKVX1w7gyslj9MPIXzIFiz/rGu35uC1wMi+kMhQwGhl4lt9unC9Vb9INnY9Z3/ZA3+FhASLaw==}
 
-  dotenv@17.4.0:
-    resolution: {integrity: sha512-kCKF62fwtzwYm0IGBNjRUjtJgMfGapII+FslMHIjMR5KTnwEmBmWLDRSnc3XSNP8bNy34tekgQyDT0hr7pERRQ==}
+  dotenv@17.4.1:
+    resolution: {integrity: sha512-k8DaKGP6r1G30Lx8V4+pCsLzKr8vLmV2paqEj1Y55GdAgJuIqpRp5FfajGF8KtwMxCz9qJc6wUIJnm053d/WCw==}
     engines: {node: '>=12'}
 
   dunder-proto@1.0.1:
@@ -4493,17 +4493,20 @@ packages:
     resolution: {integrity: sha512-/vxpCXddiX8NGfGO/mTafwjq4aFa/71pvamip0++IQk3zG8cbCj0fifNPrjjF1XMXUne91jL9OoxmdykoEtifQ==}
     engines: {node: '>= 10.13.0'}
 
-  recker@1.0.87:
-    resolution: {integrity: sha512-Cz+5Bz+dmd3mI0x2Du29ptNDzMpBgdMYRzNmRVHbqzQzMEVTm6rQFtOUl3b/V6upk3dwNV6XMJs8A/6cgKSPxw==}
+  recker@1.0.96:
+    resolution: {integrity: sha512-K3zXATvEQRSkVyBFpY8ltWxVEQ1ajCm92wds+RlSG01k3QK+OQpQ0vjnHDIfQ/4m4egICGck31fXPHecnm0gaw==}
     engines: {node: '>=18'}
     hasBin: true
     peerDependencies:
+      better-sqlite3: ^11.0.0
       cardinal: ^2.1.0
       ioredis: ^5.0.0
       socks: ^2.8.0
       ssh2-sftp-client: ^11.0.0
       ws: ^8.0.0
     peerDependenciesMeta:
+      better-sqlite3:
+        optional: true
       cardinal:
         optional: true
       ioredis:
@@ -5780,7 +5783,7 @@ snapshots:
     transitivePeerDependencies:
       - aws-crt
 
-  '@aws-sdk/client-cognito-identity@3.1024.0':
+  '@aws-sdk/client-cognito-identity@3.1025.0':
     dependencies:
       '@aws-crypto/sha256-browser': 5.2.0
       '@aws-crypto/sha256-js': 5.2.0
@@ -6599,7 +6602,7 @@ snapshots:
     transitivePeerDependencies:
       - aws-crt
 
-  '@aws-sdk/client-s3@3.1024.0':
+  '@aws-sdk/client-s3@3.1025.0':
     dependencies:
       '@aws-crypto/sha1-browser': 5.2.0
       '@aws-crypto/sha256-browser': 5.2.0
@@ -7150,9 +7153,9 @@ snapshots:
     transitivePeerDependencies:
       - aws-crt
 
-  '@aws-sdk/credential-providers@3.1024.0':
+  '@aws-sdk/credential-providers@3.1025.0':
     dependencies:
-      '@aws-sdk/client-cognito-identity': 3.1024.0
+      '@aws-sdk/client-cognito-identity': 3.1025.0
       '@aws-sdk/core': 3.973.26
       '@aws-sdk/credential-provider-cognito-identity': 3.972.21
       '@aws-sdk/credential-provider-env': 3.972.24
@@ -7388,7 +7391,7 @@ snapshots:
       '@smithy/types': 4.13.1
       tslib: 2.8.1
 
-  '@aws-sdk/s3-request-presigner@3.1024.0':
+  '@aws-sdk/s3-request-presigner@3.1025.0':
     dependencies:
       '@aws-sdk/signature-v4-multi-region': 3.996.15
       '@aws-sdk/types': 3.973.6
@@ -9952,7 +9955,7 @@ snapshots:
       domelementtype: 2.3.0
       domhandler: 5.0.3
 
-  dotenv@17.4.0:
+  dotenv@17.4.1:
     optional: true
 
   dunder-proto@1.0.1:
@@ -11596,7 +11599,7 @@ snapshots:
     dependencies:
       resolve: 1.22.11
 
-  recker@1.0.87(ioredis@5.10.1)(socks@2.8.7)(ws@8.20.0):
+  recker@1.0.96(ioredis@5.10.1)(socks@2.8.7)(ws@8.20.0):
     dependencies:
       '@maxmind/geoip2-node': 6.3.4
       cli-args-parser: 1.0.6
