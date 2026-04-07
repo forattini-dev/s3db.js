@@ -958,9 +958,9 @@ export class Resource extends AsyncEventEmitter implements Disposable {
     return this._eventsModule.emit(eventName, ...args);
   }
 
-  async insert({ id, ...attributes }: { id?: string } & Record<string, unknown>): Promise<ResourceData> {
+  async insert({ id, ...attributes }: { id?: string } & Record<string, unknown>, options?: { content?: Buffer | string; contentType?: string }): Promise<ResourceData> {
     this._ensureSchemaCompiled();
-    return this._persistence.insert({ id, ...attributes }) as Promise<ResourceData>;
+    return this._persistence.insert({ id, ...attributes }, options) as Promise<ResourceData>;
   }
 
   async get(id: string): Promise<ResourceData> {

@@ -24,6 +24,11 @@ export interface ResourceData extends StringRecord {
   $after?: ResourceData | null;
 }
 
+export interface InsertOptions {
+  content?: Buffer | string;
+  contentType?: string;
+}
+
 export interface InsertParams extends StringRecord {
   id?: string;
 }
@@ -392,7 +397,7 @@ export class ResourcePersistence {
     }
   }
 
-  async insert({ id, ...attributes }: InsertParams): Promise<ResourceData> {
+  async insert({ id, ...attributes }: InsertParams, options?: InsertOptions): Promise<ResourceData> {
     this.logger.trace({ id, attributeKeys: Object.keys(attributes) }, 'insert called');
 
     if (this.config.timestamps) {
@@ -464,13 +469,22 @@ export class ResourcePersistence {
     }
 
     const key = this.resource.getResourceKey(finalId);
+    let finalBody: Buffer | string = body;
     let contentType: string | undefined = undefined;
-    if (body && body !== '') {
+
+    if (options?.content && (!body || body === '')) {
+      finalBody = options.content;
+      contentType = options.contentType || 'application/octet-stream';
+      const contentLength = typeof finalBody === 'string' ? finalBody.length : finalBody.length;
+      finalMetadata._hasContent = 'true';
+      finalMetadata._mimeType = contentType;
+      finalMetadata._contentLength = String(contentLength);
+    } else if (body && body !== '') {
       const [okParse] = await tryFn(() => Promise.resolve(JSON.parse(body)));
       if (okParse) contentType = 'application/json';
     }
 
-    if (this.behavior === 'body-only' && (!body || body === '')) {
+    if (this.behavior === 'body-only' && (!finalBody || finalBody === '')) {
       throw new ResourceError('Body required for body-only behavior', {
         resourceName: this.name,
         operation: 'insert',
@@ -486,7 +500,7 @@ export class ResourcePersistence {
       ? await this.resource.composeFullObjectFromWrite({
         id: finalId,
         metadata: finalMetadata,
-        body,
+        body: finalBody,
         behavior: this.behavior
       })
       : null;
@@ -494,7 +508,7 @@ export class ResourcePersistence {
     const [okPut, errPut, putResponse] = await tryFn<{ ETag?: string }>(() => this._runAtomicPartitionWriteIfSupported(async () => {
       const putResponse = await this.client.putObject({
         key,
-        body,
+        body: finalBody,
         contentType,
         metadata: finalMetadata,
         ifNoneMatch: '*'

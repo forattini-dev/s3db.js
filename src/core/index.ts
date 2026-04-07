@@ -1,6 +1,7 @@
 export { ResourcePersistence } from './resource-persistence.class.js';
 export type {
   InsertParams,
+  InsertOptions,
   PatchOptions,
   ReplaceOptions,
   ResourceData,
