@@ -1,5 +1,6 @@
 import { cpus } from 'os';
 import { fileURLToPath } from 'url';
+import { createRequire } from 'module';
 import path from 'path';
 import type { ThreadingConfig } from '../database/types.js';
 import type { Logger } from '../concerns/logger.js';
@@ -153,7 +154,8 @@ export class ThreadPool {
     const tsPath = path.resolve(dir, 'worker-handlers.ts');
 
     try {
-      const fs = require('fs') as typeof import('fs');
+      const esmRequire = createRequire(import.meta.url);
+      const fs = esmRequire('fs') as typeof import('fs');
       if (fs.existsSync(jsPath) && !thisFile.endsWith('.ts')) {
         return jsPath;
       }

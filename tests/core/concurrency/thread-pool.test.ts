@@ -285,9 +285,8 @@ describe('ThreadPool', () => {
     });
   });
 
-  describe('inline mode fallback', () => {
-    it('inline mode produces correct results', async () => {
-      // Force inline by using enabled:true but we'll test the API works
+  describe('single-worker mode', () => {
+    it('produces correct results with poolSize:1', async () => {
       const pool = new ThreadPool({ enabled: true, poolSize: 1 });
 
       const compressed = await pool.compressText(LONG_TEXT);
@@ -321,7 +320,7 @@ describe('ThreadPool', () => {
     it('returns instance when enabled:auto on multi-core', () => {
       const pool = ThreadPool.create({ enabled: 'auto' });
       const cores = require('os').cpus().length;
-      if (cores > 2) {
+      if (cores > 1) {
         expect(pool).toBeInstanceOf(ThreadPool);
       } else {
         expect(pool).toBeNull();
