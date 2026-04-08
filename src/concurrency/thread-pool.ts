@@ -96,11 +96,15 @@ export class ThreadPool {
         // worker_threads not available
       }
 
-      if (workerThreadsAvailable && this._mode === 'worker') {
+      const handlersPath = this._resolveHandlersPath();
+      const canUseWorkers = workerThreadsAvailable
+        && this._mode === 'worker'
+        && !handlersPath.endsWith('.ts');
+
+      if (canUseWorkers) {
         const poolSize = this._resolvePoolSize(this._config.poolSize);
         const scheduler = this._config.scheduler ?? 'least-pending';
 
-        const handlersPath = this._resolveHandlersPath();
         this._bridge = createTaskBridgePool({
           modulePath: handlersPath,
           poolSize,
