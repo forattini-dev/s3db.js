@@ -78,7 +78,11 @@ export class ThreadPool {
       this._initPromise = this._initialize();
     }
     await this._initPromise;
-    return this._bridge!;
+
+    if (!this._bridge) {
+      throw new Error('ThreadPool is disabled or failed to initialize');
+    }
+    return this._bridge;
   }
 
   private async _initialize(): Promise<void> {
@@ -246,9 +250,9 @@ export class ThreadPool {
   static create(config?: ThreadingConfig, logger?: Logger): ThreadPool | null {
     if (!config) return null;
 
-    const enabled = config.enabled;
-    if (enabled === false) return null;
+    const pool = new ThreadPool(config, logger);
+    if (pool.mode === 'disabled') return null;
 
-    return new ThreadPool(config, logger);
+    return pool;
   }
 }

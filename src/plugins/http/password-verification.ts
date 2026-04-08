@@ -58,13 +58,13 @@ async function verifyWithThreadPool(
   threadPool: import('../../concurrency/thread-pool.js').ThreadPool,
   passwordCandidates: string[],
   storedHash: string
-): Promise<boolean> {
+): Promise<boolean | null> {
   for (const password of passwordCandidates) {
     try {
       const ok = await threadPool.verifyPassword(password, storedHash);
       if (ok) return true;
     } catch {
-      // ignore
+      return null;
     }
   }
   return false;
@@ -128,7 +128,8 @@ export async function verifyPassword(
     const expandedHash = storedHash.startsWith('$argon2id$') ? storedHash : expandArgon2CompactHash(storedHash);
 
     if (threadPool?.enabled) {
-      return verifyWithThreadPool(threadPool, candidates, expandedHash);
+      const result = await verifyWithThreadPool(threadPool, candidates, expandedHash);
+      if (result !== null) return result;
     }
 
     return verifyArgon2Password(candidates, expandedHash);
@@ -136,7 +137,8 @@ export async function verifyPassword(
 
   if (isBcryptHash(storedHash) || storedHash.startsWith('$2')) {
     if (threadPool?.enabled) {
-      return verifyWithThreadPool(threadPool, candidates, storedHash);
+      const result = await verifyWithThreadPool(threadPool, candidates, storedHash);
+      if (result !== null) return result;
     }
 
     return verifyBcryptPasswordWithCandidates(candidates, storedHash);

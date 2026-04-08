@@ -21,7 +21,7 @@ import { encode as toBase62, decode as fromBase62, encodeKey, decodeKey, encodeD
 import { encodeIPv4, decodeIPv4, encodeIPv6, decodeIPv6, isValidIPv4, isValidIPv6 } from "./concerns/ip.js";
 import { encodeBuffer, decodeBuffer, encodeBits, decodeBits } from "./concerns/binary.js";
 import { encodeGeoLat, decodeGeoLat, encodeGeoLon, decodeGeoLon, encodeGeoPoint, decodeGeoPoint } from "./concerns/geo-encoding.js";
-import { compressText as compressTextFn, decompressText as decompressTextFn, type CompressionConfig } from "./concerns/text-compression.js";
+import { compressTextAsync as compressTextFn, decompressTextAsync as decompressTextFn, type CompressionConfig } from "./concerns/text-compression.js";
 import {
   generateSchemaFingerprint,
   getCachedValidator,
@@ -848,10 +848,10 @@ export const SchemaActions = {
     return ok ? decoded : value;
   },
 
-  compressText: (value: unknown, { level, threshold, encoding }: ActionContext = {}): unknown => {
+  compressText: async (value: unknown, { level, threshold, encoding }: ActionContext = {}): Promise<unknown> => {
     if (value === null || value === undefined) return value;
     const str = typeof value === 'string' ? value : String(value);
-    const [ok, , compressed] = tryFnSync(() => compressTextFn(str, {
+    const [ok, , compressed] = await tryFn(() => compressTextFn(str, {
       level: typeof level === 'number' ? level : undefined,
       threshold: typeof threshold === 'number' ? threshold : undefined,
       encoding: encoding === 'base85' ? 'base85' : 'base64',
@@ -859,10 +859,10 @@ export const SchemaActions = {
     return ok ? compressed : value;
   },
 
-  decompressText: (value: unknown): unknown => {
+  decompressText: async (value: unknown): Promise<unknown> => {
     if (value === null || value === undefined) return value;
     if (typeof value !== 'string') return value;
-    const [ok, , decompressed] = tryFnSync(() => decompressTextFn(value));
+    const [ok, , decompressed] = await tryFn(() => decompressTextFn(value as string));
     return ok ? decompressed : value;
   },
 };

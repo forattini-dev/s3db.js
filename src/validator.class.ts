@@ -91,9 +91,13 @@ function createPasswordHandler(algorithm: PasswordAlgorithm = 'bcrypt') {
       argon2: this.security?.argon2,
     };
 
-    const [okHash, errHash, hash] = this.threadPool?.enabled
+    let [okHash, errHash, hash] = this.threadPool?.enabled
       ? await tryFn(() => this.threadPool!.hashPassword(strValue, hashOptions))
-      : await tryFn(() => hashPassword(strValue, hashOptions));
+      : [false, null, null] as [false, null, null];
+
+    if (!okHash) {
+      [okHash, errHash, hash] = await tryFn(() => hashPassword(strValue, hashOptions));
+    }
 
     if (!okHash) {
       errors.push(new ValidationError('Problem hashing password.', {
@@ -106,7 +110,7 @@ function createPasswordHandler(algorithm: PasswordAlgorithm = 'bcrypt') {
       return actual;
     }
 
-    const [okCompact, errCompact, compacted] = tryFnSync(() => compactHash(hash));
+    const [okCompact, errCompact, compacted] = tryFnSync(() => compactHash(hash!));
     if (!okCompact) {
       errors.push(new ValidationError('Problem compacting password hash.', {
         actual,

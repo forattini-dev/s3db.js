@@ -1,5 +1,6 @@
 import { join } from 'path';
 import { tryFn } from '../concerns/try-fn.js';
+import { mapWithConcurrency } from '../concerns/map-with-concurrency.js';
 import { isNotFoundError } from '../concerns/s3-errors.js';
 import { validateS3KeySegment } from '../concerns/s3-key.js';
 import { mapAwsError, PartitionError, ResourceError } from '../errors.js';
@@ -419,30 +420,32 @@ export class ResourcePartitions {
       return;
     }
 
-    const promises = Object.entries(partitions).map(async ([partitionName]) => {
-      const partitionKey = this.getKey({ partitionName, id: data.id, data });
-      if (partitionKey) {
-        const partitionMetadata = {
-          _v: String(this.resource.version)
-        };
-        return this.resource.client.putObject({
-          key: partitionKey,
-          metadata: partitionMetadata,
-          body: '',
-          contentType: undefined,
-        });
-      }
-      return null;
-    });
+    const partitionEntries = Object.entries(partitions);
+    const { results: successes, errors } = await mapWithConcurrency(
+      partitionEntries,
+      async ([partitionName]) => {
+        const partitionKey = this.getKey({ partitionName, id: data.id, data });
+        if (partitionKey) {
+          const partitionMetadata = {
+            _v: String(this.resource.version)
+          };
+          return this.resource.client.putObject({
+            key: partitionKey,
+            metadata: partitionMetadata,
+            body: '',
+            contentType: undefined,
+          });
+        }
+        return null;
+      },
+      { concurrency: 10 }
+    );
 
-    const results = await Promise.allSettled(promises);
-
-    const failures = results.filter((r): r is PromiseRejectedResult => r.status === 'rejected');
-    if (failures.length > 0) {
+    if (errors.length > 0) {
       this.resource.emit('partitionIndexWarning', {
         operation: 'create',
         id: data.id,
-        failures: failures.map(f => f.reason)
+        failures: errors.map(e => e.raw)
       });
     }
   }
@@ -492,27 +495,27 @@ export class ResourcePartitions {
 
     if (ops.length === 0) return;
 
-    const results = await Promise.allSettled(
-      ops.map(({ partitionKey }) =>
+    const { errors } = await mapWithConcurrency(
+      ops,
+      ({ partitionKey }) =>
         this.resource.client.putObject({
           key: partitionKey,
           metadata: { _v: String(this.resource.version) },
           body: '',
           contentType: undefined,
-        })
-      )
+        }),
+      { concurrency: 10 }
     );
 
-    for (let i = 0; i < results.length; i++) {
-      const result = results[i]!;
-      if (result.status === 'rejected') {
-        throw this._normalizePartitionError(result.reason, {
-          operation: 'updateReferences',
-          id: data.id,
-          partitionName: ops[i]!.partitionName,
-          key: ops[i]!.partitionKey
-        });
-      }
+    if (errors.length > 0) {
+      const first = errors[0]!;
+      const op = ops[first.index]!;
+      throw this._normalizePartitionError(first.raw, {
+        operation: 'updateReferences',
+        id: data.id,
+        partitionName: op.partitionName,
+        key: op.partitionKey
+      });
     }
   }
 
@@ -522,27 +525,26 @@ export class ResourcePartitions {
       return;
     }
 
-    const updatePromises = Object.entries(partitions).map(async ([partitionName, partition]): Promise<ReferenceUpdateResult> => {
-      const [ok, err] = await tryFn(() => this.handleReferenceUpdate(partitionName, partition, oldData, newData));
-      if (!ok) {
-        return { partitionName, error: err as Error };
-      }
-      return { partitionName, success: true };
-    });
-
-    const settledUpdates = await Promise.allSettled(updatePromises);
+    const partitionEntries = Object.entries(partitions);
+    const { results: updateResults, errors: updateErrors } = await mapWithConcurrency(
+      partitionEntries,
+      async ([partitionName, partition]): Promise<ReferenceUpdateResult> => {
+        const [ok, err] = await tryFn(() => this.handleReferenceUpdate(partitionName, partition, oldData, newData));
+        if (!ok) {
+          return { partitionName, error: err as Error };
+        }
+        return { partitionName, success: true };
+      },
+      { concurrency: 10 }
+    );
 
     const id = newData.id || oldData.id;
     const isNewInsert = !oldData || Object.keys(oldData).length === 0;
 
-    const updateFailures = settledUpdates
-      .map((result) => {
-        if (result.status === 'rejected') {
-          return result.reason as Error;
-        }
-        return result.value.error || null;
-      })
-      .filter((error): error is Error => Boolean(error));
+    const updateFailures = [
+      ...updateErrors.map(e => e.raw),
+      ...updateResults.filter(r => r.error).map(r => r.error!),
+    ];
 
     if (updateFailures.length > 0) {
       throw this._normalizePartitionError(updateFailures[0], {
@@ -552,44 +554,43 @@ export class ResourcePartitions {
     }
 
     if (!isNewInsert && !this.resource.client.supportsPartitionIndex) {
-      const cleanupPromises = Object.entries(partitions).map(async ([partitionName]) => {
-        const prefix = `resource=${this.resource.name}/partition=${partitionName}`;
-        const [okKeys, errKeys, keys] = await tryFn<string[]>(() => this.resource.client.getAllKeys({ prefix }));
-        if (!okKeys || !keys) {
-          return this._normalizePartitionError(errKeys, {
-            operation: 'handleReferenceUpdates.listPartitionKeys',
-            id,
-            partitionName,
-            key: prefix
-          });
-        }
-
-        const validKey = this.getKey({ partitionName, id, data: newData });
-        const staleKeys = keys.filter(key => key.endsWith(`/id=${id}`) && key !== validKey);
-
-        if (staleKeys.length > 0) {
-          const [okDelete, errDelete] = await tryFn(() => this.resource.client.deleteObjects(staleKeys));
-          if (!okDelete) {
-            return this._normalizePartitionError(errDelete, {
-              operation: 'handleReferenceUpdates.deleteStalePartitionKeys',
+      const { results: cleanupResults, errors: cleanupErrors } = await mapWithConcurrency(
+        Object.entries(partitions),
+        async ([partitionName]) => {
+          const prefix = `resource=${this.resource.name}/partition=${partitionName}`;
+          const [okKeys, errKeys, keys] = await tryFn<string[]>(() => this.resource.client.getAllKeys({ prefix }));
+          if (!okKeys || !keys) {
+            return this._normalizePartitionError(errKeys, {
+              operation: 'handleReferenceUpdates.listPartitionKeys',
               id,
-              partitionName
+              partitionName,
+              key: prefix
             });
           }
-        }
 
-        return null;
-      });
+          const validKey = this.getKey({ partitionName, id, data: newData });
+          const staleKeys = keys.filter(key => key.endsWith(`/id=${id}`) && key !== validKey);
 
-      const settledCleanup = await Promise.allSettled(cleanupPromises);
-      const cleanupFailures = settledCleanup
-        .map((result) => {
-          if (result.status === 'rejected') {
-            return result.reason as Error;
+          if (staleKeys.length > 0) {
+            const [okDelete, errDelete] = await tryFn(() => this.resource.client.deleteObjects(staleKeys));
+            if (!okDelete) {
+              return this._normalizePartitionError(errDelete, {
+                operation: 'handleReferenceUpdates.deleteStalePartitionKeys',
+                id,
+                partitionName
+              });
+            }
           }
-          return result.value || null;
-        })
-        .filter((error): error is Error => Boolean(error));
+
+          return null;
+        },
+        { concurrency: 10 }
+      );
+
+      const cleanupFailures = [
+        ...cleanupErrors.map(e => e.raw),
+        ...cleanupResults.filter((r): r is Error => r instanceof Error),
+      ];
 
       if (cleanupFailures.length > 0) {
         throw this._normalizePartitionError(cleanupFailures[0], {
