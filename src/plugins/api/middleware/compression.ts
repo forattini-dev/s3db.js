@@ -20,6 +20,9 @@ export async function createCompressionMiddleware(
 ): Promise<(c: Context, next: Next) => Promise<void>> {
   const { threshold } = compressionConfig;
   const zlib = await import('node:zlib');
+  const { promisify } = await import('node:util');
+  const gzipAsync = promisify(zlib.gzip);
+  const deflateAsync = promisify(zlib.deflate);
 
   return async (c: Context, next: Next): Promise<void> => {
     c.header('Vary', 'Accept-Encoding');
@@ -110,14 +113,14 @@ export async function createCompressionMiddleware(
 
       if (encoding === 'gzip' || encoding === 'deflate') {
         const compressed = encoding === 'gzip'
-          ? zlib.gzipSync(bodyBuffer)
-          : zlib.deflateSync(bodyBuffer);
+          ? await gzipAsync(bodyBuffer)
+          : await deflateAsync(bodyBuffer);
         c.res = new Response(new Uint8Array(compressed), c.res);
         c.res.headers.delete('Content-Length');
         c.res.headers.set('Content-Encoding', encoding === 'deflate' ? 'deflate' : 'gzip');
       } else if (encoding === 'br') {
         if (acceptEncoding.includes('gzip')) {
-          const compressed = zlib.gzipSync(bodyBuffer);
+          const compressed = await gzipAsync(bodyBuffer);
           c.res = new Response(new Uint8Array(compressed), c.res);
           c.res.headers.delete('Content-Length');
           c.res.headers.set('Content-Encoding', 'gzip');

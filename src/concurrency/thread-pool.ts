@@ -38,18 +38,22 @@ export class ThreadPool {
   constructor(config: ThreadingConfig, logger?: Logger) {
     this._config = config;
     this._logger = logger ?? null;
-
-    const enabled = this._resolveEnabled(config.enabled);
-    this._mode = enabled ? 'worker' : 'disabled';
+    this._mode = this._resolveMode(config.enabled);
   }
 
-  private _resolveEnabled(enabled?: boolean | 'auto'): boolean {
-    if (enabled === true) return true;
-    if (enabled === false || enabled === undefined) return false;
-
-    // 'auto': enable if more than 2 CPU cores available
+  private _resolveMode(enabled?: boolean | 'auto'): 'worker' | 'inline' | 'disabled' {
     const cores = cpus().length;
-    return cores > 2;
+
+    if (enabled === false || enabled === undefined) return 'disabled';
+
+    if (enabled === true) {
+      return cores <= 1 ? 'inline' : 'worker';
+    }
+
+    // 'auto': worker if 3+ cores, inline if 2, disabled if 1
+    if (cores > 2) return 'worker';
+    if (cores > 1) return 'inline';
+    return 'disabled';
   }
 
   private _resolvePoolSize(poolSize?: number | 'auto'): number {

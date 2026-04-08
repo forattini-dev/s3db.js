@@ -1290,15 +1290,26 @@ export class ResourcePersistence {
       return await this.client._executeBatch(operations, options);
     }
 
-    const settled = await Promise.allSettled(operations.map(op => op()));
-    const results = settled.map((s, index) => {
-      if (s.status === 'fulfilled') return s.value;
-      if (options.onItemError) options.onItemError(s.reason as Error, index);
-      return null;
-    });
-    const errors = settled
-      .map((s, index) => s.status === 'rejected' ? { error: s.reason as Error, index } : null)
-      .filter((e): e is { error: Error; index: number } => e !== null);
+    const concurrency = 10;
+    const results: (T | null)[] = new Array(operations.length).fill(null);
+    const errors: Array<{ error: Error; index: number }> = [];
+    const executing = new Set<Promise<void>>();
+
+    for (let i = 0; i < operations.length; i++) {
+      const index = i;
+      const p = (async () => {
+        try {
+          results[index] = await operations[index]!();
+        } catch (error) {
+          if (options.onItemError) options.onItemError(error as Error, index);
+          errors.push({ error: error as Error, index });
+        }
+      })();
+      executing.add(p);
+      p.finally(() => executing.delete(p));
+      if (executing.size >= concurrency) await Promise.race(executing);
+    }
+    await Promise.all(executing);
 
     return { results, errors };
   }

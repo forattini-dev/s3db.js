@@ -1,4 +1,8 @@
 import zlib from "node:zlib";
+import { promisify } from "node:util";
+
+const gzipAsync = promisify(zlib.gzip);
+const gunzipAsync = promisify(zlib.gunzip);
 import { PluginStorage, type PluginStorageSetOptions, type PluginClient } from "../concerns/plugin-storage.js";
 import { Cache, type CacheConfig } from "./cache.class.js";
 import { CacheError } from "../cache.errors.js";
@@ -63,7 +67,7 @@ export class S3Cache extends Cache {
     this.storage = new PluginStorage(client as PluginClient, 'cache');
   }
 
-  private _compressData(data: unknown): CompressedData {
+  private async _compressData(data: unknown): Promise<CompressedData> {
     const jsonString = JSON.stringify(data);
 
     if (!this.config.enableCompression || jsonString.length < (this.config.compressionThreshold ?? 1024)) {
@@ -74,7 +78,7 @@ export class S3Cache extends Cache {
       };
     }
 
-    const compressed = zlib.gzipSync(jsonString).toString('base64');
+    const compressed = (await gzipAsync(jsonString)).toString('base64');
     return {
       data: compressed,
       compressed: true,
@@ -84,18 +88,18 @@ export class S3Cache extends Cache {
     };
   }
 
-  private _decompressData(storedData: CompressedData | null): unknown {
+  private async _decompressData(storedData: CompressedData | null): Promise<unknown> {
     if (!storedData || !storedData.compressed) {
       return storedData && storedData.data ? JSON.parse(storedData.data) : null;
     }
 
     const buffer = Buffer.from(storedData.data, 'base64');
-    const decompressed = zlib.unzipSync(buffer).toString();
+    const decompressed = (await gunzipAsync(buffer)).toString();
     return JSON.parse(decompressed);
   }
 
   protected override async _set(key: string, data: unknown): Promise<void> {
-    const compressed = this._compressData(data);
+    const compressed = await this._compressData(data);
 
     await this.storage.set(
       this.storage.getPluginKey(null, this.keyPrefix, key),
@@ -115,7 +119,7 @@ export class S3Cache extends Cache {
 
     if (!storedData) return null;
 
-    return this._decompressData(storedData);
+    return await this._decompressData(storedData);
   }
 
   protected override async _del(key: string): Promise<unknown> {

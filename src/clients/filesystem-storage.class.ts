@@ -5,6 +5,10 @@ import { Readable } from 'node:stream';
 import path from 'path';
 import { platform } from 'os';
 import zlib from 'zlib';
+import { promisify } from 'util';
+
+const gzipAsync = promisify(zlib.gzip);
+const gunzipAsync = promisify(zlib.gunzip);
 import { chunk } from 'lodash-es';
 
 import { tryFn } from '../concerns/try-fn.js';
@@ -417,7 +421,7 @@ export class FileSystemStorage {
     await tryFn(() => copyFile(filePath, backupPath));
   }
 
-  private _compressBody(body: unknown): CompressionResult {
+  private async _compressBody(body: unknown): Promise<CompressionResult> {
     if (!this.enableCompression) {
       return { buffer: this._toBuffer(body), compressed: false };
     }
@@ -429,7 +433,7 @@ export class FileSystemStorage {
       return { buffer, compressed: false, originalSize };
     }
 
-    const compressedBuffer = zlib.gzipSync(buffer, { level: this.compressionLevel });
+    const compressedBuffer = await gzipAsync(buffer, { level: this.compressionLevel });
     const compressedSize = compressedBuffer.length;
 
     if (this.enableStats) {
@@ -463,13 +467,13 @@ export class FileSystemStorage {
     );
   }
 
-  private _decompressBody(buffer: Buffer, isCompressed?: boolean): Buffer {
+  private async _decompressBody(buffer: Buffer, isCompressed?: boolean): Promise<Buffer> {
     if (!isCompressed || !this.enableCompression) {
       return buffer;
     }
 
     try {
-      return zlib.gunzipSync(buffer);
+      return await gunzipAsync(buffer);
     } catch (error) {
       this.logger.warn({ error: (error as Error).message }, 'Decompression failed, returning raw buffer');
       return buffer;
@@ -666,7 +670,7 @@ export class FileSystemStorage {
 
       await this._createBackup(objectPath);
 
-      const compressionResult = this._compressBody(body);
+      const compressionResult = await this._compressBody(body);
       const buffer = compressionResult.buffer;
       const etag = this._generateETag(buffer);
       const lastModified = new Date().toISOString();
@@ -754,7 +758,7 @@ export class FileSystemStorage {
       throw this._mapFilesystemError(errBody as Error, { key, path: objectPath, operation: 'get' });
     }
 
-    const finalBuffer = this._decompressBody(bodyBuffer as Buffer, metadata.compressed);
+    const finalBuffer = await this._decompressBody(bodyBuffer as Buffer, metadata.compressed);
 
     if (this.enableStats) {
       this.stats.gets++;

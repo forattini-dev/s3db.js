@@ -2,6 +2,10 @@ import fs from 'fs';
 import { readFile, writeFile, unlink, readdir, stat, mkdir } from 'fs/promises';
 import path from 'path';
 import zlib from 'node:zlib';
+import { promisify } from 'node:util';
+
+const gzipAsync = promisify(zlib.gzip);
+const gunzipAsync = promisify(zlib.gunzip);
 import { Cache, type CacheConfig } from './cache.class.js';
 import tryFn from '../../concerns/try-fn.js';
 import { CacheError } from '../cache.errors.js';
@@ -300,7 +304,7 @@ export class FilesystemCache extends Cache {
       let finalData = serialized;
 
       if (this.enableCompression && originalSize >= this.compressionThreshold) {
-        const compressedBuffer = zlib.gzipSync(Buffer.from(serialized, this.encoding));
+        const compressedBuffer = await gzipAsync(Buffer.from(serialized, this.encoding));
         finalData = compressedBuffer.toString('base64');
         compressed = true;
       }
@@ -472,7 +476,7 @@ export class FilesystemCache extends Cache {
         if (isCompressed || (this.enableCompression && content.match(/^[A-Za-z0-9+/=]+$/))) {
           try {
             const compressedBuffer = Buffer.from(content, 'base64');
-            finalContent = zlib.gunzipSync(compressedBuffer).toString(this.encoding);
+            finalContent = (await gunzipAsync(compressedBuffer)).toString(this.encoding);
           } catch {
             finalContent = content;
           }

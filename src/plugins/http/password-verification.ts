@@ -3,6 +3,7 @@ import { decode as decodeBase62 } from '#src/concerns/base62.js';
 
 interface PasswordVerifyOptions {
   pepper?: string;
+  threadPool?: import('../../concurrency/thread-pool.js').ThreadPool | null;
 }
 
 const ARGON2_COMPACT_HASH_RE = /^\$([^|]+)\|([^|]+)\|([^|]+)\|([^$]+)\$([^$]+)\$([^$]+)$/;
@@ -51,6 +52,22 @@ function isArgon2Hash(storedHash: string): boolean {
   }
 
   return ARGON2_COMPACT_HASH_RE.test(storedHash);
+}
+
+async function verifyWithThreadPool(
+  threadPool: import('../../concurrency/thread-pool.js').ThreadPool,
+  passwordCandidates: string[],
+  storedHash: string
+): Promise<boolean> {
+  for (const password of passwordCandidates) {
+    try {
+      const ok = await threadPool.verifyPassword(password, storedHash);
+      if (ok) return true;
+    } catch {
+      // ignore
+    }
+  }
+  return false;
 }
 
 async function verifyArgon2Password(passwordCandidates: string[], storedHash: string): Promise<boolean> {
@@ -105,20 +122,24 @@ export async function verifyPassword(
   }
 
   const candidates = buildPasswordCandidates(plaintext, options.pepper);
+  const threadPool = options.threadPool;
 
   if (isArgon2Hash(storedHash)) {
     const expandedHash = storedHash.startsWith('$argon2id$') ? storedHash : expandArgon2CompactHash(storedHash);
-    const ok = await verifyArgon2Password(candidates, expandedHash);
-    if (ok) {
-      return true;
+
+    if (threadPool?.enabled) {
+      return verifyWithThreadPool(threadPool, candidates, expandedHash);
     }
 
-    return false;
+    return verifyArgon2Password(candidates, expandedHash);
   }
 
   if (isBcryptHash(storedHash) || storedHash.startsWith('$2')) {
-    const ok = await verifyBcryptPasswordWithCandidates(candidates, storedHash);
-    return ok;
+    if (threadPool?.enabled) {
+      return verifyWithThreadPool(threadPool, candidates, storedHash);
+    }
+
+    return verifyBcryptPasswordWithCandidates(candidates, storedHash);
   }
 
   return false;

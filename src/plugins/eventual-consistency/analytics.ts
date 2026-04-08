@@ -4,6 +4,7 @@
  */
 
 import tryFn from '../../concerns/try-fn.js';
+import { forEachWithConcurrency } from '../../concerns/map-with-concurrency.js';
 import { TasksPool } from '../../tasks/tasks-pool.class.js';
 import {
   ensureCohortHours,
@@ -615,8 +616,9 @@ export async function updateAnalytics(
       ? Array.from(affectedHours)
       : Object.keys(byHour ?? {});
 
-    await Promise.all(
-      effectiveHours.map(async (cohort) => {
+    await forEachWithConcurrency(
+      effectiveHours,
+      async (cohort) => {
         const summary = config.transactionResource
           ? calculateAnalyticsStats(await getMaterializedHourlyTransactions(
               config.transactionResource,
@@ -636,7 +638,8 @@ export async function updateAnalytics(
           replaceExisting: Boolean(config.transactionResource),
           summary
         });
-      })
+      },
+      { concurrency: 10 }
     );
   } catch (error: any) {
     throw new PluginError(`Analytics update failed for ${config.resource}.${config.field}: ${error.message}`, {

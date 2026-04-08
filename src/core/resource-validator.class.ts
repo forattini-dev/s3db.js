@@ -31,6 +31,7 @@ export interface ResourceValidatorConfig {
   security?: SecurityConfig;
   autoEncrypt?: boolean;
   autoDecrypt?: boolean;
+  threadPool?: import('../concurrency/thread-pool.js').ThreadPool | null;
 }
 
 export interface ValidationResult {
@@ -75,7 +76,8 @@ export class ResourceValidator {
 
     this.validatorManager = new ValidatorManager({
       autoEncrypt: this.autoEncrypt,
-      security: this.security
+      security: this.security,
+      threadPool: config.threadPool,
     });
 
     this.compileValidator();

@@ -533,7 +533,10 @@ export class ApiServer {
     let fetchHandler = (this.app as any).fetch;
     if (this.options.compression?.enabled) {
       const { threshold = 1024 } = this.options.compression;
-      const { gzipSync, deflateSync } = await import('node:zlib');
+      const zlib = await import('node:zlib');
+      const { promisify } = await import('node:util');
+      const gzipAsync = promisify(zlib.gzip);
+      const deflateAsync = promisify(zlib.deflate);
       const baseFetch = (this.app as any).fetch;
 
       fetchHandler = async (req: Request, env?: unknown, ctx?: unknown): Promise<Response> => {
@@ -566,7 +569,7 @@ export class ApiServer {
         }
 
         const encoding = wantsGzip ? 'gzip' : 'deflate';
-        const compressed = encoding === 'gzip' ? gzipSync(buffer) : deflateSync(buffer);
+        const compressed = encoding === 'gzip' ? await gzipAsync(buffer) : await deflateAsync(buffer);
         const headers = new Headers(res.headers);
         headers.set('Content-Encoding', encoding);
         headers.set('Vary', 'Accept-Encoding');

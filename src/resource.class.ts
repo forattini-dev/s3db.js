@@ -266,6 +266,7 @@ interface Database {
   getChildLogger(name: string, bindings?: Record<string, unknown>): Logger;
   emit(event: string, data: unknown): void;
   savedMetadata?: SavedMetadata | null;
+  threadPool?: import('./concurrency/thread-pool.js').ThreadPool | null;
 }
 
 interface SavedMetadata {
@@ -473,7 +474,8 @@ export class Resource extends AsyncEventEmitter implements Disposable {
         allNestedObjectsOptional,
         security: this.security,
         autoEncrypt,
-        autoDecrypt
+        autoDecrypt,
+        threadPool: this.database?.threadPool,
       });
 
       this._setSchema(new Schema({
@@ -630,7 +632,8 @@ export class Resource extends AsyncEventEmitter implements Disposable {
       allNestedObjectsOptional: cfg.allNestedObjectsOptional,
       security: cfg.security,
       autoEncrypt: cfg.autoEncrypt,
-      autoDecrypt: cfg.autoDecrypt
+      autoDecrypt: cfg.autoDecrypt,
+      threadPool: this.database?.threadPool,
     });
 
     this._setSchema(new Schema({

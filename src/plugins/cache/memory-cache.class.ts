@@ -1,6 +1,10 @@
 import zlib from 'node:zlib';
+import { promisify } from 'node:util';
 import os from 'node:os';
 import v8 from 'node:v8';
+
+const gzipAsync = promisify(zlib.gzip);
+const gunzipAsync = promisify(zlib.gunzip);
 import { Cache, type CacheConfig, type CacheStats } from './cache.class.js';
 import { CacheError } from '../cache.errors.js';
 import { createLogger, type Logger } from '../../concerns/logger.js';
@@ -419,7 +423,7 @@ export class MemoryCache extends Cache {
     if (this.enableCompression) {
       try {
         if (originalSize >= this.compressionThreshold) {
-          const compressedBuffer = zlib.gzipSync(Buffer.from(serialized, 'utf8'));
+          const compressedBuffer = await gzipAsync(Buffer.from(serialized, 'utf8'));
           finalData = {
             __compressed: true,
             __data: compressedBuffer.toString('base64'),
@@ -505,7 +509,7 @@ export class MemoryCache extends Cache {
     if (rawData && typeof rawData === 'object' && (rawData as CompressedData).__compressed) {
       try {
         const compressedBuffer = Buffer.from((rawData as CompressedData).__data, 'base64');
-        const decompressed = zlib.gunzipSync(compressedBuffer).toString('utf8');
+        const decompressed = (await gunzipAsync(compressedBuffer)).toString('utf8');
         const value = this.deserializer(decompressed);
         this._recordStat('hits');
         if (this.evictionPolicy === 'lru' && this.meta[normalizedKey]) {

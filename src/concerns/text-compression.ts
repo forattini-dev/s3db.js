@@ -1,4 +1,8 @@
-import { deflateRawSync, inflateRawSync } from 'zlib';
+import { deflateRawSync, inflateRawSync, deflateRaw, inflateRaw } from 'zlib';
+import { promisify } from 'util';
+
+const deflateRawAsync = promisify(deflateRaw);
+const inflateRawAsync = promisify(inflateRaw);
 
 export interface CompressionConfig {
   enabled?: boolean;
@@ -172,6 +176,50 @@ export function decompressText(encoded: string): string {
     if (payload.length === 0) return '';
     const compressed = Buffer.from(payload, 'base64');
     return inflateRawSync(compressed).toString('utf-8');
+  }
+
+  return encoded;
+}
+
+export async function compressTextAsync(value: string, options: CompressionOptions = {}): Promise<string> {
+  if (value === null || value === undefined || value === '') return value;
+
+  const threshold = options.threshold ?? DEFAULT_COMPRESSION.threshold;
+  const level = options.level ?? DEFAULT_COMPRESSION.level;
+  const encoding = options.encoding ?? DEFAULT_COMPRESSION.encoding;
+
+  const buf = Buffer.from(value, 'utf-8');
+  if (buf.length < threshold) return value;
+
+  const compressed = await deflateRawAsync(buf, { level });
+
+  let encoded: string;
+  if (encoding === 'base85') {
+    encoded = BASE85_PREFIX + encodeBase85(compressed);
+  } else {
+    encoded = DEFLATE_PREFIX + compressed.toString('base64');
+  }
+
+  if (encoded.length >= buf.length) return value;
+
+  return encoded;
+}
+
+export async function decompressTextAsync(encoded: string): Promise<string> {
+  if (encoded === null || encoded === undefined || typeof encoded !== 'string') return encoded;
+
+  if (encoded.startsWith(BASE85_PREFIX)) {
+    const payload = encoded.substring(BASE85_PREFIX.length);
+    if (payload.length === 0) return '';
+    const compressed = decodeBase85(payload);
+    return (await inflateRawAsync(compressed)).toString('utf-8');
+  }
+
+  if (encoded.startsWith(DEFLATE_PREFIX)) {
+    const payload = encoded.substring(DEFLATE_PREFIX.length);
+    if (payload.length === 0) return '';
+    const compressed = Buffer.from(payload, 'base64');
+    return (await inflateRawAsync(compressed)).toString('utf-8');
   }
 
   return encoded;

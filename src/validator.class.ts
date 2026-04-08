@@ -20,12 +20,14 @@ export interface ValidatorOptions {
   security?: SecurityConfig;
   autoEncrypt?: boolean;
   autoHash?: boolean;
+  threadPool?: import('./concurrency/thread-pool.js').ThreadPool | null;
 }
 
 interface ValidatorContext {
   security: SecurityConfig;
   autoEncrypt?: boolean;
   autoHash?: boolean;
+  threadPool?: import('./concurrency/thread-pool.js').ThreadPool | null;
 }
 
 type ValidationErrors = Array<Error | Record<string, unknown>>;
@@ -82,12 +84,17 @@ function createPasswordHandler(algorithm: PasswordAlgorithm = 'bcrypt') {
       return actual;
     }
 
-    const [okHash, errHash, hash] = await tryFn(() => hashPassword(strValue, {
+    const hashOptions = {
       rounds: this.security?.bcrypt?.rounds ?? 12,
       algorithm,
       pepper: this.security?.pepper,
       argon2: this.security?.argon2,
-    }));
+    };
+
+    const [okHash, errHash, hash] = this.threadPool?.enabled
+      ? await tryFn(() => this.threadPool!.hashPassword(strValue, hashOptions))
+      : await tryFn(() => hashPassword(strValue, hashOptions));
+
     if (!okHash) {
       errors.push(new ValidationError('Problem hashing password.', {
         actual,
@@ -132,12 +139,14 @@ export class Validator extends FastestValidator {
   security: SecurityConfig;
   autoEncrypt: boolean;
   autoHash: boolean;
+  threadPool: import('./concurrency/thread-pool.js').ThreadPool | null;
 
   constructor({
     options,
     security = {},
     autoEncrypt = true,
-    autoHash = true
+    autoHash = true,
+    threadPool = null
   }: ValidatorOptions = {}) {
     super(merge({}, {
       useNewCustomCheckerFunction: true,
@@ -168,6 +177,7 @@ export class Validator extends FastestValidator {
     this.security = security;
     this.autoEncrypt = autoEncrypt;
     this.autoHash = autoHash;
+    this.threadPool = threadPool;
 
     this.alias('secret', {
       type: 'string',

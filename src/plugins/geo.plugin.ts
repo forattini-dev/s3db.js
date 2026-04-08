@@ -1,5 +1,6 @@
 import { Plugin } from './plugin.class.js';
 import tryFn from '../concerns/try-fn.js';
+import { mapWithConcurrency } from '../concerns/map-with-concurrency.js';
 import { PluginError } from '../errors.js';
 import { createLogger } from '../concerns/logger.js';
 
@@ -467,8 +468,9 @@ export class GeoPlugin extends Plugin {
             precision
           });
 
-          const partitionResults = await Promise.all(
-            geohashesToSearch.map(async (geohash) => {
+          const { results: partitionResults } = await mapWithConcurrency(
+            geohashesToSearch,
+            async (geohash) => {
               const [ok, , records] = await tryFn(async () => {
                 const fieldName = config.zoomLevels ? `_geohash_zoom${precision}` : '_geohash';
                 return await this.listPartition({
@@ -479,7 +481,8 @@ export class GeoPlugin extends Plugin {
               });
 
               return ok ? records! : [];
-            })
+            },
+            { concurrency: 15 }
           );
 
           allRecords = partitionResults.flat();
