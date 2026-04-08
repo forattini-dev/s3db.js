@@ -478,6 +478,7 @@ export class ResourcePartitions {
       return;
     }
 
+    const ops: Array<{ partitionName: string; partitionKey: string }> = [];
     for (const [partitionName, partition] of Object.entries(partitions)) {
       if (!partition || !partition.fields || typeof partition.fields !== 'object') {
         continue;
@@ -485,25 +486,32 @@ export class ResourcePartitions {
 
       const partitionKey = this.getKey({ partitionName, id: data.id, data });
       if (partitionKey) {
-        const partitionMetadata = {
-          _v: String(this.resource.version)
-        };
-        const [okPut, errPut] = await tryFn(async () => {
-          await this.resource.client.putObject({
-            key: partitionKey,
-            metadata: partitionMetadata,
-            body: '',
-            contentType: undefined,
-          });
+        ops.push({ partitionName, partitionKey });
+      }
+    }
+
+    if (ops.length === 0) return;
+
+    const results = await Promise.allSettled(
+      ops.map(({ partitionKey }) =>
+        this.resource.client.putObject({
+          key: partitionKey,
+          metadata: { _v: String(this.resource.version) },
+          body: '',
+          contentType: undefined,
+        })
+      )
+    );
+
+    for (let i = 0; i < results.length; i++) {
+      const result = results[i]!;
+      if (result.status === 'rejected') {
+        throw this._normalizePartitionError(result.reason, {
+          operation: 'updateReferences',
+          id: data.id,
+          partitionName: ops[i]!.partitionName,
+          key: ops[i]!.partitionKey
         });
-        if (!okPut) {
-          throw this._normalizePartitionError(errPut, {
-            operation: 'updateReferences',
-            id: data.id,
-            partitionName,
-            key: partitionKey
-          });
-        }
       }
     }
   }
@@ -604,40 +612,39 @@ export class ResourcePartitions {
     const newPartitionKey = this.getKey({ partitionName, id, data: newData });
 
     if (oldPartitionKey !== newPartitionKey) {
+      const ops: Promise<void>[] = [];
+
       if (oldPartitionKey) {
-        const [okDelete, errDelete] = await tryFn(async () => {
-          await this.resource.client.deleteObject(oldPartitionKey);
-        });
-        if (!okDelete) {
-          throw this._normalizePartitionError(errDelete, {
-            operation: 'handleReferenceUpdate.deleteOld',
-            id,
-            partitionName,
-            key: oldPartitionKey
-          });
-        }
+        ops.push(
+          tryFn(async () => {
+            await this.resource.client.deleteObject(oldPartitionKey);
+          }).then(([ok, err]) => {
+            if (!ok) throw this._normalizePartitionError(err, {
+              operation: 'handleReferenceUpdate.deleteOld', id, partitionName, key: oldPartitionKey
+            });
+          })
+        );
       }
 
       if (newPartitionKey) {
-        const [okPut, errPut] = await tryFn(async () => {
-          const partitionMetadata = {
-            _v: String(this.resource.version)
-          };
-          await this.resource.client.putObject({
-            key: newPartitionKey,
-            metadata: partitionMetadata,
-            body: '',
-            contentType: undefined,
-          });
-        });
-        if (!okPut) {
-          throw this._normalizePartitionError(errPut, {
-            operation: 'handleReferenceUpdate.putNew',
-            id,
-            partitionName,
-            key: newPartitionKey
-          });
-        }
+        ops.push(
+          tryFn(async () => {
+            await this.resource.client.putObject({
+              key: newPartitionKey,
+              metadata: { _v: String(this.resource.version) },
+              body: '',
+              contentType: undefined,
+            });
+          }).then(([ok, err]) => {
+            if (!ok) throw this._normalizePartitionError(err, {
+              operation: 'handleReferenceUpdate.putNew', id, partitionName, key: newPartitionKey
+            });
+          })
+        );
+      }
+
+      if (ops.length > 0) {
+        await Promise.all(ops);
       }
     } else if (newPartitionKey) {
       const [okPut, errPut] = await tryFn(async () => {

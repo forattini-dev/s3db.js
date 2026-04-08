@@ -1,5 +1,6 @@
 import { CoordinatorPlugin } from "./concerns/coordinator-plugin.class.js";
 import tryFn from "../concerns/try-fn.js";
+import { forEachWithConcurrency } from "../concerns/map-with-concurrency.js";
 import { resolveResourceName } from "./concerns/resource-names.js";
 import { PluginError } from "../errors.js";
 
@@ -1126,6 +1127,7 @@ export class TTLPlugin extends CoordinatorPlugin {
         }) as unknown as IndexEntry[];
 
         const processableEntries: IndexEntry[] = [];
+        const staleEntries: IndexEntry[] = [];
         for (const entry of expired) {
           if (scannedEntryIds.has(entry.id)) {
             continue;
@@ -1134,14 +1136,20 @@ export class TTLPlugin extends CoordinatorPlugin {
           scannedEntryIds.add(entry.id);
           const isManaged = managedResourceNames.has(entry.resourceName) && this.resourceFilter(entry.resourceName);
           if (!isManaged) {
-            const [ok, err] = await tryFn(() => this.expirationIndex!.delete(entry.id));
-            if (!ok && err && (err as { code?: string }).code !== 'NoSuchKey' && (err as { code?: string }).code !== 'NotFound') {
-              this.logger.warn({ entryId: entry.id, error: (err as Error).message }, `Failed to remove stale TTL index entry '${entry.id}': ${(err as Error).message}`);
-            }
+            staleEntries.push(entry);
             continue;
           }
 
           processableEntries.push(entry);
+        }
+
+        if (staleEntries.length > 0) {
+          await forEachWithConcurrency(staleEntries, async (entry) => {
+            const [ok, err] = await tryFn(() => this.expirationIndex!.delete(entry.id));
+            if (!ok && err && (err as { code?: string }).code !== 'NoSuchKey' && (err as { code?: string }).code !== 'NotFound') {
+              this.logger.warn({ entryId: entry.id, error: (err as Error).message }, `Failed to remove stale TTL index entry '${entry.id}': ${(err as Error).message}`);
+            }
+          }, { concurrency: 10 });
         }
 
         if (processableEntries.length > 0) {
@@ -1151,10 +1159,10 @@ export class TTLPlugin extends CoordinatorPlugin {
         for (let i = 0; i < processableEntries.length; i += this.batchSize) {
           const batch = processableEntries.slice(i, i + this.batchSize);
 
-          for (const entry of batch) {
+          await forEachWithConcurrency(batch, async (entry) => {
             const config = this.resources[entry.resourceName]!;
             await this._processExpiredEntry(entry, config);
-          }
+          }, { concurrency: 10 });
         }
       }
 

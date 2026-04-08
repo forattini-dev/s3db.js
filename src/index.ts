@@ -65,7 +65,7 @@ export { CronManager, getCronManager, resetCronManager, createCronManager, inter
 // Operations Pool & Task Management
 // =============================================================================
 
-export { TaskExecutor } from './concurrency/index.js'; // Assuming concurrency/index.js will be converted to .ts
+export { TaskExecutor, ThreadPool } from './concurrency/index.js'; // Assuming concurrency/index.js will be converted to .ts
 export { TasksPool } from './tasks/tasks-pool.class.js'; // Assuming tasks/tasks-pool.class.js will be converted to .ts
 export { AdaptiveTuning } from './concerns/adaptive-tuning.js'; // Assuming adaptive-tuning.js will be converted to .ts
 export { TasksRunner } from './tasks/tasks-runner.class.js'; // Assuming tasks/tasks-runner.class.js will be converted to .ts

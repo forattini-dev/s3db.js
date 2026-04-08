@@ -1,5 +1,6 @@
 import type { SecurityConfig } from '../concerns/password-hashing.js';
 import type { CompressionConfig } from '../concerns/text-compression.js';
+import type { ThreadPool } from '../concurrency/thread-pool.js';
 import type { Client } from '../clients/types.js';
 import type { BehaviorType } from '../behaviors/types.js';
 import type { LogLevel, StringRecord as CommonStringRecord, EventHandler } from '../types/common.types.js';
@@ -13,6 +14,14 @@ import type Resource from '../resource.class.js';
 import type { SchemaRegistry, PluginSchemaRegistry } from '../schema.class.js';
 
 export type StringRecord<T = unknown> = CommonStringRecord<T>;
+
+export type ThreadingScheduler = 'round-robin' | 'least-pending';
+
+export interface ThreadingConfig {
+  enabled?: boolean | 'auto';
+  poolSize?: number | 'auto';
+  scheduler?: ThreadingScheduler;
+}
 
 export interface ExecutorPoolConfig {
   enabled?: boolean;
@@ -190,6 +199,7 @@ export interface DatabaseRef {
   processManager: ProcessManager;
   cronManager: CronManager;
   executorPool: ExecutorPoolConfig;
+  threadPool: ThreadPool | null;
   pluginList: PluginConstructor[];
   pluginRegistry: StringRecord<Plugin>;
   plugins: StringRecord<Plugin>;

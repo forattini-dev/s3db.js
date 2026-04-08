@@ -7,3 +7,6 @@ export type {
   ProcessResult,
   ExecutorStats
 } from './task-executor.interface.js';
+
+export { ThreadPool } from './thread-pool.js';
+export type { DistanceMetric, CompressionTaskOptions } from './thread-pool.js';

@@ -1,6 +1,7 @@
 import { Plugin, ResourceLike } from './plugin.class.js';
 import { getValidatedNamespace } from './namespace.js';
 import tryFn from '../concerns/try-fn.js';
+import { mapWithConcurrency, forEachWithConcurrency } from '../concerns/map-with-concurrency.js';
 import { resolveResourceName } from './concerns/resource-names.js';
 import { createLogger, type Logger, type LogLevel } from '../concerns/logger.js';
 import type { PluginConfig } from './plugin.class.js';
@@ -239,19 +240,14 @@ export class AuditPlugin extends Plugin {
     const originalDeleteMany = resource.deleteMany.bind(resource);
     const plugin = this;
     resource.deleteMany = async function(ids: string[]) {
-      const objectsToDelete: Record<string, unknown>[] = [];
-      for (const id of ids) {
+      const { results: objectsToDelete } = await mapWithConcurrency(ids, async (id) => {
         const [fetchOk, , fetched] = await tryFn(() => resource.get(id));
-        if (fetchOk && fetched) {
-          objectsToDelete.push(fetched);
-        } else {
-          objectsToDelete.push({ id });
-        }
-      }
+        return (fetchOk && fetched) ? fetched as Record<string, unknown> : { id } as Record<string, unknown>;
+      }, { concurrency: 10 });
 
       const result = await originalDeleteMany(ids);
 
-      for (const oldData of objectsToDelete) {
+      await forEachWithConcurrency(objectsToDelete, async (oldData) => {
         const partitionValues = oldData && plugin.config.includePartitions ? plugin.getPartitionValues(oldData, resource as unknown as ResourceLike) : null;
         await plugin.logAudit({
           resourceName: resource.name,
@@ -262,7 +258,7 @@ export class AuditPlugin extends Plugin {
           partition: partitionValues ? plugin.getPrimaryPartition(partitionValues) : null,
           partitionValues: partitionValues ? JSON.stringify(partitionValues) : null
         });
-      }
+      }, { concurrency: 10 });
 
       return result;
     };
@@ -389,13 +385,14 @@ export class AuditPlugin extends Plugin {
       return items.slice(offset, offset + limit);
     } else if (startDate && !resourceName && !operation && !recordId && !partition) {
       const dates = this._generateDateRange(startDate, endDate);
-      for (const date of dates) {
+      const { results: dateResults } = await mapWithConcurrency(dates, async (date) => {
         const [ok, , result] = await tryFn(() =>
           this.auditResource!.query({ createdAt: date })
         );
-        if (ok && result) {
-          items.push(...(result as unknown as AuditRecord[]));
-        }
+        return (ok && result) ? (result as unknown as AuditRecord[]) : [];
+      }, { concurrency: 10 });
+      for (const dateItems of dateResults) {
+        items.push(...dateItems);
       }
       return items.slice(offset, offset + limit);
     } else if (resourceName || operation || recordId || partition || startDate || endDate) {
@@ -500,20 +497,20 @@ export class AuditPlugin extends Plugin {
 
     let deletedCount = 0;
 
-    for (const dateStr of datesToDelete) {
+    await forEachWithConcurrency(datesToDelete, async (dateStr) => {
       const [ok, , oldAudits] = await tryFn(() =>
         this.auditResource!.query({ createdAt: dateStr })
       );
 
       if (ok && oldAudits) {
-        for (const audit of oldAudits as unknown as AuditRecord[]) {
+        await forEachWithConcurrency(oldAudits as unknown as AuditRecord[], async (audit) => {
           const [delOk] = await tryFn(() => this.auditResource!.delete(audit.id));
           if (delOk) {
             deletedCount++;
           }
-        }
+        }, { concurrency: 10 });
       }
-    }
+    }, { concurrency: 5 });
 
     return deletedCount;
   }

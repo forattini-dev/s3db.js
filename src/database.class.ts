@@ -9,6 +9,7 @@ import { SafeEventEmitter } from './concerns/safe-event-emitter.js';
 import { CronManager } from './concerns/cron-manager.js';
 import { createLogger, getLoggerOptionsFromEnv, type Logger } from './concerns/logger.js';
 
+import { ThreadPool } from './concurrency/thread-pool.js';
 import { DatabaseHooks } from './database/database-hooks.class.js';
 import { DatabaseCoordinators } from './database/database-coordinators.class.js';
 import { DatabaseRecovery } from './database/database-recovery.class.js';
@@ -43,7 +44,9 @@ import type {
   HookEventName,
   DatabaseHookFunction,
   Plugin,
-  PluginConstructor
+  PluginConstructor,
+  ThreadingConfig,
+  ThreadingScheduler
 } from './database/types.js';
 
 export type {
@@ -67,7 +70,9 @@ export type {
   Plugin,
   PluginConstructor,
   CreateResourceConfig,
-  HashExistsResult
+  HashExistsResult,
+  ThreadingConfig,
+  ThreadingScheduler
 };
 
 export type { ResourceApiConfig } from './database/database-resources.class.js';
@@ -103,6 +108,7 @@ export interface DatabaseOptions {
   exitOnSignal?: boolean;
   autoCleanup?: boolean;
   compression?: CompressionConfig;
+  threading?: ThreadingConfig;
 }
 
 export class Database extends SafeEventEmitter {
@@ -120,6 +126,8 @@ export class Database extends SafeEventEmitter {
   public cache: CacheConfig | boolean | undefined;
   public security: SecurityConfig;
   public compression: CompressionConfig | undefined;
+  public threading: ThreadingConfig | undefined;
+  public threadPool: ThreadPool | null;
   public versioningEnabled: boolean;
   public strictValidation: boolean;
   public strictHooks: boolean;
@@ -236,6 +244,8 @@ export class Database extends SafeEventEmitter {
     this.cache = options.cache;
     this.security = options.security ?? { passphrase: 'secret', bcrypt: { rounds: 12 } };
     this.compression = options.compression;
+    this.threading = options.threading;
+    this.threadPool = ThreadPool.create(options.threading, this.logger);
     this.versioningEnabled = options.versioningEnabled ?? false;
     this.strictValidation = (options.strictValidation ?? true) !== false;
     this.strictHooks = options.strictHooks ?? false;

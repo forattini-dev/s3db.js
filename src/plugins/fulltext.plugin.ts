@@ -1,5 +1,6 @@
 import { Plugin, type PluginConfig, type ResourceLike } from './plugin.class.js';
 import tryFn from '../concerns/try-fn.js';
+import { forEachWithConcurrency } from '../concerns/map-with-concurrency.js';
 import { FulltextError } from './fulltext.errors.js';
 import { resolveResourceName } from './concerns/resource-names.js';
 
@@ -240,7 +241,7 @@ export class FullTextPlugin extends Plugin {
     if (!this.indexResource) return;
 
     const [ok] = await tryFn(async () => {
-      for (const key of this.deletedIndexes) {
+      await forEachWithConcurrency([...this.deletedIndexes], async (key) => {
         const [resourceName] = key.split(':');
         const [queryOk, , results] = await tryFn(() =>
           this.indexResource!.query({ resourceName })
@@ -254,13 +255,13 @@ export class FullTextPlugin extends Plugin {
             }
           }
         }
-      }
+      }, { concurrency: 10 });
 
-      for (const key of this.dirtyIndexes) {
+      await forEachWithConcurrency([...this.dirtyIndexes], async (key) => {
         const [resourceName, fieldName, word] = key.split(':');
         const data = this.indexes.get(key);
 
-        if (!data) continue;
+        if (!data) return;
 
         const [queryOk, , results] = await tryFn(() =>
           this.indexResource!.query({ resourceName })
@@ -292,7 +293,7 @@ export class FullTextPlugin extends Plugin {
             lastUpdated: new Date().toISOString()
           });
         }
-      }
+      }, { concurrency: 10 });
 
       this.dirtyIndexes.clear();
       this.deletedIndexes.clear();

@@ -238,6 +238,11 @@ export class DatabaseConnection {
         Object.keys(db.resources).forEach(k => delete db._resourcesMap[k]);
       }
 
+      if (db.threadPool) {
+        await tryFn(() => db.threadPool!.destroy());
+        (db as any).threadPool = null;
+      }
+
       if (db.client) {
         if (typeof (db.client as any).removeAllListeners === 'function') {
           (db.client as any).removeAllListeners();
