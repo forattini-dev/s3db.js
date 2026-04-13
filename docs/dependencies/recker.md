@@ -27,6 +27,8 @@ The main integration points are:
 
 - `src/concerns/http-client.ts`
 - `src/clients/recker-http-handler.ts`
+- `src/clients/reddb-client.class.ts`
+- `src/clients/reddb-native-client.class.ts`
 - Spider adapters that dynamically import Recker SEO and security helpers
 - SMTP templating in scenarios where Recker utilities are reused
 
@@ -52,6 +54,7 @@ In s3db.js, the interesting parts are:
 | --- | --- |
 | HTTP/2 presets | S3 and high-volume outbound traffic benefit from tuned connection behavior |
 | Retry coordination | Avoids naive retry storms and handles transport-specific failures better |
+| RedDB V2 transports | `RedDbClient` and `RedDbNativeClient` can use `http`, `grpc`, or `wire` depending on deployment |
 | Circuit breaker and dedupe patterns | Implemented in local wrappers on top of the client |
 | `curl-impersonate` setup | Useful for crawl and edge-network scenarios |
 | SEO/security helpers | Used by spider-style integrations instead of reinventing parsing logic |

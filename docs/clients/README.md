@@ -12,6 +12,7 @@ s3db.js supports multiple storage backends through a unified client interface.
 | [MemoryClient](memory-client.md) | `memory://` | Testing, development | None |
 | [FilesystemClient](filesystem-client.md) | `file://` | Local development, edge cases | None |
 | [RedDbClient](reddb-client.md) | `reddb://` | Multi-structure DB (tables, graphs, vectors) | None |
+| [RedDbNativeClient](reddb-native-client.md) | `reddb://` + explicit transport options | Direct RedDB SQL, KV, graph, document, vector access | `recker` |
 
 > Not sure which backend to use? See the [Choosing a Backend](/guides/choosing-a-backend.md) guide for pricing comparisons and decision flowcharts.
 
@@ -191,6 +192,7 @@ file:///home/user/data/s3db
 # RedDB
 reddb://localhost:8080
 reddb://authToken@localhost:8080/prefix?collection=myCollection
+reddb://authToken:writeToken@localhost:8080/app?collection=events&transport=wire&wireAddress=127.0.0.1:7001
 ```
 
 ### SQLite Query Parameters

@@ -322,6 +322,9 @@ importers:
       raffel:
         specifier: 1.0.26
         version: 1.0.26(ajv@8.18.0)(fastest-validator@1.19.1)(zod-to-json-schema@3.25.2(zod@4.3.6))(zod@4.3.6)
+      reddb-cli:
+        specifier: ^0.1.2
+        version: 0.1.2
 
 packages:
 
@@ -4769,6 +4772,11 @@ packages:
   redblue-cli@0.1.0:
     resolution: {integrity: sha512-qzNO0NuIvg6B8aKc3xbvbv/FqO1k+zdOa/37etPjwFV+grcEWsatwZd6TdUfJVs/HoiicERvVLw0ZwcwqpvS2A==}
     engines: {node: '>=20'}
+
+  reddb-cli@0.1.2:
+    resolution: {integrity: sha512-E3miT5RgPP7MiNKLwdJBihm++w7SZyJpitaPuTrc3XTdvMTaVz0A6QCnkuPfZbY58aTQXfnMCzEB864oSK1JNw==}
+    engines: {node: '>=20'}
+    hasBin: true
 
   redis-errors@1.2.0:
     resolution: {integrity: sha512-1qny3OExCf0UvUV/5wpYKf2YwPcOqXzkwKKSmKHiE6ZMQs5heeE/c8eXK+PNllPvmjgAbfnsbpkGZWy8cBpn9w==}
@@ -12406,6 +12414,9 @@ snapshots:
       ws: 8.20.0
 
   redblue-cli@0.1.0: {}
+
+  reddb-cli@0.1.2:
+    optional: true
 
   redis-errors@1.2.0: {}
 

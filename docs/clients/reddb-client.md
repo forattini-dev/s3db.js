@@ -2,6 +2,8 @@
 
 The **RedDbClient** connects s3db.js to [RedDB](https://github.com/nicholasgasior/reddb) -- a Rust-based unified database engine that supports tables, graphs, documents, and vectors in a single process. It maps the s3db.js key-value object interface to RedDB's HTTP API, storing each object as a row with structured fields.
 
+If you want RedDB's native namespaces directly (`sql`, `rows`, `documents`, `nodes`, `edges`, `vectors`, `kv`), use [RedDbNativeClient](./reddb-native-client.md). `RedDbClient` is the S3-compatible adapter layer.
+
 **Best for:**
 
 - Self-hosted environments where you want a single database engine for multiple data models
@@ -177,6 +179,8 @@ const db = new Database({
 ```
 
 The `authToken` is sent as a Bearer token on all requests. If `writeToken` is provided, it is stored separately (the HTTP client uses `authToken` for its Bearer header by default).
+
+Under the hood, the current implementation uses the `recker` RedDB V2 client and will prefer native transports where configured, while preserving the s3db.js object-storage contract.
 
 ### Key Prefix for Multi-Tenancy
 
