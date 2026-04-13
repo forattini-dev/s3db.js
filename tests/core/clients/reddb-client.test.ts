@@ -120,6 +120,7 @@ describe('RedDbClient', () => {
       logger: silentLogger,
     });
     mockHttp = createMockHttpClient();
+    (client as any)._nativeClient = null;
     (client as any)._httpClient = mockHttp;
   });
 
@@ -1268,6 +1269,7 @@ describe('RedDbClient', () => {
         logger: silentLogger,
       });
       prefixMockHttp = createMockHttpClient();
+      (prefixedClient as any)._nativeClient = null;
       (prefixedClient as any)._httpClient = prefixMockHttp;
     });
 

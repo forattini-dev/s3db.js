@@ -1,5 +1,12 @@
 import type EventEmitter from 'events';
 import type { Readable } from 'node:stream';
+import type {
+  RedDbGrpcKeepaliveOptions,
+  RedDbGrpcTlsOptions,
+  RedDbOperationTimeouts,
+  RedDbTransportMode,
+  RedDbWireTlsOptions,
+} from 'recker';
 
 export interface S3ClientConfig {
   logLevel?: string;
@@ -273,6 +280,25 @@ export interface RedDbClientConfig {
   bucket?: string;
   keyPrefix?: string;
   region?: string;
+  transport?: RedDbTransportMode;
+  allowTransportFallback?: boolean;
+  headers?: Record<string, string>;
+  http2?: boolean;
+  wireAddress?: string;
+  wireTls?: boolean | RedDbWireTlsOptions;
+  wirePoolSize?: number;
+  wireKeepAlive?: boolean;
+  wireKeepAliveInitialDelayMs?: number;
+  wireConnectTimeout?: number;
+  grpcAddress?: string;
+  grpcTls?: boolean | RedDbGrpcTlsOptions;
+  grpcOptions?: Record<string, string | number>;
+  grpcKeepalive?: RedDbGrpcKeepaliveOptions;
+  operationTimeouts?: RedDbOperationTimeouts;
+  batchConcurrency?: number;
+  ensureIndexes?: boolean;
+  warmupIndexes?: boolean;
+  indexTransport?: RedDbTransportMode;
 }
 
 export interface CompressionConfig {

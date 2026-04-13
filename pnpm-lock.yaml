@@ -201,8 +201,8 @@ importers:
         specifier: ^2.0.0
         version: 2.11.2(puppeteer-extra@3.3.6(puppeteer-core@24.40.0)(puppeteer@24.40.0(typescript@6.0.2)))
       recker:
-        specifier: 1.0.101
-        version: 1.0.101(ioredis@5.10.1)(socks@2.8.7)(ws@8.20.0)
+        specifier: 1.0.103
+        version: 1.0.103(ioredis@5.10.1)(socks@2.8.7)(ws@8.20.0)
       redblue-cli:
         specifier: ^0.1.0
         version: 0.1.0
@@ -4535,6 +4535,10 @@ packages:
     resolution: {integrity: sha512-CvexbZtbov6jW2eXAvLukXjXUW1TzFaivC46BpWc/3BpcCysb5Vffu+B3XHMm8lVEuy2Mm4XGex8hBSg1yapPg==}
     engines: {node: '>=12.0.0'}
 
+  protobufjs@8.0.1:
+    resolution: {integrity: sha512-NWWCCscLjs+cOKF/s/XVNFRW7Yih0fdH+9brffR5NZCy8k42yRdl5KlWKMVXuI1vfCoy4o1z80XR/W/QUb3V3w==}
+    engines: {node: '>=12.0.0'}
+
   proxy-addr@2.0.7:
     resolution: {integrity: sha512-llQsMLSUDUPT44jdrU/O37qlnifitDP+ZwrmmZcoSKyLKvtZxpyV0n2/bD/N4tBAAZ/gJEdZU7KMraoK1+XYAg==}
     engines: {node: '>= 0.10'}
@@ -4737,8 +4741,8 @@ packages:
     resolution: {integrity: sha512-/vxpCXddiX8NGfGO/mTafwjq4aFa/71pvamip0++IQk3zG8cbCj0fifNPrjjF1XMXUne91jL9OoxmdykoEtifQ==}
     engines: {node: '>= 10.13.0'}
 
-  recker@1.0.101:
-    resolution: {integrity: sha512-EHi29Xt1FaPfqp7hD+qhJixlVCUT7ZPKdhba54tSCI0EP2YD+7FYFEJ1B8TQDT05Gv5UwUTVzTYvvfVT3/xjOQ==}
+  recker@1.0.103:
+    resolution: {integrity: sha512-X65VGcEIejFs/xYlzvYwVee/R5xeRfn0f3HRrRY5hzqtmYeGjtqr92uTjMFlc3yzkusxzVc7XsE98l4OdczDnA==}
     engines: {node: '>=18'}
     hasBin: true
     peerDependencies:
@@ -8869,7 +8873,6 @@ snapshots:
     dependencies:
       '@grpc/proto-loader': 0.8.0
       '@js-sdsl/ordered-map': 4.4.2
-    optional: true
 
   '@grpc/proto-loader@0.8.0':
     dependencies:
@@ -8877,7 +8880,6 @@ snapshots:
       long: 5.3.2
       protobufjs: 7.5.4
       yargs: 17.7.2
-    optional: true
 
   '@hono/node-server@1.19.12(hono@4.12.9)':
     dependencies:
@@ -8914,8 +8916,7 @@ snapshots:
       '@jridgewell/resolve-uri': 3.1.2
       '@jridgewell/sourcemap-codec': 1.5.5
 
-  '@js-sdsl/ordered-map@4.4.2':
-    optional: true
+  '@js-sdsl/ordered-map@4.4.2': {}
 
   '@jsep-plugin/assignment@1.3.0(jsep@1.4.0)':
     dependencies:
@@ -9092,38 +9093,28 @@ snapshots:
 
   '@polka/url@1.0.0-next.29': {}
 
-  '@protobufjs/aspromise@1.1.2':
-    optional: true
+  '@protobufjs/aspromise@1.1.2': {}
 
-  '@protobufjs/base64@1.1.2':
-    optional: true
+  '@protobufjs/base64@1.1.2': {}
 
-  '@protobufjs/codegen@2.0.4':
-    optional: true
+  '@protobufjs/codegen@2.0.4': {}
 
-  '@protobufjs/eventemitter@1.1.0':
-    optional: true
+  '@protobufjs/eventemitter@1.1.0': {}
 
   '@protobufjs/fetch@1.1.0':
     dependencies:
       '@protobufjs/aspromise': 1.1.2
       '@protobufjs/inquire': 1.1.0
-    optional: true
 
-  '@protobufjs/float@1.0.2':
-    optional: true
+  '@protobufjs/float@1.0.2': {}
 
-  '@protobufjs/inquire@1.1.0':
-    optional: true
+  '@protobufjs/inquire@1.1.0': {}
 
-  '@protobufjs/path@1.1.2':
-    optional: true
+  '@protobufjs/path@1.1.2': {}
 
-  '@protobufjs/pool@1.1.0':
-    optional: true
+  '@protobufjs/pool@1.1.0': {}
 
-  '@protobufjs/utf8@1.1.0':
-    optional: true
+  '@protobufjs/utf8@1.1.0': {}
 
   '@puppeteer/browsers@2.13.0':
     dependencies:
@@ -11621,8 +11612,7 @@ snapshots:
 
   lodash-es@4.18.1: {}
 
-  lodash.camelcase@4.3.0:
-    optional: true
+  lodash.camelcase@4.3.0: {}
 
   lodash.debounce@4.0.8: {}
 
@@ -11632,8 +11622,7 @@ snapshots:
 
   long@4.0.0: {}
 
-  long@5.3.2:
-    optional: true
+  long@5.3.2: {}
 
   lowercase-keys@3.0.0: {}
 
@@ -12127,7 +12116,21 @@ snapshots:
       '@protobufjs/utf8': 1.1.0
       '@types/node': 25.5.2
       long: 5.3.2
-    optional: true
+
+  protobufjs@8.0.1:
+    dependencies:
+      '@protobufjs/aspromise': 1.1.2
+      '@protobufjs/base64': 1.1.2
+      '@protobufjs/codegen': 2.0.4
+      '@protobufjs/eventemitter': 1.1.0
+      '@protobufjs/fetch': 1.1.0
+      '@protobufjs/float': 1.0.2
+      '@protobufjs/inquire': 1.1.0
+      '@protobufjs/path': 1.1.2
+      '@protobufjs/pool': 1.1.0
+      '@protobufjs/utf8': 1.1.0
+      '@types/node': 25.5.2
+      long: 5.3.2
 
   proxy-addr@2.0.7:
     dependencies:
@@ -12386,12 +12389,14 @@ snapshots:
     dependencies:
       resolve: 1.22.11
 
-  recker@1.0.101(ioredis@5.10.1)(socks@2.8.7)(ws@8.20.0):
+  recker@1.0.103(ioredis@5.10.1)(socks@2.8.7)(ws@8.20.0):
     dependencies:
+      '@grpc/grpc-js': 1.14.3
       '@maxmind/geoip2-node': 6.3.4
       cli-args-parser: 1.0.6
       css-select: 6.0.0
       he: 1.2.0
+      protobufjs: 8.0.1
       tuiuiu.js: 1.0.63
       undici: 7.24.6
       zod: 4.3.6
